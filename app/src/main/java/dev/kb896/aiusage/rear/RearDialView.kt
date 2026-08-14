@@ -150,25 +150,48 @@ class RearDialView(context: Context) : View(context) {
     private fun drawBars(canvas: Canvas) {
         val left = Panel.CUTOUT_RIGHT + 34f
         val right = Panel.WIDTH - 34f
-        var y = 60f
+
+        // Layout metrics scale with the type. These were originally tuned for 12/15/14pt
+        // text; when the sizes went to 18/22.5/21 the rows kept their old pitch and
+        // crowded. Keep them proportional to the fonts rather than as loose literals.
+        val barH = 20f
+        val rowPitch = 33f
+        val headingAdvance = 30f
 
         label.color = Panel.Palette.DIM
-        canvas.drawText("7-DAY WINDOWS", left, y, label)
-        y += 34f
+        canvas.drawText("7-DAY WINDOWS", left, 34f, label)
 
-        for (account in Account.entries) {
+        // Measure both account blocks before drawing anything, so the leftover space
+        // can be shared out evenly instead of accumulating at the bottom.
+        val blocks = Account.entries.map { account ->
             val status = state.statuses.firstOrNull { it.account == account }
-            heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
-            canvas.drawText(account.label, left, y, heading)
-            y += 20f
-
             val rows = status?.snapshot?.windows.orEmpty()
                 .filter { it.kind != WindowKind.SESSION }
+            Triple(account, status, rows)
+        }
+        val contentH = blocks.fold(0f) { acc, (_, _, rows) ->
+            acc + headingAdvance + rows.size * rowPitch
+        }
+
+        // The region the bars own: below the section header, above the ACRNM mark.
+        val regionTop = 58f
+        val regionBottom = Panel.HEIGHT - 26f - 66f
+        // One gap above the first block, one between, one below the last — so the
+        // blocks sit evenly rather than hugging the top.
+        val gap = ((regionBottom - regionTop - contentH) / (blocks.size + 1))
+            .coerceAtLeast(0f)
+
+        var y = regionTop + gap
+        for ((account, status, rows) in blocks) {
+            heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
+            canvas.drawText(account.label, left, y, heading)
+            y += headingAdvance
+
             for (w in rows) {
-                canvas.drawText(w.label, left, y + 11f, label)
-                val barLeft = left + 62f
-                val barRight = right - 52f
-                canvas.drawRect(barLeft, y, barRight, y + 13f, barTrack)
+                canvas.drawText(w.label, left, y + barH - 4f, label)
+                val barLeft = left + 92f
+                val barRight = right - 72f
+                canvas.drawRect(barLeft, y, barRight, y + barH, barTrack)
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
@@ -177,13 +200,14 @@ class RearDialView(context: Context) : View(context) {
                 } else Panel.Palette.DIM
                 canvas.drawRect(
                     barLeft, y,
-                    barLeft + (barRight - barLeft) * w.utilization.coerceIn(0f, 1f), y + 13f, barFill,
+                    barLeft + (barRight - barLeft) * w.utilization.coerceIn(0f, 1f),
+                    y + barH, barFill,
                 )
                 value.color = barFill.color
-                canvas.drawText("${(w.utilization * 100).toInt()}%", right, y + 11f, value)
-                y += 22f
+                canvas.drawText("${(w.utilization * 100).toInt()}%", right, y + barH - 4f, value)
+                y += rowPitch
             }
-            y += 18f
+            y += gap
         }
     }
 
