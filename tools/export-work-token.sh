@@ -38,7 +38,17 @@ echo "→ keychain service: $SERVICE"
 BLOB=$(security find-generic-password -s "$SERVICE" -w) || {
   echo "✗ could not read $SERVICE — is that config dir logged in?"; exit 1; }
 
-printf '%s' "$BLOB" | pbcopy
+# Extract ONLY claudeAiOauth. The keychain entry also holds `mcpOAuth`, which
+# carries OAuth state for whatever MCP servers are configured (Atlassian, etc.) —
+# credentials for unrelated third-party services. Copying the whole blob would put
+# those on the clipboard and into the app's paste field for no reason; the app reads
+# four fields from claudeAiOauth and ignores everything else.
+#
+# plutil is built into macOS, so this needs no extra dependency.
+CLAUDE_OAUTH=$(printf '%s' "$BLOB" | plutil -extract claudeAiOauth json -o - - 2>/dev/null) || {
+  echo "✗ no claudeAiOauth in $SERVICE — unexpected keychain shape"; exit 1; }
+
+printf '%s' "$CLAUDE_OAUTH" | pbcopy
 
 echo "✓ credential copied to the clipboard — not written to disk, not pushed"
 echo "  Open Claude Status → 'Import work token' → paste."
