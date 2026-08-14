@@ -60,7 +60,20 @@ class RearUserService : IRearService.Stub {
 
         // Transaction 50 returns a success parcel even when it does nothing, so the
         // return value proves nothing. Confirm with the window manager.
-        if (!isOnDisplay(displayId)) {
+        // Composition-level check first: it is the only one that has never lied.
+        // A failed move is now corrected by moving again rather than by tearing the
+        // panel down — the user asked for recovery, not eviction, and a second move
+        // usually lands when the first did not.
+        if (compositingOnRear() == false) {
+            Log.w(TAG, "compositing on the MAIN display — re-issuing the move")
+            exec("service call activity_task 50 i32 $task i32 $displayId")
+            wake(displayId)
+            if (compositingOnRear() == false) {
+                Log.e(TAG, "still on the MAIN display after a second move; finishing")
+                hide()
+                return
+            }
+        } else if (!isOnDisplay(displayId)) {
             Log.e(TAG, "move FAILED — task $task is not on display $displayId; finishing")
             hide()
             return
@@ -83,6 +96,42 @@ class RearUserService : IRearService.Stub {
      * screen. It is better than nothing as this service's own self-check, but it is
      * not evidence to present as confirmation of on-device placement to anyone.
      */
+    /**
+     * Whether SurfaceFlinger is actually COMPOSITING RearActivity on the rear panel.
+     *
+     * This is the only signal on this device that has not lied. Every window-manager
+     * source — Activity.getDisplay(), `dumpsys window displays`, `am stack list` bounds
+     * — reports display 1 while the panel renders visibly on the FRONT screen, and
+     * panel power state cannot distinguish "our activity lit it" from "MIUI lit it".
+     *
+     * SurfaceFlinger is different in kind: `Display <id> (active|inactive) HWC layers:`
+     * sections list what each display is composing. That is where pixels physically go,
+     * not what the window manager believes about task ownership.
+     *
+     * Returns null when the output cannot be parsed, so an unknown answer never
+     * triggers a corrective move.
+     */
+    private fun compositingOnRear(): Boolean? {
+        val out = exec("dumpsys SurfaceFlinger")
+        if (!out.contains("HWC layers:")) return null
+
+        val header = Regex("""Display (\d+) \((?:active|inactive)\) HWC layers:""")
+        val matches = header.findAll(out).toList()
+        if (matches.isEmpty()) return null
+
+        for ((i, m) in matches.withIndex()) {
+            val start = m.range.last + 1
+            val end = if (i + 1 < matches.size) matches[i + 1].range.first else out.length
+            val body = out.substring(start, end)
+            if (body.contains("RearActivity")) {
+                return m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)
+            }
+        }
+        // Layer not composited on any display yet (panel asleep, activity not drawn).
+        // Unknown rather than wrong — do not act on it.
+        return null
+    }
+
     private fun isOnDisplay(displayId: Int): Boolean {
         val out = exec("dumpsys window displays")
         // A bare `indexOf("mDisplayId=$displayId")` would let displayId=1 match as a
@@ -120,6 +169,13 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        /**
+         * Tail of the rear panel's physical display id (local:4630946949513469332).
+         * Matched as a suffix so the constant does not have to track the full 19-digit
+         * value appearing in two different formats across dumpsys outputs.
+         */
+        const val REAR_PHYSICAL_ID_SUFFIX = "332"
+
         const val TAG = "ClaudeStatusRear"
         const val PKG = "dev.kb896.aiusage"
         const val ACTIVITY = ".rear.RearActivity"

@@ -229,8 +229,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Fetches immediately, bypassing UsageRepository's burst floor. Both callers have
+     * just been handed a credential by the user and are showing them the result, which
+     * is the one case where waiting out the floor would look like a failed import.
+     */
     private fun refreshNow() = lifecycleScope.launch {
-        graph.repository.refresh()
+        graph.repository.refresh(force = true)
         graph.bridge.update(StatePayload.encode(graph.repository.state.value))
     }
 
