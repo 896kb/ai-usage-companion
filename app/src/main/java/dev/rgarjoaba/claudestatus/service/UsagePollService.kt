@@ -75,6 +75,33 @@ class UsagePollService : Service() {
      * Dispatchers.Default with no installed handler. Cancellation must still
      * propagate normally, so it is rethrown rather than logged.
      */
+    /**
+     * Confirms a placement actually landed on the rear panel, and tears it down if not.
+     *
+     * This exists because placement success is otherwise UNOBSERVABLE on this device.
+     * `am stack list` reports identical bounds whether the activity is on display 1 or
+     * stranded at (0,0) on the main display; `dumpsys window displays` and the
+     * activity's own `getDisplay()` both report display 1 while it is visibly
+     * rendering on the FRONT screen. Trusting any of them stranded a fullscreen,
+     * immersive activity on the user's main screen three times, each needing a
+     * force-stop to clear.
+     *
+     * So this asks the hardware instead. RearActivity holds FLAG_KEEP_SCREEN_ON, so if
+     * it is genuinely on display 1 that display physically cannot doze. If the move
+     * failed, MIUI powers the rear panel down within a few seconds. Panel state is
+     * therefore a signal the window manager cannot misreport.
+     *
+     * Failure is bounded rather than eliminated: a bad placement is visible for up to
+     * VERIFY_DELAY_MS before being cleared, instead of sitting there until someone
+     * notices.
+     */
+    private suspend fun verifyPlacement(app: Graph) {
+        delay(VERIFY_DELAY_MS)
+        if (panelOn()) return
+        Log.w(TAG, "placement did not light the rear panel — clearing a probable strand")
+        app.bridge.hide()
+    }
+
     private suspend fun safeTick() {
         try {
             tick()
@@ -94,7 +121,6 @@ class UsagePollService : Service() {
         // numbers with a non-OK Health, not nothing.
         val payload = StatePayload.encode(app.repository.state.value)
         val decision = ensurePlaced(app, payload)
-        if (decision.state == Watchdog.State.ALIVE) userHasPlaced = true
         // A fresh respawn already delivered `payload` via the launch intent extra
         // (RearUserService.show()'s `am start --es state ...`), and calibrate mode
         // must never be touched by this service at all — only an already-alive,
@@ -128,14 +154,6 @@ class UsagePollService : Service() {
      *    here — that is a pre-existing gap in how calibrate mode is reached today,
      *    not something this task can close without new infrastructure.
      */
-    /**
-     * Set once the panel has been placed deliberately — via MainActivity's button, or
-     * a successful earlier respawn. Until then the watchdog reports state but does not
-     * place anything. See the guard in ensurePlaced().
-     */
-    @Volatile
-    private var userHasPlaced = false
-
     private fun ensurePlaced(app: Graph, payload: String): Watchdog.Decision {
         val decision = Watchdog.decide(watchdogState, app.bridge.isPanelAlive(), app.bridge.isCalibrating())
         watchdogState = decision.state
@@ -146,19 +164,10 @@ class UsagePollService : Service() {
                 Watchdog.State.ALIVE -> "rear panel confirmed alive"
             })
         }
-        // Respawn only if the user has placed the panel at least once since the
-        // service started. The move to display 1 fails intermittently on this device,
-        // and NEITHER of our detection methods can see it: `am stack list` reports the
-        // same bounds either way, and `dumpsys` (plus Activity.getDisplay()) reports
-        // display 1 while the panel is visibly rendering on the FRONT screen. So a
-        // failed placement strands a fullscreen, immersive activity on the user's main
-        // display, and the self-eviction guard cannot detect it either.
-        //
-        // Respawning unprompted after every install meant that happened three times
-        // with no user action at all. Gating on an explicit placement keeps the
-        // always-on respawn the user asked for, without the app seizing their main
-        // screen on its own initiative.
-        if (decision.shouldRespawn && userHasPlaced) app.bridge.show(payload)
+        if (decision.shouldRespawn) {
+            app.bridge.show(payload)
+            scope.launch { verifyPlacement(app) }
+        }
         return decision
     }
 
@@ -189,6 +198,14 @@ class UsagePollService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        /**
+         * How long to wait before checking whether a placement lit the rear panel.
+         * Must exceed MIUI's own rear-display timeout (observed ~5s) so a genuine
+         * success is not mistaken for a failure, while keeping a bad placement's time
+         * on the user's main screen short.
+         */
+        private const val VERIFY_DELAY_MS = 8_000L
+
         private const val TAG = "ClaudeStatusPoll"
         private const val CHANNEL = "usage"
         private const val NOTIFICATION_ID = 1
