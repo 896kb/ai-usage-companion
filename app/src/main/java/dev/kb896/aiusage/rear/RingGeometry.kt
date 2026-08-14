@@ -19,7 +19,7 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * a future nudge cannot desynchronise them — an earlier live-tuning pass did
          * exactly that, leaving one ring a pixel off the other's column.
          */
-        private const val LENS_CX = 150f
+        private const val LENS_CX = 149f
 
         private const val PERSONAL_LENS_CY = 149f
         private const val WORK_LENS_CY = 422f
