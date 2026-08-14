@@ -19,10 +19,10 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * a future nudge cannot desynchronise them — an earlier live-tuning pass did
          * exactly that, leaving one ring a pixel off the other's column.
          */
-        private const val LENS_CX = 151f
+        private const val LENS_CX = 150f
 
         private const val PERSONAL_LENS_CY = 149f
-        private const val WORK_LENS_CY = 424f
+        private const val WORK_LENS_CY = 422f
 
         /**
          * The lens radius, also measured — the calibration ruler was aligned to the
@@ -57,7 +57,7 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * recompute both inequalities rather than adjusting one by eye.
          */
         private const val RING_OFFSET = 20f
-        private const val RING_STROKE = 28f
+        private const val RING_STROKE = 30f
 
         private const val RING_RADIUS = LENS_RADIUS + RING_OFFSET
 
