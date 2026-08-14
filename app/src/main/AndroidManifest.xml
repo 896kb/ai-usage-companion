@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:label="Claude Status"
         android:supportsRtl="false"
@@ -36,6 +37,21 @@
             android:name=".service.UsagePollService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Restarts UsagePollService after a device reboot — see BootReceiver's
+             KDoc for why this alone does not mean the panel reappears immediately
+             (Shizuku itself needs a manual restart on this device). directBootAware
+             left at its default "false": placement needs TokenStore's Keystore
+             access, which needs user-unlocked (credential-encrypted) storage
+             anyway, so there is nothing useful this receiver could do before then. -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="false"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
