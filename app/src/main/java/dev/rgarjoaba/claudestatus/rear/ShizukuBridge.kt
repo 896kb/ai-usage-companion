@@ -20,6 +20,28 @@ class ShizukuBridge(private val context: Context) {
 
     private var service: IRearService? = null
     private var pending: String? = null
+    private var binderListenerArmed = false
+
+    /**
+     * Flush the queued payload as soon as Shizuku's binder shows up.
+     *
+     * Sticky, so it fires immediately if the binder is already there rather than
+     * waiting for the next delivery — otherwise a race between the queue and the
+     * binder's arrival strands the payload until something else calls show().
+     * Registered at most once; Shizuku keeps listeners for the process's lifetime.
+     */
+    private fun armBinderListener() {
+        if (binderListenerArmed) return
+        binderListenerArmed = true
+        try {
+            Shizuku.addBinderReceivedListenerSticky {
+                pending?.let { p -> pending = null; show(p) }
+            }
+        } catch (e: Exception) {
+            binderListenerArmed = false
+            Log.e(TAG, "could not register the Shizuku binder listener", e)
+        }
+    }
 
     /**
      * Best-effort "is the panel currently meant to be in calibrate mode" flag — see
@@ -77,7 +99,19 @@ class ShizukuBridge(private val context: Context) {
     fun show(payload: String) {
         calibrating = CalibrateMode.isCalibrate(payload)
         val s = status()
-        if (!s.ready) { Log.w(TAG, "not ready: $s"); return }
+        if (!s.ready) {
+            // Hold the payload instead of dropping it. This is the normal state for the
+            // first seconds after the app is killed and restarted: Shizuku has to
+            // re-deliver its binder to the fresh process, so status().ready is false
+            // even though everything is installed and granted. Dropping the request
+            // here meant the panel could not return until the next 20s watchdog tick
+            // happened to land after the binder arrived — measured at ~30s. Queued
+            // plus the listener below, it goes back the moment Shizuku is reachable.
+            Log.w(TAG, "not ready: $s — queuing")
+            pending = payload
+            armBinderListener()
+            return
+        }
         val svc = service ?: run { pending = payload; bind(); return }
         try { svc.show(payload, s.rearDisplayId) } catch (e: Exception) { Log.e(TAG, "show failed", e); service = null }
     }
