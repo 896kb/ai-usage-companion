@@ -16,6 +16,15 @@ class RearUserService : IRearService.Stub {
 
     override fun destroy() = exitProcess(0)
 
+    /**
+     * Task existence only — see the AIDL doc on IRearService.isAlive(). Deliberately
+     * NOT `placedDisplayId == ... && taskId() > 0`: placedDisplayId is this
+     * process's own in-memory bookkeeping and is meaningless after this service
+     * process itself restarts (Shizuku respawns it independently of RearActivity's
+     * lifecycle), whereas `am stack list` is always a live, authoritative read.
+     */
+    override fun isAlive(): Boolean = taskId() > 0
+
     override fun hide() {
         // -p $PKG scopes the broadcast to our own app. The receiver stays exported
         // (the sender here is shell uid 2000, which an unexported receiver can't

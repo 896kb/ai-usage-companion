@@ -21,6 +21,12 @@ class ShizukuBridge(private val context: Context) {
     private var service: IRearService? = null
     private var pending: String? = null
 
+    /**
+     * Best-effort "is the panel currently meant to be in calibrate mode" flag — see
+     * isCalibrating() below for what it can and cannot see.
+     */
+    @Volatile private var calibrating = false
+
     private val args by lazy {
         Shizuku.UserServiceArgs(ComponentName(context.packageName, RearUserService::class.java.name))
             .daemon(false).processNameSuffix("rear").debuggable(false).version(1)
@@ -69,6 +75,7 @@ class ShizukuBridge(private val context: Context) {
     }
 
     fun show(payload: String) {
+        calibrating = CalibrateMode.isCalibrate(payload)
         val s = status()
         if (!s.ready) { Log.w(TAG, "not ready: $s"); return }
         val svc = service ?: run { pending = payload; bind(); return }
@@ -76,12 +83,44 @@ class ShizukuBridge(private val context: Context) {
     }
 
     fun update(payload: String) {
+        calibrating = CalibrateMode.isCalibrate(payload)
         try { service?.update(payload) } catch (e: Exception) { Log.e(TAG, "update failed", e); service = null }
     }
 
     fun hide() {
         try { service?.hide() } catch (e: Exception) { Log.e(TAG, "hide failed", e) }
     }
+
+    /**
+     * Asks the shell-uid service whether RearActivity's task still exists — see the
+     * KDoc on IRearService.isAlive(). Not yet bound counts as "not alive": that is
+     * exactly the state a killed panel would be in immediately after Shizuku itself
+     * restarts, and the caller (UsagePollService's watchdog) already treats "not
+     * alive" as "call show()", whose existing `pending` queue-and-bind handles an
+     * unbound service correctly.
+     */
+    fun isPanelAlive(): Boolean {
+        val svc = service ?: return false
+        return try { svc.isAlive() } catch (e: Exception) { Log.e(TAG, "isAlive failed", e); service = null; false }
+    }
+
+    /**
+     * Whether the last payload THIS bridge instance was asked to show or update was
+     * a calibrate payload — the watchdog's guard against re-placing a panel that is
+     * mid-calibration (Task 15 Step 2b).
+     *
+     * This is intent tracking, not a live query: RearActivity runs in its own
+     * process (:rear) and there is no cheap, reliable way to ask it what it is
+     * currently rendering, so this reflects "what we last told it to show," not
+     * "what it is proven to be showing." It is also necessarily scoped to calls
+     * that went through THIS bridge — a calibrate session started via the manual
+     * `adb shell am broadcast ... --es state '{"mode":"calibrate"}'` workaround
+     * (see MainActivity's comment) bypasses ShizukuBridge/IRearService entirely and
+     * is invisible here. That workaround predates any in-app calibrate control;
+     * once one exists and routes through a bridge shared with the poll service (the
+     * Graph singleton makes that the natural wiring), this becomes fully accurate.
+     */
+    fun isCalibrating(): Boolean = calibrating
 
     private companion object { const val TAG = "ClaudeStatusBridge" }
 }
