@@ -8,8 +8,8 @@ import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.IBinder
 import android.util.Log
-import android.view.Display
 import dev.rgarjoaba.claudestatus.IRearService
+import dev.rgarjoaba.claudestatus.Panel
 import rikka.shizuku.Shizuku
 
 class ShizukuBridge(private val context: Context) {
@@ -43,9 +43,19 @@ class ShizukuBridge(private val context: Context) {
         return Status(running, granted, rearDisplayId())
     }
 
-    fun rearDisplayId(): Int =
-        (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
-            .displays.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }?.displayId ?: -1
+    /**
+     * [Panel.DISPLAY_ID] is the single source of truth for which display the rear
+     * panel is — never derive it. We only confirm that display actually exists, so
+     * an absent panel still reports -1 and the front UI can say so.
+     *
+     * Deliberately NOT "first display that isn't the default": that heuristic is
+     * correct only by topology coincidence and would silently select a Chromecast,
+     * an HDMI output, or a virtual display if one were ever enumerated.
+     */
+    fun rearDisplayId(): Int {
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        return if (dm.getDisplay(Panel.DISPLAY_ID) != null) Panel.DISPLAY_ID else -1
+    }
 
     fun requestPermission(@Suppress("UNUSED_PARAMETER") activity: Activity, requestCode: Int = 4117) {
         if (!Shizuku.pingBinder() || Shizuku.isPreV11()) return
