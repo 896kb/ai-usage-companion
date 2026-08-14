@@ -183,7 +183,7 @@ class RearDialView(context: Context) : View(context) {
      * title and logo drifting apart is exactly what a copied hex value causes.
      */
     private fun drawTitle(canvas: Canvas) {
-        val left = Panel.CUTOUT_RIGHT + 34f
+        val left = CONTENT_LEFT
         val size = TITLE_LOGO_SIZE
         logo.setTint(Panel.Palette.WORK)
         // The drawable's box is not its ink: the glyph occupies rows 5..20 of a 24-unit
@@ -210,8 +210,8 @@ class RearDialView(context: Context) : View(context) {
      * (`scope.model.display_name`), never a hardcoded model name.
      */
     private fun drawBars(canvas: Canvas) {
-        val left = Panel.CUTOUT_RIGHT + 34f
-        val right = Panel.WIDTH - 34f
+        val left = CONTENT_LEFT
+        val right = CONTENT_RIGHT
 
         // Layout metrics scale with the type. These were originally tuned for 12/15/14pt
         // text; when the sizes went to 18/22.5/21 the rows kept their old pitch and
@@ -239,7 +239,7 @@ class RearDialView(context: Context) : View(context) {
 
         // The region the bars own: below the masthead, above the ACRNM mark.
         val regionTop = TITLE_BASELINE + 26f
-        val regionBottom = Panel.HEIGHT - 26f - 66f
+        val regionBottom = Panel.HEIGHT - MARK_BOTTOM - MARK_H
         // One gap above the first block, one between, one below the last — so the
         // blocks sit evenly rather than hugging the top.
         val gap = ((regionBottom - regionTop - contentH) / (blocks.size + 1))
@@ -267,8 +267,8 @@ class RearDialView(context: Context) : View(context) {
                 // "disabled" even on a healthy account.
                 label.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
                 canvas.drawText(w.label, left, y + barH - 4f, label)
-                val barLeft = left + 92f
-                val barRight = right - 72f
+                val barLeft = BAR_LEFT
+                val barRight = BAR_RIGHT
                 canvas.drawRect(barLeft, y, barRight, y + barH, barTrack)
                 // Time for the session row, utilisation for the rest.
                 val fraction = if (isSession) sessionElapsed(w.resetsAt) else w.utilization
@@ -323,7 +323,7 @@ class RearDialView(context: Context) : View(context) {
         val stale = staleLabel(state.fetchedAt, System.currentTimeMillis())
         if (stale != null) {
             value.color = Panel.Palette.DIM
-            canvas.drawText(stale, markLeft() - 20f, Panel.HEIGHT - 40f, value)
+            canvas.drawText(stale, BAR_LEFT - 20f, Panel.HEIGHT - 40f, value)
         }
     }
 
@@ -331,18 +331,11 @@ class RearDialView(context: Context) : View(context) {
     private fun drawMark(canvas: Canvas) {
         ray.setTint(Panel.Palette.PERSONAL)
         ray.setBounds(
-            markLeft().toInt(), Panel.HEIGHT - MARK_BOTTOM - MARK_H,
-            Panel.WIDTH - MARK_RIGHT, Panel.HEIGHT - MARK_BOTTOM,
+            BAR_LEFT.toInt(), (Panel.HEIGHT - MARK_BOTTOM - MARK_H).toInt(),
+            BAR_RIGHT.toInt(), Panel.HEIGHT - MARK_BOTTOM,
         )
         ray.draw(canvas)
     }
-
-    /**
-     * The mark's left edge. Derived rather than written out again: the footer's stale
-     * marker right-aligns to this edge, and when the two were separate literals a
-     * change to the mark's size or margin silently drew the marker underneath it.
-     */
-    private fun markLeft(): Float = (Panel.WIDTH - MARK_RIGHT - MARK_W).toFloat()
 
     /**
      * Short marker shown beside an account whose numbers cannot be vouched for.
@@ -412,13 +405,30 @@ class RearDialView(context: Context) : View(context) {
         private const val BG_ALPHA = 0xB4
 
         /**
-         * Maker's-mark box. Moved further from the right edge and enlarged at the
-         * user's request; drawMark and the footer's stale marker both derive from these
-         * rather than repeating the numbers.
+         * The canvas side's two vertical rules. Everything on the right of the panel
+         * lines up on one or the other: labels and the masthead at CONTENT_LEFT, bars
+         * and the maker's mark between BAR_LEFT and BAR_RIGHT.
+         *
+         * These were four separate literals spread across drawBars, drawTitle and
+         * drawMark. Sharing them is what makes "the mark is the same width as the bars"
+         * a fact of the layout rather than a coincidence that survives until someone
+         * retunes one of the margins.
          */
-        private const val MARK_W = 300
-        private const val MARK_H = 78
-        private const val MARK_RIGHT = 62
+        private const val CONTENT_LEFT = Panel.CUTOUT_RIGHT + 34f
+        private const val CONTENT_RIGHT = Panel.WIDTH - 34f
+        private const val BAR_LEFT = CONTENT_LEFT + 92f
+        private const val BAR_RIGHT = CONTENT_RIGHT - 72f
+
+        /**
+         * Maker's mark. Spans exactly the bar column (BAR_LEFT..BAR_RIGHT) at the
+         * user's request, so its edges line up vertically with every bar above it.
+         *
+         * The height is derived from the drawable's own 405x102 viewport rather than
+         * chosen, so the fan is never stretched: fixing the width to the bar column and
+         * also hand-picking a height is exactly how an aspect-ratio distortion gets
+         * baked in unnoticed.
+         */
+        private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
 
         /** The session window's fixed length — see sessionElapsed. */

@@ -3,6 +3,7 @@ package dev.kb896.aiusage.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.KeyguardManager
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -129,6 +130,9 @@ class UsagePollService : Service() {
             }
         }
     }
+
+    private fun keyguardLocked(): Boolean =
+        (getSystemService(KeyguardManager::class.java))?.isKeyguardLocked == true
 
     private fun panelOn(): Boolean =
         displays.getDisplay(Panel.DISPLAY_ID)?.state == Display.STATE_ON
@@ -306,6 +310,23 @@ class UsagePollService : Service() {
             })
         }
         if (decision.shouldRespawn) {
+            // NOT while the keyguard is up. Respawning means ShizukuBridge.show(), and
+            // show() launches on display 0 before moving to display 1 — the rear panel
+            // rejects direct launches, so there is no other route. RearActivity holds
+            // FLAG_SHOW_WHEN_LOCKED and setTurnScreenOn(true), so that transient launch
+            // does not pass unnoticed on a locked phone: it draws over the keyguard and
+            // wakes the main screen. That is the "every time I lock the screen it gets
+            // sent to the main screen" report, and the cause is this respawn, not the
+            // system moving anything.
+            //
+            // Deferring costs a dark rear panel until the phone is unlocked, which
+            // nobody is looking at anyway — the alternative is hijacking the lock
+            // screen every time. USER_PRESENT drives screenReceiver, so the panel is
+            // back within a moment of unlocking.
+            if (keyguardLocked()) {
+                Log.i(TAG, "panel needs re-placing but the keyguard is up — deferring to unlock")
+                return decision
+            }
             app.bridge.show(payload)
             scope.launch { verifyPlacement(app) }
         }

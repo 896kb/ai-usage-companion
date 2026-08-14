@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.rear
 
 import android.app.Activity
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -198,6 +199,17 @@ class RearActivity : Activity() {
     }
 
     private val evictIfStranded = Runnable {
+        // Never evict while the keyguard is up. Locking churns this activity's
+        // lifecycle and display reporting, and an eviction here does not end quietly:
+        // finish() makes the watchdog see a dead panel and respawn it, and respawning
+        // launches on display 0 — over the lock screen. Evicting on a locked phone
+        // therefore CAUSES the visible takeover this guard exists to prevent.
+        // The guard still protects the case it was written for: a strand the user can
+        // actually see and is stuck behind, which by definition means an unlocked phone.
+        if ((getSystemService(KeyguardManager::class.java))?.isKeyguardLocked == true) {
+            Log.i(TAG, "wrong display but the keyguard is up — not evicting")
+            return@Runnable
+        }
         if (display?.displayId != Panel.DISPLAY_ID) {
             Log.w(TAG, "stranded on display ${display?.displayId}, evicting")
             finish()
