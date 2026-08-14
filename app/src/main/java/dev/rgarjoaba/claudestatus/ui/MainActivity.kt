@@ -17,6 +17,7 @@ import dev.rgarjoaba.claudestatus.auth.OAuthClient
 import dev.rgarjoaba.claudestatus.auth.PkceChallenge
 import dev.rgarjoaba.claudestatus.auth.TokenImport
 import dev.rgarjoaba.claudestatus.data.Account
+import dev.rgarjoaba.claudestatus.data.CallLog
 import dev.rgarjoaba.claudestatus.data.DashboardState
 import dev.rgarjoaba.claudestatus.data.StatePayload
 import dev.rgarjoaba.claudestatus.rear.ShizukuBridge
@@ -293,13 +294,34 @@ class MainActivity : ComponentActivity() {
         recoveryDisplayAbsent.visibility = if (s.rearDisplayId < 0) View.VISIBLE else View.GONE
     }
 
+    /**
+     * The last few Anthropic requests, newest first. The panel can show that an
+     * account is unhealthy but not why or when — this is the only place on the device
+     * that answers that without adb.
+     */
+    private fun renderCallLog(): String {
+        val recent = CallLog.recent()
+        if (recent.isEmpty()) return "\n\nRECENT CALLS\n  (none yet)"
+        val now = System.currentTimeMillis()
+        return buildString {
+            append("\n\nRECENT CALLS\n")
+            for (e in recent) {
+                val agoSec = ((now - e.atMillis) / 1000).coerceAtLeast(0)
+                val ago = if (agoSec >= 60) "${agoSec / 60}m" else "${agoSec}s"
+                append("  ").append(ago.padStart(4)).append("  ")
+                    .append(e.account.padEnd(9)).append(e.outcome).append('\n')
+            }
+        }
+    }
+
     private fun renderPreview(state: DashboardState) {
         val raw = StatePayload.encode(state)
-        previewText.text = try {
+        val pretty = try {
             prettyJson.encodeToString(JsonElement.serializer(), Json.parseToJsonElement(raw))
         } catch (_: Exception) {
             raw
         }
+        previewText.text = pretty + renderCallLog()
     }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()

@@ -67,6 +67,7 @@ class UsageRepository(
         backoffUntil[account]?.let { until ->
             if (nowElapsed < until) {
                 Log.i(TAG, "${account.slug}: backing off ${(until - nowElapsed) / 1000}s more")
+                CallLog.record(account, "skipped, backoff ${(until - nowElapsed) / 1000}s")
                 return AccountStatus(account, Health.STALE, last)
             }
         }
@@ -87,16 +88,19 @@ class UsageRepository(
                 oauth.refresh(stored.refreshToken).also { store.save(account, it) }
             } catch (e: Exception) {
                 Log.w(TAG, "${account.slug}: token refresh failed: ${e.message}")
+                CallLog.record(account, "refresh failed: ${e.message}")
                 return AccountStatus(account, Health.AUTH, last)
             }
         } else stored
 
         return try {
             val snapshot = api.fetch(usable.accessToken)
+            CallLog.record(account, "ok")
             backoffUntil.remove(account)
             backoffStep.remove(account)
             AccountStatus(account, Health.OK, snapshot)
         } catch (e: UsageApi.Failure) {
+            CallLog.record(account, e.message ?: e.kind.name)
             if (e.kind == UsageApi.Kind.RATE_LIMITED) applyBackoff(account, e.retryAfterSec)
             // Keep the last good numbers, but never present them as live.
             Log.w(TAG, "${account.slug}: usage fetch failed: ${e.message}")
