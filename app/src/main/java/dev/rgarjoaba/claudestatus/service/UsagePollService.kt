@@ -4,7 +4,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.IntentFilter
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.IBinder
@@ -98,6 +100,11 @@ class UsagePollService : Service() {
         cachedState()?.let { app.repository.restore(StatePayload.decode(it)) }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displays.registerDisplayListener(displayListener, null)
+        registerReceiver(screenReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        })
         scope.launch {
             val initial = initialDelayMs()
             if (initial > 0) {
@@ -162,10 +169,25 @@ class UsagePollService : Service() {
         app.bridge.hide()
     }
 
+    /**
+     * Fires on lock and unlock. Both are moments the system re-evaluates which
+     * activity shows over the keyguard, and both are when the panel was observed
+     * jumping to the front screen — so the corrective check runs immediately rather
+     * than waiting out the watchdog interval, which would leave the user's lock
+     * screen covered for up to 20 seconds.
+     *
+     * The translucent RearTheme should stop the hoist happening at all; this stays as
+     * the net for the case where it still does. Neither path makes a network call.
+     */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = safeSupervise()
+    }
+
     /** Watchdog-only pass: no fetch, just make sure the panel is still up. */
     private fun safeSupervise() {
         try {
             val app = Graph.of(this)
+            if (app.bridge.ensureOnRear()) Log.w(TAG, "panel was on the main display — moved back")
             ensurePlaced(app, StatePayload.encode(app.repository.state.value))
         } catch (e: Exception) {
             Log.e(TAG, "supervise failed", e)
@@ -310,6 +332,7 @@ class UsagePollService : Service() {
 
     override fun onDestroy() {
         displays.unregisterDisplayListener(displayListener)
+        try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         scope.cancel()
         super.onDestroy()
     }

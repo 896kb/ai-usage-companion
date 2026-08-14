@@ -31,7 +31,7 @@
             android:excludeFromRecents="true"
             android:screenOrientation="nosensor"
             android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
-            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+            android:theme="@style/RearTheme" />
 
         <service
             android:name=".service.UsagePollService"
