@@ -13,9 +13,16 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * 2026-08-14 and confirmed visually by the user against the physical lenses.
          * Do not "correct" these back toward round numbers.
          */
+        /**
+         * Shared deliberately: the two lenses sit in one vertical column on the
+         * physical panel, confirmed by the user. Keeping this a single constant means
+         * a future nudge cannot desynchronise them — an earlier live-tuning pass did
+         * exactly that, leaving one ring a pixel off the other's column.
+         */
         private const val LENS_CX = 148f
-        private const val PERSONAL_LENS_CY = 147f
-        private const val WORK_LENS_CY = 425f
+
+        private const val PERSONAL_LENS_CY = 148f
+        private const val WORK_LENS_CY = 424f
 
         /**
          * The lens radius, also measured — the calibration ruler was aligned to the
