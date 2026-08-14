@@ -1,5 +1,6 @@
 package dev.kb896.aiusage.data
 
+import android.util.Log
 import dev.kb896.aiusage.auth.OAuthClient
 import dev.kb896.aiusage.auth.TokenStore
 import kotlinx.coroutines.Dispatchers
@@ -33,15 +34,22 @@ class UsageRepository(
 
     private fun fetchOne(account: Account, last: UsageSnapshot?): AccountStatus {
         val stored = store.load(account)
-            ?: return AccountStatus(account, Health.AUTH, null)
+            ?: run {
+                Log.i(TAG, "${account.slug}: no stored credential")
+                return AccountStatus(account, Health.AUTH, null)
+            }
 
         val now = System.currentTimeMillis()
-        if (stored.refreshExpired(now)) return AccountStatus(account, Health.AUTH, last)
+        if (stored.refreshExpired(now)) {
+            Log.w(TAG, "${account.slug}: refresh token expired")
+            return AccountStatus(account, Health.AUTH, last)
+        }
 
         val usable = if (stored.accessExpired(now)) {
             try {
                 oauth.refresh(stored.refreshToken).also { store.save(account, it) }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "${account.slug}: token refresh failed: ${e.message}")
                 return AccountStatus(account, Health.AUTH, last)
             }
         } else stored
@@ -50,17 +58,28 @@ class UsageRepository(
             AccountStatus(account, Health.OK, api.fetch(usable.accessToken))
         } catch (e: UsageApi.Failure) {
             // Keep the last good numbers, but never present them as live.
+            Log.w(TAG, "${account.slug}: usage fetch failed: ${e.message}")
             AccountStatus(account, healthFor(e.kind), last)
         } catch (e: Exception) {
             // api.fetch is documented to only throw UsageApi.Failure, but that is an
             // implementation detail of a class this repository does not own. One
             // account's fetch must never be able to abort the sibling account's — see
             // the map over Account.entries in refresh(). Degrade this account only.
+            Log.e(TAG, "${account.slug}: unexpected fetch error: ${e.javaClass.simpleName}")
             AccountStatus(account, Health.ERROR, last)
         }
     }
 
+
     companion object {
+        /**
+         * Failure messages only — UsageApi.Failure and OAuthClient.Failure are both
+         * built from status codes, exception class names and static strings, never
+         * from a token or a response body. Without this a dimmed panel gives the user
+         * no way at all to find out why.
+         */
+        const val TAG = "ClaudeStatusRepo"
+
         /**
          * `when` over an enum class used as an expression is exhaustive by construction:
          * Kotlin refuses to compile this function if UsageApi.Kind gains a fifth entry
