@@ -21,8 +21,8 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          */
         private const val LENS_CX = 148f
 
-        private const val PERSONAL_LENS_CY = 148f
-        private const val WORK_LENS_CY = 424f
+        private const val PERSONAL_LENS_CY = 149f
+        private const val WORK_LENS_CY = 425f
 
         /**
          * The lens radius, also measured — the calibration ruler was aligned to the
