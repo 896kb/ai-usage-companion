@@ -124,10 +124,14 @@ class RearDialView(context: Context) : View(context) {
         if (status == null || session == null || status.health == Health.AUTH) return
 
         arc.strokeWidth = g.stroke
-        // Always the ramp colour, never dimmed — the user's call. Trust is signalled
-        // by the tag beside the account label and the footer's staleness marker
-        // instead, so the numbers stay readable at a glance.
-        arc.color = RampColor.at(session.utilization)
+        // Coloured while the data is good, dimmed once a fetch has actually failed.
+        // The tag beside the account label says which failure it was, so grey means
+        // "this is history" rather than the unexplained grey it used to mean.
+        arc.color = if (status.health == Health.OK) {
+            RampColor.at(session.utilization)
+        } else {
+            Panel.Palette.DIM
+        }
         canvas.drawArc(scratch, -90f, 360f * session.utilization.coerceIn(0f, 1f), false, arc)
     }
 
@@ -182,11 +186,11 @@ class RearDialView(context: Context) : View(context) {
 
         var y = regionTop + gap
         for ((account, status, rows) in blocks) {
-            heading.color = account.accent
+            heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
             canvas.drawText(account.label, left, y, heading)
-            // Colour no longer encodes trust, so state is spelled out instead. Without
-            // this a stale or unauthenticated account would render identically to a
-            // live one, which is the one thing a status display must never do.
+            // Kept alongside the dimming: grey alone says "something is wrong" without
+            // saying what, which is what made an all-grey panel read as broken rather
+            // than informative. The tag names the actual failure.
             healthTag(status?.health)?.let { tag ->
                 label.color = Panel.Palette.DIM
                 canvas.drawText(tag, left + heading.measureText(account.label) + 14f, y, label)
@@ -201,7 +205,9 @@ class RearDialView(context: Context) : View(context) {
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
-                barFill.color = barColor(w.utilization, account.accent)
+                barFill.color = if (status?.health == Health.OK) {
+                    barColor(w.utilization, account.accent)
+                } else Panel.Palette.DIM
                 canvas.drawRect(
                     barLeft, y,
                     barLeft + (barRight - barLeft) * w.utilization.coerceIn(0f, 1f),
