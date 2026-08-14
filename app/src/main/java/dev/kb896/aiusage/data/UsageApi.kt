@@ -17,7 +17,12 @@ class UsageApi(
     enum class Kind { UNAUTHORIZED, RATE_LIMITED, NETWORK, SERVER }
 
     /** Message deliberately excludes the token — this is thrown into logs. */
-    class Failure(val kind: Kind, message: String) : RuntimeException(message)
+    class Failure(
+        val kind: Kind,
+        message: String,
+        /** Seconds the server asked us to wait, from the Retry-After header. */
+        val retryAfterSec: Long? = null,
+    ) : RuntimeException(message)
 
     fun fetch(accessToken: String): UsageSnapshot {
         val url = baseUrl.newBuilder().addPathSegments("api/oauth/usage").build()
@@ -34,7 +39,11 @@ class UsageApi(
                     res.code == 401 || res.code == 403 ->
                         throw Failure(Kind.UNAUTHORIZED, "usage: HTTP ${res.code}")
                     res.code == 429 ->
-                        throw Failure(Kind.RATE_LIMITED, "usage: HTTP 429")
+                        throw Failure(
+                            Kind.RATE_LIMITED,
+                            "usage: HTTP 429",
+                            res.header("Retry-After")?.toLongOrNull(),
+                        )
                     !res.isSuccessful ->
                         throw Failure(Kind.SERVER, "usage: HTTP ${res.code}")
                 }
