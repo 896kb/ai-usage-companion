@@ -53,7 +53,13 @@ class UsagePollService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIFICATION_ID, notification())
-        Graph.of(this).repository.onFetchCompleted = { recordFetch() }
+        val app = Graph.of(this)
+        app.repository.onFetchCompleted = {
+            recordFetch(StatePayload.encode(app.repository.state.value))
+        }
+        // Render the last known values immediately rather than waiting out the
+        // remaining interval with a blank panel.
+        cachedState()?.let { app.repository.restore(StatePayload.decode(it)) }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displays.registerDisplayListener(displayListener, null)
         scope.launch {
@@ -126,9 +132,22 @@ class UsagePollService : Service() {
     private fun lastFetchAt(): Long =
         getSharedPreferences("poll", MODE_PRIVATE).getLong("lastFetchAt", 0L)
 
-    private fun recordFetch() =
+    /**
+     * Persists the fetch time AND the values themselves. Carrying only the timestamp
+     * meant a restart knew not to re-fetch but had nothing to show, so the panel sat
+     * empty for the remainder of the interval — blank for data we already had.
+     *
+     * The payload is the same one broadcast to the panel: utilisations and timestamps
+     * only, never a credential. See StatePayload.
+     */
+    private fun recordFetch(state: String) =
         getSharedPreferences("poll", MODE_PRIVATE).edit()
-            .putLong("lastFetchAt", System.currentTimeMillis()).apply()
+            .putLong("lastFetchAt", System.currentTimeMillis())
+            .putString("lastState", state)
+            .apply()
+
+    private fun cachedState(): String? =
+        getSharedPreferences("poll", MODE_PRIVATE).getString("lastState", null)
 
     /**
      * How long to wait before the first fetch after the service starts.
