@@ -109,16 +109,29 @@ class ShizukuBridge(private val context: Context) {
      * a calibrate payload — the watchdog's guard against re-placing a panel that is
      * mid-calibration (Task 15 Step 2b).
      *
-     * This is intent tracking, not a live query: RearActivity runs in its own
-     * process (:rear) and there is no cheap, reliable way to ask it what it is
-     * currently rendering, so this reflects "what we last told it to show," not
-     * "what it is proven to be showing." It is also necessarily scoped to calls
-     * that went through THIS bridge — a calibrate session started via the manual
-     * `adb shell am broadcast ... --es state '{"mode":"calibrate"}'` workaround
-     * (see MainActivity's comment) bypasses ShizukuBridge/IRearService entirely and
-     * is invisible here. That workaround predates any in-app calibrate control;
-     * once one exists and routes through a bridge shared with the poll service (the
-     * Graph singleton makes that the natural wiring), this becomes fully accurate.
+     * DEAD CODE TODAY, on purpose, not by oversight: calibrate mode is currently
+     * reachable ONLY via the manual `adb shell am broadcast ... --es state
+     * '{"mode":"calibrate"}'` workaround (see MainActivity's comment), which goes
+     * straight to RearActivity's receiver and never touches ShizukuBridge/
+     * IRearService. Nothing in the app calls show()/update() with a calibrate
+     * payload yet, so this field is always false in practice and the guard can
+     * never fire — until Task 17 (or whatever adds an in-app calibrate control)
+     * wires it through this bridge, which is the natural integration (it already
+     * shares Graph with UsagePollService, exactly like the "Show on back" button
+     * does today), not a change made "just to activate this guard."
+     *
+     * This is intent tracking, not a live query, and that distinction matters here:
+     * RearActivity runs in its own process (:rear), so once it dies there is
+     * nothing left to ask "are you calibrating?" — this field is deliberately kept
+     * in THIS process instead, specifically so it survives that death. That means
+     * it is NOT equivalent to "RearActivity is currently rendering calibrate mode
+     * right now" (which would trivially go false the instant the activity dies) —
+     * it is "the last thing we told it to show was calibrate," which is exactly
+     * what lets Watchdog.decide() still choose CALIBRATING (not DEAD) for a task
+     * that crashed mid-calibration, so a crash there is left dead rather than
+     * silently resurrected into the normal dial view. Once a calibrate control
+     * exists and uses this bridge, that crash-recovery behaviour is real, not
+     * merely documented.
      */
     fun isCalibrating(): Boolean = calibrating
 

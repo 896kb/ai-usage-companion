@@ -14,7 +14,11 @@ package dev.rgarjoaba.claudestatus.service
  *    lets the caller log only on a transition instead of once per attempt.
  *  - "never respawn while calibrate mode is active" — CALIBRATING always wins
  *    over both ALIVE and DEAD, so a panel that died mid-calibration is left dead
- *    rather than silently respawned back into the normal dial view.
+ *    rather than silently respawned back into the normal dial view. This branch
+ *    is currently unreachable in practice — see ShizukuBridge.isCalibrating()'s
+ *    KDoc for exactly why — but it is not unreachable in principle: `calibrating`
+ *    is tracked in this (surviving) process rather than read live from the dead
+ *    one, specifically so this comparison still works after RearActivity crashes.
  */
 object Watchdog {
 
