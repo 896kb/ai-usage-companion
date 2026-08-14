@@ -14,6 +14,21 @@
             </intent-filter>
         </activity>
 
+        <!-- Rear panel window. exported=true because HyperOS denies shell
+             START_ANY_ACTIVITY against non-exported targets. No intent filters —
+             explicit component only. Own process so panel input can't ANR the app.
+             configChanges so the move to display 1 does not recreate it. -->
+        <activity
+            android:name=".rear.RearActivity"
+            android:exported="true"
+            android:process=":rear"
+            android:launchMode="singleTask"
+            android:taskAffinity="dev.rgarjoaba.claudestatus.rear"
+            android:excludeFromRecents="true"
+            android:screenOrientation="nosensor"
+            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
