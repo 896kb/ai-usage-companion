@@ -28,4 +28,19 @@ interface IRearService {
      * crash, or a reboot.
      */
     boolean isAlive() = 5;
+
+    /**
+     * If RearActivity is compositing on the MAIN display, move it back to displayId.
+     *
+     * Separate from show() because the strand does not only happen at placement time.
+     * Locking the device makes the system hoist this activity onto the primary display
+     * over the keyguard — it holds FLAG_SHOW_WHEN_LOCKED, so that is the system doing
+     * exactly what it was asked — and no placement attempt is in flight when it
+     * happens. Recovery therefore has to be callable on its own, from the watchdog and
+     * from the screen-off/on broadcasts.
+     *
+     * Returns true only when it actually moved something, so the caller can log a real
+     * correction without logging every quiet check.
+     */
+    boolean ensureOnRear(int displayId) = 6;
 }

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Theme for RearActivity, copied from the another project rear-panel app, which has never
+      exhibited the failure this fixes.
+
+      THE SYMPTOM: locking the device made the rear panel's override appear on the
+      FRONT screen, over the keyguard.
+
+      THE CAUSE was the previous theme, Theme.Material.NoActionBar.Fullscreen: an
+      OPAQUE fullscreen activity. RearActivity holds FLAG_SHOW_WHEN_LOCKED (it must —
+      that is what keeps the panel alive through a lock), and when the keyguard comes
+      up the system looks for a top opaque fullscreen activity to show over it. An
+      opaque activity is exactly that candidate; a translucent one is not, so it is
+      never hoisted onto the primary display in the first place.
+
+      windowAnimationStyle=@null matters for the same reason and is not cosmetic: the
+      default window animations run this window through the system's lock/unlock
+      transition, which is itself a path by which it gets drawn on display 0.
+      RearActivity's overridePendingTransition(0, 0) only covers its own launch, not
+      system-driven transitions.
+
+      Translucency costs nothing visually here: RearDialView.onDraw opens with
+      canvas.drawColor(Panel.Palette.BG), so the view paints its own opaque background
+      across the whole surface. Nothing shows through.
+    -->
+    <style name="RearTheme" parent="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+    </style>
+</resources>

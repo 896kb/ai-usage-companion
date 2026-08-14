@@ -83,6 +83,27 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
+     * Pulls a stranded panel back onto the rear display. See the AIDL doc for why this
+     * cannot live inside show().
+     *
+     * Deliberately does nothing unless compositingOnRear() is a definite false. An
+     * unknown answer (panel asleep, layer not drawn, unparseable dump) must not move a
+     * task: this runs every watchdog tick, and a check that acts on uncertainty would
+     * shove a correctly-placed panel around the display topology every 20 seconds.
+     */
+    override fun ensureOnRear(displayId: Int): Boolean {
+        if (displayId < 0) return false
+        if (compositingOnRear() != false) return false
+        val task = taskId()
+        if (task <= 0) return false
+        Log.w(TAG, "task $task stranded on the main display — moving it back to $displayId")
+        exec("service call activity_task 50 i32 $task i32 $displayId")
+        wake(displayId)
+        placedDisplayId = displayId
+        return true
+    }
+
+    /**
      * Asks the window manager which display actually owns the activity.
      *
      * Do NOT check this with `am stack list` bounds. A correctly placed panel and a

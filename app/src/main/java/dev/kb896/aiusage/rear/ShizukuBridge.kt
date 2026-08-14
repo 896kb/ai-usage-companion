@@ -105,6 +105,19 @@ class ShizukuBridge(private val context: Context) {
     }
 
     /**
+     * Pulls the panel back to the rear display if it has been hoisted onto the main
+     * one. Cheap and silent when nothing is wrong — see IRearService.ensureOnRear.
+     */
+    fun ensureOnRear(): Boolean {
+        val svc = service ?: return false
+        val id = rearDisplayId()
+        if (id < 0) return false
+        return try { svc.ensureOnRear(id) } catch (e: Exception) {
+            Log.e(TAG, "ensureOnRear failed", e); service = null; false
+        }
+    }
+
+    /**
      * Whether the last payload THIS bridge instance was asked to show or update was
      * a calibrate payload — the watchdog's guard against re-placing a panel that is
      * mid-calibration (Task 15 Step 2b).
