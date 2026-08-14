@@ -55,7 +55,19 @@ class UsagePollService : Service() {
         startForeground(NOTIFICATION_ID, notification())
         val app = Graph.of(this)
         app.repository.onFetchCompleted = {
-            recordFetch(StatePayload.encode(app.repository.state.value))
+            val current = app.repository.state.value
+            // Only cache a refresh that actually produced numbers. onFetchCompleted
+            // fires whatever the outcome, so caching unconditionally let one throttled
+            // cycle overwrite good values with an empty snapshot — destroying exactly
+            // the data this cache exists to preserve.
+            //
+            // The timestamp is still recorded either way: a failed attempt is still an
+            // attempt, and must not license an immediate retry on the next restart.
+            if (current.statuses.any { it.snapshot != null }) {
+                recordFetch(StatePayload.encode(current))
+            } else {
+                recordFetchTimeOnly()
+            }
         }
         // Render the last known values immediately rather than waiting out the
         // remaining interval with a blank panel.
@@ -145,6 +157,11 @@ class UsagePollService : Service() {
             .putLong("lastFetchAt", System.currentTimeMillis())
             .putString("lastState", state)
             .apply()
+
+    /** Records the attempt without touching the cached values. See onFetchCompleted. */
+    private fun recordFetchTimeOnly() =
+        getSharedPreferences("poll", MODE_PRIVATE).edit()
+            .putLong("lastFetchAt", System.currentTimeMillis()).apply()
 
     private fun cachedState(): String? =
         getSharedPreferences("poll", MODE_PRIVATE).getString("lastState", null)
