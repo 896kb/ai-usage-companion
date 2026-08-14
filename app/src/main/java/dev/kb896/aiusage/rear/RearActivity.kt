@@ -167,6 +167,36 @@ class RearActivity : Activity() {
      * showed exactly that kind of repeated, system-driven resume/config-change churn
      * around the original stranding failure.
      */
+    /**
+     * Positive identification that we are on the MAIN display, independent of
+     * Activity.getDisplay().
+     *
+     * Every identity-based signal on this device lies in exactly the failing case:
+     * getDisplay(), dumpsys window displays and `am stack list` bounds all report
+     * display 1 while the panel renders visibly on the FRONT screen. Panel power is
+     * no good either — display 1 can be lit for MIUI's own reasons.
+     *
+     * Density is different because it is not a claim about identity, it is what the
+     * layout is actually being measured with: this device runs the main display at
+     * 520dpi and the rear panel at 450 (380 after its override). So if our own
+     * configuration says 520, we are being laid out for the main display whatever
+     * anything else asserts.
+     *
+     * Deliberately positive: it returns true only when the densities genuinely differ
+     * AND ours matches the main display's. An unknown or identical density yields
+     * false, so this can never evict a correctly-placed panel.
+     */
+    private fun onMainDisplayByDensity(): Boolean {
+        val dm = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+        fun densityOf(id: Int): Int? = dm.getDisplay(id)?.let { d ->
+            android.util.DisplayMetrics().also { d.getRealMetrics(it) }.densityDpi
+        }
+        val main = densityOf(android.view.Display.DEFAULT_DISPLAY) ?: return false
+        val rear = densityOf(Panel.DISPLAY_ID) ?: return false
+        if (main == rear) return false
+        return resources.configuration.densityDpi == main
+    }
+
     private val evictIfStranded = Runnable {
         if (display?.displayId != Panel.DISPLAY_ID) {
             Log.w(TAG, "stranded on display ${display?.displayId}, evicting")
