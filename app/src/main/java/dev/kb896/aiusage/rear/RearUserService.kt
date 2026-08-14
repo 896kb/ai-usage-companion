@@ -17,12 +17,17 @@ class RearUserService : IRearService.Stub {
     override fun destroy() = exitProcess(0)
 
     override fun hide() {
-        exec("am broadcast -a $ACTION_FINISH")
+        // -p $PKG scopes the broadcast to our own app. The receiver stays exported
+        // (the sender here is shell uid 2000, which an unexported receiver can't
+        // reach), so without this any app declaring a matching intent-filter could
+        // receive — or spoof — panel state. Do not drop this as "redundant."
+        exec("am broadcast -p $PKG -a $ACTION_FINISH")
         placedDisplayId = -1
     }
 
     override fun update(payload: String) {
-        exec("am broadcast -a $ACTION_STATE --es state ${shellQuote(payload)}")
+        // See hide() — same exported-receiver-plus-shell-sender reasoning.
+        exec("am broadcast -p $PKG -a $ACTION_STATE --es state ${shellQuote(payload)}")
     }
 
     override fun wake(displayId: Int) {
