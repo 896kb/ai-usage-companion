@@ -108,8 +108,17 @@ class RearUserService : IRearService.Stub {
      * sections list what each display is composing. That is where pixels physically go,
      * not what the window manager believes about task ownership.
      *
-     * Returns null when the output cannot be parsed, so an unknown answer never
-     * triggers a corrective move.
+     * Deliberately asymmetric: false is returned ONLY when the layer is present on the
+     * main display AND absent from the rear one. A capture taken while placement was
+     * correct showed MainActivity's layer listed under BOTH display sections, so a
+     * section listing a layer is not proof that display currently owns it — leftovers
+     * linger. Under a "first section that mentions it wins" rule, one stale main-side
+     * entry would report a strand that isn't happening and trigger a pointless move of
+     * a correctly-placed panel. Requiring absence from the rear section costs nothing
+     * in the real failure case, where the activity genuinely never reached the panel.
+     *
+     * Returns null when the output cannot be parsed or the layer appears nowhere (panel
+     * asleep, activity not yet drawn), so an unknown answer never triggers a move.
      */
     private fun compositingOnRear(): Boolean? {
         val out = exec("dumpsys SurfaceFlinger")
@@ -119,17 +128,19 @@ class RearUserService : IRearService.Stub {
         val matches = header.findAll(out).toList()
         if (matches.isEmpty()) return null
 
+        var onRear = false
+        var onMain = false
         for ((i, m) in matches.withIndex()) {
             val start = m.range.last + 1
             val end = if (i + 1 < matches.size) matches[i + 1].range.first else out.length
-            val body = out.substring(start, end)
-            if (body.contains("RearActivity")) {
-                return m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)
-            }
+            if (!out.substring(start, end).contains("RearActivity")) continue
+            if (m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)) onRear = true else onMain = true
         }
-        // Layer not composited on any display yet (panel asleep, activity not drawn).
-        // Unknown rather than wrong — do not act on it.
-        return null
+        return when {
+            onRear -> true
+            onMain -> false
+            else -> null
+        }
     }
 
     private fun isOnDisplay(displayId: Int): Boolean {
