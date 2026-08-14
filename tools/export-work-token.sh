@@ -48,8 +48,29 @@ BLOB=$(security find-generic-password -s "$SERVICE" -w) || {
 CLAUDE_OAUTH=$(printf '%s' "$BLOB" | plutil -extract claudeAiOauth json -o - - 2>/dev/null) || {
   echo "✗ no claudeAiOauth in $SERVICE — unexpected keychain shape"; exit 1; }
 
-printf '%s' "$CLAUDE_OAUTH" | pbcopy
+# Write straight into the app's PRIVATE storage over adb.
+#
+# An earlier revision copied to the macOS clipboard and asked the user to paste —
+# which cannot work, because macOS and Android do not share a clipboard. Before
+# that it pushed to /sdcard/Download, which any app holding storage permission can
+# read. This route has neither problem:
+#   * /data/data/<pkg>/files is app-private; even the shell user gets
+#     "Permission denied" listing the parent, so no other app can read it.
+#   * It never touches shared storage and never goes through an intent extra.
+#   * It travels only over the USB debug link, which is already trusted.
+# The app deletes the file as soon as it has imported and encrypted the contents.
+ADB=/opt/homebrew/bin/adb
+DEVICE=f940914b
+PKG=dev.rgarjoaba.claudestatus
 
-echo "✓ credential copied to the clipboard — not written to disk, not pushed"
-echo "  Open Claude Status → 'Import work token' → paste."
-echo "  Clear the clipboard when done:  printf '' | pbcopy"
+if ! "$ADB" -s "$DEVICE" get-state >/dev/null 2>&1; then
+  echo "✗ device $DEVICE not connected"; exit 1
+fi
+
+printf '%s' "$CLAUDE_OAUTH" \
+  | "$ADB" -s "$DEVICE" shell "run-as $PKG sh -c 'cat > files/work-token.json && chmod 600 files/work-token.json'" \
+  || { echo "✗ could not write to the app's private storage — is it installed?"; exit 1; }
+
+echo "✓ credential written to the app's private storage"
+echo "  Open Claude Status and tap 'Import work token'."
+echo "  The app deletes the file once it has encrypted the contents."
