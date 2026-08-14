@@ -85,6 +85,18 @@ class UsagePollService : Service() {
                 delay(Cadence.forPanelState(panelOn()))
             }
         }
+
+        // Supervising the display is a separate job from fetching data, on its own
+        // clock. Coupling them meant a panel dismissed by MIUI's double-tap gesture
+        // stayed gone until the next poll — up to five minutes of blank back screen
+        // for something that should return in seconds. This loop makes no network
+        // calls: it re-places using whatever the repository already holds.
+        scope.launch {
+            while (isActive) {
+                delay(WATCHDOG_INTERVAL_MS)
+                safeSupervise()
+            }
+        }
     }
 
     private fun panelOn(): Boolean =
@@ -124,6 +136,16 @@ class UsagePollService : Service() {
         if (panelOn()) return
         Log.w(TAG, "placement did not light the rear panel — clearing a probable strand")
         app.bridge.hide()
+    }
+
+    /** Watchdog-only pass: no fetch, just make sure the panel is still up. */
+    private fun safeSupervise() {
+        try {
+            val app = Graph.of(this)
+            ensurePlaced(app, StatePayload.encode(app.repository.state.value))
+        } catch (e: Exception) {
+            Log.e(TAG, "supervise failed", e)
+        }
     }
 
     private suspend fun safeTick() {
@@ -278,6 +300,16 @@ class UsagePollService : Service() {
          * on the user's main screen short.
          */
         private const val VERIFY_DELAY_MS = 8_000L
+
+        /**
+         * How often to check the panel is still placed. Short because the user
+         * dismisses it by double-tapping the rear panel, and a status display that
+         * takes minutes to come back is not one you trust to be there.
+         *
+         * Cheap to run: no network, just an aliveness check and, if needed, a re-place
+         * using cached state.
+         */
+        private const val WATCHDOG_INTERVAL_MS = 20_000L
 
         private const val TAG = "ClaudeStatusPoll"
         private const val CHANNEL = "usage"
