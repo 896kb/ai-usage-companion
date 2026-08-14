@@ -20,12 +20,24 @@
 
         <!-- Rear panel window. exported=true because HyperOS denies shell
              START_ANY_ACTIVITY against non-exported targets. No intent filters —
-             explicit component only. Own process so panel input can't ANR the app.
-             configChanges so the move to display 1 does not recreate it. -->
+             explicit component only. configChanges so the move to display 1 does not
+             recreate it.
+
+             NO android:process. It used to run in ":rear", isolated so panel input
+             could not ANR the app — but the panel takes no input at all (its window is
+             NO_INPUT_CHANNEL; the dismiss gesture belongs to MIUI, not to us), so that
+             bought nothing, and it cost the only protection that matters here.
+
+             UsagePollService is a foreground service in the DEFAULT process, and a
+             foreground service raises the importance of its own process only. With the
+             activity in ":rear", that process had no foreground component and MIUI
+             killed it the moment the app left the foreground — the panel lived exactly
+             as long as the app was the focused window, which is what the user
+             observed. Sharing the default process puts the panel under the foreground
+             service's protection. -->
         <activity
             android:name=".rear.RearActivity"
             android:exported="true"
-            android:process=":rear"
             android:launchMode="singleTask"
             android:taskAffinity="dev.kb896.aiusage.rear"
             android:excludeFromRecents="true"

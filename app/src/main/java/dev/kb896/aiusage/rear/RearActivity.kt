@@ -198,22 +198,24 @@ class RearActivity : Activity() {
         return resources.configuration.densityDpi == main
     }
 
+    /**
+     * Was: finish() when found on the wrong display. Now a no-op beyond logging.
+     *
+     * Eviction is the wrong remedy and it was the last remaining source of self-inflicted
+     * teardown. A strand is now fixed by MOVING the task back to the rear display
+     * (IRearService.ensureOnRear, driven from the watchdog, the screen broadcasts and
+     * the post-placement check) — which this activity cannot do for itself, because the
+     * move needs shell privileges it does not have. All finish() could do was destroy
+     * the panel and hand the problem to the respawn path, whose only route back runs an
+     * `am start` across display 0.
+     *
+     * The escape hatch the guard existed to provide is still there and is better: the
+     * ongoing notification re-places the panel on tap, and system bars stay reachable
+     * because hideBars() no-ops off the rear display.
+     */
     private val evictIfStranded = Runnable {
-        // Never evict while the keyguard is up. Locking churns this activity's
-        // lifecycle and display reporting, and an eviction here does not end quietly:
-        // finish() makes the watchdog see a dead panel and respawn it, and respawning
-        // launches on display 0 — over the lock screen. Evicting on a locked phone
-        // therefore CAUSES the visible takeover this guard exists to prevent.
-        // The guard still protects the case it was written for: a strand the user can
-        // actually see and is stuck behind, which by definition means an unlocked phone.
-        if ((getSystemService(KeyguardManager::class.java))?.isKeyguardLocked == true) {
-            Log.i(TAG, "wrong display but the keyguard is up — not evicting")
-            return@Runnable
-        }
-        if (display?.displayId != Panel.DISPLAY_ID) {
-            Log.w(TAG, "stranded on display ${display?.displayId}, evicting")
-            finish()
-        }
+        val id = display?.displayId
+        if (id != Panel.DISPLAY_ID) Log.w(TAG, "on display $id, not $Panel.DISPLAY_ID — leaving it to ensureOnRear")
     }
 
     private fun armEvictionTimer() {
