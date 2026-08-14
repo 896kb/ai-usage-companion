@@ -148,44 +148,24 @@ class UsagePollService : Service() {
      * propagate normally, so it is rethrown rather than logged.
      */
     /**
-     * Confirms a placement actually landed on the rear panel, and tears it down if not.
+     * Post-placement check. Corrects, never tears down.
      *
-     * This exists because placement success is otherwise UNOBSERVABLE on this device.
-     * `am stack list` reports identical bounds whether the activity is on display 1 or
-     * stranded at (0,0) on the main display; `dumpsys window displays` and the
-     * activity's own `getDisplay()` both report display 1 while it is visibly
-     * rendering on the FRONT screen. Trusting any of them stranded a fullscreen,
-     * immersive activity on the user's main screen three times, each needing a
-     * force-stop to clear.
+     * This used to call bridge.hide() when the rear panel was not lit 8s after a
+     * placement, on the theory that an unlit panel meant a failed move. That theory is
+     * obsolete — SurfaceFlinger now tells us directly which display is compositing the
+     * activity — and the action was actively destructive: hide() FINISHES the activity,
+     * so every placement armed a timer that could kill the panel, and the watchdog then
+     * respawned it ~20s later. Measured on device while the app sat in the background:
+     * the task was destroyed and recreated on a 28-32s cycle, which is exactly this 8s
+     * teardown plus the 20s watchdog. The panel was fighting itself.
      *
-     * So this asks the hardware instead. RearActivity holds FLAG_KEEP_SCREEN_ON, so if
-     * it is genuinely on display 1 that display physically cannot doze. If the move
-     * failed, MIUI powers the rear panel down within a few seconds. Panel state is
-     * therefore a signal the window manager cannot misreport.
-     *
-     * Failure is bounded rather than eliminated: a bad placement is visible for up to
-     * VERIFY_DELAY_MS before being cleared, instead of sitting there until someone
-     * notices.
+     * ensureOnRear() moves a genuinely stranded task back and does nothing when the
+     * answer is uncertain, so an unlit-but-fine panel now costs one dumpsys instead of
+     * the panel's life.
      */
     private suspend fun verifyPlacement(app: Graph) {
         delay(VERIFY_DELAY_MS)
-        if (panelOn()) return
-        Log.w(TAG, "placement did not light the rear panel — clearing a probable strand")
-        app.bridge.hide()
-    }
-
-    /**
-     * Fires on lock and unlock. Both are moments the system re-evaluates which
-     * activity shows over the keyguard, and both are when the panel was observed
-     * jumping to the front screen — so the corrective check runs immediately rather
-     * than waiting out the watchdog interval, which would leave the user's lock
-     * screen covered for up to 20 seconds.
-     *
-     * The translucent RearTheme should stop the hoist happening at all; this stays as
-     * the net for the case where it still does. Neither path makes a network call.
-     */
-    private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = safeSupervise()
+        if (app.bridge.ensureOnRear()) Log.w(TAG, "post-placement: was on the main display, moved back")
     }
 
     /** Watchdog-only pass: no fetch, just make sure the panel is still up. */
