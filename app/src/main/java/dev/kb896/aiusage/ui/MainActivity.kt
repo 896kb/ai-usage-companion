@@ -197,7 +197,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val record = withContext(Dispatchers.IO) {
-                    oauthClient.exchange(code, challenge.verifier, redirectUri)
+                    oauthClient.exchange(code, challenge.verifier, redirectUri, challenge.state)
                 }
                 graph.store.save(Account.PERSONAL, record)
                 toast("Personal sign-in complete")

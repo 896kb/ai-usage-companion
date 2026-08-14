@@ -43,7 +43,7 @@ class OAuthClientTest {
     @Test fun `exchange on a malformed 200 body raises a Failure without echoing the body, code, or verifier`() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html>502 Bad Gateway</html>"))
         val f = runCatching {
-            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback")
+            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback", "state-secret")
         }.exceptionOrNull() as OAuthClient.Failure
         assertTrue(!f.message!!.contains("<html>"))
         assertTrue(!f.message!!.contains("502 Bad Gateway"))
@@ -60,7 +60,7 @@ class OAuthClientTest {
     @Test fun `exchange surfaces the OAuth error code but never the code or verifier`() {
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"invalid_grant"}"""))
         val f = runCatching {
-            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback")
+            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback", "state-secret")
         }.exceptionOrNull() as OAuthClient.Failure
         assertTrue(!f.message!!.contains("auth-code-secret"))
         assertTrue(!f.message!!.contains("verifier-secret"))
@@ -74,7 +74,7 @@ class OAuthClientTest {
             )
         )
         val f = runCatching {
-            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback")
+            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback", "state-secret")
         }.exceptionOrNull() as OAuthClient.Failure
         assertTrue("must not echo error_description", !f.message!!.contains("has expired"))
         assertTrue("must not leak the code via error_description", !f.message!!.contains("auth-code-secret"))
@@ -87,7 +87,7 @@ class OAuthClientTest {
                 """{"access_token":"at","refresh_token":"rt","expires_in":3600}"""
             )
         )
-        val record = client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback")
+        val record = client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback", "state-secret")
         assertTrue(record.accessToken == "at")
         assertTrue(record.refreshToken == "rt")
     }

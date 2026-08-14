@@ -15,18 +15,29 @@ import java.io.IOException
 
 class OAuthClient(
     private val client: OkHttpClient,
-    private val baseUrl: HttpUrl = "https://console.anthropic.com/".toHttpUrl(),
+    private val baseUrl: HttpUrl = "https://platform.claude.com/".toHttpUrl(),
 ) {
     /** Message deliberately excludes the token — this is thrown into logs. */
     class Failure(message: String) : RuntimeException(message)
 
     companion object {
         /**
-         * Claude Code's public OAuth client. UNVERIFIED — the one remaining
-         * assumption in the project. Task 10 proves it with a real login; if it
-         * fails, the import path from Task 9 already covers both accounts.
+         * Claude Code's public OAuth client.
+         *
+         * VERIFIED 2026-08-14: a real sign-in on device reached the authorize page,
+         * the user approved it, and a code came back — so the client id is accepted.
+         * It was the project's last unproven assumption from the design stage.
          */
         const val CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+        /**
+         * Space-separated, and the set matters: requesting a narrower set than the
+         * client is registered for is one of the ways the token exchange returns 400.
+         * `user:sessions:claude_code` is the one that makes this a Claude Code session
+         * rather than a generic API token.
+         */
+        const val SCOPES =
+            "user:inference user:profile user:sessions:claude_code user:mcp_servers"
     }
 
     fun refresh(refreshToken: String): TokenRecord {
@@ -55,7 +66,7 @@ class OAuthClient(
             .addQueryParameter("client_id", CLIENT_ID)
             .addQueryParameter("response_type", "code")
             .addQueryParameter("redirect_uri", redirectUri)
-            .addQueryParameter("scope", "user:profile user:inference")
+            .addQueryParameter("scope", SCOPES)
             .addQueryParameter("code_challenge", challenge.challenge)
             .addQueryParameter("code_challenge_method", "S256")
             .addQueryParameter("state", challenge.state)
@@ -67,13 +78,21 @@ class OAuthClient(
      * see the class doc on [Failure] — so neither may appear in a thrown message, and
      * neither is logged here.
      */
-    fun exchange(code: String, verifier: String, redirectUri: String): TokenRecord {
+    fun exchange(
+        code: String,
+        verifier: String,
+        redirectUri: String,
+        state: String,
+    ): TokenRecord {
         val form = FormBody.Builder()
             .add("grant_type", "authorization_code")
             .add("code", code)
             .add("redirect_uri", redirectUri)
             .add("client_id", CLIENT_ID)
             .add("code_verifier", verifier)
+            // Anthropic's token endpoint requires `state` in the exchange body, not
+            // just on the authorize URL. Omitting it returns HTTP 400.
+            .add("state", state)
             .build()
         val req = Request.Builder()
             .url(baseUrl.newBuilder().addPathSegments("v1/oauth/token").build())
