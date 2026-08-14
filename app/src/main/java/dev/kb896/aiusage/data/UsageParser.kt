@@ -1,5 +1,6 @@
 package dev.kb896.aiusage.data
 
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -14,19 +15,30 @@ import java.time.format.DateTimeParseException
  *
  * Deliberately ignores the top-level window keys: they carry a rotating set of
  * codenamed experimental buckets (tangelo, iguana_necktie, nimbus_quill, …) that
- * churn, and the managed account carries extra keys the personal one does not.
- * `limits[]` is self-describing and stable across both.
+ * churn and are not a stable contract. `limits[]` is self-describing and stable.
  *
  * Uses kotlinx.serialization's JsonElement tree (already a project dependency) rather
  * than org.json: org.json.JSONObject is part of the Android platform stub jar, and its
  * methods throw ("not mocked") in plain JVM unit tests without Robolectric — which this
  * module does not use. This is tree-walking only; there is no typed/@Serializable wire
  * model here, that is Task 11's concern.
+ *
+ * Malformed input (not valid JSON at all, or valid JSON that isn't the expected shape)
+ * degrades to an empty snapshot rather than throwing — this is the one place that knows
+ * the wire format, so it is the one place responsible for not letting a captive-portal
+ * page, a truncated body, or an empty response crash the caller. Any parse failure is
+ * swallowed without inspecting or logging the offending text, since exception messages
+ * from a JSON parser can embed fragments of the input.
  */
 object UsageParser {
 
     fun parse(json: String, fetchedAt: Long): UsageSnapshot {
-        val root = Json.parseToJsonElement(json) as? JsonObject
+        val parsed = try {
+            Json.parseToJsonElement(json)
+        } catch (_: SerializationException) {
+            return UsageSnapshot(emptyList(), fetchedAt)
+        }
+        val root = parsed as? JsonObject
             ?: return UsageSnapshot(emptyList(), fetchedAt)
         val limits = root["limits"] as? JsonArray
             ?: return UsageSnapshot(emptyList(), fetchedAt)

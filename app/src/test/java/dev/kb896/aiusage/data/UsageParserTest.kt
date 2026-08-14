@@ -75,4 +75,16 @@ class UsageParserTest {
         assertEquals(0, UsageParser.parse("""{"limits":[]}""", 0L).windows.size)
         assertEquals(0, UsageParser.parse("""{}""", 0L).windows.size)
     }
+
+    @Test fun `not-JSON-at-all yields an empty snapshot rather than throwing`() {
+        assertEquals(0, UsageParser.parse("<html>503</html>", 0L).windows.size)
+    }
+
+    @Test fun `empty string yields an empty snapshot rather than throwing`() {
+        assertEquals(0, UsageParser.parse("", 0L).windows.size)
+    }
+
+    @Test fun `truncated JSON yields an empty snapshot rather than throwing`() {
+        assertEquals(0, UsageParser.parse("""{"limits":[{"kind":"session",""", 0L).windows.size)
+    }
 }
