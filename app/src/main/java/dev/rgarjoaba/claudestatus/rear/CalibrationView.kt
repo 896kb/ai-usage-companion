@@ -12,14 +12,18 @@ class CalibrationView(context: Context) : View(context) {
     var geometry: PanelGeometry = PanelGeometry.DEFAULT
         set(value) { field = value; invalidate() }
 
-    private val fine = Paint().apply { color = 0xFF1C1F22.toInt(); strokeWidth = 1f }
-    private val coarse = Paint().apply { color = 0xFF2C3034.toInt(); strokeWidth = 1f }
+    private val fine = Paint().apply { color = Panel.Palette.GRID_FINE; strokeWidth = 1f }
+    private val coarse = Paint().apply { color = Panel.Palette.GRID_COARSE; strokeWidth = 1f }
     private val edge = Paint().apply {
-        color = Panel.Palette.CRIT; strokeWidth = 2f
+        color = Panel.Palette.CRIT
+        // 2px, not the usual 1px rule: this is the single most important reference
+        // line on a calibration-only screen (the reported cutout edge), and it needs
+        // to stand out from the 1px grid at a glance, not blend into it.
+        strokeWidth = 2f
         pathEffect = android.graphics.DashPathEffect(floatArrayOf(8f, 6f), 0f)
     }
     private val label = Paint().apply {
-        color = 0xFF6B7075.toInt(); textSize = 13f; isAntiAlias = true
+        color = Panel.Palette.DIM; textSize = 13f; isAntiAlias = true
     }
     private val ringPersonal = Paint().apply {
         color = Panel.Palette.PERSONAL; style = Paint.Style.STROKE
@@ -31,7 +35,7 @@ class CalibrationView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(0xFF0A0B0C.toInt())
+        canvas.drawColor(Panel.Palette.BG)
         val w = width.toFloat(); val h = height.toFloat()
 
         var x = 0f

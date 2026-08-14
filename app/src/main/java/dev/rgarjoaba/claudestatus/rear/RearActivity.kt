@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
@@ -18,10 +19,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import dev.rgarjoaba.claudestatus.Panel
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 
 class RearActivity : Activity() {
 
@@ -29,7 +26,6 @@ class RearActivity : Activity() {
         const val ACTION_STATE = "dev.rgarjoaba.claudestatus.STATE"
         const val ACTION_FINISH = "dev.rgarjoaba.claudestatus.FINISH"
         const val EXTRA_STATE = "state"
-        private const val MODE_CALIBRATE = "calibrate"
         private const val TAG = "ClaudeStatusRear"
 
         /**
@@ -40,19 +36,6 @@ class RearActivity : Activity() {
          * stuck for long. Never raise this to paper over a placement bug — fix the bug.
          */
         const val STRAND_GRACE_MS = 4_000L
-
-        /**
-         * The mode travels *inside* the payload (not a separate intent extra) so placement
-         * always goes through the one proven path — RearUserService.show(payload, displayId)
-         * — with no AIDL change. Tolerates non-JSON payloads (e.g. a bare status string):
-         * anything that doesn't parse, or has no "mode":"calibrate", is the normal render.
-         */
-        private fun isCalibrate(payload: String): Boolean = try {
-            val root = Json.parseToJsonElement(payload) as? JsonObject
-            (root?.get("mode") as? JsonPrimitive)?.contentOrNull == MODE_CALIBRATE
-        } catch (_: Exception) {
-            false
-        }
     }
 
     private lateinit var dump: TextView
@@ -60,6 +43,10 @@ class RearActivity : Activity() {
     private lateinit var calibrationView: CalibrationView
     private var calibrating = false
     private var geometry = PanelGeometry.DEFAULT
+
+    /** -1 while on the rear panel; set once, to the elapsed-time clock, on the first
+     *  wrong-display detection. See armEvictionTimer(). */
+    private var strandedSinceMs = -1L
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -71,7 +58,15 @@ class RearActivity : Activity() {
             calibrationView.geometry = geometry
             when (intent?.action) {
                 ACTION_FINISH -> finish()
-                ACTION_STATE -> render(intent.getStringExtra(EXTRA_STATE).orEmpty())
+                // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
+                // leave the current mode untouched. Re-evaluating unconditionally with
+                // `.orEmpty()` treated a missing extra the same as an explicit empty
+                // payload, isCalibrate("") is false, and a nudge mid-calibration would
+                // silently swap back to the text dump and drop FLAG_KEEP_SCREEN_ON —
+                // panel goes dark mid-measurement. Only render on a genuine state update.
+                ACTION_STATE -> if (intent.hasExtra(EXTRA_STATE)) {
+                    render(intent.getStringExtra(EXTRA_STATE).orEmpty())
+                }
             }
         }
     }
@@ -119,7 +114,7 @@ class RearActivity : Activity() {
     }
 
     private fun render(payload: String) {
-        val wantCalibrate = isCalibrate(payload)
+        val wantCalibrate = CalibrateMode.isCalibrate(payload)
         if (wantCalibrate != calibrating) {
             calibrating = wantCalibrate
             setContentView(if (calibrating) calibrationView else dumpContainer)
@@ -178,6 +173,15 @@ class RearActivity : Activity() {
      * This is not hypothetical — a failed move left the device unusable until it was
      * force-stopped over adb. Never remove this guard, and never raise the grace
      * period to hide a placement bug.
+     *
+     * The deadline anchors to `strandedSinceMs`, set once on the FIRST wrong-display
+     * detection — not to "now" on every call. armEvictionTimer() runs from both
+     * onResume() and onConfigurationChanged(), and if a `removeCallbacks` +
+     * `postDelayed(STRAND_GRACE_MS)` pair ran on every arm, lifecycle churn faster
+     * than the grace period would restart the clock each time and defer eviction
+     * indefinitely. That is not contrived — this project's own incident forensics
+     * showed exactly that kind of repeated, system-driven resume/config-change churn
+     * around the original stranding failure.
      */
     private val evictIfStranded = Runnable {
         if (display?.displayId != Panel.DISPLAY_ID) {
@@ -188,8 +192,17 @@ class RearActivity : Activity() {
 
     private fun armEvictionTimer() {
         window.decorView.removeCallbacks(evictIfStranded)
-        if (display?.displayId != Panel.DISPLAY_ID) {
-            window.decorView.postDelayed(evictIfStranded, STRAND_GRACE_MS)
+        if (display?.displayId == Panel.DISPLAY_ID) {
+            strandedSinceMs = -1L
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (strandedSinceMs < 0) strandedSinceMs = now
+        val remaining = STRAND_GRACE_MS - (now - strandedSinceMs)
+        if (remaining <= 0) {
+            evictIfStranded.run()
+        } else {
+            window.decorView.postDelayed(evictIfStranded, remaining)
         }
     }
 

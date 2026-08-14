@@ -76,11 +76,13 @@ class RearUserService : IRearService.Stub {
      */
     private fun isOnDisplay(displayId: Int): Boolean {
         val out = exec("dumpsys window displays")
-        val marker = "Display: mDisplayId=$displayId"
-        val start = out.indexOf(marker)
-        if (start < 0) return false
-        val next = out.indexOf("Display: mDisplayId=", start + marker.length)
-        val section = if (next < 0) out.substring(start) else out.substring(start, next)
+        // A bare `indexOf("mDisplayId=$displayId")` would let displayId=1 match as a
+        // prefix of mDisplayId=10, =11, ... =19. The lookahead anchors so the digit
+        // run cannot continue past the id we're actually looking for.
+        val marker = Regex("Display: mDisplayId=$displayId(?!\\d)").find(out) ?: return false
+        val start = marker.range.first
+        val next = Regex("Display: mDisplayId=\\d+").find(out, start + marker.value.length)
+        val section = if (next == null) out.substring(start) else out.substring(start, next.range.first)
         return section.contains("RearActivity")
     }
 
