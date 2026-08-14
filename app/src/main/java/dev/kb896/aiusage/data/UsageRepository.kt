@@ -49,13 +49,29 @@ class UsageRepository(
         return try {
             AccountStatus(account, Health.OK, api.fetch(usable.accessToken))
         } catch (e: UsageApi.Failure) {
-            when (e.kind) {
-                // Keep the last good numbers, but never present them as live.
-                UsageApi.Kind.UNAUTHORIZED -> AccountStatus(account, Health.AUTH, last)
-                UsageApi.Kind.RATE_LIMITED,
-                UsageApi.Kind.NETWORK -> AccountStatus(account, Health.STALE, last)
-                UsageApi.Kind.SERVER -> AccountStatus(account, Health.ERROR, last)
-            }
+            // Keep the last good numbers, but never present them as live.
+            AccountStatus(account, healthFor(e.kind), last)
+        } catch (e: Exception) {
+            // api.fetch is documented to only throw UsageApi.Failure, but that is an
+            // implementation detail of a class this repository does not own. One
+            // account's fetch must never be able to abort the sibling account's — see
+            // the map over Account.entries in refresh(). Degrade this account only.
+            AccountStatus(account, Health.ERROR, last)
+        }
+    }
+
+    companion object {
+        /**
+         * `when` over an enum class used as an expression is exhaustive by construction:
+         * Kotlin refuses to compile this function if UsageApi.Kind gains a fifth entry
+         * without a matching branch here (verified: temporarily removing the SERVER
+         * branch produces "'when' expression must be exhaustive" at compile time — see
+         * task-11-report.md). No `else` branch, so no new Kind can silently fall through.
+         */
+        internal fun healthFor(kind: UsageApi.Kind): Health = when (kind) {
+            UsageApi.Kind.UNAUTHORIZED -> Health.AUTH
+            UsageApi.Kind.RATE_LIMITED, UsageApi.Kind.NETWORK -> Health.STALE
+            UsageApi.Kind.SERVER -> Health.ERROR
         }
     }
 }
