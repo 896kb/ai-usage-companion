@@ -1,5 +1,6 @@
 package dev.rgarjoaba.claudestatus.auth
 
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -47,9 +48,20 @@ class OAuthClient(
         }
     }
 
-    internal fun parseObject(body: String): JsonObject =
-        Json.parseToJsonElement(body) as? JsonObject
-            ?: throw Failure("token response was not a JSON object")
+    /**
+     * `body` on a 2xx refresh response carries the live access/refresh tokens, and
+     * kotlinx.serialization's parse exceptions embed a snippet of the offending input
+     * in their message — so a malformed body must never be echoed into a Failure.
+     * Mirrors UsageParser's narrow SerializationException catch.
+     */
+    internal fun parseObject(body: String): JsonObject {
+        val parsed = try {
+            Json.parseToJsonElement(body)
+        } catch (_: SerializationException) {
+            throw Failure("refresh: malformed token response")
+        }
+        return parsed as? JsonObject ?: throw Failure("token response was not a JSON object")
+    }
 
     internal fun toRecord(o: JsonObject, fallbackRefresh: String): TokenRecord {
         val now = System.currentTimeMillis()
