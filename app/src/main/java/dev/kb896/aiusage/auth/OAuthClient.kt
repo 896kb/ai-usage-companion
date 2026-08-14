@@ -41,24 +41,65 @@ class OAuthClient(
         try {
             client.newCall(req).execute().use { res ->
                 if (!res.isSuccessful) throw Failure("refresh: HTTP ${res.code}")
-                return toRecord(parseObject(res.body?.string().orEmpty()), refreshToken)
+                return toRecord(parseObject(res.body?.string().orEmpty(), "refresh"), refreshToken)
             }
         } catch (e: IOException) {
             throw Failure("refresh: ${e.javaClass.simpleName}")
         }
     }
 
+    /** Authorization-code request URL for the personal account's on-device PKCE login (Task 10). */
+    fun authorizeUrl(challenge: PkceChallenge, redirectUri: String): String =
+        "https://claude.ai/oauth/authorize".toHttpUrl().newBuilder()
+            .addQueryParameter("code", "true")
+            .addQueryParameter("client_id", CLIENT_ID)
+            .addQueryParameter("response_type", "code")
+            .addQueryParameter("redirect_uri", redirectUri)
+            .addQueryParameter("scope", "user:profile user:inference")
+            .addQueryParameter("code_challenge", challenge.challenge)
+            .addQueryParameter("code_challenge_method", "S256")
+            .addQueryParameter("state", challenge.state)
+            .build().toString()
+
     /**
-     * `body` on a 2xx refresh response carries the live access/refresh tokens, and
+     * Exchanges an authorization code (from [LoopbackServer.awaitCode]) and its PKCE
+     * verifier for tokens. `code` and `verifier` are single-use credential material —
+     * see the class doc on [Failure] — so neither may appear in a thrown message, and
+     * neither is logged here.
+     */
+    fun exchange(code: String, verifier: String, redirectUri: String): TokenRecord {
+        val form = FormBody.Builder()
+            .add("grant_type", "authorization_code")
+            .add("code", code)
+            .add("redirect_uri", redirectUri)
+            .add("client_id", CLIENT_ID)
+            .add("code_verifier", verifier)
+            .build()
+        val req = Request.Builder()
+            .url(baseUrl.newBuilder().addPathSegments("v1/oauth/token").build())
+            .post(form).build()
+        try {
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) throw Failure("exchange: HTTP ${res.code}")
+                return toRecord(parseObject(res.body?.string().orEmpty(), "exchange"), "")
+            }
+        } catch (e: IOException) {
+            throw Failure("exchange: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * `body` on a 2xx token response carries the live access/refresh tokens, and
      * kotlinx.serialization's parse exceptions embed a snippet of the offending input
      * in their message — so a malformed body must never be echoed into a Failure.
-     * Mirrors UsageParser's narrow SerializationException catch.
+     * Mirrors UsageParser's narrow SerializationException catch. [context] only labels
+     * which caller failed ("refresh" / "exchange"); it never carries response content.
      */
-    internal fun parseObject(body: String): JsonObject {
+    internal fun parseObject(body: String, context: String): JsonObject {
         val parsed = try {
             Json.parseToJsonElement(body)
         } catch (_: SerializationException) {
-            throw Failure("refresh: malformed token response")
+            throw Failure("$context: malformed token response")
         }
         return parsed as? JsonObject ?: throw Failure("token response was not a JSON object")
     }
