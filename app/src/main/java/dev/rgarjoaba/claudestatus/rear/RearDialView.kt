@@ -48,6 +48,38 @@ class RearDialView(context: Context) : View(context) {
     private val barFill = Paint()
     private val ray = resources.getDrawable(R.drawable.acrnm_ray, null)
 
+    /**
+     * Self-scheduling redraw, independent of `state`/`geometry` pushes. Both of
+     * Task 16's features (staleLabel, driftOffset) are computed live at draw time
+     * from the clock, but onDraw only ever runs when something calls invalidate() —
+     * and normally that "something" is UsagePollService pushing a fresh
+     * DashboardState roughly once a minute (the `state` setter above invalidates).
+     *
+     * RearActivity runs in its own `:rear` process (see the manifest), reachable
+     * from UsagePollService only via the ACTION_STATE broadcast. If that service's
+     * tick loop has died — precisely the condition staleLabel exists to surface —
+     * no more broadcasts arrive and invalidate() stops firing from that path. Without
+     * an independent trigger the view would freeze on its last frame: the stale
+     * marker would never appear, and the burn-in drift would freeze at one fixed
+     * offset for as long as the service stays dead, which is unbounded and turns the
+     * one failure this task defends against into the worst case for it. This timer
+     * is what keeps both alive with no other input.
+     */
+    private val redrawTick: Runnable = Runnable {
+        invalidate()
+        postDelayed(redrawTick, REDRAW_INTERVAL_MS)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        postDelayed(redrawTick, REDRAW_INTERVAL_MS)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(redrawTick)
+        super.onDetachedFromWindow()
+    }
+
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(Panel.Palette.BG)
         // Burn-in mitigation, applied unconditionally. The panel is always-on at the
@@ -201,6 +233,19 @@ class RearDialView(context: Context) : View(context) {
     }
 
     companion object {
+        /**
+         * How often [redrawTick] reschedules itself. Chosen to be frequent enough
+         * that the ±4px/10-minute drift reads as a slow wander rather than a single
+         * jump (40 steps per cycle) and that a fresh `⟳ Nm` reading never lags more
+         * than this far behind the real minute it crossed — but far from tight
+         * enough to matter for battery or CPU on a canvas this simple. Not something
+         * StalenessTest can cover: it drives a real Handler/Looper tied to this
+         * View's window, which is UI glue, not the pure clock math in staleLabel/
+         * driftOffset — same split this file already draws between companion
+         * functions (tested) and onDraw/drawRing/drawBars/etc. (not).
+         */
+        private const val REDRAW_INTERVAL_MS = 15_000L
+
         /** Accent until it matters, then the ramp's upper stops. Mirrors waybar's battery rule. */
         @JvmStatic
         fun barColor(utilization: Float, accent: Int): Int = when {
