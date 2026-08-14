@@ -94,6 +94,7 @@ class UsagePollService : Service() {
         // numbers with a non-OK Health, not nothing.
         val payload = StatePayload.encode(app.repository.state.value)
         val decision = ensurePlaced(app, payload)
+        if (decision.state == Watchdog.State.ALIVE) userHasPlaced = true
         // A fresh respawn already delivered `payload` via the launch intent extra
         // (RearUserService.show()'s `am start --es state ...`), and calibrate mode
         // must never be touched by this service at all — only an already-alive,
@@ -127,6 +128,14 @@ class UsagePollService : Service() {
      *    here — that is a pre-existing gap in how calibrate mode is reached today,
      *    not something this task can close without new infrastructure.
      */
+    /**
+     * Set once the panel has been placed deliberately — via MainActivity's button, or
+     * a successful earlier respawn. Until then the watchdog reports state but does not
+     * place anything. See the guard in ensurePlaced().
+     */
+    @Volatile
+    private var userHasPlaced = false
+
     private fun ensurePlaced(app: Graph, payload: String): Watchdog.Decision {
         val decision = Watchdog.decide(watchdogState, app.bridge.isPanelAlive(), app.bridge.isCalibrating())
         watchdogState = decision.state
@@ -137,7 +146,19 @@ class UsagePollService : Service() {
                 Watchdog.State.ALIVE -> "rear panel confirmed alive"
             })
         }
-        if (decision.shouldRespawn) app.bridge.show(payload)
+        // Respawn only if the user has placed the panel at least once since the
+        // service started. The move to display 1 fails intermittently on this device,
+        // and NEITHER of our detection methods can see it: `am stack list` reports the
+        // same bounds either way, and `dumpsys` (plus Activity.getDisplay()) reports
+        // display 1 while the panel is visibly rendering on the FRONT screen. So a
+        // failed placement strands a fullscreen, immersive activity on the user's main
+        // display, and the self-eviction guard cannot detect it either.
+        //
+        // Respawning unprompted after every install meant that happened three times
+        // with no user action at all. Gating on an explicit placement keeps the
+        // always-on respawn the user asked for, without the app seizing their main
+        // screen on its own initiative.
+        if (decision.shouldRespawn && userHasPlaced) app.bridge.show(payload)
         return decision
     }
 
