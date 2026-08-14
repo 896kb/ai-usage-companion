@@ -34,12 +34,15 @@ class RearUserService : IRearService.Stub {
      * The question is "is the user looking at it", and composition is the only signal
      * on this device that answers it honestly.
      *
-     * Both non-true answers count as dead, deliberately: compositing on the MAIN
-     * display is a strand, and compositing nowhere is the silent death above. Respawn
-     * is the right response to each, and it is bounded — the watchdog ticks every 20s
-     * and defers entirely while the keyguard is up.
+     * Only a DEFINITE false counts as dead. `null` means the layer is composited
+     * nowhere, which is genuinely ambiguous: it is what a silently-dead panel looks
+     * like, but it is ALSO what a blanked display looks like, because SurfaceFlinger
+     * stops listing HWC layers for a display that is not being composed. Treating
+     * unknown as dead made every screen-off look like a death and respawned the panel
+     * through `am start` on display 0 — which is the takeover this whole area exists to
+     * prevent. Ambiguity has to resolve to "leave it alone".
      */
-    override fun isAlive(): Boolean = taskId() > 0 && compositingOnRear() == true
+    override fun isAlive(): Boolean = taskId() > 0 && compositingOnRear() != false
 
     override fun hide() {
         // -p $PKG scopes the broadcast to our own app. The receiver stays exported
@@ -242,9 +245,20 @@ class RearUserService : IRearService.Stub {
                 try {
                     Thread.sleep(KEEPALIVE_MS)
                     if (keyguardShowing()) continue
-                    if (compositingOnRear() == true) continue
-                    Log.w(TAG, "keep-alive: panel not on the rear panel — re-placing")
-                    show(lastPayload, displayId)
+                    when {
+                        // Definitely on the main display: a move is enough, and a move
+                        // is cheap and invisible. Never relaunch for this.
+                        compositingOnRear() == false -> ensureOnRear(displayId)
+                        // Composited nowhere AND no task: genuinely gone, relaunch.
+                        // The task check is what makes this safe — "composited nowhere"
+                        // on its own is also what a blanked display reports, and
+                        // relaunching on that turned every screen-off into an `am start`
+                        // on display 0.
+                        compositingOnRear() == null && taskId() <= 0 -> {
+                            Log.w(TAG, "keep-alive: no panel and no task — re-placing")
+                            show(lastPayload, displayId)
+                        }
+                    }
                 } catch (e: InterruptedException) {
                     return@Thread
                 } catch (e: Exception) {
