@@ -1,0 +1,23 @@
+# brainstorming session scratch (mockups persist here, not source of truth)
+.superpowers/
+
+# android / gradle
+*.iml
+.gradle/
+local.properties
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+release/
+
+# credentials — never commit an imported token blob
+*.token.json
+credentials.json
+
+# ide
+.idea/
+*.hprof
+
+# macos
+.DS_Store
