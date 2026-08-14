@@ -9,17 +9,39 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
 
     companion object {
         /**
-         * Measured, not estimated — do not "correct" these back toward round numbers.
-         *
-         * Confirmed visually on device f940914b (Xiaomi 17 Pro, 25098PN5AC) on
-         * 2026-08-14: both ring rulers seated concentric on the physical camera
-         * lenses via the CalibrationView grid, nudged live from the original
-         * estimate (cy1 152 -> 147, cy2 420 -> 425); cx, radius and stroke were
-         * already correct as estimated.
+         * Lens centres, MEASURED on device f940914b (Xiaomi 17 Pro, 25098PN5AC) on
+         * 2026-08-14 and confirmed visually by the user against the physical lenses.
+         * Do not "correct" these back toward round numbers.
          */
+        private const val LENS_CX = 148f
+        private const val PERSONAL_LENS_CY = 147f
+        private const val WORK_LENS_CY = 425f
+
+        /**
+         * The lens radius, also measured — the calibration ruler was aligned to the
+         * lens *outline*, so this is the edge of the camera itself.
+         */
+        private const val LENS_RADIUS = 108f
+
+        /**
+         * How far outside the lens edge the ring's centreline sits.
+         *
+         * UNVERIFIED. Drawing at LENS_RADIUS put the ring directly on the camera bump,
+         * where it was invisible at any colour or thickness — the calibration ruler
+         * measured where the lens *is*, not where a ring around it should go. These
+         * values are a first estimate and need a device pass to settle.
+         *
+         * With RING_STROKE = 28 the band spans roughly 118..146, i.e. clear of the
+         * lens edge at 108 and sitting on the surrounding glass.
+         */
+        private const val RING_OFFSET = 24f
+        private const val RING_STROKE = 28f
+
+        private const val RING_RADIUS = LENS_RADIUS + RING_OFFSET
+
         val DEFAULT = PanelGeometry(
-            personal = RingGeometry(cx = 148f, cy = 147f, radius = 108f, stroke = 17f),
-            work = RingGeometry(cx = 148f, cy = 425f, radius = 108f, stroke = 17f),
+            personal = RingGeometry(LENS_CX, PERSONAL_LENS_CY, RING_RADIUS, RING_STROKE),
+            work = RingGeometry(LENS_CX, WORK_LENS_CY, RING_RADIUS, RING_STROKE),
         )
 
         /**
