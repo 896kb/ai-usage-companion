@@ -205,8 +205,12 @@ class RearDialView(context: Context) : View(context) {
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
+                // Same continuous ramp as the rings, so the whole panel speaks one
+                // colour language: green through amber to red as a window fills.
+                // Replaced the earlier accent-until-75%-then-escalate rule, which made
+                // a bar at 60% look identical to one at 10%.
                 barFill.color = if (status?.health == Health.OK) {
-                    barColor(w.utilization, account.accent)
+                    RampColor.at(w.utilization)
                 } else Panel.Palette.DIM
                 canvas.drawRect(
                     barLeft, y,
@@ -293,12 +297,6 @@ class RearDialView(context: Context) : View(context) {
         private const val REDRAW_INTERVAL_MS = 15_000L
 
         /** Accent until it matters, then the ramp's upper stops. Mirrors waybar's battery rule. */
-        @JvmStatic
-        fun barColor(utilization: Float, accent: Int): Int = when {
-            utilization >= 0.90f -> Panel.Palette.CRIT
-            utilization >= 0.75f -> Panel.Palette.WARN
-            else -> accent
-        }
 
         /**
          * Null while the data is fresh enough to present as live. `fetchedAt` is
