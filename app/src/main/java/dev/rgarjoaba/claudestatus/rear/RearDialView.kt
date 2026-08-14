@@ -48,6 +48,14 @@ class RearDialView(context: Context) : View(context) {
     private val barFill = Paint()
     private val ray = resources.getDrawable(R.drawable.acrnm_ray, null)
 
+    /** Masthead type. Green rather than accent-coloured — see drawTitle. */
+    private val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 34f; typeface = label.typeface; color = Panel.Palette.WORK
+    }
+
+    /** White mask, tinted at draw time — same contract as [ray]. */
+    private val logo = resources.getDrawable(R.drawable.claude_code, null)
+
     /**
      * Self-scheduling redraw, independent of `state`/`geometry` pushes. Both of
      * Task 16's features (staleLabel, driftOffset) are computed live at draw time
@@ -137,9 +145,36 @@ class RearDialView(context: Context) : View(context) {
 
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
     private fun drawCanvasSide(canvas: Canvas) {
+        drawTitle(canvas)
         drawBars(canvas)
         drawFooter(canvas)
         drawMark(canvas)
+    }
+
+    /**
+     * Masthead: the Claude Code mark and "CLAUDE USAGE", across the top of the canvas
+     * side. Replaces the "7-DAY WINDOWS" section label that used to sit here — the
+     * bars are self-describing (each row is named, and the 5-hour figures are on the
+     * rings), so that label spent a line of a 572px panel restating the obvious.
+     *
+     * Fixed green, never health-tinted. Everything else on this panel changes colour to
+     * mean something — the ramp on the rings and bars, DIM when a fetch failed — so a
+     * masthead that also changed colour would read as a fifth status signal. It is
+     * branding, and it stays put.
+     *
+     * The mark is tinted to the same green from the same constant, not a second literal:
+     * title and logo drifting apart is exactly what a copied hex value causes.
+     */
+    private fun drawTitle(canvas: Canvas) {
+        val left = Panel.CUTOUT_RIGHT + 34f
+        val size = TITLE_LOGO_SIZE
+        logo.setTint(Panel.Palette.WORK)
+        logo.setBounds(
+            left.toInt(), (TITLE_BASELINE - size).toInt(),
+            (left + size).toInt(), TITLE_BASELINE.toInt(),
+        )
+        logo.draw(canvas)
+        canvas.drawText("CLAUDE USAGE", left + size + 16f, TITLE_BASELINE, title)
     }
 
     /**
@@ -169,16 +204,12 @@ class RearDialView(context: Context) : View(context) {
                 .filter { it.kind != WindowKind.SESSION }
             Triple(account, status, rows)
         }
-        // The section label counts as content, not as a fixed fixture above it.
-        // Pinning it near the top while distributing everything below left it
-        // stranded over ~99px of nothing — it now travels with the first block.
-        val sectionAdvance = 34f
-        val contentH = sectionAdvance + blocks.fold(0f) { acc, (_, _, rows) ->
+        val contentH = blocks.fold(0f) { acc, (_, _, rows) ->
             acc + headingAdvance + rows.size * rowPitch
         }
 
-        // The region the bars own: below the section header, above the ACRNM mark.
-        val regionTop = 24f
+        // The region the bars own: below the masthead, above the ACRNM mark.
+        val regionTop = TITLE_BASELINE + 26f
         val regionBottom = Panel.HEIGHT - 26f - 66f
         // One gap above the first block, one between, one below the last — so the
         // blocks sit evenly rather than hugging the top.
@@ -186,9 +217,6 @@ class RearDialView(context: Context) : View(context) {
             .coerceAtLeast(0f)
 
         var y = regionTop + gap
-        label.color = Panel.Palette.DIM
-        canvas.drawText("7-DAY WINDOWS", left, y, label)
-        y += sectionAdvance
 
         for ((account, status, rows) in blocks) {
             heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
@@ -304,6 +332,14 @@ class RearDialView(context: Context) : View(context) {
          * driftOffset — same split this file already draws between companion
          * functions (tested) and onDraw/drawRing/drawBars/etc. (not).
          */
+        /**
+         * Masthead baseline, and the size of the square the mark is drawn into.
+         * The mark's box is bottom-aligned to the text baseline so the two sit on one
+         * line regardless of the font's own metrics.
+         */
+        private const val TITLE_BASELINE = 54f
+        private const val TITLE_LOGO_SIZE = 34f
+
         private const val REDRAW_INTERVAL_MS = 15_000L
 
         /** Accent until it matters, then the ramp's upper stops. Mirrors waybar's battery rule. */

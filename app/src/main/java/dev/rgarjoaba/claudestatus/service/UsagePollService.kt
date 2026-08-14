@@ -41,12 +41,36 @@ class UsagePollService : Service() {
      *  transition from a repeated reading — see ensurePlaced(). */
     private var watchdogState: Watchdog.State? = null
 
+    /** Last panel power state this listener acted on — see onDisplayChanged. */
+    private var panelWasOn = false
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {}
         override fun onDisplayRemoved(displayId: Int) {}
+
+        /**
+         * Repaints the panel when it wakes. Deliberately does NOT fetch.
+         *
+         * This callback fires on every change to a display's properties — brightness
+         * ramps, refresh-rate switches between 60 and 120Hz, rotation — not only on
+         * power transitions. It previously ran a full safeTick() on each one, so an
+         * ordinary brightness ramp produced a burst of requests, observed at up to
+         * three per second.
+         *
+         * Two things fix that, and both are needed. The state check makes this act only
+         * on a genuine off -> on transition instead of every property change. And a
+         * wake does not need new data anyway: showing the panel what the repository
+         * already holds is exactly the "no extra calls, just render what's already in"
+         * rule the rest of this app follows. Fresh numbers arrive on the poll loop's
+         * own schedule.
+         */
         override fun onDisplayChanged(displayId: Int) {
-            // Panel just woke: refresh immediately so it never shows a stale frame.
-            if (displayId == Panel.DISPLAY_ID && panelOn()) scope.launch { safeTick() }
+            if (displayId != Panel.DISPLAY_ID) return
+            val on = panelOn()
+            val woke = on && !panelWasOn
+            panelWasOn = on
+            if (!woke) return
+            scope.launch { safeSupervise() }
         }
     }
 

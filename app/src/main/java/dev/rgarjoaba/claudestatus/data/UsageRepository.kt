@@ -42,7 +42,34 @@ class UsageRepository(
     private val _state = MutableStateFlow(DashboardState.EMPTY)
     val state: StateFlow<DashboardState> = _state.asStateFlow()
 
-    suspend fun refresh() = withContext(Dispatchers.IO) {
+    /**
+     * Minimum spacing between automatic refreshes — a structural floor, not a cadence.
+     *
+     * The cadence lives in Cadence.kt (5 min fast / 15 min slow); this is far below it
+     * and never shapes normal polling. It exists because bunched requests have now
+     * twice gotten an account 429'd, and both times the burst came from a caller that
+     * looked harmless in isolation: first every service restart fetching immediately,
+     * then a DisplayManager listener firing on every brightness and refresh-rate change
+     * and fetching on each one — up to three requests a second.
+     *
+     * Rate was never the problem; bunching was. Fixing each trigger individually only
+     * holds until the next trigger is added, so the invariant belongs here, at the one
+     * point every request must pass through.
+     */
+    private var lastRefreshAtElapsed = 0L
+
+    /**
+     * @param force skips the burst floor. Reserved for the two moments a user has just
+     * supplied a credential and is watching for it to take effect — an imported work
+     * token and a completed personal sign-in. Never pass true from an automatic path.
+     */
+    suspend fun refresh(force: Boolean = false) = withContext(Dispatchers.IO) {
+        val since = android.os.SystemClock.elapsedRealtime() - lastRefreshAtElapsed
+        if (!force && lastRefreshAtElapsed != 0L && since < MIN_REFRESH_INTERVAL_MS) {
+            Log.i(TAG, "refresh suppressed — only ${since / 1000}s since the last one")
+            return@withContext
+        }
+        lastRefreshAtElapsed = android.os.SystemClock.elapsedRealtime()
         val previous = _state.value.statuses.associateBy { it.account }
         val statuses = Account.entries.map { account ->
             fetchOne(account, previous[account]?.snapshot)
@@ -131,6 +158,7 @@ class UsageRepository(
 
     companion object {
         /** First backoff after a 429, when the server sends no Retry-After. */
+        const val MIN_REFRESH_INTERVAL_MS = 60_000L
         const val FIRST_BACKOFF_MS = 300_000L
 
         /** Ceiling on the doubling. Hour-old numbers still inform; never recovering does not. */
