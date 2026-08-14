@@ -44,7 +44,13 @@ class MainActivity : ComponentActivity() {
             // Renders the calibration grid — the size/payload text dump this used to
             // show is superseded. Mode travels inside the payload (no AIDL change);
             // RearActivity parses it and selects CalibrationView.
-            setOnClickListener { bridge.show("""{"mode":"calibrate"}""") }
+            // Live render. Task 5 temporarily pointed this at calibrate mode while the
+            // lens geometry was being measured; that is done and baked into
+            // PanelGeometry.DEFAULT, so the button now shows what it says it shows.
+            // Calibrate mode is still reachable when the rings need re-checking:
+            //   adb -s f940914b shell "am broadcast -p dev.rgarjoaba.claudestatus \
+            //     -a dev.rgarjoaba.claudestatus.STATE --es state '{\"mode\":\"calibrate\"}'"
+            setOnClickListener { bridge.show("{}") }
         }
 
         val layout = LinearLayout(this).apply {

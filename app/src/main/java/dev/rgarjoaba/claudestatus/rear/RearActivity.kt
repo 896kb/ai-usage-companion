@@ -71,8 +71,18 @@ class RearActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         overridePendingTransition(0, 0)
+        // FLAG_KEEP_SCREEN_ON is applied unconditionally at the user's explicit
+        // request: they want the panel present permanently, not following the
+        // system timeout. Without it MIUI powers the rear display down within
+        // about five seconds.
+        //
+        // This reverses the spec's original default and makes Task 16's pixel-drift
+        // mitigation load-bearing rather than optional — a permanently-lit OLED
+        // showing two fixed rings, four fixed bars and a fixed corner mark is close
+        // to worst-case burn-in geometry. Do not remove the drift.
         window.addFlags(
-            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
         )
         setShowWhenLocked(true)
@@ -104,15 +114,6 @@ class RearActivity : Activity() {
         if (wantCalibrate != calibrating) {
             calibrating = wantCalibrate
             setContentView(if (calibrating) calibrationView else dial)
-            // FLAG_KEEP_SCREEN_ON only in calibrate mode — the spec forbids it as a
-            // default; a permanently-lit panel is exactly the battery/burn-in cost
-            // this design exists to avoid. MIUI powers the panel down within seconds
-            // otherwise, too fast for a human to read a calibration grid off.
-            if (calibrating) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
         }
         if (!calibrating) {
             dial.state = StatePayload.decode(payload)
