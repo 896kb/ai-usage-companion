@@ -161,9 +161,6 @@ class RearDialView(context: Context) : View(context) {
         val rowPitch = 33f
         val headingAdvance = 30f
 
-        label.color = Panel.Palette.DIM
-        canvas.drawText("7-DAY WINDOWS", left, 34f, label)
-
         // Measure both account blocks before drawing anything, so the leftover space
         // can be shared out evenly instead of accumulating at the bottom.
         val blocks = Account.entries.map { account ->
@@ -172,12 +169,16 @@ class RearDialView(context: Context) : View(context) {
                 .filter { it.kind != WindowKind.SESSION }
             Triple(account, status, rows)
         }
-        val contentH = blocks.fold(0f) { acc, (_, _, rows) ->
+        // The section label counts as content, not as a fixed fixture above it.
+        // Pinning it near the top while distributing everything below left it
+        // stranded over ~99px of nothing — it now travels with the first block.
+        val sectionAdvance = 34f
+        val contentH = sectionAdvance + blocks.fold(0f) { acc, (_, _, rows) ->
             acc + headingAdvance + rows.size * rowPitch
         }
 
         // The region the bars own: below the section header, above the ACRNM mark.
-        val regionTop = 58f
+        val regionTop = 24f
         val regionBottom = Panel.HEIGHT - 26f - 66f
         // One gap above the first block, one between, one below the last — so the
         // blocks sit evenly rather than hugging the top.
@@ -185,6 +186,10 @@ class RearDialView(context: Context) : View(context) {
             .coerceAtLeast(0f)
 
         var y = regionTop + gap
+        label.color = Panel.Palette.DIM
+        canvas.drawText("7-DAY WINDOWS", left, y, label)
+        y += sectionAdvance
+
         for ((account, status, rows) in blocks) {
             heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
             canvas.drawText(account.label, left, y, heading)
