@@ -65,6 +65,14 @@ class TokenStore(context: Context) {
         return String(cipher.doFinal(ct))
     }
 
+    // Synchronized: KeyGenParameterSpec.Builder(ALIAS, ...) *overwrites* any existing key under
+    // that alias rather than reusing it. Without a lock, two callers racing on the very first
+    // save()/load() (plausible here — two accounts can be touched around the same time) can both
+    // see the entry absent and both generate a key, with the second generateKey() silently
+    // replacing the key material the first just encrypted under. That ciphertext then becomes
+    // permanently undecryptable — load() returns null via the caught AEADBadTagException, with
+    // no error surfaced anywhere. The check-then-act here must not be separable.
+    @Synchronized
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
