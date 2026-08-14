@@ -90,19 +90,24 @@ class RearUserService : IRearService.Stub {
         // A failed move is now corrected by moving again rather than by tearing the
         // panel down — the user asked for recovery, not eviction, and a second move
         // usually lands when the first did not.
+        // Never hide() from here. Both branches used to, and they were the last
+        // teardown paths left after verifyPlacement's and the activity's own eviction
+        // guard were removed. They fired in the normal case, not an exceptional one:
+        // immediately after `am start` the layer is often not composited yet, so
+        // compositingOnRear() is null rather than false, which fell through to
+        // isOnDisplay() — the `dumpsys window displays` read that has lied in every
+        // stranding incident in this project and also simply lags a fresh placement.
+        // A false reading there destroyed the panel we had just created, and the
+        // watchdog then rebuilt it, which is the panel dying for no reason.
+        //
+        // A second move is the whole remedy. If it does not take, leaving the activity
+        // alone is strictly better than killing it: ensureOnRear() runs every keep-alive
+        // tick and will move it later, whereas a finished activity has to be relaunched
+        // through display 0.
         if (compositingOnRear() == false) {
             Log.w(TAG, "compositing on the MAIN display — re-issuing the move")
             exec("service call activity_task 50 i32 $task i32 $displayId")
             wake(displayId)
-            if (compositingOnRear() == false) {
-                Log.e(TAG, "still on the MAIN display after a second move; finishing")
-                hide()
-                return
-            }
-        } else if (!isOnDisplay(displayId)) {
-            Log.e(TAG, "move FAILED — task $task is not on display $displayId; finishing")
-            hide()
-            return
         }
         placedDisplayId = displayId
         wake(displayId)

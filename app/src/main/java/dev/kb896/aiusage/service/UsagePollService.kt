@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import android.view.Display
 import dev.kb896.aiusage.Panel
@@ -147,8 +148,24 @@ class UsagePollService : Service() {
         }
     }
 
-    private fun keyguardLocked(): Boolean =
-        (getSystemService(KeyguardManager::class.java))?.isKeyguardLocked == true
+    /**
+     * "Do not relaunch right now" — screen off OR keyguard up.
+     *
+     * isKeyguardLocked() alone is not enough and was silently useless on this device:
+     * it reports the SECURE lock state, so with a swipe-only keyguard it returns false
+     * the whole time the lock screen is showing. The window manager's
+     * isKeyguardShowing said true at the same moment. A respawn was observed firing 25s
+     * into a lock because of that gap, which is exactly the `am start` across display 0
+     * this guard exists to prevent.
+     *
+     * PowerManager.isInteractive() is the reliable half: it goes false when the main
+     * screen goes off, regardless of how the keyguard is configured.
+     */
+    private fun screenOffOrLocked(): Boolean {
+        val power = getSystemService(PowerManager::class.java)
+        if (power != null && !power.isInteractive) return true
+        return getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+    }
 
     private fun panelOn(): Boolean =
         displays.getDisplay(Panel.DISPLAY_ID)?.state == Display.STATE_ON
@@ -319,7 +336,7 @@ class UsagePollService : Service() {
             // nobody is looking at anyway — the alternative is hijacking the lock
             // screen every time. USER_PRESENT drives screenReceiver, so the panel is
             // back within a moment of unlocking.
-            if (keyguardLocked()) {
+            if (screenOffOrLocked()) {
                 Log.i(TAG, "panel needs re-placing but the keyguard is up — deferring to unlock")
                 return decision
             }
