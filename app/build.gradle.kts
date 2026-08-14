@@ -52,6 +52,10 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // RingGeometryTest needs a real android.os.Bundle (put/get/containsKey) — the plain
+    // JVM mockable-android.jar throws "not mocked" for it, same trap as org.json (see
+    // UsageParser.kt). Scoped to that one test class via @RunWith(RobolectricTestRunner).
+    testImplementation("org.robolectric:robolectric:4.13")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
 }

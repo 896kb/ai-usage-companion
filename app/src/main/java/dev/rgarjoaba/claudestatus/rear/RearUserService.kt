@@ -48,8 +48,40 @@ class RearUserService : IRearService.Stub {
         // Transaction 50 = IActivityTaskManager#moveRootTaskToDisplay.
         val moved = exec("service call activity_task 50 i32 $task i32 $displayId")
         Log.d(TAG, "move task=$task -> display=$displayId : $moved")
+
+        // Transaction 50 returns a success parcel even when it does nothing, so the
+        // return value proves nothing. Confirm with the window manager.
+        if (!isOnDisplay(displayId)) {
+            Log.e(TAG, "move FAILED — task $task is not on display $displayId; finishing")
+            hide()
+            return
+        }
         placedDisplayId = displayId
         wake(displayId)
+    }
+
+    /**
+     * Asks the window manager which display actually owns the activity.
+     *
+     * Do NOT check this with `am stack list` bounds. A correctly placed panel and a
+     * 904x572 box stranded at (0,0) on the main display report the SAME bounds, and
+     * `grep RearActivity` discards the `Stack id=` header that would disambiguate
+     * them. That ambiguity is what let a failed move strand the activity on the
+     * user's main screen, fullscreen and immersive, until it was force-stopped.
+     *
+     * This is still a weak signal, not proof — `dumpsys` has been observed reporting
+     * `mDisplayId=1` continuously while the activity visibly rendered on the front
+     * screen. It is better than nothing as this service's own self-check, but it is
+     * not evidence to present as confirmation of on-device placement to anyone.
+     */
+    private fun isOnDisplay(displayId: Int): Boolean {
+        val out = exec("dumpsys window displays")
+        val marker = "Display: mDisplayId=$displayId"
+        val start = out.indexOf(marker)
+        if (start < 0) return false
+        val next = out.indexOf("Display: mDisplayId=", start + marker.length)
+        val section = if (next < 0) out.substring(start) else out.substring(start, next)
+        return section.contains("RearActivity")
     }
 
     private fun pollTaskId(): Int {

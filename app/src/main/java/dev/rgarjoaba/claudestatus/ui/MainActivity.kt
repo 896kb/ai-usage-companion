@@ -41,7 +41,10 @@ class MainActivity : ComponentActivity() {
         }
         val showButton = Button(this).apply {
             text = "Show on back"
-            setOnClickListener { bridge.show("{}") }
+            // Renders the calibration grid — the size/payload text dump this used to
+            // show is superseded. Mode travels inside the payload (no AIDL change);
+            // RearActivity parses it and selects CalibrationView.
+            setOnClickListener { bridge.show("""{"mode":"calibrate"}""") }
         }
 
         val layout = LinearLayout(this).apply {
