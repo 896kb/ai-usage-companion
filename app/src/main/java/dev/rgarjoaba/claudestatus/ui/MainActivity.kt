@@ -148,7 +148,16 @@ class MainActivity : ComponentActivity() {
         }
         signInButton.setOnClickListener { signInPersonal() }
         importButton.setOnClickListener { importPastedToken() }
-        showButton.setOnClickListener { graph.bridge.show("{}") }
+        // Renders whatever the repository already holds — no network call. Placing
+        // the panel is a display action, not a data action, so it must not spend a
+        // request against an endpoint that has already rate-limited one account.
+        //
+        // It also used to send "{}", which decodes to an empty state: the panel went
+        // blank on placement and stayed blank until the next poll, now up to five
+        // minutes away.
+        showButton.setOnClickListener {
+            graph.bridge.show(StatePayload.encode(graph.repository.state.value))
+        }
         hideButton.setOnClickListener { graph.bridge.hide() }
     }
 
