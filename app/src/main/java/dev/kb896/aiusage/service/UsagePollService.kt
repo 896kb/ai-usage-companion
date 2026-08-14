@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.KeyguardManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -343,10 +344,20 @@ class UsagePollService : Service() {
         val mgr = getSystemService(NotificationManager::class.java)
         mgr.createNotificationChannel(
             NotificationChannel(CHANNEL, "Claude Status", NotificationManager.IMPORTANCE_LOW))
+        // Tapping the notification re-places the panel. This is the only recovery path
+        // that does not require opening the app, and it exists because the panel can
+        // end up in states the watchdog cannot see — a task that still exists while
+        // nothing composites it will read as ALIVE forever.
+        val tap = PendingIntent.getForegroundService(
+            this, 0,
+            Intent(this, UsagePollService::class.java).setAction(ACTION_SHOW_PANEL),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         return Notification.Builder(this, CHANNEL)
             .setContentTitle("Claude Status")
-            .setContentText("Watching rate limits")
+            .setContentText("Tap to show on the rear panel")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentIntent(tap)
             .setOngoing(true)
             .build()
     }
@@ -356,6 +367,27 @@ class UsagePollService : Service() {
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         scope.cancel()
         super.onDestroy()
+    }
+
+    /**
+     * Handles the notification tap: re-place the panel, now, from cached state.
+     *
+     * Deliberately a re-place rather than a nudge — this is the button you reach for
+     * precisely when the panel is NOT there, so it must work from a dead panel, not
+     * only from a live one. It calls show() directly instead of going through
+     * ensurePlaced(), because the watchdog's Watchdog.decide() will happily answer
+     * ALIVE for a task that exists but is composited nowhere, which is the exact state
+     * this recovers from.
+     *
+     * Makes no network call. The payload is whatever the repository already holds, the
+     * same rule the rest of the app follows.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_SHOW_PANEL) {
+            val app = Graph.of(this)
+            app.bridge.show(StatePayload.encode(app.repository.state.value))
+        }
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -378,6 +410,9 @@ class UsagePollService : Service() {
          * using cached state.
          */
         private const val WATCHDOG_INTERVAL_MS = 20_000L
+
+        /** Notification tap → re-place the panel. See onStartCommand. */
+        const val ACTION_SHOW_PANEL = "dev.kb896.aiusage.SHOW_PANEL"
 
         private const val TAG = "ClaudeStatusPoll"
         private const val CHANNEL = "usage"

@@ -40,9 +40,21 @@ export JAVA_HOME
 # The panel does not need it: UsagePollService is already running and its watchdog
 # re-places the rear activity on its own. Pass LAUNCH=1 when you actually want the
 # front UI, e.g. to tap Import or Sign in.
+# UsagePollService is started from MainActivity.onCreate, and `pm install -r` kills
+# the app — so something MUST bring the app up again or the install leaves it dead:
+# no service, no watchdog, no panel, and nothing to notice or recover. An earlier
+# revision skipped the launch entirely to stop installs stealing the main screen, and
+# that is exactly what it caused.
+#
+# The service is exported=false, so `am start-foreground-service` from the shell is
+# refused ("Requires permission not exported"). Launching the activity is the only
+# route in. So launch it, then immediately go HOME: the service is running and the
+# screen is back where the user left it, about a second later.
+"$ADB" -s "$DEVICE" shell am start -n "$PKG/.ui.MainActivity" >/dev/null
 if [ "${LAUNCH:-0}" = "1" ]; then
-  "$ADB" -s "$DEVICE" shell am start -n "$PKG/.ui.MainActivity" >/dev/null
-  echo "✓ installed and launched on $DEVICE"
+  echo "✓ installed and left open on $DEVICE"
 else
-  echo "✓ installed on $DEVICE (front UI not launched; LAUNCH=1 to open it)"
+  sleep 1
+  "$ADB" -s "$DEVICE" shell input keyevent KEYCODE_HOME >/dev/null
+  echo "✓ installed on $DEVICE (service started, front UI dismissed)"
 fi

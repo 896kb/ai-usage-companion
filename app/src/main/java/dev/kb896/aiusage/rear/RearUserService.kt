@@ -14,16 +14,32 @@ class RearUserService : IRearService.Stub {
 
     private var placedDisplayId = -1
 
+    /** Last payload shown, so the keep-alive can re-place without the app's help. */
+    private var lastPayload: String = "{}"
+    private var keepAlive: Thread? = null
+
     override fun destroy() = exitProcess(0)
 
     /**
-     * Task existence only — see the AIDL doc on IRearService.isAlive(). Deliberately
-     * NOT `placedDisplayId == ... && taskId() > 0`: placedDisplayId is this
-     * process's own in-memory bookkeeping and is meaningless after this service
-     * process itself restarts (Shizuku respawns it independently of RearActivity's
-     * lifecycle), whereas `am stack list` is always a live, authoritative read.
+     * Whether the panel is actually THERE — composited on the rear display, not merely
+     * recorded as a task.
+     *
+     * This used to be `taskId() > 0`, and that is the hole the panel kept falling into:
+     * observed on device with RearActivity's window reporting mDisplayId=1 while
+     * SurfaceFlinger composited it on NEITHER display, and the rear panel showed MIUI's
+     * SubScreenLauncher. The task existed the whole time, so the watchdog read ALIVE
+     * and never respawned — the panel stayed silently gone until someone noticed.
+     *
+     * Task existence answers "did something get created", which is not the question.
+     * The question is "is the user looking at it", and composition is the only signal
+     * on this device that answers it honestly.
+     *
+     * Both non-true answers count as dead, deliberately: compositing on the MAIN
+     * display is a strand, and compositing nowhere is the silent death above. Respawn
+     * is the right response to each, and it is bounded — the watchdog ticks every 20s
+     * and defers entirely while the keyguard is up.
      */
-    override fun isAlive(): Boolean = taskId() > 0
+    override fun isAlive(): Boolean = taskId() > 0 && compositingOnRear() == true
 
     override fun hide() {
         // -p $PKG scopes the broadcast to our own app. The receiver stays exported
@@ -48,7 +64,14 @@ class RearUserService : IRearService.Stub {
 
     override fun show(payload: String, displayId: Int) {
         if (displayId < 0) return
-        if (placedDisplayId == displayId && taskId() > 0) {
+        lastPayload = payload
+        startKeepAlive(displayId)
+        // The cheap path — already placed, just push new numbers — must ALSO require
+        // that the panel is genuinely composited. Checking only "same display and the
+        // task exists" is how a silently-dead panel became unrecoverable: the task
+        // outlives composition, so every subsequent show() took this branch and
+        // broadcast an update to a window nobody was drawing, instead of relaunching.
+        if (placedDisplayId == displayId && taskId() > 0 && compositingOnRear() == true) {
             update(payload); wake(displayId); return
         }
         exec("am start -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
@@ -104,20 +127,6 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * Asks the window manager which display actually owns the activity.
-     *
-     * Do NOT check this with `am stack list` bounds. A correctly placed panel and a
-     * 904x572 box stranded at (0,0) on the main display report the SAME bounds, and
-     * `grep RearActivity` discards the `Stack id=` header that would disambiguate
-     * them. That ambiguity is what let a failed move strand the activity on the
-     * user's main screen, fullscreen and immersive, until it was force-stopped.
-     *
-     * This is still a weak signal, not proof — `dumpsys` has been observed reporting
-     * `mDisplayId=1` continuously while the activity visibly rendered on the front
-     * screen. It is better than nothing as this service's own self-check, but it is
-     * not evidence to present as confirmation of on-device placement to anyone.
-     */
-    /**
      * Whether SurfaceFlinger is actually COMPOSITING RearActivity on the rear panel.
      *
      * This is the only signal on this device that has not lied. Every window-manager
@@ -164,6 +173,20 @@ class RearUserService : IRearService.Stub {
         }
     }
 
+    /**
+     * Asks the window manager which display actually owns the activity.
+     *
+     * Do NOT check this with `am stack list` bounds. A correctly placed panel and a
+     * 904x572 box stranded at (0,0) on the main display report the SAME bounds, and
+     * `grep RearActivity` discards the `Stack id=` header that would disambiguate
+     * them. That ambiguity is what let a failed move strand the activity on the
+     * user's main screen, fullscreen and immersive, until it was force-stopped.
+     *
+     * This is still a weak signal, not proof — `dumpsys` has been observed reporting
+     * `mDisplayId=1` continuously while the activity visibly rendered on the front
+     * screen. It is better than nothing as this service's own self-check, but it is
+     * not evidence to present as confirmation of on-device placement to anyone.
+     */
     private fun isOnDisplay(displayId: Int): Boolean {
         val out = exec("dumpsys window displays")
         // A bare `indexOf("mDisplayId=$displayId")` would let displayId=1 match as a
@@ -191,6 +214,50 @@ class RearUserService : IRearService.Stub {
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     /** Runs via `sh -c` so PATH resolves am/service/input in the forked process. */
+    /**
+     * Keeps the panel placed from INSIDE the Shizuku service, on its own thread.
+     *
+     * UsagePollService already runs a 20s watchdog doing the same job, and this does
+     * not replace it — it survives what that one cannot. That watchdog lives in the
+     * app process, so it dies with the app: an `adb install` (pm install -r kills the
+     * app), a low-memory kill, or MIUI's background management all leave the panel
+     * dead with nothing left running to notice. Observed exactly that on device — no
+     * app process, no services, panel gone, and no path back without user action.
+     *
+     * This thread lives in Shizuku's user-service process at shell uid, which Shizuku
+     * manages independently of the app's lifecycle, so it keeps checking through all
+     * of the above.
+     *
+     * The two guards match the app-side watchdog's, for the same reasons:
+     *   - nothing happens while the keyguard is up, because re-placing means `am start`
+     *     on display 0, which on a locked phone draws over the lock screen and wakes
+     *     the main display;
+     *   - only a definite "not composited on the rear" triggers a re-place, so an
+     *     unparseable dump or a momentary gap does not restart a healthy panel.
+     */
+    private fun startKeepAlive(displayId: Int) {
+        if (keepAlive?.isAlive == true) return
+        keepAlive = Thread {
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    Thread.sleep(KEEPALIVE_MS)
+                    if (keyguardShowing()) continue
+                    if (compositingOnRear() == true) continue
+                    Log.w(TAG, "keep-alive: panel not on the rear panel — re-placing")
+                    show(lastPayload, displayId)
+                } catch (e: InterruptedException) {
+                    return@Thread
+                } catch (e: Exception) {
+                    Log.e(TAG, "keep-alive tick failed", e)
+                }
+            }
+        }.apply { isDaemon = true; name = "rear-keepalive"; start() }
+    }
+
+    /** Cheap targeted read — `dumpsys window` in full is megabytes. */
+    private fun keyguardShowing(): Boolean =
+        exec("dumpsys window | grep -m1 isKeyguardShowing").contains("true")
+
     private fun exec(cmd: String): String = try {
         val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
         val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }
@@ -207,6 +274,13 @@ class RearUserService : IRearService.Stub {
          * value appearing in two different formats across dumpsys outputs.
          */
         const val REAR_PHYSICAL_ID_SUFFIX = "332"
+
+        /**
+         * Keep-alive period. Matches UsagePollService's watchdog rather than racing it:
+         * both may re-place, and show() is idempotent when the panel is healthy (it
+         * short-circuits to update+wake), so a duplicate tick costs one dumpsys.
+         */
+        const val KEEPALIVE_MS = 20_000L
 
         const val TAG = "ClaudeStatusRear"
         const val PKG = "dev.kb896.aiusage"
