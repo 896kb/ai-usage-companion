@@ -89,7 +89,24 @@ class RearDialView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(Panel.Palette.BG)
+        canvas.drawColor(BG_ALPHA shl 24 or (Panel.Palette.BG and 0xFFFFFF))
+        // Partial fill, so the system's own rear-screen background shows through while
+        // this surface still occludes. RearTheme's translucency does nothing on its own
+        // — it was in place for a full build while this line painted Palette.BG at full
+        // opacity over the whole surface, hiding everything behind it.
+        //
+        // DO NOT take this to zero. It was tried, and the panel stops working: with
+        // nothing occluding it, MIUI's SubScreenLauncher resumes and takes the display,
+        // and RearActivity's window leaves the window list entirely while its process
+        // and task record stay alive. The panel then shows MIUI's clock-and-steps
+        // widget and none of our marks. That failure is also invisible to the respawn
+        // watchdog, which asks isAlive() about the TASK — and the task is still there.
+        //
+        // The cost of any alpha below 255 is contrast: the bar TRACKS are a near-black
+        // #2A2C2E picked against #1D1F21, so over a light background they are the first
+        // thing to disappear. Filled bars, rings and type are bright palette colours
+        // and hold up.
+        //
         // Burn-in mitigation, applied unconditionally. The panel is always-on at the
         // user's explicit request (RearActivity holds FLAG_KEEP_SCREEN_ON with no
         // toggle — MIUI otherwise kills the rear display in about five seconds), so
@@ -104,9 +121,9 @@ class RearDialView(context: Context) : View(context) {
         // including the ACRNM mark drawn at the end of drawCanvasSide — small, bright,
         // high-contrast and pinned to one corner, the single highest burn-in risk on
         // the panel. A drift that moved the bars but left the mark pinned would miss
-        // the worst offender. drawColor above is unaffected (it fills the canvas's
-        // clip, not a shape, so it ignores the transform) which is correct: the
-        // background is uniform, it has nothing to protect against ghosting.
+        // the worst offender. The drawColor above is unaffected (it fills the canvas's
+        // clip, not a shape, so it ignores the transform) which is correct: a uniform
+        // wash has nothing to protect against ghosting.
         //
         // SystemClock.elapsedRealtime(), not System.currentTimeMillis(): this must be
         // monotonic so an NTP correction or timezone change can't produce a sudden,
@@ -306,18 +323,26 @@ class RearDialView(context: Context) : View(context) {
         val stale = staleLabel(state.fetchedAt, System.currentTimeMillis())
         if (stale != null) {
             value.color = Panel.Palette.DIM
-            canvas.drawText(stale, Panel.WIDTH - 34f - 260f - 20f, Panel.HEIGHT - 40f, value)
+            canvas.drawText(stale, markLeft() - 20f, Panel.HEIGHT - 40f, value)
         }
     }
 
     /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit the drawable. */
     private fun drawMark(canvas: Canvas) {
-        val w = 260
-        val h = 66
         ray.setTint(Panel.Palette.PERSONAL)
-        ray.setBounds(Panel.WIDTH - 34 - w, Panel.HEIGHT - 26 - h, Panel.WIDTH - 34, Panel.HEIGHT - 26)
+        ray.setBounds(
+            markLeft().toInt(), Panel.HEIGHT - MARK_BOTTOM - MARK_H,
+            Panel.WIDTH - MARK_RIGHT, Panel.HEIGHT - MARK_BOTTOM,
+        )
         ray.draw(canvas)
     }
+
+    /**
+     * The mark's left edge. Derived rather than written out again: the footer's stale
+     * marker right-aligns to this edge, and when the two were separate literals a
+     * change to the mark's size or margin silently drew the marker underneath it.
+     */
+    private fun markLeft(): Float = (Panel.WIDTH - MARK_RIGHT - MARK_W).toFloat()
 
     /**
      * Short marker shown beside an account whose numbers cannot be vouched for.
@@ -373,6 +398,29 @@ class RearDialView(context: Context) : View(context) {
          * The mark's box is bottom-aligned to the text baseline so the two sit on one
          * line regardless of the font's own metrics.
          */
+        /**
+         * Opacity of the background fill, 0..255.
+         *
+         * Not a style knob — it trades two things off against each other. At 255 the
+         * panel is the Tomorrow Night ground the palette was designed against, and
+         * nothing shows through. At 0 the system wallpaper shows through completely and
+         * the panel stops working entirely (see onDraw for what that failure looks
+         * like). This sits between: enough coverage to keep occluding the sub-screen
+         * launcher and to keep the near-black bar tracks legible, while the wallpaper
+         * still reads through it.
+         */
+        private const val BG_ALPHA = 0xB4
+
+        /**
+         * Maker's-mark box. Moved further from the right edge and enlarged at the
+         * user's request; drawMark and the footer's stale marker both derive from these
+         * rather than repeating the numbers.
+         */
+        private const val MARK_W = 300
+        private const val MARK_H = 78
+        private const val MARK_RIGHT = 62
+        private const val MARK_BOTTOM = 26
+
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
 
