@@ -32,7 +32,25 @@ class UsageRepository(
         _state.value = DashboardState(System.currentTimeMillis(), statuses)
     }
 
+    /**
+     * Earliest elapsed-time at which each account may be fetched again. Per-account
+     * deliberately: one account being throttled must not stop the other refreshing.
+     */
+    private val backoffUntil = mutableMapOf<Account, Long>()
+    private val backoffStep = mutableMapOf<Account, Long>()
+
     private fun fetchOne(account: Account, last: UsageSnapshot?): AccountStatus {
+        // Respect an active backoff before spending a request. Without this a 429 is
+        // answered by polling again at the same cadence, which keeps the account
+        // throttled indefinitely rather than letting it recover — exactly what
+        // happened to the work account.
+        val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        backoffUntil[account]?.let { until ->
+            if (nowElapsed < until) {
+                Log.i(TAG, "${account.slug}: backing off ${(until - nowElapsed) / 1000}s more")
+                return AccountStatus(account, Health.STALE, last)
+            }
+        }
         val stored = store.load(account)
             ?: run {
                 Log.i(TAG, "${account.slug}: no stored credential")
@@ -55,8 +73,12 @@ class UsageRepository(
         } else stored
 
         return try {
-            AccountStatus(account, Health.OK, api.fetch(usable.accessToken))
+            val snapshot = api.fetch(usable.accessToken)
+            backoffUntil.remove(account)
+            backoffStep.remove(account)
+            AccountStatus(account, Health.OK, snapshot)
         } catch (e: UsageApi.Failure) {
+            if (e.kind == UsageApi.Kind.RATE_LIMITED) applyBackoff(account, e.retryAfterSec)
             // Keep the last good numbers, but never present them as live.
             Log.w(TAG, "${account.slug}: usage fetch failed: ${e.message}")
             AccountStatus(account, healthFor(e.kind), last)
@@ -71,7 +93,26 @@ class UsageRepository(
     }
 
 
+    /**
+     * Honours Retry-After when the server sends one, otherwise doubles from 5 minutes
+     * up to an hour. Capped because a status panel showing hour-old numbers is still
+     * useful, whereas one that never recovers is not.
+     */
+    private fun applyBackoff(account: Account, retryAfterSec: Long?) {
+        val step = retryAfterSec?.times(1_000L)
+            ?: ((backoffStep[account]?.times(2) ?: FIRST_BACKOFF_MS).coerceAtMost(MAX_BACKOFF_MS))
+        backoffStep[account] = step
+        backoffUntil[account] = android.os.SystemClock.elapsedRealtime() + step
+        Log.w(TAG, "${account.slug}: rate limited, backing off ${step / 1000}s")
+    }
+
     companion object {
+        /** First backoff after a 429, when the server sends no Retry-After. */
+        const val FIRST_BACKOFF_MS = 300_000L
+
+        /** Ceiling on the doubling. Hour-old numbers still inform; never recovering does not. */
+        const val MAX_BACKOFF_MS = 3_600_000L
+
         /**
          * Failure messages only — UsageApi.Failure and OAuthClient.Failure are both
          * built from status codes, exception class names and static strings, never
