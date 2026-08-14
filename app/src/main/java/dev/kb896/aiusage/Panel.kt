@@ -18,6 +18,17 @@ object Panel {
         const val RULE = 0xFF2F3234.toInt()
         const val WARN = 0xFFF0C674.toInt()
         const val CRIT = 0xFFBD2C40.toInt()
+
+        /**
+         * Calibration-grid line tints. Derived, like TRACK/RULE above — the rice
+         * defines no grid colour. Reusing TRACK's and RULE's exact values rather
+         * than inventing new ones: a grid's fine/coarse lines are the same "subtle
+         * tint over BG" role those already serve, and picking untested numbers isn't
+         * safe without the device to check contrast against, which this round doesn't
+         * have.
+         */
+        const val GRID_FINE = 0xFF2A2C2E.toInt()
+        const val GRID_COARSE = 0xFF2F3234.toInt()
     }
 
     /** Ramp stops as (position, argb), ascending by position. */
