@@ -31,10 +31,25 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * measured where the lens *is*, not where a ring around it should go. These
          * values are a first estimate and need a device pass to settle.
          *
-         * With RING_STROKE = 28 the band spans roughly 118..146, i.e. clear of the
-         * lens edge at 108 and sitting on the surrounding glass.
+         * TWO CONSTRAINTS BOUND ANY CHANGE HERE, and they squeeze from both sides:
+         *
+         *   Outward — the panel edge, with room for the burn-in drift. The ring's
+         *   outer edge is RING_OFFSET + LENS_RADIUS + RING_STROKE/2. The tightest
+         *   margin is the upper lens at cy=147, and the drift swings +/-4px, so:
+         *       LENS_RADIUS + RING_OFFSET + RING_STROKE/2  <=  147 - 4  =  143
+         *   At offset 24 / stroke 28 the outer edge is 146 — it clipped at the top
+         *   and bottom on every drift cycle. Offset 20 gives 142, a 5px margin.
+         *
+         *   Inward — the lens itself. The band's inner edge is
+         *   LENS_RADIUS + RING_OFFSET - RING_STROKE/2, which must stay clear of 108
+         *   or the ring disappears under the camera bump again. Offset 20 clears it
+         *   by 6px.
+         *
+         * So the usable window is narrow: offset 20 with stroke 28 satisfies both.
+         * If you widen the stroke, the offset must come down, and vice versa —
+         * recompute both inequalities rather than adjusting one by eye.
          */
-        private const val RING_OFFSET = 24f
+        private const val RING_OFFSET = 20f
         private const val RING_STROKE = 28f
 
         private const val RING_RADIUS = LENS_RADIUS + RING_OFFSET
