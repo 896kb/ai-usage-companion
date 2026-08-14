@@ -21,6 +21,8 @@ class UsageRepository(
     private val oauth: OAuthClient,
     private val store: TokenStore,
 ) {
+    /** Set by the poll service so a completed refresh can be remembered across restarts. */
+    var onFetchCompleted: (() -> Unit)? = null
     private val _state = MutableStateFlow(DashboardState.EMPTY)
     val state: StateFlow<DashboardState> = _state.asStateFlow()
 
@@ -30,6 +32,7 @@ class UsageRepository(
             fetchOne(account, previous[account]?.snapshot)
         }
         _state.value = DashboardState(System.currentTimeMillis(), statuses)
+        onFetchCompleted?.invoke()
     }
 
     /**

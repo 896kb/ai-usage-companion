@@ -53,9 +53,15 @@ class UsagePollService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIFICATION_ID, notification())
+        Graph.of(this).repository.onFetchCompleted = { recordFetch() }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displays.registerDisplayListener(displayListener, null)
         scope.launch {
+            val initial = initialDelayMs()
+            if (initial > 0) {
+                Log.i(TAG, "recent fetch ${(System.currentTimeMillis() - lastFetchAt()) / 1000}s ago — first poll in ${initial / 1000}s")
+                delay(initial)
+            }
             while (isActive) {
                 safeTick()
                 delay(Cadence.forPanelState(panelOn()))
@@ -110,6 +116,37 @@ class UsagePollService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "tick failed", e)
         }
+    }
+
+    /**
+     * Wall-clock time of the last completed fetch, persisted so it survives the process
+     * dying. elapsedRealtime would be wrong here: it resets on reboot, and the point is
+     * to remember across restarts.
+     */
+    private fun lastFetchAt(): Long =
+        getSharedPreferences("poll", MODE_PRIVATE).getLong("lastFetchAt", 0L)
+
+    private fun recordFetch() =
+        getSharedPreferences("poll", MODE_PRIVATE).edit()
+            .putLong("lastFetchAt", System.currentTimeMillis()).apply()
+
+    /**
+     * How long to wait before the first fetch after the service starts.
+     *
+     * Every service start used to fetch immediately. That is fine once, but the service
+     * restarts far more often than expected — every app update during development, and
+     * in normal use whenever MIUI kills and revives it. Each restart then fired a
+     * request, producing bursts against the very endpoint that reports rate limits, and
+     * that burst pattern is what got the work account 429'd. Rate is not the problem;
+     * bunching is.
+     *
+     * So a restart resumes the existing cadence rather than restarting it: if the last
+     * fetch was recent, wait out the remainder instead of fetching again.
+     */
+    private fun initialDelayMs(): Long {
+        val since = System.currentTimeMillis() - lastFetchAt()
+        if (since < 0) return 0L // clock moved backwards; do not stall forever
+        return (Cadence.FAST_MS - since).coerceIn(0L, Cadence.FAST_MS)
     }
 
     private suspend fun tick() {
