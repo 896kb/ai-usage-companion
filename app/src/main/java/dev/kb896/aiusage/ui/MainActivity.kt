@@ -160,12 +160,21 @@ class MainActivity : ComponentActivity() {
      * document picker, no storage permission anywhere in the manifest.
      */
     private fun importPastedToken() {
-        val record = TokenImport.parse(pasteField.text.toString())
+        // Prefer the file the export script writes into our own private storage —
+        // macOS and Android share no clipboard, so "copy on the Mac, paste on the
+        // phone" cannot actually work. The paste field remains as a manual fallback.
+        val staged = java.io.File(filesDir, "work-token.json")
+        val source = if (staged.canRead()) staged.readText() else pasteField.text.toString()
+
+        val record = TokenImport.parse(source)
         if (record == null) {
             toast("That doesn't look like a Claude Code credential")
             return
         }
         graph.store.save(Account.WORK, record)
+        // Delete the staged file the moment its contents are encrypted in TokenStore —
+        // app-private is not a reason to leave a live credential lying in plaintext.
+        staged.delete()
         // Clear immediately — leaving it in the field keeps it in the view hierarchy,
         // recoverable from a screenshot, and restorable across a config change.
         pasteField.setText("")
