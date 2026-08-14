@@ -57,6 +57,49 @@ class RearDialView(context: Context) : View(context) {
     private val logo = resources.getDrawable(R.drawable.claude_code, null)
 
     /**
+     * One damped spring per animated quantity, keyed by what it drives.
+     *
+     * Values arrive as steps — a poll completes and a bar jumps — which on an
+     * always-on panel reads as a glitch rather than as news. Springing them makes a
+     * change something you notice out of the corner of your eye, which is the entire
+     * job of a display nobody is looking at directly.
+     */
+    private class Spring {
+        /** NaN until the first frame, so the panel opens on the real values rather
+         *  than animating up from zero every time the activity is re-placed — and
+         *  respawns are frequent here. Only genuine CHANGES animate. */
+        var value = Float.NaN
+        var velocity = 0f
+
+        fun advance(target: Float, dt: Float): Float {
+            if (value.isNaN()) { value = target; velocity = 0f; return value }
+            val accel = STIFFNESS * (target - value) - DAMPING * velocity
+            velocity += accel * dt
+            value += velocity * dt
+            return value
+        }
+
+        fun settled(target: Float): Boolean =
+            kotlin.math.abs(target - value) < EPSILON && kotlin.math.abs(velocity) < EPSILON
+    }
+
+    private val springs = mutableMapOf<String, Spring>()
+    private var lastFrameNanos = 0L
+    private var frameDt = 0f
+    private var animating = false
+
+    /**
+     * Current animated value for [key], advancing toward [target] by this frame's dt.
+     * Flags the frame as animating so onDraw knows to schedule another one.
+     */
+    private fun springTo(key: String, target: Float): Float {
+        val spring = springs.getOrPut(key) { Spring() }
+        val v = spring.advance(target, frameDt)
+        if (!spring.settled(target)) animating = true
+        return v
+    }
+
+    /**
      * Self-scheduling redraw, independent of `state`/`geometry` pushes. Both of
      * Task 16's features (staleLabel, driftOffset) are computed live at draw time
      * from the clock, but onDraw only ever runs when something calls invalidate() —
@@ -89,6 +132,16 @@ class RearDialView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
+        // Real elapsed time, clamped. The idle redraw is every 15s, so an unclamped dt
+        // would integrate a 15-second step in one go and teleport every spring past its
+        // target — the clamp makes a long gap behave like a resumed animation rather
+        // than an explosion.
+        val now = System.nanoTime()
+        frameDt = if (lastFrameNanos == 0L) 0f
+            else ((now - lastFrameNanos) / 1e9f).coerceIn(0f, MAX_FRAME_DT)
+        lastFrameNanos = now
+        animating = false
+
         canvas.drawColor(BG_ALPHA shl 24 or (Panel.Palette.BG and 0xFFFFFF))
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
@@ -134,6 +187,11 @@ class RearDialView(context: Context) : View(context) {
         drawRing(canvas, geometry.personal, Account.PERSONAL)
         drawRing(canvas, geometry.work, Account.WORK)
         drawCanvasSide(canvas)
+
+        // Next frame only while something is still moving. When everything has settled
+        // this stops entirely and the view falls back to the 15s idle tick — an
+        // always-on panel must not hold a 60fps loop for a display that is not changing.
+        if (animating) postInvalidateOnAnimation()
     }
 
     private fun drawRing(canvas: Canvas, g: RingGeometry, account: Account) {
@@ -152,12 +210,11 @@ class RearDialView(context: Context) : View(context) {
         // Coloured while the data is good, dimmed once a fetch has actually failed.
         // The tag beside the account label says which failure it was, so grey means
         // "this is history" rather than the unexplained grey it used to mean.
-        arc.color = if (status.health == Health.OK) {
-            RampColor.at(session.utilization)
-        } else {
-            Panel.Palette.DIM
-        }
-        canvas.drawArc(scratch, -90f, 360f * session.utilization.coerceIn(0f, 1f), false, arc)
+        // Sweep AND colour both follow the animated value, so the ramp travels with the
+        // arc instead of snapping to the new colour while the arc is still moving.
+        val shown = springTo("ring:${account.name}", session.utilization).coerceIn(0f, 1f)
+        arc.color = if (status.health == Health.OK) RampColor.at(shown) else Panel.Palette.DIM
+        canvas.drawArc(scratch, -90f, 360f * shown, false, arc)
     }
 
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
@@ -270,8 +327,11 @@ class RearDialView(context: Context) : View(context) {
                 val barLeft = BAR_LEFT
                 val barRight = BAR_RIGHT
                 canvas.drawRect(barLeft, y, barRight, y + barH, barTrack)
-                // Time for the session row, utilisation for the rest.
-                val fraction = if (isSession) sessionElapsed(w.resetsAt) else w.utilization
+                // Time for the session row, utilisation for the rest. Keyed per account
+                // AND per window kind so each bar keeps its own momentum — one shared
+                // spring would drag every row along with whichever value moved.
+                val target = if (isSession) sessionElapsed(w.resetsAt) else w.utilization
+                val fraction = springTo("bar:${account.name}:${w.kind.name}", target)
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
@@ -281,6 +341,8 @@ class RearDialView(context: Context) : View(context) {
                 // a bar at 60% look identical to one at 10%.
                 barFill.color = when {
                     status?.health != Health.OK -> Panel.Palette.DIM
+                    // Ramp reads the animated value, like the ring, so the colour
+                    // travels with the bar rather than snapping ahead of it.
                     // Deliberately NOT the ramp. On a usage bar, filling up means
                     // approaching a limit, and the green-to-red ramp says so. On this
                     // bar filling up means the window is about to RESET, which is good
@@ -288,7 +350,7 @@ class RearDialView(context: Context) : View(context) {
                     // one colour language. The account accent keeps it legible and
                     // marks it as a different kind of measure from the rows beneath.
                     isSession -> account.accent
-                    else -> RampColor.at(w.utilization)
+                    else -> RampColor.at(fraction)
                 }
                 canvas.drawRect(
                     barLeft, y,
@@ -297,7 +359,11 @@ class RearDialView(context: Context) : View(context) {
                 )
                 value.color = barFill.color
                 canvas.drawText(
-                    if (isSession) countdown(w.resetsAt) else "${(w.utilization * 100).toInt()}%",
+                    // The number counts with the bar. Springing the bar while the label
+                    // jumps straight to the new figure would make them disagree for the
+                    // whole animation. The session row is exempt: its label is a
+                    // countdown, not a share of the bar's length.
+                    if (isSession) countdown(w.resetsAt) else "${(fraction * 100).toInt()}%",
                     right, y + barH - 4f, value,
                 )
                 y += rowPitch
@@ -443,6 +509,24 @@ class RearDialView(context: Context) : View(context) {
          * Used to seat the mark on the text baseline; see drawTitle.
          */
         private const val LOGO_BOTTOM_PAD = 4f / 24f
+
+        /**
+         * Spring constants, in SI-ish units against a seconds-based dt.
+         *
+         * Damping ratio is DAMPING / (2 * sqrt(STIFFNESS)) = 4.2 / 7.48 = 0.56 —
+         * underdamped, so a change overshoots by roughly a tenth and settles back.
+         * That overshoot is the point: it is what makes the movement register as a
+         * spring rather than a slow lerp. Settling time is about 4 / (zeta * omega) =
+         * 4 / 2.1, near enough two seconds.
+         */
+        private const val STIFFNESS = 14f
+        private const val DAMPING = 4.2f
+
+        /** Below this, in both value and velocity, a spring counts as arrived. */
+        private const val EPSILON = 0.0005f
+
+        /** Longest dt any single frame may integrate. See onDraw. */
+        private const val MAX_FRAME_DT = 0.05f
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
