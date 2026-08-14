@@ -23,6 +23,22 @@ class UsageRepository(
 ) {
     /** Set by the poll service so a completed refresh can be remembered across restarts. */
     var onFetchCompleted: (() -> Unit)? = null
+
+    /**
+     * Seeds state from the last persisted snapshot, without spending a request.
+     *
+     * A restart otherwise leaves the panel empty until the next poll — up to a full
+     * interval of blankness for data we already had. Restoring means the panel renders
+     * the last known values immediately and the next fetch still happens on the
+     * original schedule.
+     *
+     * Only ever called before polling begins; it must not clobber fresher data.
+     */
+    fun restore(cached: DashboardState) {
+        if (_state.value.statuses.isEmpty() && cached.statuses.isNotEmpty()) {
+            _state.value = cached
+        }
+    }
     private val _state = MutableStateFlow(DashboardState.EMPTY)
     val state: StateFlow<DashboardState> = _state.asStateFlow()
 
