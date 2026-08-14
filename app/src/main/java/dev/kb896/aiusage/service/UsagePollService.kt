@@ -107,6 +107,21 @@ class UsagePollService : Service() {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
         })
+        // Place the panel NOW, before either loop's first delay.
+        //
+        // This is the whole recovery story for an app that has been killed: the panel
+        // dies with the app (RearActivity is ours, in our own :rear process, and
+        // force-stop takes the Shizuku user service with it since Shizuku names that
+        // process after our package). Nothing outside the app can bring it back, so
+        // starting the app has to. Without this the poll loop waits out
+        // initialDelayMs() — up to a full 5 minutes if a fetch completed recently —
+        // and the watchdog waits its own 20s, so opening the app to fix a dead panel
+        // left it dead for another 20s at best.
+        //
+        // Uses cached state and makes no network call, so it costs nothing against
+        // the rate limit and cannot re-introduce the request bursts.
+        scope.launch { safeSupervise() }
+
         scope.launch {
             val initial = initialDelayMs()
             if (initial > 0) {
