@@ -8,10 +8,18 @@ data class RingGeometry(val cx: Float, val cy: Float, val radius: Float, val str
 data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
 
     companion object {
-        /** Estimates. Replaced with measured values at the end of Task 5. */
+        /**
+         * Measured, not estimated — do not "correct" these back toward round numbers.
+         *
+         * Confirmed visually on device f940914b (Xiaomi 17 Pro, 25098PN5AC) on
+         * 2026-08-14: both ring rulers seated concentric on the physical camera
+         * lenses via the CalibrationView grid, nudged live from the original
+         * estimate (cy1 152 -> 147, cy2 420 -> 425); cx, radius and stroke were
+         * already correct as estimated.
+         */
         val DEFAULT = PanelGeometry(
-            personal = RingGeometry(cx = 148f, cy = 152f, radius = 108f, stroke = 17f),
-            work = RingGeometry(cx = 148f, cy = 420f, radius = 108f, stroke = 17f),
+            personal = RingGeometry(cx = 148f, cy = 147f, radius = 108f, stroke = 17f),
+            work = RingGeometry(cx = 148f, cy = 425f, radius = 108f, stroke = 17f),
         )
 
         /**
