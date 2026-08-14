@@ -124,11 +124,10 @@ class RearDialView(context: Context) : View(context) {
         if (status == null || session == null || status.health == Health.AUTH) return
 
         arc.strokeWidth = g.stroke
-        arc.color = if (status.health == Health.OK) {
-            RampColor.at(session.utilization)
-        } else {
-            Panel.Palette.DIM
-        }
+        // Always the ramp colour, never dimmed — the user's call. Trust is signalled
+        // by the tag beside the account label and the footer's staleness marker
+        // instead, so the numbers stay readable at a glance.
+        arc.color = RampColor.at(session.utilization)
         canvas.drawArc(scratch, -90f, 360f * session.utilization.coerceIn(0f, 1f), false, arc)
     }
 
@@ -183,8 +182,15 @@ class RearDialView(context: Context) : View(context) {
 
         var y = regionTop + gap
         for ((account, status, rows) in blocks) {
-            heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
+            heading.color = account.accent
             canvas.drawText(account.label, left, y, heading)
+            // Colour no longer encodes trust, so state is spelled out instead. Without
+            // this a stale or unauthenticated account would render identically to a
+            // live one, which is the one thing a status display must never do.
+            healthTag(status?.health)?.let { tag ->
+                label.color = Panel.Palette.DIM
+                canvas.drawText(tag, left + heading.measureText(account.label) + 14f, y, label)
+            }
             y += headingAdvance
 
             for (w in rows) {
@@ -195,9 +201,7 @@ class RearDialView(context: Context) : View(context) {
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
-                barFill.color = if (status?.health == Health.OK) {
-                    barColor(w.utilization, account.accent)
-                } else Panel.Palette.DIM
+                barFill.color = barColor(w.utilization, account.accent)
                 canvas.drawRect(
                     barLeft, y,
                     barLeft + (barRight - barLeft) * w.utilization.coerceIn(0f, 1f),
@@ -245,6 +249,18 @@ class RearDialView(context: Context) : View(context) {
         ray.setTint(Panel.Palette.PERSONAL)
         ray.setBounds(Panel.WIDTH - 34 - w, Panel.HEIGHT - 26 - h, Panel.WIDTH - 34, Panel.HEIGHT - 26)
         ray.draw(canvas)
+    }
+
+    /**
+     * Short marker shown beside an account whose numbers cannot be vouched for.
+     * null when the account is healthy, so nothing is drawn in the common case.
+     */
+    private fun healthTag(health: Health?): String? = when (health) {
+        null -> null
+        Health.OK -> null
+        Health.AUTH -> "SIGN IN"
+        Health.STALE -> "STALE"
+        Health.ERROR -> "ERROR"
     }
 
     /** resetsAt is nullable: an unused window has nothing to reset. */
