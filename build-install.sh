@@ -28,5 +28,21 @@ export JAVA_HOME
 "$ADB" -s "$DEVICE" push app/build/outputs/apk/debug/app-debug.apk "$STAGE" >/dev/null
 "$ADB" -s "$DEVICE" shell pm install -r "$STAGE"
 "$ADB" -s "$DEVICE" shell rm -f "$STAGE"
-"$ADB" -s "$DEVICE" shell am start -n "$PKG/.ui.MainActivity" >/dev/null
-echo "✓ installed and launched on $DEVICE"
+
+# Launching the front UI is OPT-IN, and that matters more than it looks.
+#
+# This used to run unconditionally, so every install threw MainActivity onto the
+# phone's main screen. During a tuning session that is one interruption per build,
+# and it is indistinguishable — from the far side of the phone — from the rear
+# panel's "override" jumping to the front screen, which is a real bug this project
+# has chased separately. At least one report of that bug was in fact this line.
+#
+# The panel does not need it: UsagePollService is already running and its watchdog
+# re-places the rear activity on its own. Pass LAUNCH=1 when you actually want the
+# front UI, e.g. to tap Import or Sign in.
+if [ "${LAUNCH:-0}" = "1" ]; then
+  "$ADB" -s "$DEVICE" shell am start -n "$PKG/.ui.MainActivity" >/dev/null
+  echo "✓ installed and launched on $DEVICE"
+else
+  echo "✓ installed on $DEVICE (front UI not launched; LAUNCH=1 to open it)"
+fi
