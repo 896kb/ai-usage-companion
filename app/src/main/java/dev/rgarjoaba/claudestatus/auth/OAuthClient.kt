@@ -80,8 +80,9 @@ class OAuthClient(
             .post(form).build()
         try {
             client.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) throw Failure("exchange: HTTP ${res.code}")
-                return toRecord(parseObject(res.body?.string().orEmpty(), "exchange"), "")
+                val body = res.body?.string().orEmpty()
+                if (!res.isSuccessful) throw Failure("exchange: HTTP ${res.code}${oauthError(body)}")
+                return toRecord(parseObject(body, "exchange"), "")
             }
         } catch (e: IOException) {
             throw Failure("exchange: ${e.javaClass.simpleName}")
@@ -95,6 +96,29 @@ class OAuthClient(
      * Mirrors UsageParser's narrow SerializationException catch. [context] only labels
      * which caller failed ("refresh" / "exchange"); it never carries response content.
      */
+    /**
+     * Extracts RFC 6749's `error` code from a failed token response — and **only** that
+     * field. Returns "" if absent or unparseable.
+     *
+     * Without this a 400 is undiagnosable: "exchange: HTTP 400" cannot distinguish a
+     * wrong client id from an expired code from a redirect-uri mismatch, and the OAuth
+     * flow is the one part of this app that cannot be tested without a live account.
+     *
+     * `error` is a bounded, spec-defined token ("invalid_grant", "invalid_client",
+     * "unsupported_grant_type"). It carries no credential material.
+     *
+     * `error_description` is deliberately NOT included, though it is the more
+     * informative field. It is free text at the server's discretion, and a server is
+     * entirely at liberty to write "the code 'abc123' has expired" — which would put a
+     * live authorization code into an exception message that gets logged. The bounded
+     * field is worth surfacing; the unbounded one is not.
+     */
+    private fun oauthError(body: String): String = try {
+        val o = Json.parseToJsonElement(body) as? JsonObject
+        val err = (o?.get("error") as? JsonPrimitive)?.contentOrNull
+        if (err.isNullOrBlank()) "" else " ($err)"
+    } catch (_: Exception) { "" }
+
     internal fun parseObject(body: String, context: String): JsonObject {
         val parsed = try {
             Json.parseToJsonElement(body)

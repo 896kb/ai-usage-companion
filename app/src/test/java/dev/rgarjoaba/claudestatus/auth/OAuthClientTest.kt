@@ -51,14 +51,34 @@ class OAuthClientTest {
         assertTrue(!f.message!!.contains("verifier-secret"))
     }
 
-    @Test fun `exchange on a non-2xx response raises a Failure without echoing the code or verifier`() {
+    /**
+     * The spec-defined `error` code IS surfaced — deliberately. Without it a 400 is
+     * undiagnosable, and this flow cannot be tested without a live account.
+     * `error_description` is NOT surfaced, because it is free text the server chooses
+     * and could contain the submitted code; the next test pins that.
+     */
+    @Test fun `exchange surfaces the OAuth error code but never the code or verifier`() {
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"invalid_grant"}"""))
         val f = runCatching {
             client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback")
         }.exceptionOrNull() as OAuthClient.Failure
         assertTrue(!f.message!!.contains("auth-code-secret"))
         assertTrue(!f.message!!.contains("verifier-secret"))
-        assertTrue(!f.message!!.contains("invalid_grant"))
+        assertTrue("should surface the error code", f.message!!.contains("invalid_grant"))
+    }
+
+    @Test fun `exchange never surfaces error_description, which can echo the code`() {
+        server.enqueue(
+            MockResponse().setResponseCode(400).setBody(
+                """{"error":"invalid_grant","error_description":"the code auth-code-secret has expired"}"""
+            )
+        )
+        val f = runCatching {
+            client.exchange("auth-code-secret", "verifier-secret", "http://localhost:54545/callback")
+        }.exceptionOrNull() as OAuthClient.Failure
+        assertTrue("must not echo error_description", !f.message!!.contains("has expired"))
+        assertTrue("must not leak the code via error_description", !f.message!!.contains("auth-code-secret"))
+        assertTrue(f.message!!.contains("invalid_grant"))
     }
 
     @Test fun `exchange parses a successful token response`() {
