@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.SystemClock
 import android.view.View
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
@@ -49,6 +50,30 @@ class RearDialView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(Panel.Palette.BG)
+        // Burn-in mitigation, applied unconditionally. The panel is always-on at the
+        // user's explicit request (RearActivity holds FLAG_KEEP_SCREEN_ON with no
+        // toggle — MIUI otherwise kills the rear display in about five seconds), so
+        // there is no "off" state during which this composition isn't lit. Two fixed
+        // rings, four fixed bars, a fixed corner mark, all saturated colour, never
+        // otherwise moving, is close to worst-case burn-in geometry for an OLED panel.
+        // This translate is the only thing standing between that and irreversible
+        // ghosting — it is load-bearing, not cosmetic. Do not gate it behind a flag,
+        // do not make it conditional, and do not remove it to "simplify" this method.
+        //
+        // Applied before drawRing/drawCanvasSide so it moves the *entire* composition,
+        // including the ACRNM mark drawn at the end of drawCanvasSide — small, bright,
+        // high-contrast and pinned to one corner, the single highest burn-in risk on
+        // the panel. A drift that moved the bars but left the mark pinned would miss
+        // the worst offender. drawColor above is unaffected (it fills the canvas's
+        // clip, not a shape, so it ignores the transform) which is correct: the
+        // background is uniform, it has nothing to protect against ghosting.
+        //
+        // SystemClock.elapsedRealtime(), not System.currentTimeMillis(): this must be
+        // monotonic so an NTP correction or timezone change can't produce a sudden,
+        // meaningless jump in drawn position. Same reasoning as RearActivity's
+        // armEvictionTimer() guard, which uses the same clock for the same reason.
+        val (dx, dy) = driftOffset(SystemClock.elapsedRealtime())
+        canvas.translate(dx, dy)
         drawRing(canvas, geometry.personal, Account.PERSONAL)
         drawRing(canvas, geometry.work, Account.WORK)
         drawCanvasSide(canvas)
@@ -130,13 +155,31 @@ class RearDialView(context: Context) : View(context) {
         }
     }
 
-    /** Reset countdown for the personal session window, or an em dash. */
+    /**
+     * Reset countdown for the personal session window, or an em dash. Also carries
+     * the staleness marker (Task 16), right-aligned on the same row, when the data
+     * is too old to present as live.
+     *
+     * The marker's right edge is anchored to the ACRNM mark's *left* edge (mark box
+     * is Panel.WIDTH - 34 - 260 .. Panel.WIDTH - 34, same 260/66 as drawMark below),
+     * not to the panel's own right margin. This row shares its y-band with the mark
+     * (mark bottom sits at HEIGHT - 26, this text's baseline at HEIGHT - 40, both
+     * inside the mark's 66px height), so right-aligning to the panel edge would draw
+     * the marker underneath the mark itself. Aligning to the mark's left edge instead
+     * keeps the two in their own horizontal lanes on the shared row.
+     */
     private fun drawFooter(canvas: Canvas) {
         val left = Panel.CUTOUT_RIGHT + 34f
         val session = state.statuses.firstOrNull { it.account == Account.PERSONAL }
             ?.snapshot?.windows?.firstOrNull { it.kind == WindowKind.SESSION }
         label.color = Panel.Palette.DIM
         canvas.drawText("5H RESETS ${countdown(session?.resetsAt)}", left, Panel.HEIGHT - 40f, label)
+
+        val stale = staleLabel(state.fetchedAt, System.currentTimeMillis())
+        if (stale != null) {
+            value.color = Panel.Palette.DIM
+            canvas.drawText(stale, Panel.WIDTH - 34f - 260f - 20f, Panel.HEIGHT - 40f, value)
+        }
     }
 
     /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit the drawable. */
@@ -164,6 +207,49 @@ class RearDialView(context: Context) : View(context) {
             utilization >= 0.90f -> Panel.Palette.CRIT
             utilization >= 0.75f -> Panel.Palette.WARN
             else -> accent
+        }
+
+        /**
+         * Null while the data is fresh enough to present as live. `fetchedAt` is
+         * [dev.kb896.aiusage.data.DashboardState.fetchedAt] — wall-clock
+         * epoch millis stamped by UsageRepository.refresh() and carried across the
+         * ACTION_STATE broadcast into this process, so `now` must be wall-clock too
+         * (System.currentTimeMillis(), as drawFooter calls this) to compare against
+         * it meaningfully; a monotonic clock on one side and wall-clock on the other
+         * would compare unrelated epochs.
+         */
+        @JvmStatic
+        fun staleLabel(fetchedAt: Long, now: Long): String? {
+            val age = now - fetchedAt
+            if (age < 2 * 60_000L) return null
+            val mins = age / 60_000L
+            return if (mins >= 60) "⟳ ${mins / 60}h" else "⟳ ${mins}m"
+        }
+
+        /**
+         * Slow sub-pixel wander so a permanently-lit panel doesn't ghost. 10-minute
+         * period, ±4px, applied to the whole composition including the ACRNM mark —
+         * see onDraw for why this is load-bearing rather than cosmetic now that the
+         * panel is always-on unconditionally.
+         *
+         * `now` should be a monotonic clock (SystemClock.elapsedRealtime()) at the
+         * call site — see onDraw's KDoc. This function itself is clock-agnostic; it
+         * just needs a steadily-increasing Long, verified by StalenessTest.
+         *
+         * ±4px and a 10-minute period are the brief's numbers, written for the
+         * original opt-in/default-off toggle design. They still hold here — see
+         * the task report for the tradeoff analysis now that the panel runs this
+         * unconditionally, 24/7. Do not change these without checking that analysis
+         * and the ring geometry margins in PanelGeometry.DEFAULT first: this
+         * function's contract (StalenessTest's `dx in -4f..4f && dy in -4f..4f`)
+         * pins the amplitude, and PanelGeometry's default ring placement has as
+         * little as ~1-2px of margin from the panel edge at this amplitude already.
+         */
+        @JvmStatic
+        fun driftOffset(now: Long): Pair<Float, Float> {
+            val period = 600_000.0
+            val phase = (now % period.toLong()) / period * 2 * Math.PI
+            return (Math.sin(phase) * 4).toFloat() to (Math.cos(phase) * 4).toFloat()
         }
     }
 }
