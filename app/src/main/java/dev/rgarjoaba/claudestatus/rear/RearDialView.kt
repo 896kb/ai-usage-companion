@@ -169,9 +169,16 @@ class RearDialView(context: Context) : View(context) {
         val left = Panel.CUTOUT_RIGHT + 34f
         val size = TITLE_LOGO_SIZE
         logo.setTint(Panel.Palette.WORK)
+        // The drawable's box is not its ink: the glyph occupies rows 5..20 of a 24-unit
+        // viewBox, so the bottom sixth of the box is empty. Bottom-aligning the BOX to
+        // the text baseline therefore leaves the mark visibly floating, by a gap that
+        // grows every time the size does. Pushing the box down by that empty fraction
+        // puts the glyph's own bottom edge on the baseline instead, which is what
+        // "aligned with the text" means and what stays true at any size.
+        val bottom = TITLE_BASELINE + size * LOGO_BOTTOM_PAD
         logo.setBounds(
-            left.toInt(), (TITLE_BASELINE - size).toInt(),
-            (left + size).toInt(), TITLE_BASELINE.toInt(),
+            left.toInt(), (bottom - size).toInt(),
+            (left + size).toInt(), bottom.toInt(),
         )
         logo.draw(canvas)
         canvas.drawText("CLAUDE USAGE", left + size + 16f, TITLE_BASELINE, title)
@@ -338,7 +345,14 @@ class RearDialView(context: Context) : View(context) {
          * line regardless of the font's own metrics.
          */
         private const val TITLE_BASELINE = 54f
-        private const val TITLE_LOGO_SIZE = 34f
+        private const val TITLE_LOGO_SIZE = 48f
+
+        /**
+         * Fraction of the drawable's box that sits BELOW the glyph's ink — the source
+         * path spans rows 5..20 of a 24-unit viewBox, leaving 4/24 empty at the bottom.
+         * Used to seat the mark on the text baseline; see drawTitle.
+         */
+        private const val LOGO_BOTTOM_PAD = 4f / 24f
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
