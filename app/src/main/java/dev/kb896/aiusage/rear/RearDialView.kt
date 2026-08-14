@@ -203,6 +203,11 @@ class RearDialView(context: Context) : View(context) {
             y += headingAdvance
 
             for (w in rows) {
+                // Row labels take the account accent while the data is good, and only
+                // go grey when it cannot be vouched for — same rule as the heading and
+                // the bar. Previously they were permanently DIM, which read as
+                // "disabled" even on a healthy account.
+                label.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
                 canvas.drawText(w.label, left, y + barH - 4f, label)
                 val barLeft = left + 92f
                 val barRight = right - 72f
