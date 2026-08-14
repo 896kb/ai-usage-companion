@@ -35,14 +35,14 @@ class RearDialView(context: Context) : View(context) {
     private val scratch = RectF()
 
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Panel.Palette.DIM; textSize = 12f
+        color = Panel.Palette.DIM; textSize = 18f
         typeface = resources.getFont(R.font.departure_mono)
     }
     private val heading = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 15f; typeface = label.typeface
+        textSize = 22.5f; typeface = label.typeface
     }
     private val value = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 14f; typeface = label.typeface; textAlign = Paint.Align.RIGHT
+        textSize = 21f; typeface = label.typeface; textAlign = Paint.Align.RIGHT
     }
     private val barTrack = Paint().apply { color = Panel.Palette.TRACK }
     private val barFill = Paint()
