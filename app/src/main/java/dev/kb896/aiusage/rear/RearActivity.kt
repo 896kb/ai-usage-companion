@@ -6,19 +6,16 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
-import android.view.Gravity
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.data.StatePayload
 
 class RearActivity : Activity() {
 
@@ -38,8 +35,7 @@ class RearActivity : Activity() {
         const val STRAND_GRACE_MS = 4_000L
     }
 
-    private lateinit var dump: TextView
-    private lateinit var dumpContainer: FrameLayout
+    private lateinit var dial: RearDialView
     private lateinit var calibrationView: CalibrationView
     private var calibrating = false
     private var geometry = PanelGeometry.DEFAULT
@@ -56,13 +52,14 @@ class RearActivity : Activity() {
             // dispatching on action.
             geometry = PanelGeometry.fromExtras(intent?.extras, geometry)
             calibrationView.geometry = geometry
+            dial.geometry = geometry
             when (intent?.action) {
                 ACTION_FINISH -> finish()
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
                 // leave the current mode untouched. Re-evaluating unconditionally with
                 // `.orEmpty()` treated a missing extra the same as an explicit empty
                 // payload, isCalibrate("") is false, and a nudge mid-calibration would
-                // silently swap back to the text dump and drop FLAG_KEEP_SCREEN_ON —
+                // silently swap back to the ring view and drop FLAG_KEEP_SCREEN_ON —
                 // panel goes dark mid-measurement. Only render on a genuine state update.
                 ACTION_STATE -> if (intent.hasExtra(EXTRA_STATE)) {
                     render(intent.getStringExtra(EXTRA_STATE).orEmpty())
@@ -88,19 +85,8 @@ class RearActivity : Activity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         calibrationView = CalibrationView(this)
-        dump = TextView(this).apply {
-            setTextColor(Panel.Palette.FG)
-            typeface = Typeface.MONOSPACE
-            textSize = 9f
-            gravity = Gravity.CENTER
-        }
-        dumpContainer = FrameLayout(this).apply {
-            setBackgroundColor(Panel.Palette.BG)
-            addView(dump, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT))
-        }
-        setContentView(dumpContainer)
+        dial = RearDialView(this)
+        setContentView(dial)
 
         // No-op until we are actually on the rear panel — see hideBars().
         hideBars()
@@ -117,7 +103,7 @@ class RearActivity : Activity() {
         val wantCalibrate = CalibrateMode.isCalibrate(payload)
         if (wantCalibrate != calibrating) {
             calibrating = wantCalibrate
-            setContentView(if (calibrating) calibrationView else dumpContainer)
+            setContentView(if (calibrating) calibrationView else dial)
             // FLAG_KEEP_SCREEN_ON only in calibrate mode — the spec forbids it as a
             // default; a permanently-lit panel is exactly the battery/burn-in cost
             // this design exists to avoid. MIUI powers the panel down within seconds
@@ -129,12 +115,9 @@ class RearActivity : Activity() {
             }
         }
         if (!calibrating) {
-            dump.text = "display=${display?.displayId}  ${width()}x${height()}\n\n$payload"
+            dial.state = StatePayload.decode(payload)
         }
     }
-
-    private fun width() = window.decorView.width
-    private fun height() = window.decorView.height
 
     /**
      * Immersive mode, but ONLY once we are actually on the rear panel.
