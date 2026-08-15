@@ -429,17 +429,21 @@ class RearDialView(context: Context) : View(context) {
         val cell = (CONTENT_RIGHT - CONTENT_LEFT) / clips.size
 
         for ((i, clip) in clips.withIndex()) {
-            val w = h * clip.aspect
+            val ch = h * clip.scale
+            val w = ch * clip.aspect
             // Centred within its own cell horizontally, but sharing the baseline.
             val left = CONTENT_LEFT + i * cell + (cell - w) / 2f
             val frame = clip.frames[
                 ((System.currentTimeMillis() / MASCOT_FRAME_MS) % clip.frames.size).toInt()
             ]
+            // Scaled clips grow upward from the shared baseline, so every figure still
+            // stands on the same line.
+            val clipTop = bottom - ch
             for (r in frame) {
                 mascotPaint.color = r.color
                 canvas.drawRect(
-                    left + r.x * w, top + r.y * h,
-                    left + (r.x + r.w) * w, top + (r.y + r.h) * h,
+                    left + r.x * w, clipTop + r.y * ch,
+                    left + (r.x + r.w) * w, clipTop + (r.y + r.h) * ch,
                     mascotPaint,
                 )
             }
@@ -577,13 +581,14 @@ class RearDialView(context: Context) : View(context) {
         private const val MARK_BOTTOM = 26
 
         /**
-         * Mascot size and gait. 8 frames at MASCOT_FRAME_MS each; 125ms is 8fps, which
-         * reads as a walk rather than a twitch and is the slowest rate that still looks
-         * deliberate. Raising it raises the redraw rate of the WHOLE view, which is the
-         * real cost on an always-on display.
+         * Mascot size and gait. Raising the frame rate raises the redraw rate of the
+         * WHOLE view, which is the real cost on an always-on display — 83ms is 12fps.
          */
         private const val MASCOT_HEIGHT = 62f
-        private const val MASCOT_FRAME_MS = 125L
+        // 1.5x the original 125ms pace, at the user's request. Every clip shares it, so
+        // the 8-frame and 36-frame animations stay in step rather than one appearing to
+        // play in slow motion.
+        private const val MASCOT_FRAME_MS = 83L
 
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
