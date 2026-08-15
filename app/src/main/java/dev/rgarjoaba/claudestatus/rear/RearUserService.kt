@@ -18,6 +18,9 @@ class RearUserService : IRearService.Stub {
     private var lastPayload: String = "{}"
     private var keepAlive: Thread? = null
 
+    /** Consecutive failed attempts to move the panel off the main display. */
+    private var strandStrikes = 0
+
     override fun destroy() = exitProcess(0)
 
     /**
@@ -124,13 +127,25 @@ class RearUserService : IRearService.Stub {
      */
     override fun ensureOnRear(displayId: Int): Boolean {
         if (displayId < 0) return false
-        if (compositingOnRear() != false) return false
+        if (compositingOnRear() != false) { strandStrikes = 0; return false }
         val task = taskId()
         if (task <= 0) return false
-        Log.w(TAG, "task $task stranded on the main display — moving it back to $displayId")
+        strandStrikes++
+        Log.w(TAG, "task $task compositing on the MAIN display (strike $strandStrikes) — moving it back")
         exec("service call activity_task 50 i32 $task i32 $displayId")
         wake(displayId)
         placedDisplayId = displayId
+
+        // Last resort. If repeated moves will not get it off the main display, the
+        // panel is sitting on top of whatever the user is actually doing, and no
+        // amount of patience improves that. Tearing it down is the lesser harm — the
+        // keep-alive re-places it afterwards, and a panel that flickers is better than
+        // one parked over the foreground app.
+        if (strandStrikes >= MAX_STRAND_STRIKES) {
+            Log.e(TAG, "still on the main display after $strandStrikes moves — finishing")
+            strandStrikes = 0
+            hide()
+        }
         return true
     }
 
@@ -174,9 +189,21 @@ class RearUserService : IRearService.Stub {
             if (!out.substring(start, end).contains("RearActivity")) continue
             if (m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)) onRear = true else onMain = true
         }
+        // ON MAIN WINS, even when it is also on the rear. Observed on device: the panel
+        // drawing as a 904x572 box over the user's foreground app while
+        // Activity.getDisplay() and `dumpsys window` both reported display 1 and the
+        // layer appeared under BOTH display sections. Whatever the bookkeeping says, a
+        // layer on the main display is pixels the user is looking at, and that is the
+        // condition worth acting on.
+        //
+        // This reverses the earlier rule, which preferred "present on rear" to avoid
+        // acting on a stale leftover. That caution was wrong for THIS layer: it made
+        // the one genuinely visible failure undetectable. The cost of being wrong is a
+        // redundant move, which is cheap and invisible; the cost of missing it is the
+        // user staring at the panel on the wrong screen.
         return when {
-            onRear -> true
             onMain -> false
+            onRear -> true
             else -> null
         }
     }
@@ -300,6 +327,9 @@ class RearUserService : IRearService.Stub {
          * short-circuits to update+wake), so a duplicate tick costs one dumpsys.
          */
         const val KEEPALIVE_MS = 20_000L
+
+        /** Corrective moves to try before evicting a panel stuck on the main display. */
+        const val MAX_STRAND_STRIKES = 3
 
         const val TAG = "ClaudeStatusRear"
         const val PKG = "dev.rgarjoaba.claudestatus"
