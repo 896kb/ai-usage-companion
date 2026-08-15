@@ -338,11 +338,17 @@ class RearDialView(context: Context) : View(context) {
                 val barLeft = BAR_LEFT
                 val barRight = BAR_RIGHT
                 canvas.drawRect(barLeft, y, barRight, y + barH, barTrack)
-                // Time for the session row, utilisation for the rest. Keyed per account
-                // AND per window kind so each bar keeps its own momentum — one shared
-                // spring would drag every row along with whichever value moved.
-                val target = if (isSession) sessionElapsed(w.resetsAt) else w.utilization
-                val fraction = springTo("bar:${account.name}:${w.kind.name}", target)
+                // EVERY bar is utilisation, including the session row. It used to plot
+                // time elapsed through the 5h window, which meant the same bar shape
+                // carried two different meanings on one panel — and disagreed with the
+                // ring drawn around the lens for that very window, which has always
+                // shown utilisation. The countdown is not lost: it stays in the value
+                // column, which is the only place a reset time appears at all.
+                //
+                // Keyed per account AND per window kind so each bar keeps its own
+                // momentum — one shared spring would drag every row along with
+                // whichever value moved.
+                val fraction = springTo("bar:${account.name}:${w.kind.name}", w.utilization)
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
@@ -350,19 +356,17 @@ class RearDialView(context: Context) : View(context) {
                 // colour language: green through amber to red as a window fills.
                 // Replaced the earlier accent-until-75%-then-escalate rule, which made
                 // a bar at 60% look identical to one at 10%.
-                barFill.color = when {
-                    status?.health != Health.OK -> Panel.Palette.DIM
-                    // Ramp reads the animated value, like the ring, so the colour
-                    // travels with the bar rather than snapping ahead of it.
-                    // Deliberately NOT the ramp. On a usage bar, filling up means
-                    // approaching a limit, and the green-to-red ramp says so. On this
-                    // bar filling up means the window is about to RESET, which is good
-                    // news — painting it red would invert the meaning of the panel's
-                    // one colour language. The account accent keeps it legible and
-                    // marks it as a different kind of measure from the rows beneath.
-                    isSession -> account.accent
-                    else -> RampColor.at(fraction)
-                }
+                // One rule for every bar, now that they all plot the same quantity.
+                // The session row used to be special-cased to the account accent, which
+                // was right while it plotted TIME — filling up then meant a reset was
+                // near, which is good news, and the green-to-red ramp would have
+                // inverted that meaning. Plotting utilisation, it means what every other
+                // bar means, so it is coloured the same way.
+                //
+                // The ramp reads the animated value, like the ring, so the colour
+                // travels with the bar rather than snapping ahead of it.
+                barFill.color =
+                    if (status?.health != Health.OK) Panel.Palette.DIM else RampColor.at(fraction)
                 canvas.drawRect(
                     barLeft, y,
                     barLeft + (barRight - barLeft) * fraction.coerceIn(0f, 1f),
@@ -424,22 +428,6 @@ class RearDialView(context: Context) : View(context) {
         Health.AUTH -> "SIGN IN"
         Health.STALE -> "STALE"
         Health.ERROR -> "ERROR"
-    }
-
-    /**
-     * How far through the 5-hour session window we are, 0..1.
-     *
-     * Derived from resetsAt because that is the only anchor the API gives us — there is
-     * no window-start field — and the window's length is fixed at five hours, which is
-     * what the row is labelled. Returns 0 when resetsAt is null: that means no session
-     * is running at all (the work account is in exactly that state whenever it has not
-     * been used), and an empty bar beside an em dash reads correctly as "nothing
-     * counting down", where a full bar would read as "about to reset".
-     */
-    private fun sessionElapsed(resetsAt: Long?): Float {
-        if (resetsAt == null) return 0f
-        val remaining = resetsAt - System.currentTimeMillis()
-        return ((SESSION_WINDOW_MS - remaining).toFloat() / SESSION_WINDOW_MS).coerceIn(0f, 1f)
     }
 
     /** resetsAt is nullable: an unused window has nothing to reset. */
@@ -507,9 +495,6 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
-
-        /** The session window's fixed length — see sessionElapsed. */
-        private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
 
         private const val TITLE_BASELINE = 54f
         private const val TITLE_LOGO_SIZE = 48f
