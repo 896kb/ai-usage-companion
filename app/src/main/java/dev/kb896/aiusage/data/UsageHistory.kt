@@ -57,7 +57,18 @@ class UsageHistory(private val context: Context) {
             }
             .orEmpty()
 
+    /**
+     * The latch deadline, persisted for the same reason the trail is: the service
+     * restarts often, and an in-memory hold would drop the lifting animation on every
+     * install or low-memory kill mid-effort.
+     */
+    fun holdUntil(account: Account): Long = prefs.getLong(holdKey(account), 0L)
+
+    fun saveHoldUntil(account: Account, at: Long) =
+        prefs.edit().putLong(holdKey(account), at).apply()
+
     private fun key(a: Account) = "u_${a.slug}"
+    private fun holdKey(a: Account) = "hold_${a.slug}"
 
     private companion object {
         const val PREFS = "usage_history"

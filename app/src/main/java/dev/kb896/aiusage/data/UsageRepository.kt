@@ -218,7 +218,9 @@ class UsageRepository(
         val now = System.currentTimeMillis()
         val earlier = h.before(account, MascotMood.WINDOW_MS, now)
         h.record(account, session.utilization, now)
-        return MascotMood.of(session.utilization, earlier)
+        val decision = MascotMood.decide(session.utilization, earlier, h.holdUntil(account), now)
+        h.saveHoldUntil(account, decision.holdUntil)
+        return decision.clip
     }
 
     private fun applyBackoff(account: Account, retryAfterSec: Long?) {
