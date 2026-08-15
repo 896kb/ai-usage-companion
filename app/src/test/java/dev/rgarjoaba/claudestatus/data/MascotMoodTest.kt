@@ -40,9 +40,16 @@ class MascotMoodTest {
      * is 0.010000005 in float32, so an "exactly 1%" case tests the arithmetic's rounding
      * rather than the rule. Values either side of it are what matter.
      */
-    @Test fun `the burst threshold is exclusive`() {
-        assertEquals(MascotMood.STAND, MascotMood.of(0.3090f, 0.30f))
-        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.3120f, 0.30f))
+    /**
+     * A single 1% step MUST fire. The API reports whole percentages, so this is the
+     * smallest change that can ever be observed — requiring strictly more than 1% means
+     * requiring 2%, and a steady 1%-per-minute burn would never trigger anything.
+     * A live trail off the device read 0.34, 0.35, 0.35, 0.36.
+     */
+    @Test fun `one whole percent is enough`() {
+        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.35f, 0.34f))
+        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.36f, 0.35f))
+        assertEquals(MascotMood.STAND, MascotMood.of(0.35f, 0.35f))
     }
 
     /**
