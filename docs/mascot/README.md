@@ -23,7 +23,7 @@ Recoloured here to the panel palette: body `#B5BD68` (Palette.WORK), eyes `#1D1F
 | `walk-8frame.svg` | **confetti** — mascot celebrating under falling confetti | 8 | 204 |
 | `cycle-11frame.svg` | **muscle** — mascot lifting dumbbells | 36 | 718 |
 | `detailed.svg` | **flag** — static mascot waving a checkered flag | 12 | 829 |
-| `pose.svg` | a single static pose | 1 | 9 |
+| `pose.svg` | the **walk** rig — see below | 1 (source) | 9 |
 
 The filenames are the names I first guessed and are now wrong; the table is the truth.
 
@@ -42,6 +42,28 @@ animated clips proved it differently:
 
 Composite frame *i* = every static rect, plus frame *i* of each sequence (short
 sequences wrap). `MascotFrames.kt` is generated on that model.
+
+## The walk is procedural, not frames
+
+There is no walk animation in any SVG, and that is not an oversight — the site builds it
+in JavaScript. From the minified GSAP timeline in chunk `5ce46cbd0cd22c82.js`:
+
+    .set(leg1, {svgOrigin: "16.5 60"})   .set(leg2, {svgOrigin: "37.5 60"})
+    .set(leg3, {svgOrigin: "69.5 60"})   .set(leg4, {svgOrigin: "90.5 60"})
+    .to([leg1, leg3], {scaleY: .45, duration: .1, ease: "power2.out"}, "walk")
+    .to([leg1, leg3], {scaleY: 1,   duration: .1, ease: "power2.in"},  "walk+=0.1")
+    .to([leg2, leg4], {scaleY: .45, ...},                              "walk+=0.1")
+
+Those four origins are exactly the leg rects' horizontal centres and their top edge in
+`pose.svg` (x=11/32/64/85, w=11 → centres 16.5/37.5/69.5/90.5; y=60). So the pivot is
+the top of each leg, each pair oscillates between full height and 45%, and legs 1+3 run
+antiphase to 2+4 — a diagonal quadruped gait. The body also translates horizontally over
+2.2s, which is the part that makes it read as walking rather than marching in place.
+
+The generator bakes 8 samples of one 0.2s cycle with the same power2 easing. The panel
+plays them at its 125ms frame time, stretching the gait to 1s — deliberately slower than
+the site, because matching it would mean redrawing the whole view at 40fps forever on an
+always-on display.
 
 ## Colour
 
