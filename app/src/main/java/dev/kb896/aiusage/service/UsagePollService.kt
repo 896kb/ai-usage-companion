@@ -180,6 +180,17 @@ class UsagePollService : Service() {
      * propagate normally, so it is rethrown rather than logged.
      */
     /**
+     * Fires on lock and unlock. Both are moments the system re-evaluates which
+     * activity shows over the keyguard, and both are when the panel was observed
+     * jumping to the front screen — so the corrective check runs immediately rather
+     * than waiting out the watchdog interval, which would leave the lock screen
+     * covered for up to 20 seconds. Makes no network call.
+     */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = safeSupervise()
+    }
+
+    /**
      * Post-placement check. Corrects, never tears down.
      *
      * This used to call bridge.hide() when the rear panel was not lit 8s after a
