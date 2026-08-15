@@ -50,11 +50,11 @@ class RearDialView(context: Context) : View(context) {
 
     /** Masthead type. Green rather than accent-coloured — see drawTitle. */
     private val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 34f; typeface = label.typeface; color = Panel.Palette.WORK
+        textSize = 40f; typeface = label.typeface; color = Panel.Palette.WORK
+        // Centred: the masthead now sits on the bar column's axis and carries no mark
+        // beside it, so it is measured from its middle rather than a left edge.
+        textAlign = Paint.Align.CENTER
     }
-
-    /** White mask, tinted at draw time — same contract as [ray]. */
-    private val logo = resources.getDrawable(R.drawable.claude_code, null)
 
     /**
      * Plan tag. Right-aligned to the value column so it sits over the percentages
@@ -272,23 +272,12 @@ class RearDialView(context: Context) : View(context) {
      * title and logo drifting apart is exactly what a copied hex value causes.
      */
     private fun drawTitle(canvas: Canvas) {
-        val left = CONTENT_LEFT
-        val size = TITLE_LOGO_SIZE
-        logo.setTint(Panel.Palette.WORK)
-        // The drawable's box is not its ink: the glyph occupies rows 5..20 of a 24-unit
-        // viewBox, so the bottom sixth of the box is empty. Bottom-aligning the BOX to
-        // the text baseline therefore leaves the mark visibly floating, by a gap that
-        // grows every time the size does. Pushing the box down by that empty fraction
-        // puts the glyph's own bottom edge on the baseline instead, which is what
-        // "aligned with the text" means and what stays true at any size.
-        val bottom = TITLE_BASELINE + size * LOGO_BOTTOM_PAD
-        logo.setBounds(
-            left.toInt(), (bottom - size).toInt(),
-            (left + size).toInt(), bottom.toInt(),
-        )
-        logo.draw(canvas)
-        canvas.drawText("CLAUDE USAGE", left + size + 16f, TITLE_BASELINE, title)
+        // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
+        // maker's mark follows, so the masthead and the artwork share one axis instead
+        // of each being centred on something different.
+        canvas.drawText("CLAUDE USAGE", (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
     }
+
 
     /**
      * 7-day window bars, one block per account. A window row is only drawn when the
@@ -600,15 +589,6 @@ class RearDialView(context: Context) : View(context) {
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
 
         private const val TITLE_BASELINE = 54f
-        private const val TITLE_LOGO_SIZE = 48f
-
-        /**
-         * Fraction of the drawable's box that sits BELOW the glyph's ink — the source
-         * path spans rows 5..20 of a 24-unit viewBox, leaving 4/24 empty at the bottom.
-         * Used to seat the mark on the text baseline; see drawTitle.
-         */
-        private const val LOGO_BOTTOM_PAD = 4f / 24f
-
         /**
          * Spring constants, in SI-ish units against a seconds-based dt.
          *
