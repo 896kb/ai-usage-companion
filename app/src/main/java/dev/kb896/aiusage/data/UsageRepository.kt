@@ -103,19 +103,19 @@ class UsageRepository(
             if (nowElapsed < until) {
                 Log.i(TAG, "${account.slug}: backing off ${(until - nowElapsed) / 1000}s more")
                 CallLog.record(account, "skipped, backoff ${(until - nowElapsed) / 1000}s")
-                return AccountStatus(account, Health.STALE, last, profiles?.tier(account))
+                return AccountStatus(account, Health.STALE, last, profiles?.tier(account), moodStale(last))
             }
         }
         val stored = store.load(account)
             ?: run {
                 Log.i(TAG, "${account.slug}: no stored credential")
-                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account))
+                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), moodStale(null))
             }
 
         val now = System.currentTimeMillis()
         if (stored.refreshExpired(now)) {
             Log.w(TAG, "${account.slug}: refresh token expired")
-            return AccountStatus(account, Health.AUTH, last, profiles?.tier(account))
+            return AccountStatus(account, Health.AUTH, last, profiles?.tier(account), moodStale(last))
         }
 
         val usable = if (stored.accessExpired(now)) {
@@ -124,7 +124,7 @@ class UsageRepository(
             } catch (e: Exception) {
                 Log.w(TAG, "${account.slug}: token refresh failed: ${e.message}")
                 CallLog.record(account, "refresh failed: ${e.message}")
-                return AccountStatus(account, Health.AUTH, last, profiles?.tier(account))
+                return AccountStatus(account, Health.AUTH, last, profiles?.tier(account), moodStale(last))
             }
         } else stored
 
@@ -140,14 +140,14 @@ class UsageRepository(
             if (e.kind == UsageApi.Kind.RATE_LIMITED) applyBackoff(account, e.retryAfterSec)
             // Keep the last good numbers, but never present them as live.
             Log.w(TAG, "${account.slug}: usage fetch failed: ${e.message}")
-            AccountStatus(account, healthFor(e.kind), last, profiles?.tier(account))
+            AccountStatus(account, healthFor(e.kind), last, profiles?.tier(account), moodStale(last))
         } catch (e: Exception) {
             // api.fetch is documented to only throw UsageApi.Failure, but that is an
             // implementation detail of a class this repository does not own. One
             // account's fetch must never be able to abort the sibling account's — see
             // the map over Account.entries in refresh(). Degrade this account only.
             Log.e(TAG, "${account.slug}: unexpected fetch error: ${e.javaClass.simpleName}")
-            AccountStatus(account, Health.ERROR, last, profiles?.tier(account))
+            AccountStatus(account, Health.ERROR, last, profiles?.tier(account), moodStale(last))
         }
     }
 
@@ -191,6 +191,26 @@ class UsageRepository(
      * assembled from one real reading repeated, which would silently stop the lifting
      * animation whenever the network was unreliable.
      */
+    /**
+     * Mood for an account whose fetch DEGRADED, from the snapshot it is still showing.
+     *
+     * Only the value-based outcomes are available here — an empty window celebrates, a
+     * spent one flies the flag. The burst deliberately cannot fire: it compares against
+     * a baseline, and a degraded account is re-showing an old reading, so any delta
+     * measured against it is between a number and itself.
+     *
+     * Skipping this entirely was the previous behaviour and it was wrong on screen: the
+     * panel still DISPLAYS a degraded account's last numbers, so leaving the mascot at
+     * its default meant a bar reading 0% with a mascot that was not celebrating —
+     * exactly the inconsistency a reader would take as a rendering bug rather than as
+     * stale data.
+     */
+    private fun moodStale(last: UsageSnapshot?): String {
+        val session = last?.windows?.firstOrNull { it.kind == WindowKind.SESSION }
+            ?: return MascotMood.STAND
+        return MascotMood.of(session.utilization, null)
+    }
+
     private fun moodFor(account: Account, snapshot: UsageSnapshot): String {
         val session = snapshot.windows.firstOrNull { it.kind == WindowKind.SESSION }
             ?: return MascotMood.STAND
