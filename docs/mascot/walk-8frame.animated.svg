@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 129 123" width="387" height="369">
+  <rect width="129" height="123" fill="#1D1F21"/>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="96" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="75" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="43" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="22" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="22" y="46" width="85" height="65" fill="#B5BD68"/>
+    <rect x="107" y="82" width="22" height="23" fill="#B5BD68"/>
+    <rect x="0" y="82" width="22" height="23" fill="#B5BD68"/>
+    <rect x="86" y="71" width="11" height="11" fill="#1D1F21"/>
+    <rect x="32" y="71" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.1s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="98" y="93" width="11" height="30" fill="#B5BD68"/>
+    <rect x="77" y="93" width="11" height="30" fill="#B5BD68"/>
+    <rect x="45" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="24" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="24" y="33" width="42" height="65" fill="#B5BD68"/>
+    <rect x="66" y="22" width="43" height="71" fill="#B5BD68"/>
+    <rect x="45" y="27" width="32" height="21" fill="#B5BD68"/>
+    <rect x="105" y="13" width="22" height="31" fill="#B5BD68"/>
+    <rect x="2" y="55" width="22" height="23" fill="#B5BD68"/>
+    <rect x="88" y="33" width="11" height="11" fill="#1D1F21"/>
+    <rect x="34" y="44" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.2s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="98" y="85" width="11" height="27" fill="#B5BD68"/>
+    <rect x="77" y="85" width="11" height="27" fill="#B5BD68"/>
+    <rect x="45" y="90" width="11" height="25" fill="#B5BD68"/>
+    <rect x="24" y="90" width="11" height="25" fill="#B5BD68"/>
+    <rect x="24" y="25" width="42" height="65" fill="#B5BD68"/>
+    <rect x="66" y="14" width="43" height="71" fill="#B5BD68"/>
+    <rect x="45" y="19" width="32" height="21" fill="#B5BD68"/>
+    <rect x="105" y="10" width="8" height="26" fill="#B5BD68"/>
+    <rect x="110" y="2" width="8" height="30" fill="#B5BD68"/>
+    <rect x="114" y="2" width="8" height="27" fill="#B5BD68"/>
+    <rect x="119" y="2" width="8" height="24" fill="#B5BD68"/>
+    <rect x="2" y="61" width="22" height="23" fill="#B5BD68"/>
+    <rect x="88" y="26" width="11" height="11" fill="#1D1F21"/>
+    <rect x="34" y="36" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.3s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="98" y="93" width="11" height="26" fill="#B5BD68"/>
+    <rect x="77" y="93" width="11" height="26" fill="#B5BD68"/>
+    <rect x="45" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="24" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="24" y="33" width="42" height="65" fill="#B5BD68"/>
+    <rect x="66" y="22" width="43" height="71" fill="#B5BD68"/>
+    <rect x="45" y="27" width="32" height="21" fill="#B5BD68"/>
+    <rect x="105" y="13" width="22" height="31" fill="#B5BD68"/>
+    <rect x="2" y="55" width="22" height="23" fill="#B5BD68"/>
+    <rect x="88" y="33" width="11" height="11" fill="#1D1F21"/>
+    <rect x="34" y="44" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.4s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="96" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="75" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="43" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="22" y="111" width="11" height="12" fill="#B5BD68"/>
+    <rect x="22" y="46" width="85" height="65" fill="#B5BD68"/>
+    <rect x="107" y="82" width="22" height="23" fill="#B5BD68"/>
+    <rect x="0" y="82" width="22" height="23" fill="#B5BD68"/>
+    <rect x="86" y="71" width="11" height="11" fill="#1D1F21"/>
+    <rect x="32" y="71" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.5s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="20" y="93" width="11" height="30" fill="#B5BD68"/>
+    <rect x="41" y="93" width="11" height="30" fill="#B5BD68"/>
+    <rect x="73" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="94" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="63" y="33" width="42" height="65" fill="#B5BD68"/>
+    <rect x="20" y="22" width="43" height="71" fill="#B5BD68"/>
+    <rect x="52" y="27" width="32" height="21" fill="#B5BD68"/>
+    <rect x="2" y="13" width="22" height="31" fill="#B5BD68"/>
+    <rect x="105" y="55" width="22" height="23" fill="#B5BD68"/>
+    <rect x="30" y="33" width="11" height="11" fill="#1D1F21"/>
+    <rect x="84" y="44" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.6s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="20" y="85" width="11" height="27" fill="#B5BD68"/>
+    <rect x="41" y="85" width="11" height="27" fill="#B5BD68"/>
+    <rect x="73" y="90" width="11" height="25" fill="#B5BD68"/>
+    <rect x="94" y="90" width="11" height="25" fill="#B5BD68"/>
+    <rect x="63" y="25" width="42" height="65" fill="#B5BD68"/>
+    <rect x="20" y="14" width="43" height="71" fill="#B5BD68"/>
+    <rect x="52" y="19" width="32" height="21" fill="#B5BD68"/>
+    <rect x="16" y="10" width="8" height="26" fill="#B5BD68"/>
+    <rect x="11" y="2" width="8" height="30" fill="#B5BD68"/>
+    <rect x="7" y="2" width="8" height="27" fill="#B5BD68"/>
+    <rect x="2" y="2" width="8" height="24" fill="#B5BD68"/>
+    <rect x="105" y="61" width="22" height="23" fill="#B5BD68"/>
+    <rect x="30" y="26" width="11" height="11" fill="#1D1F21"/>
+    <rect x="84" y="36" width="11" height="11" fill="#1D1F21"/>
+  </g>
+  <g visibility="hidden">
+    <set attributeName="visibility" to="visible" begin="0.7s" dur="0.1s" repeatCount="indefinite"/>
+    <rect x="20" y="93" width="11" height="26" fill="#B5BD68"/>
+    <rect x="41" y="93" width="11" height="26" fill="#B5BD68"/>
+    <rect x="73" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="94" y="98" width="11" height="25" fill="#B5BD68"/>
+    <rect x="63" y="33" width="42" height="65" fill="#B5BD68"/>
+    <rect x="20" y="22" width="43" height="71" fill="#B5BD68"/>
+    <rect x="52" y="27" width="32" height="21" fill="#B5BD68"/>
+    <rect x="2" y="13" width="22" height="31" fill="#B5BD68"/>
+    <rect x="105" y="55" width="22" height="23" fill="#B5BD68"/>
+    <rect x="30" y="33" width="11" height="11" fill="#1D1F21"/>
+    <rect x="84" y="44" width="11" height="11" fill="#1D1F21"/>
+  </g>
+</svg>

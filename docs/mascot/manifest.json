@@ -1,0 +1,30 @@
+[
+  {
+    "file": "walk-8frame.svg",
+    "source_index": 4,
+    "viewBox": "0 0 129 113",
+    "rects": 204,
+    "frameGroups": 8
+  },
+  {
+    "file": "cycle-11frame.svg",
+    "source_index": 2,
+    "viewBox": "0 0 158 128",
+    "rects": 718,
+    "frameGroups": 0
+  },
+  {
+    "file": "detailed.svg",
+    "source_index": 1,
+    "viewBox": "0 0 140 146",
+    "rects": 654,
+    "frameGroups": 0
+  },
+  {
+    "file": "pose.svg",
+    "source_index": 13,
+    "viewBox": "0 0 107 86",
+    "rects": 10,
+    "frameGroups": 0
+  }
+]
