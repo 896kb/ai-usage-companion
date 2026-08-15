@@ -6,6 +6,7 @@ import dev.kb896.aiusage.auth.TokenStore
 import dev.kb896.aiusage.data.ProfileApi
 import dev.kb896.aiusage.data.ProfileStore
 import dev.kb896.aiusage.data.UsageApi
+import dev.kb896.aiusage.data.UsageHistory
 import dev.kb896.aiusage.data.UsageRepository
 import dev.kb896.aiusage.rear.ShizukuBridge
 import okhttp3.OkHttpClient
@@ -23,6 +24,7 @@ class Graph private constructor(context: Context) {
     val repository = UsageRepository(
         UsageApi(http), OAuthClient(http), store,
         ProfileApi(http), ProfileStore(context.applicationContext),
+        UsageHistory(context.applicationContext),
     )
     val bridge = ShizukuBridge(context.applicationContext)
 

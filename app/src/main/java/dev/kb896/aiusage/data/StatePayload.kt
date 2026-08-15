@@ -32,6 +32,7 @@ object StatePayload {
                     put("state", s.health.wire)
                     put("hasSnapshot", s.snapshot != null)
                     s.planTier?.let { put("plan", it) }
+                    put("mascot", s.mascot)
                     put("fetchedAt", s.snapshot?.fetchedAt ?: 0L)
                     putJsonArray("windows") {
                         s.snapshot?.windows?.forEach { w ->
@@ -78,6 +79,7 @@ object StatePayload {
                     UsageSnapshot(windows, (o["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L)
                 } else null,
                 planTier = o.str("plan"),
+                mascot = o.str("mascot") ?: MascotMood.STAND,
             )
         }
         DashboardState((root["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, statuses)

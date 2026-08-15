@@ -9,6 +9,7 @@ import android.view.View
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.Account
+import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.Health
 import dev.kb896.aiusage.data.WindowKind
@@ -254,7 +255,8 @@ class RearDialView(context: Context) : View(context) {
     private fun drawCanvasSide(canvas: Canvas) {
         drawTitle(canvas)
         drawBars(canvas)
-        drawMascotRow(canvas)
+        drawMascots(canvas)
+        drawMark(canvas)
     }
 
     /**
@@ -288,6 +290,7 @@ class RearDialView(context: Context) : View(context) {
      * (`scope.model.display_name`), never a hardcoded model name.
      */
     private fun drawBars(canvas: Canvas) {
+        sessionBars.clear()
         val left = CONTENT_LEFT
         val right = CONTENT_RIGHT
 
@@ -400,6 +403,9 @@ class RearDialView(context: Context) : View(context) {
                 // Time-to-reset in its own column, so every window says when it turns
                 // over rather than only the session one.
                 canvas.drawText(remaining(w.resetsAt), TIME_RIGHT, y + barH - 4f, timeTag)
+                if (w.kind == WindowKind.SESSION) {
+                    sessionBars[account] = SessionBar(barLeft, barRight, y, fraction)
+                }
                 y += rowPitch
             }
             y += gap
@@ -407,51 +413,70 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * TEMPORARY comparison row: every mascot clip side by side, in place of the maker's
-     * mark, so they can be judged against each other at panel size and in the panel's
-     * own colours. Not a shipping layout — the mark is only commented out of the draw
-     * order, not deleted, and one clip is meant to win.
+     * One mascot per account, standing on that account's 5-hour bar.
      *
-     * Clips are laid out on a shared BASELINE rather than a shared box. They have
-     * different aspect ratios, so centring each in an equal cell would leave them
-     * standing at different heights and make them harder to compare, not easier.
+     * Which clip plays is NOT decided here — it arrives on the payload as
+     * AccountStatus.mascot, chosen by MascotMood in the app process. This view is
+     * destroyed and recreated constantly by the placement machinery, so it cannot hold
+     * the usage history that decision needs.
      *
-     * Every clip advances off the same wall clock, so a 36-frame animation and an
-     * 8-frame one run at the same frames-per-second instead of the longer one appearing
-     * to play in slow motion.
+     * Feet sit on the bar's top edge, so the figure reads as standing on the progress it
+     * describes. Drawn AFTER the bars for that reason — it should overlap them rather
+     * than hide behind the track.
+     *
+     * Placed at the bar's FILLED end and clamped to the bar, so the mascot rides the
+     * progress it stands on. That is the point of putting it there rather than in a
+     * corner, and it means the two accounts' mascots are rarely in the same place.
      */
-    private fun drawMascotRow(canvas: Canvas) {
-        val clips = MascotFrames.CLIPS
-        if (clips.isEmpty()) return
-        val h = MASCOT_HEIGHT
-        val bottom = (Panel.HEIGHT - MARK_BOTTOM).toFloat()
-        val top = bottom - h
-        val cell = (CONTENT_RIGHT - CONTENT_LEFT) / clips.size
-
-        for ((i, clip) in clips.withIndex()) {
-            val ch = h * clip.scale
-            val w = ch * clip.aspect
-            // Centred within its own cell horizontally, but sharing the baseline.
-            val left = CONTENT_LEFT + i * cell + (cell - w) / 2f
+    private fun drawMascots(canvas: Canvas) {
+        for ((account, bar) in sessionBars) {
+            val clip = MascotFrames.CLIPS.firstOrNull { it.name == accountMascot(account) }
+                ?: continue
+            val h = MASCOT_HEIGHT * clip.scale
+            val w = h * clip.aspect
+            val x = (bar.left + bar.fill.coerceIn(0f, 1f) * (bar.right - bar.left) - w / 2f)
+                .coerceIn(bar.left, bar.right - w)
+            val top = bar.top - h
+            // Per-clip frame time: the confetti burst reads as frantic at the pace that
+            // suits a walk or a lift, so it keeps the original 125ms while the rest run
+            // at 83ms.
             val frame = clip.frames[
-                ((System.currentTimeMillis() / MASCOT_FRAME_MS) % clip.frames.size).toInt()
+                ((System.currentTimeMillis() / clip.frameMs) % clip.frames.size).toInt()
             ]
-            // Scaled clips grow upward from the shared baseline, so every figure still
-            // stands on the same line.
-            val clipTop = bottom - ch
             for (r in frame) {
                 mascotPaint.color = r.color
                 canvas.drawRect(
-                    left + r.x * w, clipTop + r.y * ch,
-                    left + (r.x + r.w) * w, clipTop + (r.y + r.h) * ch,
+                    x + r.x * w, top + r.y * h,
+                    x + (r.x + r.w) * w, top + (r.y + r.h) * h,
                     mascotPaint,
                 )
             }
-            label.color = Panel.Palette.DIM
-            canvas.drawText(clip.name, CONTENT_LEFT + i * cell, bottom + 16f, label)
         }
-        animating = true
+        if (sessionBars.isNotEmpty()) animating = true
     }
+
+    /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit
+     *  the drawable. */
+    private fun drawMark(canvas: Canvas) {
+        ray.setTint(Panel.Palette.PERSONAL)
+        ray.setBounds(
+            BAR_LEFT.toInt(), (Panel.HEIGHT - MARK_BOTTOM - MARK_H).toInt(),
+            BAR_RIGHT.toInt(), Panel.HEIGHT - MARK_BOTTOM,
+        )
+        ray.draw(canvas)
+    }
+
+    private fun accountMascot(account: Account): String =
+        state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.STAND
+
+    /**
+     * Geometry of one account's 5h bar, captured by drawBars for the mascots to stand
+     * on. Recorded during the bar pass rather than recomputed, so the figure's feet and
+     * the bar it stands on cannot drift apart when the row layout changes.
+     */
+    private class SessionBar(val left: Float, val right: Float, val top: Float, val fill: Float)
+
+    private val sessionBars = LinkedHashMap<Account, SessionBar>()
 
     /**
      * Short marker shown beside an account whose numbers cannot be vouched for.
