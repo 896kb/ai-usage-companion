@@ -71,6 +71,9 @@ class RearDialView(context: Context) : View(context) {
         textAlign = Paint.Align.RIGHT; color = Panel.Palette.DIM
     }
 
+    /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
+    private val mascotPaint = Paint()
+
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
         textAlign = Paint.Align.RIGHT; color = Panel.Palette.WORK
@@ -250,8 +253,8 @@ class RearDialView(context: Context) : View(context) {
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
     private fun drawCanvasSide(canvas: Canvas) {
         drawTitle(canvas)
+        drawMascot(canvas)
         drawBars(canvas)
-        drawFooter(canvas)
         drawMark(canvas)
     }
 
@@ -416,24 +419,44 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * Reset countdown for the personal session window, or an em dash. Also carries
-     * the staleness marker (Task 16), right-aligned on the same row, when the data
-     * is too old to present as live.
+     * The Claude mascot, walking in the strip left of the maker's mark.
      *
-     * The marker's right edge is anchored to the ACRNM mark's *left* edge (mark box
-     * is Panel.WIDTH - 34 - 260 .. Panel.WIDTH - 34, same 260/66 as drawMark below),
-     * not to the panel's own right margin. This row shares its y-band with the mark
-     * (mark bottom sits at HEIGHT - 26, this text's baseline at HEIGHT - 40, both
-     * inside the mark's 66px height), so right-aligning to the panel edge would draw
-     * the marker underneath the mark itself. Aligning to the mark's left edge instead
-     * keeps the two in their own horizontal lanes on the shared row.
+     * Drawn from MascotFrames — flat rectangles, no bitmap and no decoder — so it costs
+     * a handful of drawRect calls and scales to any slot. Body in the palette green,
+     * eyes punched out in the background colour, the same contract as the masthead
+     * mark; the source artwork's terracotta and black never appear.
+     *
+     * The frame advances on wall-clock time rather than on a counter, so it walks at
+     * the same speed no matter how often the view happens to redraw, and a redraw
+     * triggered by something else (a spring settling, the idle tick) shows the pose for
+     * that moment rather than resuming where it left off.
+     *
+     * It declares itself animating, which keeps onDraw rescheduling. That is a
+     * deliberate cost on an always-on panel and the reason MASCOT_FRAME_MS is slow: it
+     * is the only thing here that runs when nothing has changed. The movement pays some
+     * of it back — a walking figure is the opposite of the fixed, high-contrast
+     * geometry that burns an OLED.
      */
-    private fun drawFooter(canvas: Canvas) {
-        val stale = staleLabel(state.fetchedAt, System.currentTimeMillis())
-        if (stale != null) {
-            value.color = Panel.Palette.DIM
-            canvas.drawText(stale, BAR_LEFT - 20f, Panel.HEIGHT - 40f, value)
+    private fun drawMascot(canvas: Canvas) {
+        val h = MASCOT_HEIGHT
+        val w = h * MascotFrames.ASPECT
+        // Bottom-aligned with the mark so the two share a ground line, and left-aligned
+        // to the content column. The strip between there and BAR_LEFT is otherwise
+        // empty now that the last-fetched marker is gone.
+        val left = CONTENT_LEFT
+        val top = (Panel.HEIGHT - MARK_BOTTOM) - h
+
+        val frames = MascotFrames.FRAMES
+        val index = ((System.currentTimeMillis() / MASCOT_FRAME_MS) % frames.size).toInt()
+        for (r in frames[index]) {
+            mascotPaint.color = if (r.eye) Panel.Palette.BG else Panel.Palette.WORK
+            canvas.drawRect(
+                left + r.x * w, top + r.y * h,
+                left + (r.x + r.w) * w, top + (r.y + r.h) * h,
+                mascotPaint,
+            )
         }
+        animating = true
     }
 
     /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit the drawable. */
@@ -573,6 +596,15 @@ class RearDialView(context: Context) : View(context) {
         private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
 
+        /**
+         * Mascot size and gait. 8 frames at MASCOT_FRAME_MS each; 125ms is 8fps, which
+         * reads as a walk rather than a twitch and is the slowest rate that still looks
+         * deliberate. Raising it raises the redraw rate of the WHOLE view, which is the
+         * real cost on an always-on display.
+         */
+        private const val MASCOT_HEIGHT = 62f
+        private const val MASCOT_FRAME_MS = 125L
+
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
 
@@ -607,23 +639,6 @@ class RearDialView(context: Context) : View(context) {
         private const val REDRAW_INTERVAL_MS = 15_000L
 
         /** Accent until it matters, then the ramp's upper stops. Mirrors waybar's battery rule. */
-
-        /**
-         * Null while the data is fresh enough to present as live. `fetchedAt` is
-         * [dev.kb896.aiusage.data.DashboardState.fetchedAt] — wall-clock
-         * epoch millis stamped by UsageRepository.refresh() and carried across the
-         * ACTION_STATE broadcast into this process, so `now` must be wall-clock too
-         * (System.currentTimeMillis(), as drawFooter calls this) to compare against
-         * it meaningfully; a monotonic clock on one side and wall-clock on the other
-         * would compare unrelated epochs.
-         */
-        @JvmStatic
-        fun staleLabel(fetchedAt: Long, now: Long): String? {
-            val age = now - fetchedAt
-            if (age < 2 * 60_000L) return null
-            val mins = age / 60_000L
-            return if (mins >= 60) "⟳ ${mins / 60}h" else "⟳ ${mins}m"
-        }
 
         /**
          * Slow sub-pixel wander so a permanently-lit panel doesn't ghost. 10-minute
