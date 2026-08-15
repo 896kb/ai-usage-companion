@@ -55,6 +55,12 @@ class MascotMoodTest {
     }
 
     /** Usage can fall when a window rolls over; that is not a burst. */
+    /** A minute is enough of a gap; five is the most that still counts. */
+    @Test fun `the comparison window spans one to five minutes`() {
+        assertEquals(60_000L, MascotMood.WINDOW_MS)
+        assertEquals(5 * 60_000L, MascotMood.MAX_BASELINE_MS)
+    }
+
     @Test fun `a falling window does not lift`() {
         assertEquals(MascotMood.STAND, MascotMood.of(0.10f, 0.80f))
     }
