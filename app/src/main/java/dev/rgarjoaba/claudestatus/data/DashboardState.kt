@@ -18,6 +18,8 @@ data class AccountStatus(
     val account: Account,
     val health: Health,
     val snapshot: UsageSnapshot?,
+    /** Short plan bracket ("MAX 5X"), or null when unknown. Purely informational. */
+    val planTier: String? = null,
 )
 
 data class DashboardState(

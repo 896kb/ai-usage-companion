@@ -3,6 +3,8 @@ package dev.rgarjoaba.claudestatus.service
 import android.content.Context
 import dev.rgarjoaba.claudestatus.auth.OAuthClient
 import dev.rgarjoaba.claudestatus.auth.TokenStore
+import dev.rgarjoaba.claudestatus.data.ProfileApi
+import dev.rgarjoaba.claudestatus.data.ProfileStore
 import dev.rgarjoaba.claudestatus.data.UsageApi
 import dev.rgarjoaba.claudestatus.data.UsageRepository
 import dev.rgarjoaba.claudestatus.rear.ShizukuBridge
@@ -18,7 +20,10 @@ import okhttp3.OkHttpClient
 class Graph private constructor(context: Context) {
     private val http = OkHttpClient()
     val store = TokenStore(context.applicationContext)
-    val repository = UsageRepository(UsageApi(http), OAuthClient(http), store)
+    val repository = UsageRepository(
+        UsageApi(http), OAuthClient(http), store,
+        ProfileApi(http), ProfileStore(context.applicationContext),
+    )
     val bridge = ShizukuBridge(context.applicationContext)
 
     companion object {

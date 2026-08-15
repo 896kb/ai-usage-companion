@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import java.time.OffsetDateTime
@@ -52,6 +53,9 @@ object UsageParser {
                 label = labelFor(kind, o),
                 utilization = (o.percentOrZero() / 100.0).toFloat().coerceIn(0f, 1f),
                 resetsAt = epochMillis(o.stringOrNull("resets_at")),
+                // Absent means active: older responses had no such field, and a window
+                // we cannot classify should read as running rather than as idle.
+                isActive = (o["is_active"] as? JsonPrimitive)?.booleanOrNull ?: true,
             )
         }
         windows.sortBy { it.kind.ordinal }
