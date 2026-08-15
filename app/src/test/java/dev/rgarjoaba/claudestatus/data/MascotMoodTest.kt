@@ -64,4 +64,57 @@ class MascotMoodTest {
     @Test fun `a falling window does not lift`() {
         assertEquals(MascotMood.STAND, MascotMood.of(0.10f, 0.80f))
     }
+
+    // ---- the latch ----------------------------------------------------------------
+
+    private val T = 1_700_000_000_000L
+
+    @Test fun `a burst starts a five minute hold`() {
+        val d = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        assertEquals(MascotMood.MUSCLE, d.clip)
+        assertEquals(T + MascotMood.HOLD_MS, d.holdUntil)
+    }
+
+    /**
+     * The reason the hold exists. Without it the next comparison is against the reading
+     * the burst itself produced, so a steady stretch of work would flicker between
+     * lifting and standing.
+     */
+    @Test fun `it keeps lifting between bursts`() {
+        val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        val later = MascotMood.decide(0.20f, 0.20f, start.holdUntil, T + 2 * 60_000L)
+        assertEquals(MascotMood.MUSCLE, later.clip)
+        assertEquals("an idle poll must not extend the hold", start.holdUntil, later.holdUntil)
+    }
+
+    @Test fun `it stops five minutes after the last burst`() {
+        val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        val after = MascotMood.decide(0.20f, 0.20f, start.holdUntil, T + MascotMood.HOLD_MS + 1)
+        assertEquals(MascotMood.STAND, after.clip)
+    }
+
+    /** A burst mid-hold restarts the clock from that moment rather than topping up. */
+    @Test fun `a second burst restarts the hold from now`() {
+        val first = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        val t2 = T + 3 * 60_000L
+        val second = MascotMood.decide(0.30f, 0.20f, first.holdUntil, t2)
+        assertEquals(MascotMood.MUSCLE, second.clip)
+        assertEquals(t2 + MascotMood.HOLD_MS, second.holdUntil)
+        // still lifting well past when the first hold alone would have lapsed
+        val late = MascotMood.decide(0.30f, 0.30f, second.holdUntil, T + 7 * 60_000L)
+        assertEquals(MascotMood.MUSCLE, late.clip)
+    }
+
+    /** Where you stand outranks what you are doing. */
+    @Test fun `hitting the high mark mid-hold flies the flag`() {
+        val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        val d = MascotMood.decide(0.95f, 0.90f, start.holdUntil, T + 60_000L)
+        assertEquals(MascotMood.FLAG, d.clip)
+    }
+
+    @Test fun `a reset to zero mid-hold celebrates`() {
+        val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        val d = MascotMood.decide(0f, 0.20f, start.holdUntil, T + 60_000L)
+        assertEquals(MascotMood.CONFETTI, d.clip)
+    }
 }

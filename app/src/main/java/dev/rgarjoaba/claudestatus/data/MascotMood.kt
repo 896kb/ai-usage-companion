@@ -55,6 +55,43 @@ object MascotMood {
     const val MAX_BASELINE_MS = 5 * 60 * 1000L
 
     /**
+     * How long the lifting animation holds after a burst.
+     *
+     * Without a hold the mascot would lift for exactly one poll and drop back, because
+     * the next comparison is against the reading the burst produced — so a genuine
+     * stretch of work would flicker between lifting and standing rather than showing as
+     * sustained effort.
+     */
+    const val HOLD_MS = 5 * 60 * 1000L
+
+    /** The chosen clip, plus the hold deadline to carry into the next poll. */
+    data class Decision(val clip: String, val holdUntil: Long)
+
+    /**
+     * The full rule, including the latch.
+     *
+     * A burst does not merely start the animation, it (re)starts the clock: holdUntil
+     * is set to now + [HOLD_MS] EVERY time one is seen, so working steadily keeps the
+     * mascot lifting continuously instead of the hold expiring mid-effort. Stop working
+     * and it lapses five minutes after the last burst.
+     *
+     * The value-based outcomes still outrank the hold. An account that hits 0 or 90%
+     * while the latch is live shows that instead — the latch describes what you are
+     * doing, those describe where you stand, and where you stand wins.
+     */
+    fun decide(utilization: Float, earlier: Float?, holdUntil: Long, now: Long): Decision {
+        val burst = earlier != null && utilization - earlier > BURST
+        val hold = if (burst) now + HOLD_MS else holdUntil
+        val clip = when {
+            utilization <= 0f -> CONFETTI
+            utilization >= HIGH -> FLAG
+            now < hold -> MUSCLE
+            else -> STAND
+        }
+        return Decision(clip, hold)
+    }
+
+    /**
      * @param utilization current 5h usage, 0..1
      * @param earlier the same account's usage as of at least [WINDOW_MS] ago, or null
      *   when no sample that old exists yet
