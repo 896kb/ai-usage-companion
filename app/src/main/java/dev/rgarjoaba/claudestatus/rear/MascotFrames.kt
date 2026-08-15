@@ -37,9 +37,9 @@ object MascotFrames {
     // stand: 1 frames, 9 rects, mascot box 107x86
     val CLIPS: List<Clip> = listOf(
         Clip("confetti", 1.06612f, 1.0f, 125L, confettiFrames()),
-        Clip("muscle", 1.17094f, 1.0f, 83L, muscleFrames()),
-        Clip("flag", 1.13670f, 0.82f, 83L, flagFrames()),
-        Clip("stand", 1.24419f, 1.0f, 83L, standFrames()),
+        Clip("muscle", 1.17094f, 0.9669f, 83L, muscleFrames()),
+        Clip("flag", 1.13670f, 0.8394f, 83L, flagFrames()),
+        Clip("stand", 1.24419f, 0.7107f, 83L, standFrames()),
     )
 
     private fun confettiFrames(): List<List<Rect>> = listOf(
