@@ -94,7 +94,7 @@ class GeometryStore(private val context: Context) {
         private const val KEY_STROKE = "stroke"
 
         /** PanelGeometry.DEFAULT, as integers. Keep these in step with it. */
-        val DEFAULT = Values(cx = 149, personalCy = 149, workCy = 422, radius = 128, stroke = 30)
+        val DEFAULT = Values(cx = 150, personalCy = 144, workCy = 420, radius = 128, stroke = 25)
 
         /**
          * Slider bounds. Wide enough to be useful, tight enough that a stray drag

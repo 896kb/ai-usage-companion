@@ -19,10 +19,10 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * a future nudge cannot desynchronise them — an earlier live-tuning pass did
          * exactly that, leaving one ring a pixel off the other's column.
          */
-        private const val LENS_CX = 149f
+        private const val LENS_CX = 150f
 
-        private const val PERSONAL_LENS_CY = 149f
-        private const val WORK_LENS_CY = 422f
+        private const val PERSONAL_LENS_CY = 144f
+        private const val WORK_LENS_CY = 420f
 
         /**
          * The lens radius, also measured — the calibration ruler was aligned to the
@@ -52,12 +52,22 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          *   or the ring disappears under the camera bump again. Offset 20 clears it
          *   by 6px.
          *
-         * So the usable window is narrow: offset 20 with stroke 28 satisfies both.
-         * If you widen the stroke, the offset must come down, and vice versa —
-         * recompute both inequalities rather than adjusting one by eye.
+         * CURRENT VALUES (cx 150, personal cy 144, work cy 420, radius 128, stroke 25)
+         * were chosen by eye on the device and are the user's, not a derivation. They
+         * satisfy the inward constraint comfortably — inner edge 115.5 clears the lens
+         * by 7.5px — and miss the outward one by half a pixel: the outer edge is 140.5
+         * against a 140 budget at the upper ring (cy 144 minus the 4px drift). So at
+         * the extreme of the drift cycle the top of the upper ring can lose half a
+         * pixel. That is accepted deliberately: it is invisible, and it was measured
+         * against the physical lenses, which beats the arithmetic. Do not "fix" it by
+         * moving the ring off the lens it is drawn around.
+         *
+         * If you change the stroke or radius, recompute BOTH inequalities rather than
+         * adjusting one by eye — and note the sliders (GeometryStore) can now move all
+         * of this at runtime, so these constants are only the starting point.
          */
         private const val RING_OFFSET = 20f
-        private const val RING_STROKE = 30f
+        private const val RING_STROKE = 25f
 
         private const val RING_RADIUS = LENS_RADIUS + RING_OFFSET
 
