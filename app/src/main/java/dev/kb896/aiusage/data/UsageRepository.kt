@@ -233,7 +233,15 @@ class UsageRepository(
 
     companion object {
         /** First backoff after a 429, when the server sends no Retry-After. */
-        const val MIN_REFRESH_INTERVAL_MS = 60_000L
+        /**
+         * Burst floor. Must stay BELOW Cadence.FAST_MS or it suppresses the very polls
+         * it is meant to protect — at 60s against a 60s cadence, jitter alone would
+         * drop every other tick and halve the effective rate silently.
+         *
+         * It exists to stop BUNCHING, not to set the rate: both 429s this app has taken
+         * came from many requests in seconds, which this still refuses.
+         */
+        const val MIN_REFRESH_INTERVAL_MS = 45_000L
         const val FIRST_BACKOFF_MS = 300_000L
 
         /** Ceiling on the doubling. Hour-old numbers still inform; never recovering does not. */
