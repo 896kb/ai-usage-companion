@@ -61,6 +61,16 @@ class RearDialView(context: Context) : View(context) {
      * rather than crowding the account name, and green — the masthead's colour, marking
      * it as fixed context about the account rather than another live reading.
      */
+    /**
+     * Time-to-reset column. Dim and a size below the percentage on purpose: both are
+     * live readings, but the percentage is the one you act on, and two equally loud
+     * numbers per row would make neither of them scan.
+     */
+    private val timeTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 18f; typeface = label.typeface
+        textAlign = Paint.Align.RIGHT; color = Panel.Palette.DIM
+    }
+
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
         textAlign = Paint.Align.RIGHT; color = Panel.Palette.WORK
@@ -344,7 +354,6 @@ class RearDialView(context: Context) : View(context) {
             y += headingAdvance
 
             for (w in rows) {
-                val isSession = w.kind == WindowKind.SESSION
                 // Row labels take the account accent while the data is good, and only
                 // go grey when it cannot be vouched for — same rule as the heading and
                 // the bar. Previously they were permanently DIM, which read as
@@ -388,15 +397,18 @@ class RearDialView(context: Context) : View(context) {
                     barLeft + (barRight - barLeft) * fraction.coerceIn(0f, 1f),
                     y + barH, barFill,
                 )
+                // Percentage for EVERY row, including the session one, which used to put
+                // its countdown here — the value column meant two different things
+                // depending on the row, exactly the inconsistency the bars had.
+                //
+                // The number counts with the bar: springing the bar while the figure
+                // jumps straight to its new value would make them disagree for the whole
+                // animation.
                 value.color = barFill.color
-                canvas.drawText(
-                    // The number counts with the bar. Springing the bar while the label
-                    // jumps straight to the new figure would make them disagree for the
-                    // whole animation. The session row is exempt: its label is a
-                    // countdown, not a share of the bar's length.
-                    if (isSession) countdown(w.resetsAt) else "${(fraction * 100).toInt()}%",
-                    right, y + barH - 4f, value,
-                )
+                canvas.drawText("${(fraction * 100).toInt()}%", PCT_RIGHT, y + barH - 4f, value)
+                // Time-to-reset in its own column, so every window says when it turns
+                // over rather than only the session one.
+                canvas.drawText(remaining(w.resetsAt), TIME_RIGHT, y + barH - 4f, timeTag)
                 y += rowPitch
             }
             y += gap
@@ -463,13 +475,27 @@ class RearDialView(context: Context) : View(context) {
         return ((SESSION_WINDOW_MS - remaining).toFloat() / SESSION_WINDOW_MS).coerceIn(0f, 1f)
     }
 
-    /** resetsAt is nullable: an unused window has nothing to reset. */
-    private fun countdown(resetsAt: Long?): String {
+    /**
+     * Compact time until a window turns over.
+     *
+     * Days are a separate unit rather than rolled into hours: a 7-day window is ~168
+     * hours out, and "167h02m" is both wider than the column and unreadable at a
+     * glance. Two units is always enough — "3d17h", "4h51m", "22m".
+     *
+     * resetsAt is nullable: a window that has never been used has nothing to reset.
+     */
+    private fun remaining(resetsAt: Long?): String {
         if (resetsAt == null) return "—"
         val ms = resetsAt - System.currentTimeMillis()
         if (ms <= 0) return "now"
         val mins = ms / 60_000
-        return if (mins >= 60) "${mins / 60}h${(mins % 60).toString().padStart(2, '0')}m" else "${mins}m"
+        val hours = mins / 60
+        val days = hours / 24
+        return when {
+            days > 0 -> "${days}d${hours % 24}h"
+            hours > 0 -> "${hours}h${(mins % 60).toString().padStart(2, '0')}m"
+            else -> "${mins}m"
+        }
     }
 
     companion object {
@@ -522,7 +548,18 @@ class RearDialView(context: Context) : View(context) {
          * leave slack for a longer name than FABLE.
          */
         private const val BAR_LEFT = CONTENT_LEFT + 112f
-        private const val BAR_RIGHT = CONTENT_RIGHT - 72f
+        /**
+         * Each row is four columns: label, bar, percentage, time-to-reset. The last two
+         * are derived backwards from the panel edge so the bar absorbs the remaining
+         * width — adding the time column had to take its space from somewhere, and the
+         * bar is the only element that reads fine at any length.
+         *
+         * Widths are sized against the worst case each column can hold: "100%" at 21f
+         * for the percentage, "3d17h" at 18f for the time.
+         */
+        private const val TIME_RIGHT = CONTENT_RIGHT
+        private const val PCT_RIGHT = CONTENT_RIGHT - 82f
+        private const val BAR_RIGHT = PCT_RIGHT - 68f
 
         /**
          * Maker's mark. Spans exactly the bar column (BAR_LEFT..BAR_RIGHT) at the
