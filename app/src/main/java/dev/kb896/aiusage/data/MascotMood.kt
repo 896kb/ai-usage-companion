@@ -24,7 +24,16 @@ object MascotMood {
     /** Above this, the window is effectively spent. */
     const val HIGH = 0.90f
 
-    /** Recent burn that counts as "working hard". */
+    /**
+     * Recent burn that counts as "working hard", INCLUSIVE.
+     *
+     * Inclusive is not a detail here, it is the difference between the rule working and
+     * never firing. The API reports whole percentages, so utilisation only ever moves in
+     * steps of 0.01 — a live trail read off the device went 0.34, 0.35, 0.35, 0.36. With
+     * a strictly-greater test, "more than 1%" therefore means "2% or more", and a steady
+     * 1%-per-minute burn never triggers anything. Compared with >= so that one step of
+     * the smallest observable unit is enough.
+     */
     const val BURST = 0.01f
 
     /**
@@ -64,6 +73,13 @@ object MascotMood {
      */
     const val HOLD_MS = 5 * 60 * 1000L
 
+    /**
+     * Float slack for the comparison. 0.35f - 0.34f is 0.010000005 and 0.36f - 0.35f is
+     * 0.009999990 — the same 1% step lands either side of the threshold depending on the
+     * values, so an exact >= would fire on some steps and not others.
+     */
+    private const val EPSILON = 1e-4f
+
     /** The chosen clip, plus the hold deadline to carry into the next poll. */
     data class Decision(val clip: String, val holdUntil: Long)
 
@@ -80,7 +96,7 @@ object MascotMood {
      * doing, those describe where you stand, and where you stand wins.
      */
     fun decide(utilization: Float, earlier: Float?, holdUntil: Long, now: Long): Decision {
-        val burst = earlier != null && utilization - earlier > BURST
+        val burst = earlier != null && utilization - earlier >= BURST - EPSILON
         val hold = if (burst) now + HOLD_MS else holdUntil
         val clip = when {
             utilization <= 0f -> CONFETTI
@@ -114,7 +130,7 @@ object MascotMood {
     fun of(utilization: Float, earlier: Float?): String = when {
         utilization <= 0f -> CONFETTI
         utilization >= HIGH -> FLAG
-        earlier != null && utilization - earlier > BURST -> MUSCLE
+        earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE
         else -> STAND
     }
 }

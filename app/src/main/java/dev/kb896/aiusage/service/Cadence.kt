@@ -26,10 +26,16 @@ object Cadence {
     // matter are unchanged: the per-account backoff on 429 (5min doubling to 60min) and
     // UsageRepository's floor, which still refuses anything faster than this.
     const val FAST_MS = 60_000L      // panel on
-    // Vestigial while always-on is enabled, but kept correct rather than deleted: if
-    // FLAG_KEEP_SCREEN_ON is ever lifted, a sleeping panel should back off further
-    // still. The fast < slow invariant is what CadenceTest pins.
-    const val SLOW_MS = 900_000L     // panel off
-
-    fun forPanelState(panelOn: Boolean): Long = if (panelOn) FAST_MS else SLOW_MS
+    // No slow cadence any more. There used to be a 15-minute interval for "panel off",
+    // on the theory that nobody is looking. Two problems with that in practice:
+    //
+    //   * panelOn() reads the REAR display's power state, and MIUI powers that panel
+    //     down whenever the phone itself idles — so the app spent most of its time on
+    //     the slow interval, polling every fifteen minutes. That is what the user saw.
+    //   * the numbers are not only for the panel. The mascot's burst rule and the limit
+    //     notifications both need a fresh trail, and both are wanted while the phone is
+    //     in a pocket.
+    //
+    // One interval, always.
+    fun forPanelState(panelOn: Boolean): Long = FAST_MS
 }
