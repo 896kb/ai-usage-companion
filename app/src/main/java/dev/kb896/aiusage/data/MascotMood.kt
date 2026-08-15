@@ -28,24 +28,31 @@ object MascotMood {
     const val BURST = 0.01f
 
     /**
-     * How far back "recently" reaches.
+     * The SHORTEST gap that counts as a comparison. A baseline even one minute old is
+     * enough — if 1% has gone in that time, the mascot lifts.
      *
-     * Matches the poll cadence (Cadence.FAST_MS), which is not a coincidence: the trail
-     * only gains a sample per poll, so a window shorter than the cadence could never be
-     * measured, and one much longer would smear several polls together.
+     * Being this small does not make the panel react within a minute, and it is worth
+     * being clear why: the trail only gains a sample when a poll completes, and polls
+     * are five minutes apart by rate-limit discipline. So in practice the newest usable
+     * baseline is the previous poll. What this constant really controls is that a gap
+     * is never rejected for being too SHORT — if the cadence ever tightens, or a manual
+     * refresh lands, a one-minute comparison is accepted immediately rather than
+     * discarded.
      */
-    const val WINDOW_MS = 5 * 60 * 1000L
+    const val WINDOW_MS = 60 * 1000L
 
     /**
-     * Oldest sample still allowed to serve as the baseline.
+     * The LONGEST gap that still counts — the threshold beyond which a baseline is too
+     * stale to mean anything.
      *
-     * Without a ceiling the measurement silently stretches: on the slow cadence the
-     * panel polls every 15 minutes, so "the newest sample at least 5 minutes old" would
-     * be 15 minutes old, and a 1%-per-5-minutes rule would quietly become
-     * 1%-per-15-minutes — three times more sensitive than asked for, and more so the
-     * longer the gap. Beyond this the honest answer is "no comparable baseline".
+     * Without a ceiling the measurement stretches silently: on the slow cadence the
+     * panel polls every fifteen minutes, so the newest available baseline would be
+     * fifteen minutes old and "1% recently" would quietly become "1% per quarter hour"
+     * — far more sensitive than asked for, and worse the longer the gap. Beyond five
+     * minutes the honest answer is "no comparable baseline", not a different question
+     * answered confidently.
      */
-    const val MAX_BASELINE_MS = 3 * WINDOW_MS
+    const val MAX_BASELINE_MS = 5 * 60 * 1000L
 
     /**
      * @param utilization current 5h usage, 0..1

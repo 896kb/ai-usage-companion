@@ -64,6 +64,6 @@ class UsageHistory(private val context: Context) {
 
         /** Comfortably past the oldest usable baseline, so pruning never removes a
          *  sample that MascotMood would still have accepted. */
-        const val MAX_AGE_MS = MascotMood.MAX_BASELINE_MS + MascotMood.WINDOW_MS
+        const val MAX_AGE_MS = 2 * MascotMood.MAX_BASELINE_MS
     }
 }
