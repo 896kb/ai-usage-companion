@@ -20,12 +20,19 @@ data class UsageWindow(
     val utilization: Float,
     val resetsAt: Long?,
     /**
-     * Whether this window is currently counting. The API's `is_active`.
+     * The API's `is_active`: whether this is the limit currently BINDING the account —
+     * the one that will stop you first — not whether the window is counting.
      *
-     * Defaults true so a response that omits the field behaves as it always did. The
-     * session window is the one that matters: an account that has not been used has an
-     * inactive 5h window with no resets_at, which the panel previously rendered as a
-     * bare em dash — indistinguishable from "we failed to read it".
+     * That distinction was established the hard way. It was first read as "this window
+     * is running" and rendered as an IDLE tag, which was wrong: measured live, a
+     * session window with percent=5 and a live resets_at reported is_active=false while
+     * every window was plainly accruing. In the same response the ONLY window flagged
+     * active was weekly_all at percent=41 — the highest of the three. So it marks the
+     * governing limit, and an inactive window is emphatically not an unused one.
+     *
+     * Nothing renders this today. It is kept because "which limit is about to bite" is
+     * genuinely worth showing and the field is free — it arrives in a response the app
+     * already fetches. Defaults true so a response omitting it behaves as before.
      */
     val isActive: Boolean = true,
 )
