@@ -17,7 +17,12 @@ class CadenceTest {
         assertEquals(Cadence.FAST_MS, Cadence.forPanelState(panelOn = false))
     }
 
-    @Test fun `polling is once a minute`() {
-        assertEquals(60_000L, Cadence.FAST_MS)
+    /**
+     * Two minutes. 60s was measured on device and produced backoff in seven of twelve
+     * samples while the endpoint itself answered 200 to a direct probe — a steady rate
+     * can be too fast on its own, not only a bursty one.
+     */
+    @Test fun `polling is every two minutes`() {
+        assertEquals(120_000L, Cadence.FAST_MS)
     }
 }

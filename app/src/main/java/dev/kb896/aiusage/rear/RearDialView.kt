@@ -63,13 +63,20 @@ class RearDialView(context: Context) : View(context) {
      * it as fixed context about the account rather than another live reading.
      */
     /**
-     * Time-to-reset column. Dim and a size below the percentage on purpose: both are
-     * live readings, but the percentage is the one you act on, and two equally loud
-     * numbers per row would make neither of them scan.
+     * Time-to-reset column, in the palette's foreground white.
+     *
+     * It was DIM (#555555), which is the palette's "this is disabled" tone and was
+     * barely legible against #1D1F21 on the physical panel — the hierarchy was being
+     * carried entirely by colour, and it overshot into invisible. The separation the
+     * dimming was after is still there, just done with SIZE instead: 18f against the
+     * percentage's 21f. Both readings stay legible, the percentage still leads.
+     *
+     * Palette.FG rather than pure #FFFFFF, so the panel keeps to the Tomorrow Night set
+     * it is drawn from — every other bright element on the display is a palette colour.
      */
     private val timeTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
-        textAlign = Paint.Align.RIGHT; color = Panel.Palette.DIM
+        textAlign = Paint.Align.RIGHT; color = Panel.Palette.FG
     }
 
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
