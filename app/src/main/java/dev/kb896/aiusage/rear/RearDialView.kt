@@ -424,12 +424,17 @@ class RearDialView(context: Context) : View(context) {
      * describes. Drawn AFTER the bars for that reason — it should overlap them rather
      * than hide behind the track.
      *
-     * Placed at the bar's FILLED end and clamped to the bar, so the mascot rides the
-     * progress it stands on. That is the point of putting it there rather than in a
-     * corner, and it means the two accounts' mascots are rarely in the same place.
+     * Positions are FIXED along the bar, one per account, rather than tracking the
+     * fill. Riding the fill was tried and reads badly here: at 0% both figures pile up
+     * against the left edge on top of the row label, and two accounts at similar usage
+     * put them at the same place on stacked rows, which looks like a mistake rather
+     * than data. Fixed offsets keep them staggered and legible at every value, and the
+     * bar underneath already shows the progress.
      */
     private fun drawMascots(canvas: Canvas) {
-        for ((account, bar) in sessionBars) {
+        for ((index, entry) in sessionBars.entries.withIndex()) {
+            val account = entry.key
+            val bar = entry.value
             // Fall back to standing for anything unresolvable. A payload restored from
             // disk can name a clip this build no longer ships — "walk" is exactly that
             // case, being withheld until it is finished — and silently drawing nothing
@@ -439,7 +444,8 @@ class RearDialView(context: Context) : View(context) {
                 ?: continue
             val h = MASCOT_HEIGHT * clip.scale
             val w = h * clip.aspect
-            val x = (bar.left + bar.fill.coerceIn(0f, 1f) * (bar.right - bar.left) - w / 2f)
+            val at = MASCOT_STOPS.getOrElse(index) { MASCOT_STOPS.last() }
+            val x = (bar.left + at * (bar.right - bar.left) - w / 2f)
                 .coerceIn(bar.left, bar.right - w)
             val top = bar.top - h
             // Per-clip frame time: the confetti burst reads as frantic at the pace that
@@ -614,6 +620,13 @@ class RearDialView(context: Context) : View(context) {
          * Mascot size and gait. Raising the frame rate raises the redraw rate of the
          * WHOLE view, which is the real cost on an always-on display — 83ms is 12fps.
          */
+        /**
+         * Where each account's mascot stands along its bar, as a fraction. Staggered on
+         * purpose: the two bars are directly above one another, so equal positions would
+         * line the figures up in a column and read as a rendering artefact.
+         */
+        private val MASCOT_STOPS = floatArrayOf(0.45f, 0.80f)
+
         private const val MASCOT_HEIGHT = 62f
         // 1.5x the original 125ms pace, at the user's request. Every clip shares it, so
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
