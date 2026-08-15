@@ -17,6 +17,8 @@ class MascotMoodTest {
 
     @Test fun `burning through it with room left lifts`() {
         assertEquals(MascotMood.MUSCLE, MascotMood.of(0.40f, 0.30f))
+        // 1% over the window is the bar now, not 5%.
+        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.4101f, 0.40f))
     }
 
     /**
@@ -28,15 +30,19 @@ class MascotMoodTest {
         assertEquals(MascotMood.FLAG, MascotMood.of(0.95f, 0.80f))
     }
 
-    @Test fun `steady use in the middle just walks`() {
-        assertEquals(MascotMood.STAND, MascotMood.of(0.40f, 0.39f))
-        assertEquals(MascotMood.STAND, MascotMood.of(0.40f, 0.40f))
+    @Test fun `steady use in the middle just stands`() {
+        assertEquals(MascotMood.STAND, MascotMood.of(0.400f, 0.395f))
+        assertEquals(MascotMood.STAND, MascotMood.of(0.400f, 0.400f))
     }
 
-    /** Exactly 5% is not MORE than 5%. */
+    /**
+     * The threshold is exclusive, but do not assert it at exactly BURST: 0.40f - 0.39f
+     * is 0.010000005 in float32, so an "exactly 1%" case tests the arithmetic's rounding
+     * rather than the rule. Values either side of it are what matter.
+     */
     @Test fun `the burst threshold is exclusive`() {
-        assertEquals(MascotMood.STAND, MascotMood.of(0.35f, 0.30f))
-        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.3501f, 0.30f))
+        assertEquals(MascotMood.STAND, MascotMood.of(0.3090f, 0.30f))
+        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.3120f, 0.30f))
     }
 
     /**

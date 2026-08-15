@@ -35,9 +35,16 @@ class UsageHistory(private val context: Context) {
      * that spans more than the window, the oldest sample would keep drifting further
      * into the past and the measured delta would grow with it, so a single burst would
      * keep the mascot lifting long after the burning stopped.
+     *
+     * Samples older than MascotMood.MAX_BASELINE_MS are rejected outright. A baseline
+     * that is too old does not measure the window that was asked for — see that
+     * constant — and answering "unknown" is better than answering a different question.
      */
     fun before(account: Account, age: Long, now: Long): Float? =
-        load(account).filter { now - it.first >= age }.maxByOrNull { it.first }?.second
+        load(account)
+            .filter { now - it.first >= age && now - it.first <= MascotMood.MAX_BASELINE_MS }
+            .maxByOrNull { it.first }
+            ?.second
 
     private fun load(account: Account): List<Pair<Long, Float>> =
         prefs.getString(key(account), null)
@@ -55,8 +62,8 @@ class UsageHistory(private val context: Context) {
     private companion object {
         const val PREFS = "usage_history"
 
-        /** Twice the decision window, so a sample old enough to answer always survives
-         *  a poll cycle or two of pruning. */
-        const val MAX_AGE_MS = 2 * MascotMood.WINDOW_MS
+        /** Comfortably past the oldest usable baseline, so pruning never removes a
+         *  sample that MascotMood would still have accepted. */
+        const val MAX_AGE_MS = MascotMood.MAX_BASELINE_MS + MascotMood.WINDOW_MS
     }
 }
