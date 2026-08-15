@@ -430,7 +430,12 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawMascots(canvas: Canvas) {
         for ((account, bar) in sessionBars) {
+            // Fall back to standing for anything unresolvable. A payload restored from
+            // disk can name a clip this build no longer ships — "walk" is exactly that
+            // case, being withheld until it is finished — and silently drawing nothing
+            // would look like the mascot feature had broken.
             val clip = MascotFrames.CLIPS.firstOrNull { it.name == accountMascot(account) }
+                ?: MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
                 ?: continue
             val h = MASCOT_HEIGHT * clip.scale
             val w = h * clip.aspect
