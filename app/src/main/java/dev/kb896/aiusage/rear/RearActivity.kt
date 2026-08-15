@@ -22,6 +22,11 @@ class RearActivity : Activity() {
 
     companion object {
         const val ACTION_STATE = "dev.kb896.aiusage.STATE"
+
+        /** Sent when this activity finds itself on the wrong display. Handled by
+         *  UsagePollService, which owns the Shizuku bridge and can move it back —
+         *  this process cannot, the move needs shell privileges. */
+        const val ACTION_STRANDED = "dev.kb896.aiusage.STRANDED"
         const val ACTION_FINISH = "dev.kb896.aiusage.FINISH"
         const val EXTRA_STATE = "state"
         private const val TAG = "ClaudeStatusRear"
@@ -199,23 +204,38 @@ class RearActivity : Activity() {
     }
 
     /**
-     * Was: finish() when found on the wrong display. Now a no-op beyond logging.
+     * Strand handling, in three stages: ESCAPE, then MOVE, then evict.
      *
-     * Eviction is the wrong remedy and it was the last remaining source of self-inflicted
-     * teardown. A strand is now fixed by MOVING the task back to the rear display
-     * (IRearService.ensureOnRear, driven from the watchdog, the screen broadcasts and
-     * the post-placement check) — which this activity cannot do for itself, because the
-     * move needs shell privileges it does not have. All finish() could do was destroy
-     * the panel and hand the problem to the respawn path, whose only route back runs an
-     * `am start` across display 0.
+     * This activity is fullscreen, immersive, excluded from recents and sized for the
+     * rear panel. On the MAIN display those properties make it a trap with nothing
+     * tappable — which is exactly what a user reported after an earlier version of this
+     * removed the eviction guard entirely. Recovery-first was the right instinct;
+     * leaving no fallback was not.
      *
-     * The escape hatch the guard existed to provide is still there and is better: the
-     * ongoing notification re-places the panel on tap, and system bars stay reachable
-     * because hideBars() no-ops off the rear display.
+     * Stage 1, immediately: show the system bars. That happens in armEvictionTimer()
+     * the moment a wrong display is seen, not after any delay, because a trapped user
+     * needs a way out before anything else is attempted.
+     *
+     * Stage 2: ask for a move back. Broadcast only — the corrective
+     * moveRootTaskToDisplay needs shell privileges this process does not have, so
+     * UsagePollService has to do it.
+     *
+     * Stage 3, if still stranded after STRAND_GRACE_MS: finish. Being trapped behind a
+     * fullscreen window is worse than losing the panel, and the panel comes back on its
+     * own. The grace period is what stops this firing during normal placement, which is
+     * legitimately on display 0 for a moment by design.
      */
     private val evictIfStranded = Runnable {
-        val id = display?.displayId
-        if (id != Panel.DISPLAY_ID) Log.w(TAG, "on display $id, not $Panel.DISPLAY_ID — leaving it to ensureOnRear")
+        if (display?.displayId == Panel.DISPLAY_ID) return@Runnable
+        Log.w(TAG, "still on display ${display?.displayId} after the grace period — finishing")
+        finish()
+    }
+
+    /** Stage 1 + 2. Cheap, and safe to run more than once. */
+    private fun escapeAndRequestMove() {
+        WindowInsetsControllerCompat(window, window.decorView)
+            .show(WindowInsetsCompat.Type.systemBars())
+        sendBroadcast(Intent(ACTION_STRANDED).setPackage(packageName))
     }
 
     private fun armEvictionTimer() {
@@ -224,6 +244,9 @@ class RearActivity : Activity() {
             strandedSinceMs = -1L
             return
         }
+        // Wrong display. Give the user their way out and ask for a move on EVERY
+        // arm, not once — a single failed move should not leave things stuck.
+        escapeAndRequestMove()
         val now = SystemClock.elapsedRealtime()
         if (strandedSinceMs < 0) strandedSinceMs = now
         val remaining = STRAND_GRACE_MS - (now - strandedSinceMs)

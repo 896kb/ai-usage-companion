@@ -13,11 +13,13 @@ import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.IBinder
 import android.os.PowerManager
+import androidx.core.content.ContextCompat
 import android.util.Log
 import android.view.Display
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.GeometryStore
+import dev.kb896.aiusage.rear.RearActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -104,11 +106,22 @@ class UsagePollService : Service() {
         cachedState()?.let { app.repository.restore(StatePayload.decode(it)) }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displays.registerDisplayListener(displayListener, null)
-        registerReceiver(screenReceiver, IntentFilter().apply {
+        // RECEIVER_NOT_EXPORTED is required, not optional: on API 34+ a receiver whose
+        // filter contains a NON-system action must declare its export state or
+        // registerReceiver throws SecurityException and takes the service down at
+        // startup. ACTION_STRANDED is ours, so this filter is no longer system-only.
+        // NOT_EXPORTED still receives it — RearActivity is a different process but the
+        // same UID.
+        ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
-        })
+            // RearActivity shouting that it has landed on the wrong display. It cannot
+            // move itself — moveRootTaskToDisplay needs shell privileges — so it tells
+            // us and we go through Shizuku. Handled on the same path as the screen
+            // broadcasts: ensureOnRear() first, which is the whole remedy when it works.
+            addAction(RearActivity.ACTION_STRANDED)
+        }, ContextCompat.RECEIVER_NOT_EXPORTED)
         // Place the panel NOW, before either loop's first delay.
         //
         // This is the whole recovery story for an app that has been killed: the panel
