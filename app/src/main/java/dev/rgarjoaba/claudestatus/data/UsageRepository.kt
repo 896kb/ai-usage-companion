@@ -27,6 +27,7 @@ class UsageRepository(
      */
     private val profileApi: ProfileApi? = null,
     private val profiles: ProfileStore? = null,
+    private val history: UsageHistory? = null,
 ) {
     /** Set by the poll service so a completed refresh can be remembered across restarts. */
     var onFetchCompleted: (() -> Unit)? = null
@@ -132,7 +133,8 @@ class UsageRepository(
             CallLog.record(account, "ok")
             backoffUntil.remove(account)
             backoffStep.remove(account)
-            AccountStatus(account, Health.OK, snapshot, planTier(account, usable.accessToken))
+            AccountStatus(account, Health.OK, snapshot,
+                planTier(account, usable.accessToken), moodFor(account, snapshot))
         } catch (e: UsageApi.Failure) {
             CallLog.record(account, e.message ?: e.kind.name)
             if (e.kind == UsageApi.Kind.RATE_LIMITED) applyBackoff(account, e.retryAfterSec)
@@ -179,6 +181,24 @@ class UsageRepository(
             store.markAttempted(account, now)
         }
         return fetched ?: store.tier(account)
+    }
+
+    /**
+     * Records this reading and picks the account's mascot.
+     *
+     * Only on the SUCCESS path: a degraded fetch reuses the previous snapshot, and
+     * recording that again would fabricate a flat trail — ten minutes of "no burn"
+     * assembled from one real reading repeated, which would silently stop the lifting
+     * animation whenever the network was unreliable.
+     */
+    private fun moodFor(account: Account, snapshot: UsageSnapshot): String {
+        val session = snapshot.windows.firstOrNull { it.kind == WindowKind.SESSION }
+            ?: return MascotMood.STAND
+        val h = history ?: return MascotMood.of(session.utilization, null)
+        val now = System.currentTimeMillis()
+        val earlier = h.before(account, MascotMood.WINDOW_MS, now)
+        h.record(account, session.utilization, now)
+        return MascotMood.of(session.utilization, earlier)
     }
 
     private fun applyBackoff(account: Account, retryAfterSec: Long?) {

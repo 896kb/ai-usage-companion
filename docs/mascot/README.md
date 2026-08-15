@@ -65,6 +65,17 @@ plays them at its 125ms frame time, stretching the gait to 1s — deliberately s
 the site, because matching it would mean redrawing the whole view at 40fps forever on an
 always-on display.
 
+## Known incomplete: the walk
+
+The walk clip reproduces the leg gait from the GSAP timeline but NOT the whole
+animation — the site also translates the body horizontally over 2.2s and plays an
+entry hop (`y:-18` then `y:0`) before the loop, and there may be more of the timeline
+than the fragment decoded so far. It is generated and kept, but MascotMood never
+selects it; the idle state is the still `stand` pose instead.
+
+That is deliberate for now on two counts: the clip is unfinished, and a mascot marching
+on the spot forever is motion with nothing to say on a panel that is lit 24/7.
+
 ## Colour
 
 Tinted to a green monochrome that preserves each source colour's relative luminance, so
