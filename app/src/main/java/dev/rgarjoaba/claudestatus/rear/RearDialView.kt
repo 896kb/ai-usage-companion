@@ -210,10 +210,20 @@ class RearDialView(context: Context) : View(context) {
         // Coloured while the data is good, dimmed once a fetch has actually failed.
         // The tag beside the account label says which failure it was, so grey means
         // "this is history" rather than the unexplained grey it used to mean.
-        // Sweep AND colour both follow the animated value, so the ramp travels with the
-        // arc instead of snapping to the new colour while the arc is still moving.
-        val shown = springTo("ring:${account.name}", session.utilization).coerceIn(0f, 1f)
-        arc.color = if (status.health == Health.OK) RampColor.at(shown) else Panel.Palette.DIM
+        // The ring is a CLOCK, not a gauge: it sweeps toward the 5-hour reset, filling
+        // as the window runs out of time. Utilisation for the same window is the 5H bar
+        // on the canvas side — the two were the other way round until the user swapped
+        // them, and a ring around a lens reads far more naturally as a dial than as a
+        // percentage.
+        //
+        // Accent-coloured, never the ramp, and that follows directly from what it now
+        // plots. On the bars, a full bar means a limit is nearly spent and the
+        // green-to-red ramp says so. A full ring means the window is about to RESET,
+        // which is good news; ramping it to red would invert the panel's one colour
+        // language. This is the same reasoning that used to apply to the 5H bar back
+        // when the bar was the thing showing time.
+        val shown = springTo("ring:${account.name}", sessionElapsed(session.resetsAt)).coerceIn(0f, 1f)
+        arc.color = if (status.health == Health.OK) account.accent else Panel.Palette.DIM
         canvas.drawArc(scratch, -90f, 360f * shown, false, arc)
     }
 
@@ -430,6 +440,23 @@ class RearDialView(context: Context) : View(context) {
         Health.ERROR -> "ERROR"
     }
 
+    /**
+     * How far through the 5-hour session window we are, 0..1. Drives the rings.
+     *
+     * Derived from resetsAt because that is the only anchor the API gives us — there is
+     * no window-start field — and the window's length is fixed at five hours, which is
+     * what the row is labelled.
+     *
+     * Returns 0 when resetsAt is null: no session is running, and an empty ring reads
+     * correctly as "nothing counting down", where a full one would read as "about to
+     * reset".
+     */
+    private fun sessionElapsed(resetsAt: Long?): Float {
+        if (resetsAt == null) return 0f
+        val remaining = resetsAt - System.currentTimeMillis()
+        return ((SESSION_WINDOW_MS - remaining).toFloat() / SESSION_WINDOW_MS).coerceIn(0f, 1f)
+    }
+
     /** resetsAt is nullable: an unused window has nothing to reset. */
     private fun countdown(resetsAt: Long?): String {
         if (resetsAt == null) return "—"
@@ -495,6 +522,9 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
+
+        /** The session window's fixed length — see sessionElapsed. */
+        private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
 
         private const val TITLE_BASELINE = 54f
         private const val TITLE_LOGO_SIZE = 48f
