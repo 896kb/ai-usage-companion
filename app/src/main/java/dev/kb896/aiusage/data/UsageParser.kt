@@ -62,14 +62,27 @@ object UsageParser {
         return UsageSnapshot(windows, fetchedAt)
     }
 
+    /**
+     * Row label: what the limit covers, then the window it covers it over.
+     *
+     * Both halves are load-bearing. "5H" and "7D" alone said the duration but not the
+     * SCOPE, so nothing on the panel distinguished the all-models limits from the
+     * per-model one — and the scoped row said "FABLE", which named the scope but no
+     * duration at all, leaving the only per-model limit as the one row whose window was
+     * a guess. "ALL 5H" / "ALL 7D" / "FABLE 7D" makes both readable without a legend.
+     *
+     * The model name comes from the live response (`scope.model.display_name`) and is
+     * never hardcoded — whatever model the account's scoped limit applies to is what
+     * appears here.
+     */
     private fun labelFor(kind: WindowKind, o: JsonObject): String = when (kind) {
-        WindowKind.SESSION -> "5H"
-        WindowKind.WEEKLY_ALL -> "7D"
+        WindowKind.SESSION -> "ALL 5H"
+        WindowKind.WEEKLY_ALL -> "ALL 7D"
         WindowKind.WEEKLY_SCOPED -> {
             val name = (o["scope"] as? JsonObject)
                 ?.let { it["model"] as? JsonObject }
                 ?.stringOrNull("display_name")
-            if (name.isNullOrBlank()) "SCOPED" else name.uppercase()
+            if (name.isNullOrBlank()) "SCOPED 7D" else "${name.uppercase()} 7D"
         }
     }
 
