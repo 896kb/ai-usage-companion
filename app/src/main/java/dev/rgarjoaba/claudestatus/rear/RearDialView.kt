@@ -374,15 +374,7 @@ class RearDialView(context: Context) : View(context) {
                     // jumps straight to the new figure would make them disagree for the
                     // whole animation. The session row is exempt: its label is a
                     // countdown, not a share of the bar's length.
-                    when {
-                        // An inactive session window is not a failed read — the account
-                        // simply has not been used, so no 5h clock is running. Saying so
-                        // beats the bare em dash it used to draw, which looked identical
-                        // to a value we could not fetch.
-                        isSession && !w.isActive -> "IDLE"
-                        isSession -> countdown(w.resetsAt)
-                        else -> "${(fraction * 100).toInt()}%"
-                    },
+                    if (isSession) countdown(w.resetsAt) else "${(fraction * 100).toInt()}%",
                     right, y + barH - 4f, value,
                 )
                 y += rowPitch
