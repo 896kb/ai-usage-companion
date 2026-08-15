@@ -455,7 +455,7 @@ class RearDialView(context: Context) : View(context) {
                 ((System.currentTimeMillis() / clip.frameMs) % clip.frames.size).toInt()
             ]
             for (r in frame) {
-                mascotPaint.color = r.color
+                mascotPaint.color = accentFor(account, r.color)
                 canvas.drawRect(
                     x + r.x * w, top + r.y * h,
                     x + (r.x + r.w) * w, top + (r.y + r.h) * h,
@@ -476,6 +476,22 @@ class RearDialView(context: Context) : View(context) {
         )
         ray.draw(canvas)
     }
+
+    /**
+     * Re-tints the mascot's HARDWARE per account: headband, dumbbells and flag pole.
+     *
+     * The work account's kit is the company blue, the personal account's stays
+     * Anthropic orange, so a glance at which figure is which needs no label. Applied at
+     * draw time rather than baked into MascotFrames because the frame data is shared by
+     * both accounts — baking it would mean generating and holding two copies of every
+     * clip to change one colour.
+     *
+     * Only the accent is swapped. The body stays the palette green in both, because the
+     * green is the panel's own language and two differently-coloured mascots would read
+     * as two different characters rather than one character on two accounts.
+     */
+    private fun accentFor(account: Account, color: Int): Int =
+        if (account == Account.WORK && color == ACCENT_ORANGE) ACCENT_WORK else color
 
     private fun accountMascot(account: Account): String =
         state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.STAND
@@ -626,6 +642,16 @@ class RearDialView(context: Context) : View(context) {
          * line the figures up in a column and read as a rendering artefact.
          */
         private val MASCOT_STOPS = floatArrayOf(0.45f, 0.80f)
+
+        /**
+         * Mascot hardware accents. The orange is Anthropic's brand colour and is what
+         * MascotFrames bakes in; the blue is the company's, swapped in for the work
+         * account at draw time. Neither belongs in Panel.Palette — that is the Tomorrow
+         * Night set the whole panel is drawn from, and these two are brand colours that
+         * appear on exactly one element each.
+         */
+        private const val ACCENT_ORANGE = 0xFFD97757.toInt()
+        private const val ACCENT_WORK = 0xFF006EFF.toInt()
 
         private const val MASCOT_HEIGHT = 62f
         // 1.5x the original 125ms pace, at the user's request. Every clip shares it, so
