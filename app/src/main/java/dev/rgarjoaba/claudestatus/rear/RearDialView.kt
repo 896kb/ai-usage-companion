@@ -57,6 +57,16 @@ class RearDialView(context: Context) : View(context) {
     private val logo = resources.getDrawable(R.drawable.claude_code, null)
 
     /**
+     * Plan tag. Right-aligned to the value column so it sits over the percentages
+     * rather than crowding the account name, and green — the masthead's colour, marking
+     * it as fixed context about the account rather than another live reading.
+     */
+    private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 18f; typeface = label.typeface
+        textAlign = Paint.Align.RIGHT; color = Panel.Palette.WORK
+    }
+
+    /**
      * One damped spring per animated quantity, keyed by what it drives.
      *
      * Values arrive as steps — a poll completes and a bar jumps — which on an
@@ -317,17 +327,13 @@ class RearDialView(context: Context) : View(context) {
         for ((account, status, rows) in blocks) {
             heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
             canvas.drawText(account.label, left, y, heading)
-            // Plan bracket, dim and to the right of the name. Static information, so it
-            // is never ramp- or health-coloured: it says what you are entitled to, not
-            // how much of it is left. Only the tier is shown — the profile response
+            // Plan bracket, right-aligned to the value column. Static information, so
+            // it is never ramp- or health-coloured: it says what you are entitled to,
+            // not how much of it is left. Only the tier is shown — the profile response
             // also carries a name, an email and an org, none of which belong on a
             // panel that faces outward from the back of the phone.
-            var tagX = left + heading.measureText(account.label) + 14f
-            status?.planTier?.let { tier ->
-                label.color = Panel.Palette.DIM
-                canvas.drawText(tier, tagX, y, label)
-                tagX += label.measureText(tier) + 14f
-            }
+            status?.planTier?.let { canvas.drawText(it, right, y, planTag) }
+            val tagX = left + heading.measureText(account.label) + 14f
             // Kept alongside the dimming: grey alone says "something is wrong" without
             // saying what, which is what made an all-grey panel read as broken rather
             // than informative. The tag names the actual failure.
@@ -508,7 +514,14 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val CONTENT_LEFT = Panel.CUTOUT_RIGHT + 34f
         private const val CONTENT_RIGHT = Panel.WIDTH - 34f
-        private const val BAR_LEFT = CONTENT_LEFT + 92f
+        /**
+         * 112, not 92. The column was sized for "5H"/"7D"/"FABLE"; once the labels
+         * gained their scope and window ("ALL 5H", "FABLE 7D") the longest of them ran
+         * straight into the bar. Measure against the LONGEST label, which is the scoped
+         * one — and that one is only as long as the model name the API returns, so
+         * leave slack for a longer name than FABLE.
+         */
+        private const val BAR_LEFT = CONTENT_LEFT + 112f
         private const val BAR_RIGHT = CONTENT_RIGHT - 72f
 
         /**

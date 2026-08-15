@@ -34,12 +34,13 @@ class UsageParserTest {
 
     @Test fun `takes the scoped label from scope model display_name`() {
         val scoped = personal.windows.first { it.kind == WindowKind.WEEKLY_SCOPED }
-        assertEquals("FABLE", scoped.label)
+        // Scope AND window: the model name alone named no time period.
+        assertEquals("FABLE 7D", scoped.label)
     }
 
     @Test fun `session and weekly labels are fixed`() {
-        assertEquals("5H", personal.windows.first { it.kind == WindowKind.SESSION }.label)
-        assertEquals("7D", personal.windows.first { it.kind == WindowKind.WEEKLY_ALL }.label)
+        assertEquals("ALL 5H", personal.windows.first { it.kind == WindowKind.SESSION }.label)
+        assertEquals("ALL 7D", personal.windows.first { it.kind == WindowKind.WEEKLY_ALL }.label)
     }
 
     @Test fun `tolerates null resets_at on an unused window`() {
@@ -68,7 +69,7 @@ class UsageParserTest {
 
     @Test fun `falls back to a generic scoped label when display_name is missing`() {
         val json = """{"limits":[{"kind":"weekly_scoped","percent":5,"resets_at":null,"scope":{"model":{}}}]}"""
-        assertEquals("SCOPED", UsageParser.parse(json, 0L).windows[0].label)
+        assertEquals("SCOPED 7D", UsageParser.parse(json, 0L).windows[0].label)
     }
 
     @Test fun `empty limits yields an empty snapshot rather than throwing`() {
