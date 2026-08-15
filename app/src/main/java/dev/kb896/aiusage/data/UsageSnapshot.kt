@@ -19,6 +19,15 @@ data class UsageWindow(
     val label: String,
     val utilization: Float,
     val resetsAt: Long?,
+    /**
+     * Whether this window is currently counting. The API's `is_active`.
+     *
+     * Defaults true so a response that omits the field behaves as it always did. The
+     * session window is the one that matters: an account that has not been used has an
+     * inactive 5h window with no resets_at, which the panel previously rendered as a
+     * bare em dash — indistinguishable from "we failed to read it".
+     */
+    val isActive: Boolean = true,
 )
 
 data class UsageSnapshot(

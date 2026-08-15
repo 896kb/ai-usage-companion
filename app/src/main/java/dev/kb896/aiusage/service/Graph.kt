@@ -3,6 +3,8 @@ package dev.kb896.aiusage.service
 import android.content.Context
 import dev.kb896.aiusage.auth.OAuthClient
 import dev.kb896.aiusage.auth.TokenStore
+import dev.kb896.aiusage.data.ProfileApi
+import dev.kb896.aiusage.data.ProfileStore
 import dev.kb896.aiusage.data.UsageApi
 import dev.kb896.aiusage.data.UsageRepository
 import dev.kb896.aiusage.rear.ShizukuBridge
@@ -18,7 +20,10 @@ import okhttp3.OkHttpClient
 class Graph private constructor(context: Context) {
     private val http = OkHttpClient()
     val store = TokenStore(context.applicationContext)
-    val repository = UsageRepository(UsageApi(http), OAuthClient(http), store)
+    val repository = UsageRepository(
+        UsageApi(http), OAuthClient(http), store,
+        ProfileApi(http), ProfileStore(context.applicationContext),
+    )
     val bridge = ShizukuBridge(context.applicationContext)
 
     companion object {

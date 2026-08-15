@@ -31,6 +31,7 @@ object StatePayload {
                     put("label", s.account.label)
                     put("state", s.health.wire)
                     put("hasSnapshot", s.snapshot != null)
+                    s.planTier?.let { put("plan", it) }
                     put("fetchedAt", s.snapshot?.fetchedAt ?: 0L)
                     putJsonArray("windows") {
                         s.snapshot?.windows?.forEach { w ->
@@ -42,6 +43,7 @@ object StatePayload {
                                 // tell "unused window" from "field missing".
                                 if (w.resetsAt == null) put("resetsAt", JsonNull)
                                 else put("resetsAt", w.resetsAt)
+                                put("isActive", w.isActive)
                             }
                         }
                     }
@@ -66,6 +68,7 @@ object StatePayload {
                     label = w.str("label").orEmpty(),
                     utilization = (w["utilization"] as? JsonPrimitive)?.floatOrNull ?: 0f,
                     resetsAt = (w["resetsAt"] as? JsonPrimitive)?.longOrNull,
+                    isActive = (w["isActive"] as? JsonPrimitive)?.booleanOrNull ?: true,
                 )
             }
             statuses += AccountStatus(
@@ -74,6 +77,7 @@ object StatePayload {
                 snapshot = if ((o["hasSnapshot"] as? JsonPrimitive)?.booleanOrNull == true) {
                     UsageSnapshot(windows, (o["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L)
                 } else null,
+                planTier = o.str("plan"),
             )
         }
         DashboardState((root["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, statuses)

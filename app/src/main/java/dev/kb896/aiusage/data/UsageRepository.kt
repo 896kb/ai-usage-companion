@@ -20,6 +20,13 @@ class UsageRepository(
     private val api: UsageApi,
     private val oauth: OAuthClient,
     private val store: TokenStore,
+    /**
+     * Optional so existing tests construct this unchanged, and so the plan tag is a
+     * strictly additive feature: with these null the repository behaves exactly as
+     * before and simply never reports a tier.
+     */
+    private val profileApi: ProfileApi? = null,
+    private val profiles: ProfileStore? = null,
 ) {
     /** Set by the poll service so a completed refresh can be remembered across restarts. */
     var onFetchCompleted: (() -> Unit)? = null
@@ -95,19 +102,19 @@ class UsageRepository(
             if (nowElapsed < until) {
                 Log.i(TAG, "${account.slug}: backing off ${(until - nowElapsed) / 1000}s more")
                 CallLog.record(account, "skipped, backoff ${(until - nowElapsed) / 1000}s")
-                return AccountStatus(account, Health.STALE, last)
+                return AccountStatus(account, Health.STALE, last, profiles?.tier(account))
             }
         }
         val stored = store.load(account)
             ?: run {
                 Log.i(TAG, "${account.slug}: no stored credential")
-                return AccountStatus(account, Health.AUTH, null)
+                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account))
             }
 
         val now = System.currentTimeMillis()
         if (stored.refreshExpired(now)) {
             Log.w(TAG, "${account.slug}: refresh token expired")
-            return AccountStatus(account, Health.AUTH, last)
+            return AccountStatus(account, Health.AUTH, last, profiles?.tier(account))
         }
 
         val usable = if (stored.accessExpired(now)) {
@@ -116,7 +123,7 @@ class UsageRepository(
             } catch (e: Exception) {
                 Log.w(TAG, "${account.slug}: token refresh failed: ${e.message}")
                 CallLog.record(account, "refresh failed: ${e.message}")
-                return AccountStatus(account, Health.AUTH, last)
+                return AccountStatus(account, Health.AUTH, last, profiles?.tier(account))
             }
         } else stored
 
@@ -125,20 +132,20 @@ class UsageRepository(
             CallLog.record(account, "ok")
             backoffUntil.remove(account)
             backoffStep.remove(account)
-            AccountStatus(account, Health.OK, snapshot)
+            AccountStatus(account, Health.OK, snapshot, planTier(account, usable.accessToken))
         } catch (e: UsageApi.Failure) {
             CallLog.record(account, e.message ?: e.kind.name)
             if (e.kind == UsageApi.Kind.RATE_LIMITED) applyBackoff(account, e.retryAfterSec)
             // Keep the last good numbers, but never present them as live.
             Log.w(TAG, "${account.slug}: usage fetch failed: ${e.message}")
-            AccountStatus(account, healthFor(e.kind), last)
+            AccountStatus(account, healthFor(e.kind), last, profiles?.tier(account))
         } catch (e: Exception) {
             // api.fetch is documented to only throw UsageApi.Failure, but that is an
             // implementation detail of a class this repository does not own. One
             // account's fetch must never be able to abort the sibling account's — see
             // the map over Account.entries in refresh(). Degrade this account only.
             Log.e(TAG, "${account.slug}: unexpected fetch error: ${e.javaClass.simpleName}")
-            AccountStatus(account, Health.ERROR, last)
+            AccountStatus(account, Health.ERROR, last, profiles?.tier(account))
         }
     }
 
@@ -148,6 +155,32 @@ class UsageRepository(
      * up to an hour. Capped because a status panel showing hour-old numbers is still
      * useful, whereas one that never recovers is not.
      */
+    /**
+     * The account's plan tier, fetched at most once a week and otherwise read from
+     * cache.
+     *
+     * Called only on the SUCCESS path, deliberately. A usage fetch that just failed is
+     * the worst moment to spend another request on decoration — if the account is
+     * rate-limited, the profile call is one more request against an endpoint family
+     * that is already refusing, and if the token is bad this would fail too. Failure
+     * paths reuse whatever tier is already cached.
+     */
+    private fun planTier(account: Account, accessToken: String): String? {
+        val store = profiles ?: return null
+        val api = profileApi ?: return null
+        val now = System.currentTimeMillis()
+        if (!store.isStale(account, now)) return store.tier(account)
+        val fetched = api.tier(accessToken)
+        if (fetched != null) {
+            store.save(account, fetched, now)
+            Log.i(TAG, "${account.slug}: plan tier $fetched")
+        } else {
+            // Do not retry on the next poll; see ProfileStore.markAttempted.
+            store.markAttempted(account, now)
+        }
+        return fetched ?: store.tier(account)
+    }
+
     private fun applyBackoff(account: Account, retryAfterSec: Long?) {
         val step = retryAfterSec?.times(1_000L)
             ?: ((backoffStep[account]?.times(2) ?: FIRST_BACKOFF_MS).coerceAtMost(MAX_BACKOFF_MS))

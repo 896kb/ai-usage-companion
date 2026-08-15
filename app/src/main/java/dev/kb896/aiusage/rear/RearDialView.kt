@@ -307,12 +307,23 @@ class RearDialView(context: Context) : View(context) {
         for ((account, status, rows) in blocks) {
             heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
             canvas.drawText(account.label, left, y, heading)
+            // Plan bracket, dim and to the right of the name. Static information, so it
+            // is never ramp- or health-coloured: it says what you are entitled to, not
+            // how much of it is left. Only the tier is shown — the profile response
+            // also carries a name, an email and an org, none of which belong on a
+            // panel that faces outward from the back of the phone.
+            var tagX = left + heading.measureText(account.label) + 14f
+            status?.planTier?.let { tier ->
+                label.color = Panel.Palette.DIM
+                canvas.drawText(tier, tagX, y, label)
+                tagX += label.measureText(tier) + 14f
+            }
             // Kept alongside the dimming: grey alone says "something is wrong" without
             // saying what, which is what made an all-grey panel read as broken rather
             // than informative. The tag names the actual failure.
             healthTag(status?.health)?.let { tag ->
                 label.color = Panel.Palette.DIM
-                canvas.drawText(tag, left + heading.measureText(account.label) + 14f, y, label)
+                canvas.drawText(tag, tagX, y, label)
             }
             y += headingAdvance
 
@@ -363,7 +374,15 @@ class RearDialView(context: Context) : View(context) {
                     // jumps straight to the new figure would make them disagree for the
                     // whole animation. The session row is exempt: its label is a
                     // countdown, not a share of the bar's length.
-                    if (isSession) countdown(w.resetsAt) else "${(fraction * 100).toInt()}%",
+                    when {
+                        // An inactive session window is not a failed read — the account
+                        // simply has not been used, so no 5h clock is running. Saying so
+                        // beats the bare em dash it used to draw, which looked identical
+                        // to a value we could not fetch.
+                        isSession && !w.isActive -> "IDLE"
+                        isSession -> countdown(w.resetsAt)
+                        else -> "${(fraction * 100).toInt()}%"
+                    },
                     right, y + barH - 4f, value,
                 )
                 y += rowPitch
