@@ -25,10 +25,27 @@ object MascotMood {
     const val HIGH = 0.90f
 
     /** Recent burn that counts as "working hard". */
-    const val BURST = 0.05f
+    const val BURST = 0.01f
 
-    /** How far back "recently" reaches. */
-    const val WINDOW_MS = 10 * 60 * 1000L
+    /**
+     * How far back "recently" reaches.
+     *
+     * Matches the poll cadence (Cadence.FAST_MS), which is not a coincidence: the trail
+     * only gains a sample per poll, so a window shorter than the cadence could never be
+     * measured, and one much longer would smear several polls together.
+     */
+    const val WINDOW_MS = 5 * 60 * 1000L
+
+    /**
+     * Oldest sample still allowed to serve as the baseline.
+     *
+     * Without a ceiling the measurement silently stretches: on the slow cadence the
+     * panel polls every 15 minutes, so "the newest sample at least 5 minutes old" would
+     * be 15 minutes old, and a 1%-per-5-minutes rule would quietly become
+     * 1%-per-15-minutes — three times more sensitive than asked for, and more so the
+     * longer the gap. Beyond this the honest answer is "no comparable baseline".
+     */
+    const val MAX_BASELINE_MS = 3 * WINDOW_MS
 
     /**
      * @param utilization current 5h usage, 0..1
