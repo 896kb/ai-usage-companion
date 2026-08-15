@@ -253,9 +253,8 @@ class RearDialView(context: Context) : View(context) {
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
     private fun drawCanvasSide(canvas: Canvas) {
         drawTitle(canvas)
-        drawMascot(canvas)
         drawBars(canvas)
-        drawMark(canvas)
+        drawMascotRow(canvas)
     }
 
     /**
@@ -419,54 +418,46 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * The Claude mascot, walking in the strip left of the maker's mark.
+     * TEMPORARY comparison row: every mascot clip side by side, in place of the maker's
+     * mark, so they can be judged against each other at panel size and in the panel's
+     * own colours. Not a shipping layout — the mark is only commented out of the draw
+     * order, not deleted, and one clip is meant to win.
      *
-     * Drawn from MascotFrames — flat rectangles, no bitmap and no decoder — so it costs
-     * a handful of drawRect calls and scales to any slot. Body in the palette green,
-     * eyes punched out in the background colour, the same contract as the masthead
-     * mark; the source artwork's terracotta and black never appear.
+     * Clips are laid out on a shared BASELINE rather than a shared box. They have
+     * different aspect ratios, so centring each in an equal cell would leave them
+     * standing at different heights and make them harder to compare, not easier.
      *
-     * The frame advances on wall-clock time rather than on a counter, so it walks at
-     * the same speed no matter how often the view happens to redraw, and a redraw
-     * triggered by something else (a spring settling, the idle tick) shows the pose for
-     * that moment rather than resuming where it left off.
-     *
-     * It declares itself animating, which keeps onDraw rescheduling. That is a
-     * deliberate cost on an always-on panel and the reason MASCOT_FRAME_MS is slow: it
-     * is the only thing here that runs when nothing has changed. The movement pays some
-     * of it back — a walking figure is the opposite of the fixed, high-contrast
-     * geometry that burns an OLED.
+     * Every clip advances off the same wall clock, so a 36-frame animation and an
+     * 8-frame one run at the same frames-per-second instead of the longer one appearing
+     * to play in slow motion.
      */
-    private fun drawMascot(canvas: Canvas) {
+    private fun drawMascotRow(canvas: Canvas) {
+        val clips = MascotFrames.CLIPS
+        if (clips.isEmpty()) return
         val h = MASCOT_HEIGHT
-        val w = h * MascotFrames.ASPECT
-        // Bottom-aligned with the mark so the two share a ground line, and left-aligned
-        // to the content column. The strip between there and BAR_LEFT is otherwise
-        // empty now that the last-fetched marker is gone.
-        val left = CONTENT_LEFT
-        val top = (Panel.HEIGHT - MARK_BOTTOM) - h
+        val bottom = (Panel.HEIGHT - MARK_BOTTOM).toFloat()
+        val top = bottom - h
+        val cell = (CONTENT_RIGHT - CONTENT_LEFT) / clips.size
 
-        val frames = MascotFrames.FRAMES
-        val index = ((System.currentTimeMillis() / MASCOT_FRAME_MS) % frames.size).toInt()
-        for (r in frames[index]) {
-            mascotPaint.color = if (r.eye) Panel.Palette.BG else Panel.Palette.WORK
-            canvas.drawRect(
-                left + r.x * w, top + r.y * h,
-                left + (r.x + r.w) * w, top + (r.y + r.h) * h,
-                mascotPaint,
-            )
+        for ((i, clip) in clips.withIndex()) {
+            val w = h * clip.aspect
+            // Centred within its own cell horizontally, but sharing the baseline.
+            val left = CONTENT_LEFT + i * cell + (cell - w) / 2f
+            val frame = clip.frames[
+                ((System.currentTimeMillis() / MASCOT_FRAME_MS) % clip.frames.size).toInt()
+            ]
+            for (r in frame) {
+                mascotPaint.color = r.color
+                canvas.drawRect(
+                    left + r.x * w, top + r.y * h,
+                    left + (r.x + r.w) * w, top + (r.y + r.h) * h,
+                    mascotPaint,
+                )
+            }
+            label.color = Panel.Palette.DIM
+            canvas.drawText(clip.name, CONTENT_LEFT + i * cell, bottom + 16f, label)
         }
         animating = true
-    }
-
-    /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit the drawable. */
-    private fun drawMark(canvas: Canvas) {
-        ray.setTint(Panel.Palette.PERSONAL)
-        ray.setBounds(
-            BAR_LEFT.toInt(), (Panel.HEIGHT - MARK_BOTTOM - MARK_H).toInt(),
-            BAR_RIGHT.toInt(), Panel.HEIGHT - MARK_BOTTOM,
-        )
-        ray.draw(canvas)
     }
 
     /**
