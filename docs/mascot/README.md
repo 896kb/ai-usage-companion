@@ -18,12 +18,47 @@ helps rather than hurts burn-in on an always-on OLED.
 Recoloured here to the panel palette: body `#B5BD68` (Palette.WORK), eyes `#1D1F21`
 (Palette.BG) so they read as cut-outs against the panel the way the masthead mark does.
 
-| file | viewBox | rects | what it is |
+| file | what it actually is | frames | rects |
 |---|---|---|---|
-| `walk-8frame.svg` | 129x113 | 204 | 8-frame walk cycle. Frames `l001`-`l005` face one way, `l006`-`l008` are mirrored (`matrix(-1 0 0 1 tx ty)`). **The one to use.** |
-| `cycle-11frame.svg` | 158x128 | 718 | 11 `body` groups; frame segmentation not yet resolved |
-| `detailed.svg` | 140x146 | 654 | high-detail pixel-art piece, not frame-grouped |
-| `pose.svg` | 107x86 | 10 | single static pose |
+| `walk-8frame.svg` | **confetti** — mascot celebrating under falling confetti | 8 | 204 |
+| `cycle-11frame.svg` | **muscle** — mascot lifting dumbbells | 36 | 718 |
+| `detailed.svg` | **flag** — static mascot waving a checkered flag | 12 | 829 |
+| `pose.svg` | a single static pose | 1 | 9 |
+
+The filenames are the names I first guessed and are now wrong; the table is the truth.
+
+## Layers, and why a flat frame list drops content
+
+An animation is a set of LAYERS, not a flat list of frames, and each of the three
+animated clips proved it differently:
+
+* **confetti** keeps its confetti in TWO sibling top-level `<g>` layers, outside the
+  mascot's own `l001`-`l008` frames. Reading only the mascot layer silently lost 114 of
+  204 rects — the entire confetti.
+* **flag** is a static mascot plus a 12-frame flag sequence nested inside the scene.
+  Treating the whole thing as one frame produced a still image.
+* **muscle** is the simple case: 36 sibling frames, each already carrying mascot and
+  dumbbells.
+
+Composite frame *i* = every static rect, plus frame *i* of each sequence (short
+sequences wrap). `MascotFrames.kt` is generated on that model.
+
+## Colour
+
+Tinted to a green monochrome that preserves each source colour's relative luminance, so
+shaded artwork keeps its shading instead of flattening to a silhouette. Two exceptions,
+both learned on the panel:
+
+* the **confetti keep their real colours** (`#7CA4D0` blue, `#DD8361` orange,
+  `#C87392`/`#CB708F` pink) — recolouring confetti to one green turns a celebration into
+  a shrug. Possible only because they sit in their own layers and can be identified
+  without guessing by hue.
+* the **dumbbells are forced white**. `#1A4C81` and `#5D5B56` land at a luminance the
+  green tint renders as dark olive — visible in theory, invisible against `#1D1F21`, so
+  the mascot appeared to be lifting nothing.
+
+The tint's floor also sits well above the background; an earlier version mapped
+luminance onto a range starting at the panel colour and mid-tones disappeared.
 
 `*.original.svg` keeps the untouched source next to each recoloured copy.
 

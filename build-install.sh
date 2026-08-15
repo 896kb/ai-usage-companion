@@ -14,7 +14,30 @@
 # failed on the same device, same session, same APK.
 set -e
 ADB=/opt/homebrew/bin/adb
-DEVICE=f940914b            # 25098PN5AC / pandora — NOT the glasses or the OnePlus
+# Device selection. Was a hardcoded USB serial, which breaks the moment the phone is
+# on wireless adb (the serial becomes an ip:port). Resolution order:
+#   ANDROID_SERIAL if the caller set it, else the only attached device.
+# Three devices have been attached to this machine at various times (this phone, the
+# Rokid glasses, a OnePlus), so refuse to guess when more than one is present rather
+# than installing onto whichever adb happens to list first.
+resolve_device() {
+  if [ -n "${ANDROID_SERIAL:-}" ]; then echo "$ANDROID_SERIAL"; return; fi
+  # Prefer a wireless (ip:port) transport. While the phone is both plugged in AND on
+  # wireless adb, `adb devices` lists it TWICE — once per transport — so "exactly one
+  # device" is the wrong test. The wireless entry is also the one that keeps working
+  # when the cable comes out, which is the whole point of using it.
+  w=$("$ADB" devices | awk 'NR>1 && $2=="device" && $1 ~ /:[0-9]+$/ {print $1}')
+  if [ "$(echo "$w" | grep -c .)" = "1" ]; then echo "$w"; return; fi
+  n=$("$ADB" devices | awk 'NR>1 && $2=="device"' | wc -l | tr -d ' ')
+  if [ "$n" = "1" ]; then "$ADB" devices | awk 'NR>1 && $2=="device" {print $1}'; return; fi
+  echo "" ; return
+}
+DEVICE=$(resolve_device)
+if [ -z "$DEVICE" ]; then
+  echo "✗ need exactly one attached device, or set ANDROID_SERIAL. Attached:" >&2
+  "$ADB" devices | awk 'NR>1 && NF' >&2
+  exit 1
+fi
 PKG=dev.rgarjoaba.claudestatus
 STAGE=/data/local/tmp/claude-status.apk
 
