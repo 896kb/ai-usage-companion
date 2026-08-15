@@ -49,6 +49,8 @@ class UsagePollService : Service() {
      *  transition from a repeated reading — see ensurePlaced(). */
     private var watchdogState: Watchdog.State? = null
 
+    private val limitNotifier by lazy { LimitNotifier(this) }
+
     /** Last panel power state this listener acted on — see onDisplayChanged. */
     private var panelWasOn = false
 
@@ -302,6 +304,12 @@ class UsagePollService : Service() {
         // fetch degrades (see its KDoc), so this is never a blank/empty payload
         // just because one fetch failed — the panel keeps showing the last real
         // numbers with a non-OK Health, not nothing.
+        // Alert BEFORE placement work: a limit warning must not be delayed, or lost
+        // entirely, because the panel happened to need re-placing on this tick.
+        // Evaluates against the freshly-refreshed state and is a no-op when nothing
+        // crossed a band.
+        limitNotifier.onState(app.repository.state.value)
+
         val payload = StatePayload.encode(app.repository.state.value)
         val decision = ensurePlaced(app, payload)
         // A fresh respawn already delivered `payload` via the launch intent extra
