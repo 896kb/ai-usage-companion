@@ -11,21 +11,22 @@ package dev.rgarjoaba.claudestatus.service
  * and UsageRepository.healthFor.
  */
 object Cadence {
-    // 60s, at the user's explicit direction, so the mascot's burst rule can actually
-    // see a minute-scale change — at 5 minutes the earliest a burst could be noticed
-    // was the next poll, which made the rule far less responsive than specified.
+    // 120s. 60s was tried and MEASURED: over twelve samples the accounts were stale in
+    // seven of them, oscillating in and out of the 429 backoff, while a direct probe of
+    // the same endpoint with the same token returned 200 — so it was our rate, not the
+    // service. Two minutes still lets the mascot's burst rule see a change within a
+    // couple of minutes, which 5 minutes did not.
     //
     // The panel is always-on, so this is the ONLY interval that ever applies:
     // FLAG_KEEP_SCREEN_ON means panelOn() is permanently true. That makes it ~1,440
     // requests per account per day against the very endpoint that reports rate limits.
     //
-    // The concern this was raised against is bunching, not rate: both 429s this app has
-    // taken came from BURSTS — every service restart fetching immediately, and a
-    // DisplayManager listener firing on brightness changes — not from a steady cadence.
-    // A request a minute is regular and predictable. The protections that actually
-    // matter are unchanged: the per-account backoff on 429 (5min doubling to 60min) and
-    // UsageRepository's floor, which still refuses anything faster than this.
-    const val FAST_MS = 60_000L      // panel on
+    // The earlier reasoning — that only BUNCHING causes 429s, never a steady rate — was
+    // wrong, and the 60s trial is what showed it. A steady cadence can be too fast on
+    // its own. Recorded here because the argument was persuasive and is worth not
+    // re-making: two accounts polled every 60s is ~2,880 requests a day against the
+    // endpoint that reports rate limits, and that is enough on its own.
+    const val FAST_MS = 120_000L     // every account, every two minutes
     // No slow cadence any more. There used to be a 15-minute interval for "panel off",
     // on the theory that nobody is looking. Two problems with that in practice:
     //

@@ -241,7 +241,7 @@ class UsageRepository(
          * It exists to stop BUNCHING, not to set the rate: both 429s this app has taken
          * came from many requests in seconds, which this still refuses.
          */
-        const val MIN_REFRESH_INTERVAL_MS = 45_000L
+        const val MIN_REFRESH_INTERVAL_MS = 90_000L
         const val FIRST_BACKOFF_MS = 300_000L
 
         /** Ceiling on the doubling. Hour-old numbers still inform; never recovering does not. */

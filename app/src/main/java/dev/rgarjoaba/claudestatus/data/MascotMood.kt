@@ -54,14 +54,17 @@ object MascotMood {
      * The LONGEST gap that still counts — the threshold beyond which a baseline is too
      * stale to mean anything.
      *
-     * Without a ceiling the measurement stretches silently: on the slow cadence the
-     * panel polls every fifteen minutes, so the newest available baseline would be
-     * fifteen minutes old and "1% recently" would quietly become "1% per quarter hour"
-     * — far more sensitive than asked for, and worse the longer the gap. Beyond five
-     * minutes the honest answer is "no comparable baseline", not a different question
-     * answered confidently.
+     * Ten minutes, at the user's direction: 1% burned any time in the last ten minutes
+     * counts as working. Distinct from [HOLD_MS], which is how long the animation then
+     * PLAYS — this one is how far back the comparison may reach.
+     *
+     * A ceiling is still needed at all because without one the measurement stretches
+     * silently: whatever the oldest surviving sample happens to be becomes the baseline,
+     * so a gap in polling would quietly turn "1% in ten minutes" into "1% in an hour"
+     * without anything looking wrong. Beyond the ceiling the honest answer is "no
+     * comparable baseline", not a different question answered confidently.
      */
-    const val MAX_BASELINE_MS = 5 * 60 * 1000L
+    const val MAX_BASELINE_MS = 10 * 60 * 1000L
 
     /**
      * How long the lifting animation holds after a burst.
