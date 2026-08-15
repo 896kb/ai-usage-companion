@@ -17,6 +17,7 @@ import android.util.Log
 import android.view.Display
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.StatePayload
+import dev.kb896.aiusage.rear.GeometryStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -352,6 +353,14 @@ class UsagePollService : Service() {
                 return decision
             }
             app.bridge.show(payload)
+            // A freshly launched panel starts on PanelGeometry.DEFAULT — it runs in
+            // ":rear" and cannot see the tuned values, which live in this process's
+            // preferences. Push them once it is up, or every respawn would silently
+            // revert the user's ring adjustments to the compiled-in defaults.
+            scope.launch {
+                delay(GEOMETRY_PUSH_DELAY_MS)
+                GeometryStore(this@UsagePollService).push()
+            }
             scope.launch { verifyPlacement(app) }
         }
         return decision
@@ -432,6 +441,13 @@ class UsagePollService : Service() {
          * Cheap to run: no network, just an aliveness check and, if needed, a re-place
          * using cached state.
          */
+        /**
+         * How long after a placement to send the tuned ring geometry. Long enough for
+         * the activity to have registered its receiver, short enough that the default
+         * geometry is not visible for long.
+         */
+        private const val GEOMETRY_PUSH_DELAY_MS = 1_500L
+
         private const val WATCHDOG_INTERVAL_MS = 20_000L
 
         /** Notification tap → re-place the panel. See onStartCommand. */

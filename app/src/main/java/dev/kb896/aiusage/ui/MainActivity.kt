@@ -19,7 +19,9 @@ import dev.kb896.aiusage.auth.TokenImport
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.CallLog
 import dev.kb896.aiusage.data.DashboardState
+import android.widget.SeekBar
 import dev.kb896.aiusage.data.StatePayload
+import dev.kb896.aiusage.rear.GeometryStore
 import dev.kb896.aiusage.rear.ShizukuBridge
 import dev.kb896.aiusage.service.Graph
 import dev.kb896.aiusage.service.UsagePollService
@@ -110,6 +112,7 @@ class MainActivity : ComponentActivity() {
         hideButton = findViewById(R.id.hide_button)
         previewLabel = findViewById(R.id.preview_label)
         previewText = findViewById(R.id.preview_text)
+        bindGeometrySliders()
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
         // field only ever displays a command MainActivity wrote, never accepts
@@ -237,6 +240,70 @@ class MainActivity : ComponentActivity() {
     private fun refreshNow() = lifecycleScope.launch {
         graph.repository.refresh(force = true)
         graph.bridge.update(StatePayload.encode(graph.repository.state.value))
+    }
+
+    /**
+     * Live ring tuning. Each slider writes through to GeometryStore and pushes the
+     * result to the panel on every move, so the rings track the drag on the rear
+     * display in real time — the same nudge mechanism the adb calibration used, minus
+     * the adb.
+     *
+     * Only fromUser events are acted on. setProgress() during setup fires the listener
+     * too, and reacting to that would broadcast five times on every open and — worse —
+     * write the seeded values back over stored ones.
+     */
+    private fun bindGeometrySliders() {
+        val store = GeometryStore(this)
+        var current = store.load()
+
+        data class Slider(val bar: SeekBar, val label: TextView, val name: String,
+                          val range: IntRange, val get: () -> Int,
+                          val set: (Int) -> GeometryStore.Values)
+
+        val sliders = listOf(
+            Slider(findViewById(R.id.geo_cx), findViewById(R.id.geo_cx_label), "RING X",
+                GeometryStore.CX_RANGE, { current.cx }, { current.copy(cx = it) }),
+            Slider(findViewById(R.id.geo_cy1), findViewById(R.id.geo_cy1_label), "PERSONAL Y",
+                GeometryStore.CY1_RANGE, { current.personalCy }, { current.copy(personalCy = it) }),
+            Slider(findViewById(R.id.geo_cy2), findViewById(R.id.geo_cy2_label), "WORK Y",
+                GeometryStore.CY2_RANGE, { current.workCy }, { current.copy(workCy = it) }),
+            Slider(findViewById(R.id.geo_radius), findViewById(R.id.geo_radius_label), "RADIUS",
+                GeometryStore.RADIUS_RANGE, { current.radius }, { current.copy(radius = it) }),
+            Slider(findViewById(R.id.geo_stroke), findViewById(R.id.geo_stroke_label), "STROKE",
+                GeometryStore.STROKE_RANGE, { current.stroke }, { current.copy(stroke = it) }),
+        )
+
+        fun seed() {
+            for (s in sliders) {
+                s.bar.max = s.range.last - s.range.first
+                s.bar.progress = s.get() - s.range.first
+                s.label.text = "${s.name}  ${s.get()}"
+            }
+        }
+        seed()
+
+        for (s in sliders) {
+            s.bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    val value = progress + s.range.first
+                    current = s.set(value)
+                    s.label.text = "${s.name}  $value"
+                    store.save(current)
+                    store.broadcast(current)
+                }
+                override fun onStartTrackingTouch(bar: SeekBar) {}
+                override fun onStopTrackingTouch(bar: SeekBar) {}
+            })
+        }
+
+        findViewById<Button>(R.id.geo_reset).setOnClickListener {
+            store.reset()
+            current = store.load()
+            seed()
+            store.broadcast(current)
+            toast("Ring geometry reset")
+        }
     }
 
     private fun refreshStatus() {

@@ -147,6 +147,101 @@
             android:text="Hide"
             android:textSize="13sp" />
 
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp" />
+
+        <TextView
+            android:id="@+id/geo_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="RING GEOMETRY"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/geo_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Both rings share X and radius so they cannot drift apart."
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/geo_cx_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="RING X"
+            android:textSize="11sp" />
+
+        <SeekBar
+            android:id="@+id/geo_cx"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/geo_cy1_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="PERSONAL Y"
+            android:textSize="11sp" />
+
+        <SeekBar
+            android:id="@+id/geo_cy1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/geo_cy2_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="WORK Y"
+            android:textSize="11sp" />
+
+        <SeekBar
+            android:id="@+id/geo_cy2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/geo_radius_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="RADIUS"
+            android:textSize="11sp" />
+
+        <SeekBar
+            android:id="@+id/geo_radius"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/geo_stroke_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="STROKE"
+            android:textSize="11sp" />
+
+        <SeekBar
+            android:id="@+id/geo_stroke"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/geo_reset"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Reset to measured defaults"
+            android:textSize="13sp" />
+
         <View
             android:id="@+id/rule_3"
             android:layout_width="match_parent"
