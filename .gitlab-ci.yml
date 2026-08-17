@@ -76,13 +76,13 @@ package:
     - test -f "$APK" || { echo "no signed APK produced — check the signing variables"; exit 1; }
     - $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs "$APK"
     - $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | grep -q "application-debuggable" && { echo "APK is debuggable — refusing to publish"; exit 1; } || true
-    - cp "$APK" "claude-rear-$CI_COMMIT_TAG.apk"
+    - cp "$APK" "ai-usage-companion-$CI_COMMIT_TAG.apk"
     - |
       curl --fail --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-           --upload-file "claude-rear-$CI_COMMIT_TAG.apk" \
-           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/claude-rear/$CI_COMMIT_TAG/claude-rear-$CI_COMMIT_TAG.apk"
+           --upload-file "ai-usage-companion-$CI_COMMIT_TAG.apk" \
+           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/ai-usage-companion/$CI_COMMIT_TAG/ai-usage-companion-$CI_COMMIT_TAG.apk"
   artifacts:
-    paths: ["claude-rear-*.apk"]
+    paths: ["ai-usage-companion-*.apk"]
 
 release:
   stage: release
@@ -103,6 +103,6 @@ release:
       without Shizuku running.
     assets:
       links:
-        - name: "claude-rear-$CI_COMMIT_TAG.apk"
-          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/claude-rear/$CI_COMMIT_TAG/claude-rear-$CI_COMMIT_TAG.apk"
+        - name: "ai-usage-companion-$CI_COMMIT_TAG.apk"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/ai-usage-companion/$CI_COMMIT_TAG/ai-usage-companion-$CI_COMMIT_TAG.apk"
           link_type: package
