@@ -60,18 +60,13 @@ object MascotRenderer {
             color = Panel.Palette.BG
         }
 
-        if (mood == MascotMood.WALK) {
-            // Time 0 is the rest pose, before the lean — the walk standing still, which
-            // is the right still for "idle" and needs no bounds maths.
-            val h = px * FILL / WalkRig.ASPECT
-            val w = h * WalkRig.ASPECT
-            WalkRig.draw(canvas, 0L, (px - w) / 2f, (px - h) / 2f, h, span = 0f, paint = body)
-            return bmp
-        }
-
         val dead = mood == MascotMood.DEAD
-        val clip = MascotFrames.CLIPS.firstOrNull { it.name == if (dead) MascotMood.STAND else mood }
-            ?: return bmp
+        // WALK resolves to the stand clip rather than to WalkRig. A still of the walk is
+        // the rig at rest — the pose WalkRig itself holds at t=0, before the lean — and
+        // routing it through the clip means one code path punches the eyes out instead
+        // of two.
+        val name = if (dead || mood == MascotMood.WALK) MascotMood.STAND else mood
+        val clip = MascotFrames.CLIPS.firstOrNull { it.name == name } ?: return bmp
         val index = clip.frames.indices.maxByOrNull { clip.frames[it].size } ?: 0
         val frame = clip.frames[index]
         if (frame.isEmpty()) return bmp
@@ -90,6 +85,7 @@ object MascotRenderer {
             x = (px - (x1 - x0) * w) / 2f - x0 * w,
             top = (px - (y1 - y0) * h) / 2f - y0 * h,
             h = h, body = body, eye = eye, accent = accent, dead = dead,
+            holes = true,
         )
         return bmp
     }
@@ -114,9 +110,24 @@ object MascotRenderer {
         eye: Paint,
         accent: Int = ACCENT_ORANGE,
         dead: Boolean = false,
+        holes: Boolean = false,
     ) {
         val w = h * clip.aspect
         val frame = clip.frames[((nowMs / clip.frameMs) % clip.frames.size).toInt()]
+
+        // Eyes as transparency rather than as dark paint.
+        //
+        // On the panel the mascot is drawn onto a known background, so an eye painted in
+        // that background colour IS a hole. Anywhere else it is a lie that survives only
+        // while nothing recolours the image — and HyperOS recolours it. The island tints
+        // the picture flat white, which turned the eyes white too and erased the face,
+        // leaving a blank blob whose remaining notches read as tear tracks.
+        //
+        // Punching them out instead survives any tint, because alpha is the one channel
+        // a tint cannot overwrite.
+        val punch = if (holes) Paint().apply {
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+        } else null
 
         if (dead) {
             canvas.save()
@@ -131,7 +142,7 @@ object MascotRenderer {
             canvas.drawRect(
                 x + r.x * w, top + r.y * h,
                 x + (r.x + r.w) * w, top + (r.y + r.h) * h,
-                body,
+                if (punch != null && r.color == Panel.Palette.BG) punch else body,
             )
         }
 
@@ -149,6 +160,7 @@ object MascotRenderer {
             eye.style = Paint.Style.FILL
             eye.isAntiAlias = false
             eye.color = Panel.Palette.BG
+            val cross = punch ?: eye
             for (r in frame) {
                 if (r.color != Panel.Palette.BG) continue
                 val l = x + r.x * w
@@ -160,7 +172,7 @@ object MascotRenderer {
                         canvas.drawRect(
                             l + j * cw, t + i * ch,
                             l + (j + 1) * cw, t + (i + 1) * ch,
-                            eye,
+                            cross,
                         )
                     }
                 }
