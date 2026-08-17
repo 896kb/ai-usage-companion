@@ -83,12 +83,11 @@ class RearUserService : IRearService.Stub {
         exec("am start -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
         val task = pollTaskId()
         if (task <= 0) { Log.e(TAG, "RearActivity task never appeared"); return }
-        // Transaction 50 = IActivityTaskManager#moveRootTaskToDisplay.
-        val moved = exec("service call activity_task 50 i32 $task i32 $displayId")
+        val moved = moveToDisplay(task, displayId)
         Log.d(TAG, "move task=$task -> display=$displayId : $moved")
 
-        // Transaction 50 returns a success parcel even when it does nothing, so the
-        // return value proves nothing. Confirm with the window manager.
+        // A command that did not complain still proves only that it was accepted, not
+        // that the panel is on screen. Confirm with the window manager.
         // Composition-level check first: it is the only one that has never lied.
         // A failed move is now corrected by moving again rather than by tearing the
         // panel down — the user asked for recovery, not eviction, and a second move
@@ -109,7 +108,7 @@ class RearUserService : IRearService.Stub {
         // through display 0.
         if (compositingOnRear() == false) {
             Log.w(TAG, "compositing on the MAIN display — re-issuing the move")
-            exec("service call activity_task 50 i32 $task i32 $displayId")
+            moveToDisplay(task, displayId)
             wake(displayId)
         }
         placedDisplayId = displayId
@@ -132,7 +131,7 @@ class RearUserService : IRearService.Stub {
         if (task <= 0) return false
         strandStrikes++
         Log.w(TAG, "task $task compositing on the MAIN display (strike $strandStrikes) — moving it back")
-        exec("service call activity_task 50 i32 $task i32 $displayId")
+        moveToDisplay(task, displayId)
         wake(displayId)
         placedDisplayId = displayId
 
@@ -303,6 +302,35 @@ class RearUserService : IRearService.Stub {
     /** Cheap targeted read — `dumpsys window` in full is megabytes. */
     private fun keyguardShowing(): Boolean =
         exec("dumpsys window | grep -m1 isKeyguardShowing").contains("true")
+
+    /**
+     * Moves [task] onto [displayId], and reports whether the command itself complained.
+     *
+     * `am display move-stack`, NOT `service call activity_task <n>`.
+     *
+     * This app used to issue binder transaction 50 directly, on the basis that 50 was
+     * IActivityTaskManager#moveRootTaskToDisplay. Transaction numbers are assigned by
+     * position in the AIDL, so they are not an ABI — they shift whenever a method is
+     * added or removed above them. Android 16 shifted this one, and the failure mode was
+     * the worst kind: `service call` does no type checking, so the call still returned a
+     * success parcel (exception code 0) while doing nothing at all, and every check we
+     * had downstream reported a panel that was simply never placed.
+     *
+     * The named command cannot drift like that. It has existed since Android 8, it is
+     * resolved by name, and it prints a stack trace when it is unhappy instead of
+     * silently succeeding.
+     *
+     * Not kept as a fallback, either: whatever slot 50 holds now is unknown, and calling
+     * an arbitrary method on the activity manager because it once meant something else
+     * is not a fallback, it is a loaded gun.
+     */
+    private fun moveToDisplay(task: Int, displayId: Int): Boolean {
+        val out = exec("am display move-stack $task $displayId")
+        val failed = out.contains("Exception", ignoreCase = true) ||
+            out.contains("Error", ignoreCase = true)
+        if (failed) Log.e(TAG, "move task=$task -> display=$displayId refused: $out")
+        return !failed
+    }
 
     private fun exec(cmd: String): String = try {
         val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
