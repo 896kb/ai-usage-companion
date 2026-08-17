@@ -21,11 +21,15 @@ object MascotRenderer {
     const val ACCENT_WORK = 0xFF006EFF.toInt()
 
     /**
-     * Cells per side of a dead mascot's X. Odd so the two diagonals meet in a single
-     * centre cell; 5 is the smallest that still reads as a cross rather than a blob at
-     * the size these are drawn.
+     * Cells per side of a dead mascot's X. Odd, so the two diagonals meet in a single
+     * centre cell rather than making a fat middle.
+     *
+     * Three, not five. Both were rendered and compared on the panel: at 3 the X fills 5
+     * of 9 cells and its blocks are close to the size of the body's own pixels, so it
+     * reads as part of the same artwork. At 5 it fills 9 of 25, and the finer blocks
+     * make it look like a drawn cross laid on top of pixel art rather than made of it.
      */
-    private const val EYE_GRID = 5
+    private const val EYE_GRID = 3
 
     /**
      * @param x left edge of the figure, [top] its top edge, [h] its drawn height
