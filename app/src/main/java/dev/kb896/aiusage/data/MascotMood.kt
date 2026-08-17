@@ -30,12 +30,16 @@ object MascotMood {
     const val CONFETTI = "confetti"
 
     /**
-     * Every limit spent. Rendered as the standing rig on its side with X-ed eyes — the
+     * The WEEK is gone. Rendered as the standing rig on its side with X-ed eyes — the
      * mascot has died of overuse.
      *
-     * Distinct from FLAG, which is the 5-hour window alone being nearly gone. This one
-     * means there is nothing left anywhere: session, weekly and the scoped weekly all
-     * at [SPENT] or above.
+     * Keyed on the 7-day all-models window alone, and that is the whole point: it is the
+     * limit you cannot wait out. A 5-hour window refills every five hours, so at the
+     * moment one rolls over the session reads 0% while the week is still exhausted —
+     * and the mascot threw CONFETTI at a dead account, because zero looked like a fresh
+     * start. It was not; there was nothing left to spend it on.
+     *
+     * Distinct from FLAG, which is the 5-hour window alone being nearly gone.
      */
     const val DEAD = "dead"
 
@@ -124,14 +128,14 @@ object MascotMood {
         earlier: Float?,
         holdUntil: Long,
         now: Long,
-        allSpent: Boolean = false,
+        weeklySpent: Boolean = false,
     ): Decision {
         val burst = earlier != null && utilization - earlier >= BURST - EPSILON
         val hold = if (burst) now + HOLD_MS else holdUntil
         val clip = when {
-            // Outranks everything, including a live burst hold. If nothing is left
-            // anywhere, what the user is currently doing is beside the point.
-            allSpent -> DEAD
+            // Outranks everything, including a live burst hold and a session at 0.
+            // If the week is gone, what the 5-hour window says is beside the point.
+            weeklySpent -> DEAD
             utilization <= 0f -> CONFETTI
             utilization >= HIGH -> FLAG
             now < hold -> MUSCLE
@@ -141,11 +145,19 @@ object MascotMood {
     }
 
     /**
-     * Whether EVERY window is spent. An empty list is not "all spent" — that is an
-     * account with no data, which must not be reported as dead.
+     * Whether the 7-day all-models window is spent.
+     *
+     * A MISSING weekly window is not a spent one. An account whose response carries no
+     * weekly limit has no data, not no allowance, and reporting it dead would turn a
+     * gap in the API into a verdict about the user.
+     *
+     * Only WEEKLY_ALL counts. The scoped weekly is one model's share and can be
+     * exhausted while the account still has plenty; treating it as fatal would kill the
+     * mascot over a limit its owner can simply route around by using another model.
      */
-    fun allSpent(utilizations: List<Float>): Boolean =
-        utilizations.isNotEmpty() && utilizations.all { it >= SPENT }
+    fun weeklySpent(windows: List<UsageWindow>): Boolean =
+        windows.firstOrNull { it.kind == WindowKind.WEEKLY_ALL }
+            ?.let { it.utilization >= SPENT } ?: false
 
     /**
      * @param utilization current 5h usage, 0..1
@@ -154,8 +166,10 @@ object MascotMood {
      *
      * Order matters and is not arbitrary:
      *
-     *  - ZERO first. An untouched window is the only state that is unambiguous, and it
-     *    outranks everything: at 0 there is no burn to measure and nothing to warn about.
+     *  - DEAD first: a spent WEEK outranks whatever the 5-hour window happens to say,
+     *    including a fresh one reading 0.
+     *  - ZERO second. An untouched window with allowance behind it is unambiguous: at 0
+     *    there is no burn to measure and nothing to warn about.
      *  - HIGH second, so a near-exhausted window shows the flag even while the user is
      *    still burning through it. Checking the burst first would hide the warning at
      *    exactly the moment it matters most, which is why the spec's "and total < 90%"
@@ -167,8 +181,8 @@ object MascotMood {
      * "unknown", and inventing one from a single sample would fire the lifting animation
      * on the first poll after every restart.
      */
-    fun of(utilization: Float, earlier: Float?, allSpent: Boolean = false): String = when {
-        allSpent -> DEAD
+    fun of(utilization: Float, earlier: Float?, weeklySpent: Boolean = false): String = when {
+        weeklySpent -> DEAD
         utilization <= 0f -> CONFETTI
         utilization >= HIGH -> FLAG
         earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE
