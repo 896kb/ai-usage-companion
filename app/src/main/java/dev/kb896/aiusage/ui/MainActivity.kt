@@ -191,7 +191,7 @@ class MainActivity : ComponentActivity() {
         // Clear immediately — leaving it in the field keeps it in the view hierarchy,
         // recoverable from a screenshot, and restorable across a config change.
         pasteField.setText("")
-        toast("Work token imported")
+        toast("Token imported")
         refreshNow()
     }
 

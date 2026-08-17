@@ -746,9 +746,9 @@ class RearDialView(context: Context) : View(context) {
          *
          * ±4px and a 10-minute period are the brief's numbers, written for the
          * original opt-in/default-off toggle design. They still hold here — see
-         * the task report for the tradeoff analysis now that the panel runs this
-         * unconditionally, 24/7. Do not change these without checking that analysis
-         * and the ring geometry margins in PanelGeometry.DEFAULT first: this
+         * the analysis behind them, now that the panel runs this unconditionally, 24/7.
+         * Do not change them without re-checking the ring geometry margins in
+         * PanelGeometry.DEFAULT first: this
          * function's contract (StalenessTest's `dx in -4f..4f && dy in -4f..4f`)
          * pins the amplitude, and PanelGeometry's default ring placement has as
          * little as ~1-2px of margin from the panel edge at this amplitude already.
