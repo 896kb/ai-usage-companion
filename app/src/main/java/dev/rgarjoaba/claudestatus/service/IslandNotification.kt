@@ -26,7 +26,7 @@ import org.json.JSONObject
  * notification's extras. It is proprietary and version-specific, so everything here is
  * best-effort: if HyperOS rejects the payload, or the phone is not a HyperOS phone at
  * all, the notification still renders as an ordinary one and nothing else is affected.
- * The structure mirrors the one proven on this device in ~/labs/another project, extended with
+ * The structure mirrors one already proven on this device, extended with
  * pictures.
  *
  * `org.json` is deliberate here, against this codebase's rule of kotlinx.serialization:

@@ -19,7 +19,7 @@ object MascotRenderer {
     /** Anthropic orange, as baked into MascotFrames for headband, dumbbells and pole. */
     const val ACCENT_ORANGE = 0xFFD97757.toInt()
 
-    /** the company blue, swapped in for the work account. */
+    /** The second account's accent, swapped in for the first's. */
     const val ACCENT_WORK = 0xFF006EFF.toInt()
 
     /**
