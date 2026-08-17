@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The mascot, as the launcher icon: the same nine-rect rig the panel draws, in the same
+  body colour, so the icon is the artwork rather than a picture of it.
+
+  Sized to 64 of the 108dp canvas, not the 72 the safe zone nominally allows. The figure
+  is wider than it is tall and its hands stick out at mid-height, which is exactly where
+  a circular mask is widest — at 72 those hands cross the mask edge and get their corners
+  shaved off under a round launcher.
+
+  Coordinates stay in the source rig's units and the group does the fitting, so these
+  numbers can be compared against WalkRig and MascotFrames directly.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="22.0000"
+        android:translateY="28.2804"
+        android:scaleX="0.598131"
+        android:scaleY="0.598131">
+        <path
+            android:fillColor="#B5BD68"
+            android:pathData="M11,60h11v26h-11z M32,60h11v26h-11z M64,60h11v26h-11z M85,60h11v26h-11z M11,0h85v65h-85z M85,21h22v23h-22z M0,21h22v23h-22z" />
+        <path
+            android:fillColor="#1D1F21"
+            android:pathData="M75,11h11v11h-11z M21,11h11v11h-11z" />
+    </group>
+</vector>

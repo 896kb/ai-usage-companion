@@ -13,9 +13,17 @@ package dev.kb896.aiusage.data
  */
 object MascotMood {
 
-    /** The idle state. Deliberately the STILL pose, not the walk: the panel spends
-     *  nearly all its time here, and a mascot marching on the spot forever is motion
-     *  with nothing to say — and needless redraws on an always-on display. */
+    /**
+     * The idle state: the mascot walks its bar, at the user's request.
+     *
+     * Rendered by WalkRig rather than a MascotFrames clip — it is the only state without
+     * baked frames, because the source has none either. Costs no extra redraws: the panel
+     * already invalidates every frame for the other clips.
+     */
+    const val WALK = "walk"
+
+    /** The rig at rest. No longer an idle state of its own — see [WALK] — but still what
+     *  [DEAD] is drawn from, and the fallback for a clip name this build cannot resolve. */
     const val STAND = "stand"
     const val MUSCLE = "muscle"
     const val FLAG = "flag"
@@ -127,7 +135,7 @@ object MascotMood {
             utilization <= 0f -> CONFETTI
             utilization >= HIGH -> FLAG
             now < hold -> MUSCLE
-            else -> STAND
+            else -> WALK
         }
         return Decision(clip, hold)
     }
@@ -153,7 +161,7 @@ object MascotMood {
      *    exactly the moment it matters most, which is why the spec's "and total < 90%"
      *    qualifier exists.
      *  - BURST third — working hard, with room left.
-     *  - STAND otherwise: idling somewhere in the middle.
+     *  - WALK otherwise: idling somewhere in the middle.
      *
      * A null [earlier] cannot produce a burst. With no history the honest reading is
      * "unknown", and inventing one from a single sample would fire the lifting animation
@@ -164,6 +172,6 @@ object MascotMood {
         utilization <= 0f -> CONFETTI
         utilization >= HIGH -> FLAG
         earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE
-        else -> STAND
+        else -> WALK
     }
 }
