@@ -119,6 +119,10 @@ and all of it is designed to become editable:
 - **macOS widget.**
 - **More than two accounts**, scrolled vertically on the panel rather than stacked — which
   is why colours are named per account rather than "primary" and "secondary".
+- **Mascot states that enter and leave**, rather than looping whole. The lifting mascot
+  should put its headband on once, lift for as long as you are working, and take it off
+  when you stop — instead of restarting the whole performance every three seconds. And
+  the cut between one state and the next should stop being a cut.
 - **Automatic show-on-rear**, so the manual step below stops being manual.
 
 ---
