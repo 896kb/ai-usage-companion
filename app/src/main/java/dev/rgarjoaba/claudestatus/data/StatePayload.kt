@@ -79,7 +79,7 @@ object StatePayload {
                     UsageSnapshot(windows, (o["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L)
                 } else null,
                 planTier = o.str("plan"),
-                mascot = o.str("mascot") ?: MascotMood.STAND,
+                mascot = o.str("mascot") ?: MascotMood.WALK,
             )
         }
         DashboardState((root["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, statuses)

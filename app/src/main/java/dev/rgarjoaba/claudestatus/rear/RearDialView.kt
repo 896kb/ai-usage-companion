@@ -316,7 +316,7 @@ class RearDialView(context: Context) : View(context) {
         // text; when the sizes went to 18/22.5/21 the rows kept their old pitch and
         // crowded. Keep them proportional to the fonts rather than as loose literals.
         val barH = 20f
-        val rowPitch = 33f
+        val rowPitch = ROW_PITCH
         val headingAdvance = 30f
 
         // Measure both account blocks before drawing anything, so the leftover space
@@ -449,14 +449,46 @@ class RearDialView(context: Context) : View(context) {
      * than data. Fixed offsets keep them staggered and legible at every value, and the
      * bar underneath already shows the progress.
      */
+    /** The walk IS the stand rig, so it takes that clip's derived scale and lands the
+     *  same size as every other mascot rather than being tuned by hand. */
+    private val walkScale by lazy {
+        MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }?.scale ?: 1f
+    }
+
     private fun drawMascots(canvas: Canvas) {
+        val now = System.currentTimeMillis()
         for ((index, entry) in sessionBars.entries.withIndex()) {
             val account = entry.key
             val bar = entry.value
+
+            // The idle state walks its bar instead of standing on it. Handled before the
+            // clip lookup because it has no clip: WalkRig animates the timeline, and
+            // MascotFrames ships no "walk" for it to resolve to.
+            if (accountMascot(account) == MascotMood.WALK) {
+                val h = MASCOT_HEIGHT * walkScale
+                val w = h * WalkRig.ASPECT
+                WalkRig.draw(
+                    canvas,
+                    // Half a loop apart, for the same reason MASCOT_STOPS are staggered:
+                    // the phase comes from the wall clock, so without an offset both
+                    // accounts would step, hop and jump in perfect unison — which reads
+                    // as one animation drawn twice rather than two mascots.
+                    nowMs = now + index * (WalkRig.DURATION_MS / 2),
+                    left = bar.left,
+                    // Span is the bar minus the figure's own width, so the far end of the
+                    // jump lands ON the bar's right edge rather than past it.
+                    span = (bar.right - bar.left - w).coerceAtLeast(0f),
+                    top = bar.top - h,
+                    h = h,
+                    paint = mascotPaint,
+                    rise = ROW_PITCH,
+                )
+                continue
+            }
+
             // Fall back to standing for anything unresolvable. A payload restored from
-            // disk can name a clip this build no longer ships — "walk" is exactly that
-            // case, being withheld until it is finished — and silently drawing nothing
-            // would look like the mascot feature had broken.
+            // disk can name a clip this build no longer ships, and silently drawing
+            // nothing would look like the mascot feature had broken.
             val clip = MascotFrames.CLIPS.firstOrNull { it.name == accountMascot(account) }
                 ?: MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
                 ?: continue
@@ -470,7 +502,7 @@ class RearDialView(context: Context) : View(context) {
             // suits a walk or a lift, so it keeps the original 125ms while the rest run
             // at 83ms.
             MascotRenderer.draw(
-                canvas, clip, System.currentTimeMillis(), x, top, h, mascotPaint, deadEye,
+                canvas, clip, now, x, top, h, mascotPaint, deadEye,
                 accent = if (account == Account.WORK) MascotRenderer.ACCENT_WORK
                     else MascotRenderer.ACCENT_ORANGE,
                 dead = accountMascot(account) == MascotMood.DEAD,
@@ -507,7 +539,7 @@ class RearDialView(context: Context) : View(context) {
         if (account == Account.WORK && color == ACCENT_ORANGE) ACCENT_WORK else color
 
     private fun accountMascot(account: Account): String =
-        state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.STAND
+        state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.WALK
 
     /**
      * Geometry of one account's 5h bar, captured by drawBars for the mascots to stand
@@ -665,6 +697,15 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val ACCENT_ORANGE = 0xFFD97757.toInt()
         private const val ACCENT_WORK = 0xFF006EFF.toInt()
+
+        /**
+         * Vertical pitch between rows. Shared with the mascot, whose jump is allowed
+         * exactly one row of air — see the walk branch in drawMascots. The figure is
+         * already taller than a row and overlaps the one above it; the timeline's own
+         * reach is another row and a half on top of that, which would carry it across
+         * the account heading and into the other account's block.
+         */
+        private const val ROW_PITCH = 33f
 
         private const val MASCOT_HEIGHT = 62f
         // 1.5x the original 125ms pace, at the user's request. Every clip shares it, so

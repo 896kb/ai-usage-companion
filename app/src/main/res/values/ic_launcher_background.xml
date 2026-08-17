@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Palette.PERSONAL. The mascot is drawn in Palette.WORK (#B5BD68), so the icon is the
+      panel's two greens against each other and nothing else.
+
+      They are close in luminance — about 1.9:1 — so this is deliberately a low-contrast,
+      tonal mark rather than a legible-at-any-size logo. The dark eyes are what stop it
+      reading as a flat blob.
+    -->
+    <color name="ic_launcher_background">#FFFF78</color>
+</resources>

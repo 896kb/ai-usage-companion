@@ -21,7 +21,7 @@ data class AccountStatus(
     /** Short plan bracket ("MAX 5X"), or null when unknown. Purely informational. */
     val planTier: String? = null,
     /** Which mascot clip this account's 5h window has earned. See MascotMood. */
-    val mascot: String = MascotMood.STAND,
+    val mascot: String = MascotMood.WALK,
 )
 
 data class DashboardState(

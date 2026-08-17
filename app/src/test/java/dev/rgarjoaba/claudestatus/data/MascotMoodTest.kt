@@ -32,8 +32,8 @@ class MascotMoodTest {
     }
 
     @Test fun `steady use in the middle just stands`() {
-        assertEquals(MascotMood.STAND, MascotMood.of(0.400f, 0.395f))
-        assertEquals(MascotMood.STAND, MascotMood.of(0.400f, 0.400f))
+        assertEquals(MascotMood.WALK, MascotMood.of(0.400f, 0.395f))
+        assertEquals(MascotMood.WALK, MascotMood.of(0.400f, 0.400f))
     }
 
     /**
@@ -50,7 +50,7 @@ class MascotMoodTest {
     @Test fun `one whole percent is enough`() {
         assertEquals(MascotMood.MUSCLE, MascotMood.of(0.35f, 0.34f))
         assertEquals(MascotMood.MUSCLE, MascotMood.of(0.36f, 0.35f))
-        assertEquals(MascotMood.STAND, MascotMood.of(0.35f, 0.35f))
+        assertEquals(MascotMood.WALK, MascotMood.of(0.35f, 0.35f))
     }
 
     /**
@@ -59,7 +59,7 @@ class MascotMoodTest {
      * after every restart.
      */
     @Test fun `no history cannot produce a burst`() {
-        assertEquals(MascotMood.STAND, MascotMood.of(0.40f, null))
+        assertEquals(MascotMood.WALK, MascotMood.of(0.40f, null))
     }
 
     /** Usage can fall when a window rolls over; that is not a burst. */
@@ -75,7 +75,7 @@ class MascotMoodTest {
     }
 
     @Test fun `a falling window does not lift`() {
-        assertEquals(MascotMood.STAND, MascotMood.of(0.10f, 0.80f))
+        assertEquals(MascotMood.WALK, MascotMood.of(0.10f, 0.80f))
     }
 
     // ---- the latch ----------------------------------------------------------------
@@ -103,7 +103,7 @@ class MascotMoodTest {
     @Test fun `it stops five minutes after the last burst`() {
         val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
         val after = MascotMood.decide(0.20f, 0.20f, start.holdUntil, T + MascotMood.HOLD_MS + 1)
-        assertEquals(MascotMood.STAND, after.clip)
+        assertEquals(MascotMood.WALK, after.clip)
     }
 
     /** A burst mid-hold restarts the clock from that moment rather than topping up. */

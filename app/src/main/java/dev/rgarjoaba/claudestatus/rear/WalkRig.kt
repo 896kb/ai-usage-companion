@@ -246,10 +246,14 @@ object WalkRig {
 
     /**
      * @param left left edge of the travel span
-     * @param top the rig's top edge at rest — the jump goes [HEADROOM] x [h] above it
+     * @param top the rig's top edge at rest
      * @param h the rig's height, excluding anything it leaves the box for
      * @param span horizontal distance to cross; the rig's own width must already be
      *   subtracted, or it walks off the end
+     * @param rise how far above [top] it may go, in px. Defaults to the timeline's own
+     *   reach, [HEADROOM] x [h]. Anything smaller scales the vertical motion rather than
+     *   clipping it, so the jump stays a jump and only gets less air — a clamp would
+     *   read as the mascot hitting a ceiling.
      */
     fun draw(
         canvas: Canvas,
@@ -259,11 +263,13 @@ object WalkRig {
         h: Float,
         span: Float,
         paint: Paint,
+        rise: Float = HEADROOM * h,
     ) {
         val t = (nowMs % DURATION_MS) / 1000f
         val u = h / VB_H
+        val lift = (rise / (HEADROOM * h)).coerceIn(0f, 1f)
         val ox = left + rootXFraction.at(t) * span
-        val oy = top + rootY.at(t) * u
+        val oy = top + rootY.at(t) * u * lift
 
         fun rect(x: Float, y: Float, w: Float, hh: Float, color: Int) {
             paint.color = color
