@@ -15,7 +15,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 SRC = REPO / "app/src/main/java/dev/rgarjoaba/claudestatus/rear/MascotFrames.kt"
 OUT = REPO / "docs/media/states"
 
-BG = 0xFF1D1F21          # Panel.Palette.BG — eyes are drawn in this, and it is the field
+BG = 0xFF1D1F21          # Panel.Palette.BG — the panel's field, AND the eye colour
 SCALE = 5                # pixel art: integer scale, nearest neighbour, no smoothing
 PAD = 10                 # in source units, so the figure is not flush to the edge
 
@@ -65,25 +65,26 @@ def render(clip, dead):
     H = int((y1 - y0) * h) + PAD * 2
     if dead:                                  # rotated a quarter turn: swap the extents
         W, H = max(W, H), max(W, H)
-    im = Image.new("RGB", (W, H), tuple((BG >> s) & 255 for s in (16, 8, 0)))
+    # Transparent field, so the stills sit on whatever background renders them.
+    #
+    # The eyes are NOT part of that transparency, even though they are painted in the
+    # same colour as the panel's background. On the panel an eye drawn in the background
+    # colour IS a hole and looks correct; punched out of a README still it would show the
+    # page through the mascot's head, and on a light page leave it blank-faced. Kept
+    # opaque, they read as eyes against the green body on any background.
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     ox = (W - (x1 - x0) * w) / 2 - x0 * w
     oy = (H - (y1 - y0) * h) / 2 - y0 * h
+    opaque = lambda c: tuple((c >> s) & 255 for s in (16, 8, 0)) + (255,)
 
-    def rects(target):
-        for (rx, ry, rw, rh, c) in fr:
-            if dead and c == BG:
-                continue
-            col = tuple((c >> s) & 255 for s in (16, 8, 0))
-            target.rectangle([ox + rx * w, oy + ry * h,
-                              ox + (rx + rw) * w, oy + (ry + rh) * h], fill=col)
+    for (rx, ry, rw, rh, c) in fr:
+        if dead and c == BG:                    # skipped; re-drawn as an X below
+            continue
+        d.rectangle([ox + rx * w, oy + ry * h,
+                     ox + (rx + rw) * w, oy + (ry + rh) * h], fill=opaque(c))
 
-    if not dead:
-        rects(d)
-    else:
-        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ld = ImageDraw.Draw(layer)
-        rects(ld)
+    if dead:
         for (rx, ry, rw, rh, c) in fr:          # X-ed eyes, on a 3x3 grid like the panel
             if c != BG:
                 continue
@@ -91,10 +92,9 @@ def render(clip, dead):
             cw, ch = (rw * w) / 3, (rh * h) / 3
             for i in range(3):
                 for j in (i, 2 - i):
-                    ld.rectangle([l + j * cw, t + i * ch, l + (j + 1) * cw, t + (i + 1) * ch],
-                                 fill=tuple((BG >> s) & 255 for s in (16, 8, 0)) + (255,))
-        layer = layer.rotate(-90, resample=Image.NEAREST, center=(W / 2, H / 2))
-        im.paste(layer, (0, 0), layer)
+                    d.rectangle([l + j * cw, t + i * ch,
+                                 l + (j + 1) * cw, t + (i + 1) * ch], fill=opaque(BG))
+        im = im.rotate(-90, resample=Image.NEAREST, center=(W / 2, H / 2))
     return im.resize((W * SCALE // 2, H * SCALE // 2), Image.NEAREST)
 
 
