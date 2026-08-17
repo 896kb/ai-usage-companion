@@ -724,14 +724,28 @@ class RearDialView(context: Context) : View(context) {
         /**
          * Spring constants, in SI-ish units against a seconds-based dt.
          *
-         * Damping ratio is DAMPING / (2 * sqrt(STIFFNESS)) = 4.2 / 7.48 = 0.56 —
+         * Damping ratio is DAMPING / (2 * sqrt(STIFFNESS)) = 2.1 / 3.74 = 0.56 —
          * underdamped, so a change overshoots by roughly a tenth and settles back.
          * That overshoot is the point: it is what makes the movement register as a
          * spring rather than a slow lerp. Settling time is about 4 / (zeta * omega) =
-         * 4 / 2.1, near enough two seconds.
+         * 4 / 1.05, near enough four seconds.
+         *
+         * THESE TWO ARE COUPLED. Retuning one alone silently changes the character of
+         * the motion, not just its speed: the damping ratio is what decides whether a
+         * bar overshoots, glides, or crawls, and it depends on both. To change only the
+         * DURATION, scale them together —
+         *
+         *     omega    = sqrt(STIFFNESS)          duration is proportional to 1 / omega
+         *     zeta     = DAMPING / (2 * omega)    keep this fixed to keep the feel
+         *
+         * so halving the speed means STIFFNESS / 4 and DAMPING / 2. That is exactly
+         * this edit: 14/4.2 became 3.5/2.1, doubling the settle from ~2s to ~4s with
+         * zeta unchanged at 0.56. Dropping STIFFNESS alone would have pushed zeta to
+         * 1.12 — overdamped, no overshoot, and the spring would have become the slow
+         * lerp it exists to avoid.
          */
-        private const val STIFFNESS = 14f
-        private const val DAMPING = 4.2f
+        private const val STIFFNESS = 3.5f
+        private const val DAMPING = 2.1f
 
         /** Below this, in both value and velocity, a spring counts as arrived. */
         private const val EPSILON = 0.0005f
