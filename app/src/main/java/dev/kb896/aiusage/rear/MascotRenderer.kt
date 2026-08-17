@@ -1,8 +1,10 @@
 package dev.kb896.aiusage.rear
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.data.MascotMood
 
 /**
  * Draws one mascot clip. Shared by the rear panel and the in-app preview strip.
@@ -30,6 +32,70 @@ object MascotRenderer {
      * make it look like a drawn cross laid on top of pixel art rather than made of it.
      */
     private const val EYE_GRID = 3
+
+    /**
+     * A mood as a square bitmap on a transparent background, for places that can only
+     * take a picture — the HyperIsland pill, a notification.
+     *
+     * ONE frame, not an animation. Nothing outside the app's own views can be driven at
+     * an animation's frame rate: a notification would have to be re-posted per frame,
+     * which the system throttles and which would burn the shade. So the still has to say
+     * as much as possible on its own, and the frame chosen is the one carrying the MOST
+     * rects — the fullest confetti burst, the dumbbells at their peak, the flag extended.
+     * Frame 0 of the confetti is the mascot alone with no confetti in the air at all,
+     * which is exactly the frame that says nothing.
+     *
+     * Fitted on the chosen frame's real bounds rather than on the clip's nominal box.
+     * The two are not the same: confetti is positioned relative to the mascot and sits
+     * well outside it, at negative coordinates, so fitting the box would push the burst
+     * off the bitmap.
+     */
+    fun bitmap(mood: String, px: Int, accent: Int = ACCENT_ORANGE): Bitmap {
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val body = Paint()
+        val eye = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.SQUARE
+            color = Panel.Palette.BG
+        }
+
+        if (mood == MascotMood.WALK) {
+            // Time 0 is the rest pose, before the lean — the walk standing still, which
+            // is the right still for "idle" and needs no bounds maths.
+            val h = px * FILL / WalkRig.ASPECT
+            val w = h * WalkRig.ASPECT
+            WalkRig.draw(canvas, 0L, (px - w) / 2f, (px - h) / 2f, h, span = 0f, paint = body)
+            return bmp
+        }
+
+        val dead = mood == MascotMood.DEAD
+        val clip = MascotFrames.CLIPS.firstOrNull { it.name == if (dead) MascotMood.STAND else mood }
+            ?: return bmp
+        val index = clip.frames.indices.maxByOrNull { clip.frames[it].size } ?: 0
+        val frame = clip.frames[index]
+        if (frame.isEmpty()) return bmp
+
+        val x0 = frame.minOf { it.x }
+        val y0 = frame.minOf { it.y }
+        val x1 = frame.maxOf { it.x + it.w }
+        val y1 = frame.maxOf { it.y + it.h }
+        // Solving "the frame's extents fill the square" for h, given w = h * aspect.
+        // The dead pose is rotated a quarter turn about its own centre, so it occupies a
+        // box of the same two dimensions swapped — already inside the square this fits.
+        val h = px * FILL / maxOf((x1 - x0) * clip.aspect, y1 - y0)
+        val w = h * clip.aspect
+        draw(
+            canvas, clip, index * clip.frameMs,
+            x = (px - (x1 - x0) * w) / 2f - x0 * w,
+            top = (px - (y1 - y0) * h) / 2f - y0 * h,
+            h = h, body = body, eye = eye, accent = accent, dead = dead,
+        )
+        return bmp
+    }
+
+    /** Fraction of the bitmap the figure fills, leaving it from touching the edges. */
+    private const val FILL = 0.94f
 
     /**
      * @param x left edge of the figure, [top] its top edge, [h] its drawn height
