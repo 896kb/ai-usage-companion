@@ -29,17 +29,20 @@ object MascotFrames {
      * at the same box height — the flag's cloth is taller than the character — so the
      * box is enlarged to bring the figures back to a common size.
      */
-    class Clip(val name: String, val aspect: Float, val scale: Float, val frameMs: Long, val frames: List<List<Rect>>)
+    /** @param travelMs one full traversal of its span; 0 keeps the clip in place. */
+    class Clip(val name: String, val aspect: Float, val scale: Float, val frameMs: Long, val travelMs: Long, val frames: List<List<Rect>>)
 
     // confetti: 8 frames, 154 rects, mascot box 129x121
     // muscle: 36 frames, 718 rects, mascot box 137x117
     // flag: 7 frames, 475 rects, mascot box 113.659x99.99
+    // walk: 8 frames, 72 rects, mascot box 107x86
     // stand: 1 frames, 9 rects, mascot box 107x86
     val CLIPS: List<Clip> = listOf(
-        Clip("confetti", 1.06612f, 1.0f, 125L, confettiFrames()),
-        Clip("muscle", 1.17094f, 0.9669f, 83L, muscleFrames()),
-        Clip("flag", 1.13670f, 0.8394f, 83L, flagFrames()),
-        Clip("stand", 1.24419f, 0.7107f, 83L, standFrames()),
+        Clip("confetti", 1.06612f, 1.0f, 125L, 0L, confettiFrames()),
+        Clip("muscle", 1.17094f, 0.9669f, 83L, 0L, muscleFrames()),
+        Clip("flag", 1.13670f, 0.8394f, 83L, 0L, flagFrames()),
+        Clip("walk", 1.24419f, 0.7107f, 83L, 2200L, walkFrames()),
+        Clip("stand", 1.24419f, 0.7107f, 83L, 0L, standFrames()),
     )
 
     private fun confettiFrames(): List<List<Rect>> = listOf(
@@ -1497,6 +1500,97 @@ object MascotFrames {
             Rect(1.09978f, -0.21002f, 0.04399f, 0.05001f, 0xff000000.toInt()),
             Rect(1.09978f, -0.06001f, 0.04399f, 0.05001f, 0xff000000.toInt()),
             Rect(1.18776f, -0.21002f, 0.04399f, 0.05001f, 0xff000000.toInt()),
+        ),
+    )
+
+    private fun walkFrames(): List<List<Rect>> = listOf(
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.13605f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.30233f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.13605f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.30233f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.30233f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.13605f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.30233f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.13605f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.17762f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+        ),
+        listOf(
+            Rect(0.79439f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.59813f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.29907f, 0.69767f, 0.10280f, 0.14644f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.69767f, 0.10280f, 0.22958f, 0xffb5bd68.toInt()),
+            Rect(0.10280f, 0.00000f, 0.79439f, 0.75581f, 0xffb5bd68.toInt()),
+            Rect(0.79439f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.00000f, 0.24419f, 0.20561f, 0.26744f, 0xffb5bd68.toInt()),
+            Rect(0.70093f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
+            Rect(0.19626f, 0.12791f, 0.10280f, 0.12791f, 0xff1d1f21.toInt()),
         ),
     )
 

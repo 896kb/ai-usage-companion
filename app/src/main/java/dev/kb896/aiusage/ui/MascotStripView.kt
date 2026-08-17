@@ -44,10 +44,18 @@ class MascotStripView @JvmOverloads constructor(
      */
     private data class Cell(val clip: MascotFrames.Clip, val caption: String, val dead: Boolean)
 
+    /**
+     * The sedentary clips share the top row. A travelling clip cannot: it needs the
+     * width of the whole strip to cross, so it gets its own row underneath.
+     */
     private val cells: List<Cell> by lazy {
         val stand = MascotFrames.CLIPS.firstOrNull { it.name == "stand" }
-        MascotFrames.CLIPS.map { Cell(it, it.name, dead = false) } +
+        MascotFrames.CLIPS.filter { it.travelMs <= 0L }.map { Cell(it, it.name, dead = false) } +
             listOfNotNull(stand?.let { Cell(it, "dead", dead = true) })
+    }
+
+    private val travellers: List<MascotFrames.Clip> by lazy {
+        MascotFrames.CLIPS.filter { it.travelMs > 0L }
     }
 
     private val tick = object : Runnable {
@@ -71,12 +79,25 @@ class MascotStripView @JvmOverloads constructor(
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bg)
         if (cells.isEmpty()) return
 
+        val now = System.currentTimeMillis()
+        val rows = if (travellers.isEmpty()) 1 else 2
+        val rowH = height.toFloat() / rows
+
         val cell = width.toFloat() / cells.size
         // Leave room under the figures for the caption, and above for anything a clip
         // throws over its own head — the confetti sits well outside its mascot box.
-        val availableH = (height - CAPTION_H - HEADROOM).coerceAtLeast(1f)
-        val baseline = height - CAPTION_H
-        val now = System.currentTimeMillis()
+        val availableH = (rowH - CAPTION_H - HEADROOM).coerceAtLeast(1f)
+        val baseline = rowH - CAPTION_H
+
+        for ((i, t) in travellers.withIndex()) {
+            val h = (rowH - CAPTION_H - HEADROOM).coerceAtLeast(1f)
+                .coerceAtMost((cell * CELL_FILL) / t.aspect)
+            val w = h * t.aspect
+            val top = rowH * (rows - 1) + (rowH - CAPTION_H - h)
+            val x = MascotRenderer.travelX(t, now, 0f, width.toFloat(), w)
+            MascotRenderer.draw(canvas, t, now, x, top, h, body, eye)
+            canvas.drawText(t.name, width / 2f, height - 6f, label)
+        }
 
         for ((i, c) in cells.withIndex()) {
             // Height is bounded by the CELL as well as by the view. Sizing on height
@@ -94,7 +115,7 @@ class MascotStripView @JvmOverloads constructor(
                     else MascotRenderer.ACCENT_ORANGE,
                 dead = c.dead,
             )
-            canvas.drawText(c.caption, i * cell + cell / 2f, height - 6f, label)
+            canvas.drawText(c.caption, i * cell + cell / 2f, rowH - 6f, label)
         }
     }
 

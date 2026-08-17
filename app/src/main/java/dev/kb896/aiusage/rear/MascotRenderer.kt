@@ -32,6 +32,24 @@ object MascotRenderer {
     private const val EYE_GRID = 3
 
     /**
+     * Where a travelling clip has got to, as a left edge within [left]..[right].
+     *
+     * A sawtooth rather than a there-and-back: the site's walk is a linear translation
+     * that restarts, and a mascot that reversed would have to moonwalk, because the gait
+     * has no mirrored form.
+     *
+     * Returns [left] unchanged for clips that do not travel, so callers can apply this
+     * unconditionally.
+     */
+    fun travelX(clip: MascotFrames.Clip, nowMs: Long, left: Float, right: Float, w: Float): Float {
+        if (clip.travelMs <= 0L) return left
+        val span = (right - w) - left
+        if (span <= 0f) return left
+        val t = (nowMs % clip.travelMs).toFloat() / clip.travelMs
+        return left + span * t
+    }
+
+    /**
      * @param x left edge of the figure, [top] its top edge, [h] its drawn height
      * @param accent replaces [ACCENT_ORANGE] wherever it appears; pass ACCENT_ORANGE to
      *   leave the artwork as generated

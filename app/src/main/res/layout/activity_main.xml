@@ -281,7 +281,7 @@
         <dev.kb896.aiusage.ui.MascotStripView
             android:id="@+id/mascot_strip"
             android:layout_width="match_parent"
-            android:layout_height="150dp"
+            android:layout_height="260dp"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="24dp" />
 
