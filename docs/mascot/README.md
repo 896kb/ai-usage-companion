@@ -23,7 +23,7 @@ Recoloured here to the panel palette: body `#B5BD68` (Palette.WORK), eyes `#1D1F
 | `walk-8frame.svg` | **confetti** — mascot celebrating under falling confetti | 8 | 204 |
 | `cycle-11frame.svg` | **muscle** — mascot lifting dumbbells | 36 | 718 |
 | `detailed.svg` | **flag** — static mascot waving a checkered flag | 12 | 829 |
-| `pose.svg` | the **walk** rig — see below | 1 (source) | 9 |
+| `pose.svg` | the **stand** rig, and the rig the walk is animated from — see below | 1 | 9 |
 
 The filenames are the names I first guessed and are now wrong; the table is the truth.
 
@@ -46,35 +46,52 @@ sequences wrap). `MascotFrames.kt` is generated on that model.
 ## The walk is procedural, not frames
 
 There is no walk animation in any SVG, and that is not an oversight — the site builds it
-in JavaScript. From the minified GSAP timeline in chunk `5ce46cbd0cd22c82.js`:
+in JavaScript, as a GSAP timeline over the same nine-rect rig as the `stand` clip. So
+there is nothing to bake, and `WalkRig.kt` animates the timeline directly instead.
 
-    .set(leg1, {svgOrigin: "16.5 60"})   .set(leg2, {svgOrigin: "37.5 60"})
-    .set(leg3, {svgOrigin: "69.5 60"})   .set(leg4, {svgOrigin: "90.5 60"})
-    .to([leg1, leg3], {scaleY: .45, duration: .1, ease: "power2.out"}, "walk")
-    .to([leg1, leg3], {scaleY: 1,   duration: .1, ease: "power2.in"},  "walk+=0.1")
-    .to([leg2, leg4], {scaleY: .45, ...},                              "walk+=0.1")
+The timeline lives in chunk `5ce46cbd0cd22c82.js`. Parsing its `.to()` chain into
+absolute times — resolving `"<"`, `delay:`, and `"walk+=N"` positions the way GSAP does —
+gives an **11.51s** loop:
 
-Those four origins are exactly the leg rects' horizontal centres and their top edge in
-`pose.svg` (x=11/32/64/85, w=11 → centres 16.5/37.5/69.5/90.5; y=60). So the pivot is
-the top of each leg, each pair oscillates between full height and 45%, and legs 1+3 run
-antiphase to 2+4 — a diagonal quadruped gait. The body also translates horizontally over
-2.2s, which is the part that makes it read as walking rather than marching in place.
+| at | what |
+|----|------|
+| 0.00 | lean left: body rotates -3° about (53,65), eyes look left, legs stretch and tilt |
+| 1.90 | lean right, eyes track across and down |
+| 3.50 | settle upright, eyes drop further |
+| 3.70 | the hop (`y:-18`, then back) |
+| 4.03 | walk 55% of the span, 20 steps on a 0.1s beat |
+| 6.53 | lean right again, look down |
+| 9.43 | crouch, then jump the remaining 45% — `y:-90`, well outside the rig's box |
+| 10.51 | land, hold one second, snap back to the start |
 
-The generator bakes 8 samples of one 0.2s cycle with the same power2 easing. The panel
-plays them at its 125ms frame time, stretching the gait to 1s — deliberately slower than
-the site, because matching it would mean redrawing the whole view at 40fps forever on an
-always-on display.
+The gait itself: leg pivots move from the foot (`y=86`) to the hip (`y=60`) for the walk
+and back afterwards, each pair oscillating between full height and 45%, legs 1+3
+antiphase to 2+4 — a diagonal quadruped gait.
 
-## Known incomplete: the walk
+### Why not bake it
 
-The walk clip reproduces the leg gait from the GSAP timeline but NOT the whole
-animation — the site also translates the body horizontally over 2.2s and plays an
-entry hop (`y:-18` then `y:0`) before the loop, and there may be more of the timeline
-than the fragment decoded so far. It is generated and kept, but MascotMood never
-selects it; the idle state is the still `stand` pose instead.
+An earlier version baked 8 samples of the 0.2s leg cycle. It was wrong in three ways at
+once: it dropped the lean, the look, the hop and the jump — five sixths of the
+performance; it ran the gait at a third speed, playing a 0.2s cycle over 8 frames of
+83ms; and it marched on the spot, because the translation is a separate tween.
 
-That is deliberate for now on two counts: the clip is unfinished, and a mascot marching
-on the spot forever is motion with nothing to say on a panel that is lit 24/7.
+Baking the whole thing would need ~290 frames of 9 rects and still could not express the
+rotations: `MascotFrames.Rect` is axis-aligned by construction, and the lean rotates the
+body 3° and each leg 7-9°.
+
+### Two things that are easy to get wrong
+
+* **GSAP's power names are off by one from the exponent.** `Power1` is quadratic,
+  `Power2` **cubic**, `Power3` quartic. Reading `power2.out` as a quadratic makes every
+  ease in this timeline visibly lazier than the site's.
+* **The loop is 11.51s, not 10.51s.** The last tween ends at 10.51, but the callback that
+  resets the mascot to the start is scheduled at `"+=1"`, so that is GSAP's total
+  duration and where `repeat: -1` restarts. That second is the pause at the far end.
+
+The walk is shown only in the app's mascot strip. `MascotMood` never selects it: the
+panel's idle state is the still `stand` pose, because a mascot walking back and forth
+forever is motion with nothing to say on a display that is lit 24/7 — and it would mean
+redrawing the whole view at 25fps to say it.
 
 ## Colour
 
