@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import android.util.Log
 import android.view.Display
 import dev.rgarjoaba.claudestatus.Panel
+import dev.rgarjoaba.claudestatus.R
 import dev.rgarjoaba.claudestatus.data.StatePayload
 import dev.rgarjoaba.claudestatus.rear.GeometryStore
 import dev.rgarjoaba.claudestatus.rear.RearActivity
@@ -409,7 +410,10 @@ class UsagePollService : Service() {
         return Notification.Builder(this, CHANNEL)
             .setContentTitle("Claude Status")
             .setContentText("Tap to show on the rear panel")
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            // Ours, not a stock system glyph — this one is permanently in the
+            // status bar, so it is the app's face more than any other icon.
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(Panel.Palette.WORK)
             .setContentIntent(tap)
             .setOngoing(true)
             .build()

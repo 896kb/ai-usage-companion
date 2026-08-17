@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar icon: the mascot again, so a notification from this app is identifiable at
+  16dp without reading it.
+
+  ONE path, with fillType="evenOdd", not two. A notification small icon is an alpha mask —
+  the system throws the colours away and tints the silhouette — so eyes drawn as dark
+  rects would simply vanish into the body. As subpaths of the same even-odd path they
+  cancel against the torso they sit inside and become holes, which survives the tint.
+
+  Colour is applied per-notification via Notification.Builder.setColor, which is what
+  distinguishes a milestone from a warning now that both use this one glyph.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/colorControlNormal">
+    <group
+        android:translateX="1.0000"
+        android:translateY="3.1589"
+        android:scaleX="0.205607"
+        android:scaleY="0.205607">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M11,60h11v26h-11z M32,60h11v26h-11z M64,60h11v26h-11z M85,60h11v26h-11z M11,0h85v65h-85z M85,21h22v23h-22z M0,21h22v23h-22z M75,11h11v11h-11z M21,11h11v11h-11z" />
+    </group>
+</vector>
