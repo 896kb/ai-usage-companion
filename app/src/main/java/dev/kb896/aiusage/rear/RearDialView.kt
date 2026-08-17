@@ -469,49 +469,12 @@ class RearDialView(context: Context) : View(context) {
             // Per-clip frame time: the confetti burst reads as frantic at the pace that
             // suits a walk or a lift, so it keeps the original 125ms while the rest run
             // at 83ms.
-            val frame = clip.frames[
-                ((System.currentTimeMillis() / clip.frameMs) % clip.frames.size).toInt()
-            ]
-
-            // Dead: the standing rig tipped on its side with X-ed eyes. Rotating the
-            // CANVAS rather than the frame data keeps one copy of the artwork and lets
-            // the same clip serve both states.
-            val dead = accountMascot(account) == MascotMood.DEAD
-            if (dead) {
-                canvas.save()
-                canvas.rotate(90f, x + w / 2f, top + h / 2f)
-            }
-
-            for (r in frame) {
-                // Eyes are drawn in the background colour, so on a dead mascot they
-                // would simply vanish rather than become crosses. Skip them here and
-                // stroke an X over each below.
-                if (dead && r.color == Panel.Palette.BG) continue
-                mascotPaint.color = accentFor(account, r.color)
-                canvas.drawRect(
-                    x + r.x * w, top + r.y * h,
-                    x + (r.x + r.w) * w, top + (r.y + r.h) * h,
-                    mascotPaint,
-                )
-            }
-
-            if (dead) {
-                for (r in frame) {
-                    if (r.color != Panel.Palette.BG) continue
-                    val l = x + r.x * w
-                    val t = top + r.y * h
-                    val rt = x + (r.x + r.w) * w
-                    val b = top + (r.y + r.h) * h
-                    // Inset so the strokes read as an X inside the eye rather than a
-                    // filled square at this size.
-                    val ix = (rt - l) * 0.15f
-                    val iy = (b - t) * 0.15f
-                    deadEye.strokeWidth = ((rt - l) * 0.28f).coerceAtLeast(1.5f)
-                    canvas.drawLine(l + ix, t + iy, rt - ix, b - iy, deadEye)
-                    canvas.drawLine(rt - ix, t + iy, l + ix, b - iy, deadEye)
-                }
-                canvas.restore()
-            }
+            MascotRenderer.draw(
+                canvas, clip, System.currentTimeMillis(), x, top, h, mascotPaint, deadEye,
+                accent = if (account == Account.WORK) MascotRenderer.ACCENT_WORK
+                    else MascotRenderer.ACCENT_ORANGE,
+                dead = accountMascot(account) == MascotMood.DEAD,
+            )
         }
         if (sessionBars.isNotEmpty()) animating = true
     }
