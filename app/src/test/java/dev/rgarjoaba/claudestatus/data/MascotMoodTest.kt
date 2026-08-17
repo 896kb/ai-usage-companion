@@ -131,24 +131,64 @@ class MascotMoodTest {
         assertEquals(MascotMood.CONFETTI, d.clip)
     }
 
-    // ---- everything spent -----------------------------------------------------------
+    // ---- the week spent -------------------------------------------------------------
 
-    @Test fun `every window at or above 99 percent is dead`() {
-        assertTrue(MascotMood.allSpent(listOf(0.99f, 1.0f, 0.995f)))
-        assertEquals(MascotMood.DEAD, MascotMood.decide(1.0f, null, 0L, T, allSpent = true).clip)
-    }
+    private fun window(kind: WindowKind, u: Float) = UsageWindow(kind, kind.wire, u, null)
 
-    /** One window with room left means the account is not dead. */
-    @Test fun `a single unspent window is enough to live`() {
-        assertTrue(!MascotMood.allSpent(listOf(0.99f, 1.0f, 0.98f)))
+    @Test fun `the weekly window at or above 99 percent is dead`() {
+        assertTrue(MascotMood.weeklySpent(listOf(
+            window(WindowKind.SESSION, 0f),
+            window(WindowKind.WEEKLY_ALL, 0.99f),
+        )))
+        assertEquals(
+            MascotMood.DEAD,
+            MascotMood.decide(1.0f, null, 0L, T, weeklySpent = true).clip,
+        )
     }
 
     /**
-     * An account with no windows is not "all spent" — that is missing data, and
-     * reporting it as dead would turn a fetch problem into a false alarm.
+     * The bug this rule was rewritten for.
+     *
+     * A 5-hour window refills every five hours; the week does not. At the moment one
+     * rolls over the session reads 0% while the week is still exhausted, and the old
+     * rule — every window at or above 99% — went false, so a dead account threw
+     * confetti at a fresh start it could not use.
      */
-    @Test fun `no windows is not dead`() {
-        assertTrue(!MascotMood.allSpent(emptyList()))
+    @Test fun `a fresh session does not celebrate a spent week`() {
+        val windows = listOf(
+            window(WindowKind.SESSION, 0f),
+            window(WindowKind.WEEKLY_ALL, 0.99f),
+        )
+        assertTrue(MascotMood.weeklySpent(windows))
+        assertEquals(
+            MascotMood.DEAD,
+            MascotMood.decide(0f, null, 0L, T, MascotMood.weeklySpent(windows)).clip,
+        )
+    }
+
+    /** A busy week that is not yet spent leaves the account alive. */
+    @Test fun `a weekly window below the threshold is not dead`() {
+        assertTrue(!MascotMood.weeklySpent(listOf(window(WindowKind.WEEKLY_ALL, 0.98f))))
+    }
+
+    /**
+     * The scoped weekly is one model's share and can be exhausted while the account has
+     * plenty left, so it must not be fatal on its own.
+     */
+    @Test fun `a spent scoped weekly is not death`() {
+        assertTrue(!MascotMood.weeklySpent(listOf(
+            window(WindowKind.SESSION, 0.10f),
+            window(WindowKind.WEEKLY_SCOPED, 1.0f),
+        )))
+    }
+
+    /**
+     * An account with no weekly window is missing data, not out of allowance, and
+     * reporting it as dead would turn a gap in the API into a verdict about the user.
+     */
+    @Test fun `no weekly window is not dead`() {
+        assertTrue(!MascotMood.weeklySpent(emptyList()))
+        assertTrue(!MascotMood.weeklySpent(listOf(window(WindowKind.SESSION, 1.0f))))
     }
 
     /**
@@ -158,12 +198,15 @@ class MascotMoodTest {
     @Test fun `dead outranks an active burst hold`() {
         val burst = MascotMood.decide(0.50f, 0.40f, 0L, T)
         assertEquals(MascotMood.MUSCLE, burst.clip)
-        val dead = MascotMood.decide(1.0f, 0.99f, burst.holdUntil, T + 60_000L, allSpent = true)
+        val dead = MascotMood.decide(1.0f, 0.99f, burst.holdUntil, T + 60_000L, weeklySpent = true)
         assertEquals(MascotMood.DEAD, dead.clip)
     }
 
     /** ...and outranks the flag, which is only about the 5-hour window. */
     @Test fun `dead outranks the flag`() {
-        assertEquals(MascotMood.DEAD, MascotMood.decide(0.95f, null, 0L, T, allSpent = true).clip)
+        assertEquals(
+            MascotMood.DEAD,
+            MascotMood.decide(0.95f, null, 0L, T, weeklySpent = true).clip,
+        )
     }
 }
