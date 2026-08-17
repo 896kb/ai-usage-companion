@@ -3,11 +3,13 @@ package dev.rgarjoaba.claudestatus.service
 import android.app.Notification
 import android.graphics.drawable.Icon
 import android.os.Bundle
-import dev.rgarjoaba.claudestatus.Panel
+import dev.rgarjoaba.claudestatus.data.Account
 import dev.rgarjoaba.claudestatus.data.AccountStatus
 import dev.rgarjoaba.claudestatus.data.DashboardState
 import dev.rgarjoaba.claudestatus.data.Health
+import dev.rgarjoaba.claudestatus.data.MascotMood
 import dev.rgarjoaba.claudestatus.data.UsageWindow
+import dev.rgarjoaba.claudestatus.data.WindowKind
 import dev.rgarjoaba.claudestatus.rear.MascotRenderer
 import org.json.JSONObject
 
@@ -39,28 +41,51 @@ internal object IslandNotification {
     /** Bitmap edge, in px. The pill scales it down; islands are small. */
     private const val PIC_PX = 128
 
-    /**
-     * The window the island speaks for, and what to say about it.
-     *
-     * @param status the account it belongs to, for the label, the mascot and the accent
-     */
-    private data class Headline(val status: AccountStatus, val window: UsageWindow)
+    /** One account's headline reading. */
+    private data class Line(val status: AccountStatus, val window: UsageWindow)
 
     /**
-     * The most-used window across both accounts — the one that will stop you first.
+     * Both accounts, in a fixed order, skipping any that has no numbers yet.
      *
-     * The island holds one line. Averaging the accounts would describe neither, and
-     * always showing the personal one would go quiet at exactly the moment the work
-     * account was the problem. Highest utilisation is the only choice that cannot hide
-     * bad news.
+     * The 5-hour window specifically, not the worst window: it is the one that moves on
+     * the timescale a glance is useful over, and the one the panel's bars and mascots
+     * already speak for. Falling back to the busiest window keeps an account visible if
+     * the API ever stops reporting a session.
      *
-     * Degraded accounts still count. Their numbers are the last good ones, which is what
-     * the panel shows too; treating them as absent would make a stale 95% vanish.
+     * Order is [Account.entries] — personal, then work — and is deliberately FIXED rather
+     * than sorted by usage. The labels are abbreviated to fit, so position is doing real
+     * work; a list that reorders itself when one account overtakes the other would make
+     * every glance a re-read.
      */
-    private fun headline(state: DashboardState): Headline? =
-        state.statuses
-            .flatMap { s -> s.snapshot?.windows.orEmpty().map { Headline(s, it) } }
-            .maxByOrNull { it.window.utilization }
+    private fun lines(state: DashboardState): List<Line> = Account.entries.mapNotNull { acc ->
+        val status = state.statuses.firstOrNull { it.account == acc } ?: return@mapNotNull null
+        val windows = status.snapshot?.windows.orEmpty()
+        val window = windows.firstOrNull { it.kind == WindowKind.SESSION }
+            ?: windows.maxByOrNull { it.utilization }
+            ?: return@mapNotNull null
+        Line(status, window)
+    }
+
+    private fun percent(w: UsageWindow) = (w.utilization * 100f).toInt()
+
+    /**
+     * "PERSONAL 100% · WORK 42%", with any account that cannot vouch for its numbers
+     * carrying why.
+     *
+     * Stale numbers are labelled because an island is glanceable by design, which makes
+     * it the easiest place to mislead: a percentage with no qualifier reads as current no
+     * matter how many hours old it is.
+     */
+    private fun title(lines: List<Line>) = lines.joinToString("  ·  ") {
+        val health = if (it.status.health == Health.OK) "" else " (${it.status.health.wire})"
+        "${it.status.account.label} ${percent(it.window)}%$health"
+    }
+
+    private fun content(lines: List<Line>): String {
+        val label = lines.map { it.window.label }.distinct().singleOrNull() ?: "5H"
+        val resets = lines.joinToString(" / ") { ResetClock.short(it.window.resetsAt) ?: "—" }
+        return "$label · resets in $resets"
+    }
 
     /**
      * Decorates [builder] with the island payload and the matching shade content.
@@ -69,31 +94,24 @@ internal object IslandNotification {
      * poll lands, an island reading "0%" would be a claim, not a placeholder.
      */
     fun decorate(builder: Notification.Builder, state: DashboardState): Notification.Builder {
-        val head = headline(state) ?: return builder
+        val lines = lines(state)
+        if (lines.isEmpty()) return builder
 
-        val percent = (head.window.utilization * 100f).toInt()
-        val account = head.status.account
-        val title = "${account.label} · ${head.window.label}"
-        val reset = ResetClock.phrase(head.window.resetsAt)
-        val content = "$percent% · $reset"
-        // Stale numbers are labelled as such. An island is glanceable by design, which
-        // means it is also the easiest place to mislead: a number with no qualifier reads
-        // as current no matter how old it is.
-        val suffix = if (head.status.health == Health.OK) "" else " · ${head.status.health.wire}"
+        val title = title(lines)
+        val content = content(lines)
 
-        val mascot = runCatching {
-            MascotRenderer.bitmap(
-                head.status.mascot, PIC_PX,
-                accent = if (account == dev.rgarjoaba.claudestatus.data.Account.WORK) {
-                    MascotRenderer.ACCENT_WORK
-                } else {
-                    MascotRenderer.ACCENT_ORANGE
-                },
-            )
-        }.getOrNull()
+        // ALWAYS the plain standing mascot, never the mood.
+        //
+        // The moods are built to be read at panel size, in colour, moving. The island
+        // gives them none of that: it tints the picture to a flat white silhouette a few
+        // millimetres across, where the dead pose's crossed-out eyes turn into something
+        // that looks like a crying face and the confetti into unexplained specks. The
+        // state is in the numbers beside it; the picture's whole job here is to say which
+        // app is talking.
+        val mascot = runCatching { MascotRenderer.bitmap(MascotMood.STAND, PIC_PX) }.getOrNull()
 
         val extras = Bundle().apply {
-            putString("miui.focus.param", param(title, content + suffix, percent, head))
+            putString("miui.focus.param", param(title, content, lines))
             if (mascot != null) {
                 putBundle(
                     "miui.focus.pics",
@@ -104,7 +122,7 @@ internal object IslandNotification {
 
         return builder
             .setContentTitle(title)
-            .setContentText(content + suffix)
+            .setContentText(content)
             .addExtras(extras)
     }
 
@@ -114,12 +132,11 @@ internal object IslandNotification {
      * Two areas, and they are not two sizes of the same thing:
      *
      *  * `smallIslandArea` is the collapsed pill, a few characters wide beside the
-     *    camera. It gets the percentage and the time — the two numbers worth having
-     *    without any interaction — and the mascot, which carries the state as a picture
-     *    where there is no room for a word for it.
+     *    camera. Both percentages and nothing else — with the labels dropped, since the
+     *    order is fixed and there is no room to name them.
      *  * `bigIslandArea` is what a tap expands to, and can afford the full sentence.
      */
-    private fun param(title: String, content: String, percent: Int, head: Headline): String {
+    private fun param(title: String, content: String, lines: List<Line>): String {
         val pic = JSONObject().put("type", 1).put("pic", PIC_MASCOT)
 
         val small = JSONObject()
@@ -127,8 +144,14 @@ internal object IslandNotification {
             .put(
                 "textInfo",
                 JSONObject()
-                    .put("title", "$percent%")
-                    .put("content", ResetClock.short(head.window.resetsAt).orEmpty()),
+                    .put("title", lines.joinToString(" · ") { "${percent(it.window)}%" })
+                    // The nearest reset of the two: the pill has room for one, and the
+                    // one worth having is the one about to happen.
+                    .put(
+                        "content",
+                        lines.mapNotNull { it.window.resetsAt }.minOrNull()
+                            ?.let { ResetClock.short(it) }.orEmpty(),
+                    ),
             )
 
         val big = JSONObject()
@@ -160,12 +183,8 @@ internal object IslandNotification {
             .put("enableFloat", false)
             .put("islandFirstFloat", false)
             .put("updatable", true)
-            .put("highlightColor", hex(head.status.account.accent))
             .put("param_island", island)
 
         return JSONObject().put("param_v2", v2).toString()
     }
-
-    /** #RRGGBB, which is the only form the island's colour fields accept. */
-    private fun hex(color: Int) = String.format("#%06X", color and 0xFFFFFF)
 }
