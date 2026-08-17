@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Panel-matched controls. The colours are Panel.Palette's, repeated here because a
+      layout cannot read a Kotlin object — if the palette moves, these move with it.
+        BG #1D1F21   TRACK #2A2C2E   WORK/green #B5BD68   FG #C5C8C6   DIM #555555
+    -->
+    <style name="PanelSeekBar" parent="@android:style/Widget.Material.SeekBar">
+        <item name="android:progressDrawable">@drawable/seek_track</item>
+        <item name="android:thumb">@drawable/seek_thumb</item>
+        <item name="android:thumbOffset">0dp</item>
+        <!-- The ripple is a circle and cannot be squared; removing it keeps the control
+             from flashing a round halo around a square thumb on every touch. -->
+        <item name="android:splitTrack">false</item>
+        <item name="android:background">@null</item>
+    </style>
+</resources>

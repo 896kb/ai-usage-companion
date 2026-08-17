@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
         hideButton = findViewById(R.id.hide_button)
         previewLabel = findViewById(R.id.preview_label)
         previewText = findViewById(R.id.preview_text)
+        bindAdvancedToggle()
         bindGeometrySliders()
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
@@ -252,6 +253,26 @@ class MainActivity : ComponentActivity() {
      * too, and reacting to that would broadcast five times on every open and — worse —
      * write the seeded values back over stored ones.
      */
+    /**
+     * The advanced section stays COLLAPSED until asked for.
+     *
+     * These sliders exist for a phone whose rear display is not the one the defaults
+     * were measured against — a larger model in the same family, where the panel is a
+     * different size and the lenses sit elsewhere. That is a real need, and it is also
+     * a need almost nobody has: on the measured device the defaults are already right,
+     * and five sliders that can only make a correct layout wrong do not belong in front
+     * of someone who just installed the app.
+     */
+    private fun bindAdvancedToggle() {
+        val heading = findViewById<TextView>(R.id.geo_heading)
+        val body = findViewById<View>(R.id.geo_body)
+        heading.setOnClickListener {
+            val show = body.visibility != View.VISIBLE
+            body.visibility = if (show) View.VISIBLE else View.GONE
+            heading.text = if (show) "ADVANCED  ▾" else "ADVANCED  ▸"
+        }
+    }
+
     private fun bindGeometrySliders() {
         val store = GeometryStore(this)
         var current = store.load()

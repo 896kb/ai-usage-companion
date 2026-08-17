@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Square thumb, not the platform's circle.
+
+  Everything this app draws is axis-aligned pixel art — the mascot, the bars, the type.
+  A round thumb is the one control that would announce it came from somewhere else, and
+  it sits directly above a panel made entirely of rectangles.
+
+  No corner radius at all, and no anti-aliasing to soften it: the point is the hard edge.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFB5BD68" />
+    <size android:width="18dp" android:height="18dp" />
+</shape>
