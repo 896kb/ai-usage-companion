@@ -3,7 +3,7 @@
 Your Claude Code rate limits, live on the Xiaomi 17 Pro's rear display — so you can see
 how much of your window is left without unlocking anything, opening anything, or asking.
 
-![The panel running on the phone's rear display](docs/media/rear-panel-poster.png)
+![The panel running on the phone's rear display](docs/media/rear-panel.mp4)
 
 Two accounts, three windows each, and a mascot that tells you the state at a glance from
 across a desk.
@@ -62,10 +62,15 @@ with nothing left to spend it on.
 
 ## See it running
 
-*[Watch the panel](docs/media/rear-panel.mp4) — 17 seconds, both accounts, every state.*
+![Every state, both accounts](docs/media/rear-panel.mp4)
 
-The left account walks its bar and then raises the flag; the right one runs through
-confetti, lifting, and dead at 100%. Bars and rings animate between readings throughout.
+Seventeen seconds. The left account walks its bar and then raises the flag; the right one
+runs through confetti, lifting, and dead at 100%. Bars and rings animate between readings
+throughout.
+
+*(If your viewer does not play it inline:
+[rear-panel.mp4](docs/media/rear-panel.mp4), or a still frame:
+[poster](docs/media/rear-panel-poster.png).)*
 
 ## The rings and the bars
 
