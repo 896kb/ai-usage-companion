@@ -4,6 +4,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.LimitAlerts
 
@@ -61,10 +63,15 @@ class LimitNotifier(private val context: Context) {
         return Notification.Builder(context, CHANNEL)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(
-                if (a.isMilestone) android.R.drawable.stat_notify_sync
-                else android.R.drawable.stat_sys_warning
-            )
+            .setSmallIcon(R.drawable.ic_notification)
+            // The mascot, not a stock system glyph — a notification from this app should
+            // be identifiable in the status bar without opening the shade.
+            //
+            // Milestone and warning used to be told apart by using two DIFFERENT system
+            // icons, which cost the app its identity to carry one bit. The bit now rides
+            // on the tint instead: the system colours the small icon with this, so the
+            // same mascot arrives green for a milestone and red for a limit.
+            .setColor(if (a.isMilestone) Panel.Palette.WORK else Panel.Palette.CRIT)
             .setOnlyAlertOnce(false)
             .setAutoCancel(true)
             // The lock screen is visible to anyone near the phone, and the panel this

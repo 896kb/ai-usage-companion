@@ -3,13 +3,14 @@
   The mascot, as the launcher icon: the same nine-rect rig the panel draws, in the same
   body colour, so the icon is the artwork rather than a picture of it.
 
-  Sized to 50 of the 108dp canvas. Two separate ceilings apply and the smaller one wins:
+  Sized to 32 of the 108dp canvas, at the user's direction — a small mark on a large
+  field of colour. Sizing here is purely a look; the ceilings below are the ones that
+  are NOT free choices, and are recorded so nobody raises this back into them:
 
-    * The safe zone nominally allows 72, but the figure is wider than it is tall and its
-      hands stick out at mid-height, which is exactly where a circular mask is widest.
-      At 72 a round launcher shaves the hands' corners.
-    * 64 cleared the mask but read as too heavy — the mark crowded its own background and
-      lost the breathing room an icon needs to stay a mark rather than a texture.
+    * 72, the nominal safe zone, clips. The figure is wider than it is tall and its hands
+      stick out at mid-height, which is exactly where a circular mask is widest, so a
+      round launcher shaves the hands' corners.
+    * 64 cleared the mask but read as too heavy — the mark crowded its own background.
 
   Centred on both axes, which is why the offsets are derived from W rather than typed.
 
@@ -22,10 +23,10 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:translateX="29.0000"
-        android:translateY="33.9065"
-        android:scaleX="0.467290"
-        android:scaleY="0.467290">
+        android:translateX="38.0000"
+        android:translateY="41.1402"
+        android:scaleX="0.299065"
+        android:scaleY="0.299065">
         <path
             android:fillColor="#B5BD68"
             android:pathData="M11,60h11v26h-11z M32,60h11v26h-11z M64,60h11v26h-11z M85,60h11v26h-11z M11,0h85v65h-85z M85,21h22v23h-22z M0,21h22v23h-22z" />
