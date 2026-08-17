@@ -8,6 +8,7 @@ import android.view.View
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.MascotFrames
 import dev.kb896.aiusage.rear.MascotRenderer
+import dev.kb896.aiusage.rear.WalkRig
 
 /**
  * Every mascot state, animating, in the front UI.
@@ -18,7 +19,8 @@ import dev.kb896.aiusage.rear.MascotRenderer
  * fiction until the next poll overwrites it.
  *
  * Draws through MascotRenderer, the same code the panel uses, so this cannot drift into
- * showing something the panel does not.
+ * showing something the panel does not. The walk is the exception in both senses: it is
+ * drawn by WalkRig, and the panel never selects it — this is the only place it is shown.
  */
 class MascotStripView @JvmOverloads constructor(
     context: Context,
@@ -39,23 +41,16 @@ class MascotStripView @JvmOverloads constructor(
     private val bg = Paint().apply { color = Panel.Palette.BG }
 
     /**
-     * The dead pose is the standing rig with a flag, not a clip of its own, so it is
-     * listed here explicitly rather than read from MascotFrames.CLIPS.
+     * The dead pose is the standing rig tipped on its side, not a clip of its own, so it
+     * is listed here explicitly rather than read from MascotFrames.CLIPS.
      */
     private data class Cell(val clip: MascotFrames.Clip, val caption: String, val dead: Boolean)
 
-    /**
-     * The sedentary clips share the top row. A travelling clip cannot: it needs the
-     * width of the whole strip to cross, so it gets its own row underneath.
-     */
+    /** The baked clips, which stay in their cells, plus the dead pose. */
     private val cells: List<Cell> by lazy {
         val stand = MascotFrames.CLIPS.firstOrNull { it.name == "stand" }
-        MascotFrames.CLIPS.filter { it.travelMs <= 0L }.map { Cell(it, it.name, dead = false) } +
+        MascotFrames.CLIPS.map { Cell(it, it.name, dead = false) } +
             listOfNotNull(stand?.let { Cell(it, "dead", dead = true) })
-    }
-
-    private val travellers: List<MascotFrames.Clip> by lazy {
-        MascotFrames.CLIPS.filter { it.travelMs > 0L }
     }
 
     private val tick = object : Runnable {
@@ -80,8 +75,7 @@ class MascotStripView @JvmOverloads constructor(
         if (cells.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        val rows = if (travellers.isEmpty()) 1 else 2
-        val rowH = height.toFloat() / rows
+        val rowH = height * TOP_ROW
 
         val cell = width.toFloat() / cells.size
         // Leave room under the figures for the caption, and above for anything a clip
@@ -89,15 +83,28 @@ class MascotStripView @JvmOverloads constructor(
         val availableH = (rowH - CAPTION_H - HEADROOM).coerceAtLeast(1f)
         val baseline = rowH - CAPTION_H
 
-        for ((i, t) in travellers.withIndex()) {
-            val h = (rowH - CAPTION_H - HEADROOM).coerceAtLeast(1f)
-                .coerceAtMost((cell * CELL_FILL) / t.aspect)
-            val w = h * t.aspect
-            val top = rowH * (rows - 1) + (rowH - CAPTION_H - h)
-            val x = MascotRenderer.travelX(t, now, 0f, width.toFloat(), w)
-            MascotRenderer.draw(canvas, t, now, x, top, h, body, eye)
-            canvas.drawText(t.name, width / 2f, height - 6f, label)
-        }
+        // The walk gets the lower row to itself: it needs the whole width to cross, and
+        // its own height again in clear air above, because the jump takes it a full
+        // body-height out of its box.
+        //
+        // Its height is the STANDING clip's, computed the same way, because it is the
+        // same rig — letting it fill the row instead made it nearly twice the size of
+        // the others, which reads as a different, larger mascot rather than the same one
+        // walking. The row fit is then only a floor-case guard for a short strip.
+        val walkRow = height - rowH
+        val walkH = minOf(
+            minOf(availableH, (cell * CELL_FILL) / WalkRig.ASPECT),
+            (walkRow - CAPTION_H) / (1f + WalkRig.HEADROOM),
+        ).coerceAtLeast(1f)
+        WalkRig.draw(
+            canvas, now,
+            left = 0f,
+            top = height - CAPTION_H - walkH,
+            h = walkH,
+            span = width - walkH * WalkRig.ASPECT,
+            paint = body,
+        )
+        canvas.drawText("walk", width / 2f, height - 6f, label)
 
         for ((i, c) in cells.withIndex()) {
             // Height is bounded by the CELL as well as by the view. Sizing on height
@@ -124,6 +131,9 @@ class MascotStripView @JvmOverloads constructor(
         const val FRAME_MS = 40L
         const val CAPTION_H = 26f
         const val HEADROOM = 22f
+
+        /** Share of the strip the cell row takes; the walk gets the rest. */
+        const val TOP_ROW = 0.42f
 
         /** Fraction of its cell a figure may occupy, leaving gutters between them. */
         const val CELL_FILL = 0.72f
