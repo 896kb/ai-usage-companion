@@ -202,10 +202,18 @@ phone, understanding all of the above.
 ## Setup
 
 1. **Get Shizuku running** — see [above](#shizuku-and-why-you-cannot-skip-it).
-2. **Build and install:**
+2. **Install the app.** Download the APK from
+   [Releases](../../releases) and install it.
+
+   Or build it yourself — the APK is nothing special, and you may reasonably prefer not
+   to trust a stranger's binary with an API token:
    ```bash
-   ./build-install.sh
+   ./build-install.sh          # debug build, straight to a connected phone
    ```
+   Note that `build-install.sh` produces a **debuggable** build. That is fine for
+   development on your own cable, but it means anything with ADB access can `run-as` the
+   app — reading its files *as the app*, which includes decrypting the stored tokens. The
+   release APK is not debuggable. Prefer it for a phone you actually carry.
 3. **Sign in.** Open the app and either log in through your browser, or paste a token if
    your account is managed and device login is impractical.
 4. **Allow notifications.** Without them you lose both the limit warnings and the ongoing
