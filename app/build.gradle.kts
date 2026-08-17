@@ -14,8 +14,15 @@ android {
         applicationId = "dev.kb896.aiusage"
         minSdk = 34
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        // Version comes from the release tag when CI is building one, so the APK cannot
+        // claim to be 0.1 forever while the tags move on. Locally it stays 0.1-dev,
+        // which is a useful thing to see in an installed build.
+        //
+        // versionCode must increase for every update Android will accept, and a tag name
+        // does not give a number to derive one from. CI_PIPELINE_IID is monotonic per
+        // project, which is exactly the guarantee needed and nothing more.
+        versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.1-dev"
         ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
