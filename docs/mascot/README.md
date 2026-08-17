@@ -88,10 +88,27 @@ body 3° and each leg 7-9°.
   resets the mascot to the start is scheduled at `"+=1"`, so that is GSAP's total
   duration and where `repeat: -1` restarts. That second is the pause at the far end.
 
-The walk is shown only in the app's mascot strip. `MascotMood` never selects it: the
-panel's idle state is the still `stand` pose, because a mascot walking back and forth
-forever is motion with nothing to say on a display that is lit 24/7 — and it would mean
-redrawing the whole view at 25fps to say it.
+### There and back
+
+The site's loop ends by teleporting the mascot back to the left. Over a progress bar that
+snap is the one moment the illusion breaks, so the cycle here is **23.02s**: the timeline
+forward, then the timeline forward *again with the canvas mirrored*, so the mascot turns
+around and performs the same routine walking the other way.
+
+Mirroring the canvas, not the clock. Playing the timeline backwards was tried first and is
+subtly wrong — the mascot un-jumps and un-leans, arriving at poses instead of departing
+from them, and every ease runs inside-out, so a `power2.out` landing reads as a
+`power2.in` take-off. Reflecting the canvas keeps every keyframe in its intended order and
+only changes which way "forward" points, which is also what flips the lean and the
+eye-line to match the new direction.
+
+Position is continuous across both seams: the forward pass ends with the rig at the far
+end of the span, which is exactly where the mirrored pass begins.
+
+The walk is shown in the app's mascot strip and, since the idle state became WALK, on the
+panel — where it walks its own 5-hour bar. On the panel its jump is capped to one row of air:
+the figure is already taller than a row and overlaps the one above, and the timeline's own
+reach would carry it over the account heading into the other account's block.
 
 ## Colour
 

@@ -469,11 +469,15 @@ class RearDialView(context: Context) : View(context) {
                 val w = h * WalkRig.ASPECT
                 WalkRig.draw(
                     canvas,
-                    // Half a loop apart, for the same reason MASCOT_STOPS are staggered:
+                    // Half a cycle apart, for the same reason MASCOT_STOPS are staggered:
                     // the phase comes from the wall clock, so without an offset both
                     // accounts would step, hop and jump in perfect unison — which reads
                     // as one animation drawn twice rather than two mascots.
-                    nowMs = now + index * (WalkRig.DURATION_MS / 2),
+                    //
+                    // Half of the there-and-back cycle is exactly one pass, so the offset
+                    // puts the accounts on opposite legs of it: one walks out while the
+                    // other walks home, and they pass each other in the middle.
+                    nowMs = now + index * WalkRig.DURATION_MS,
                     left = bar.left,
                     // Span is the bar minus the figure's own width, so the far end of the
                     // jump lands ON the bar's right edge rather than past it.
