@@ -39,13 +39,32 @@ object WalkRig {
     const val ASPECT = VB_W / VB_H
 
     /**
-     * One full loop. The timeline's last tween ends at 10.51s, but its final callback —
+     * One pass of the timeline. Its last tween ends at 10.51s, but its final callback —
      * the one that snaps the mascot back to the start — is scheduled at "+=1", so GSAP's
      * total duration, and the point at which `repeat: -1` restarts, is a second later.
-     * That second is the pause at the far end of the walk, and dropping it would cut the
-     * loop short and teleport the mascot back mid-pose.
+     * That second is the pause at the far end of the walk.
      */
     const val DURATION_MS = 11_510L
+
+    /**
+     * A there-and-back cycle: the timeline forward, then the timeline forward AGAIN with
+     * the canvas mirrored, so the mascot turns around and performs the same routine
+     * walking the other way.
+     *
+     * The site restarts instead, teleporting the mascot back to the left. Over a progress
+     * bar that snap is the one moment the illusion breaks.
+     *
+     * Mirroring the canvas, not the clock. Playing the timeline backwards was tried and
+     * is subtly wrong: it makes the mascot un-jump and un-lean, arriving at poses instead
+     * of departing from them, and every ease runs inside-out — a `power2.out` landing
+     * reads as a `power2.in` take-off. Reflecting the canvas keeps every keyframe in its
+     * intended order and only changes which way "forward" points, which is also what
+     * flips the lean and the eye-line to match the new direction.
+     *
+     * Position is continuous across both seams: the forward pass ends with the rig at the
+     * far end of the span, which is exactly where the mirrored pass begins.
+     */
+    const val PERIOD_MS = DURATION_MS * 2
 
     /** How far above its resting top the jump takes it, as a multiple of its height. */
     const val HEADROOM = 90f / VB_H
@@ -265,11 +284,24 @@ object WalkRig {
         paint: Paint,
         rise: Float = HEADROOM * h,
     ) {
-        val t = (nowMs % DURATION_MS) / 1000f
+        val phase = nowMs.mod(PERIOD_MS)
+        val returning = phase >= DURATION_MS
+        val t = (if (returning) phase - DURATION_MS else phase) / 1000f
         val u = h / VB_H
+        val w = VB_W * u
         val lift = (rise / (HEADROOM * h)).coerceIn(0f, 1f)
         val ox = left + rootXFraction.at(t) * span
         val oy = top + rootY.at(t) * u * lift
+
+        // The return leg is the same timeline through a mirror. Reflecting about the
+        // middle of the travel region — the span plus the figure's own width, which is
+        // the full extent it ever occupies — is what makes leftward travel come out of a
+        // timeline that only ever moves right, and lands the mascot exactly where the
+        // forward pass left it.
+        if (returning) {
+            canvas.save()
+            canvas.scale(-1f, 1f, left + (span + w) / 2f, oy)
+        }
 
         fun rect(x: Float, y: Float, w: Float, hh: Float, color: Int) {
             paint.color = color
@@ -309,5 +341,6 @@ object WalkRig {
         rect(21f + ex, 11f + ey, 11f, 11f, EYE_COLOR)
 
         canvas.restore()
+        if (returning) canvas.restore()
     }
 }
