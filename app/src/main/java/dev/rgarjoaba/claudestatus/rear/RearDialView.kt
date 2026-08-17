@@ -99,45 +99,60 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * One damped spring per animated quantity, keyed by what it drives.
+     * One eased tween per animated quantity, keyed by what it drives.
      *
      * Values arrive as steps — a poll completes and a bar jumps — which on an
-     * always-on panel reads as a glitch rather than as news. Springing them makes a
-     * change something you notice out of the corner of your eye, which is the entire
-     * job of a display nobody is looking at directly.
+     * always-on panel reads as a glitch rather than as news. Easing them makes a change
+     * something you notice out of the corner of your eye, which is the entire job of a
+     * display nobody is looking at directly.
+     *
+     * This was a damped spring until the overshoot proved wrong for the quantity being
+     * shown. See DURATION_MS.
      */
-    private class Spring {
+    private class Tween {
         /** NaN until the first frame, so the panel opens on the real values rather
          *  than animating up from zero every time the activity is re-placed — and
          *  respawns are frequent here. Only genuine CHANGES animate. */
         var value = Float.NaN
-        var velocity = 0f
+        private var from = 0f
+        private var to = Float.NaN
+        private var startMs = 0L
 
-        fun advance(target: Float, dt: Float): Float {
-            if (value.isNaN()) { value = target; velocity = 0f; return value }
-            val accel = STIFFNESS * (target - value) - DAMPING * velocity
-            velocity += accel * dt
-            value += velocity * dt
+        fun advance(target: Float, nowMs: Long): Float {
+            if (value.isNaN()) { value = target; from = target; to = target; return value }
+            // Retarget from wherever it currently IS, not from where the last leg
+            // began, so a change arriving mid-flight continues smoothly instead of
+            // snapping back to restart.
+            if (target != to) { from = value; to = target; startMs = nowMs }
+            if (to == from) { value = to; return value }
+            val t = ((nowMs - startMs).toFloat() / DURATION_MS).coerceIn(0f, 1f)
+            value = from + (to - from) * easeInOut(t)
             return value
         }
 
-        fun settled(target: Float): Boolean =
-            kotlin.math.abs(target - value) < EPSILON && kotlin.math.abs(velocity) < EPSILON
+        fun settled(nowMs: Long): Boolean = to == from || nowMs - startMs >= DURATION_MS
+
+        /**
+         * Cubic in-out. Starts slow, accelerates, decelerates into the target, and
+         * NEVER passes it — which is the whole reason this replaced a spring.
+         */
+        private fun easeInOut(t: Float): Float =
+            if (t < 0.5f) 4f * t * t * t
+            else 1f - (-2f * t + 2f).let { it * it * it } / 2f
     }
 
-    private val springs = mutableMapOf<String, Spring>()
-    private var lastFrameNanos = 0L
-    private var frameDt = 0f
+    private val tweens = mutableMapOf<String, Tween>()
+    private var frameNowMs = 0L
     private var animating = false
 
     /**
-     * Current animated value for [key], advancing toward [target] by this frame's dt.
+     * Current animated value for [key], advancing toward [target] by wall clock.
      * Flags the frame as animating so onDraw knows to schedule another one.
      */
-    private fun springTo(key: String, target: Float): Float {
-        val spring = springs.getOrPut(key) { Spring() }
-        val v = spring.advance(target, frameDt)
-        if (!spring.settled(target)) animating = true
+    private fun animateTo(key: String, target: Float): Float {
+        val tween = tweens.getOrPut(key) { Tween() }
+        val v = tween.advance(target, frameNowMs)
+        if (!tween.settled(frameNowMs)) animating = true
         return v
     }
 
@@ -174,14 +189,12 @@ class RearDialView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        // Real elapsed time, clamped. The idle redraw is every 15s, so an unclamped dt
-        // would integrate a 15-second step in one go and teleport every spring past its
-        // target — the clamp makes a long gap behave like a resumed animation rather
-        // than an explosion.
-        val now = System.nanoTime()
-        frameDt = if (lastFrameNanos == 0L) 0f
-            else ((now - lastFrameNanos) / 1e9f).coerceIn(0f, MAX_FRAME_DT)
-        lastFrameNanos = now
+        // Absolute time, not a per-frame delta. A duration-based tween needs to know
+        // how far through its leg it is, and asking the clock directly makes it immune
+        // to the thing that used to need clamping: the idle redraw is every 15s, and an
+        // integrator handed a 15-second step would fling its value past the target in
+        // one frame. A tween handed the same gap simply reports "finished".
+        frameNowMs = SystemClock.uptimeMillis()
         animating = false
 
         canvas.drawColor(BG_ALPHA shl 24 or (Panel.Palette.BG and 0xFFFFFF))
@@ -264,7 +277,7 @@ class RearDialView(context: Context) : View(context) {
         // which is good news; ramping it to red would invert the panel's one colour
         // language. This is the same reasoning that used to apply to the 5H bar back
         // when the bar was the thing showing time.
-        val shown = springTo("ring:${account.name}", sessionElapsed(session.resetsAt)).coerceIn(0f, 1f)
+        val shown = animateTo("ring:${account.name}", sessionElapsed(session.resetsAt)).coerceIn(0f, 1f)
         arc.color = if (status.health == Health.OK) account.accent else Panel.Palette.DIM
         canvas.drawArc(scratch, -90f, 360f * shown, false, arc)
     }
@@ -385,7 +398,7 @@ class RearDialView(context: Context) : View(context) {
                 // Keyed per account AND per window kind so each bar keeps its own
                 // momentum — one shared spring would drag every row along with
                 // whichever value moved.
-                val fraction = springTo("bar:${account.name}:${w.kind.name}", w.utilization)
+                val fraction = animateTo("bar:${account.name}:${w.kind.name}", w.utilization)
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
@@ -721,37 +734,20 @@ class RearDialView(context: Context) : View(context) {
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
 
         private const val TITLE_BASELINE = 54f
-        /**
-         * Spring constants, in SI-ish units against a seconds-based dt.
+/**
+         * How long a value takes to travel from its old reading to its new one.
          *
-         * Damping ratio is DAMPING / (2 * sqrt(STIFFNESS)) = 2.1 / 3.74 = 0.56 —
-         * underdamped, so a change overshoots by roughly a tenth and settles back.
-         * That overshoot is the point: it is what makes the movement register as a
-         * spring rather than a slow lerp. Settling time is about 4 / (zeta * omega) =
-         * 4 / 1.05, near enough four seconds.
+         * This replaced a damped spring, at the user's request, and the reason is worth
+         * keeping: the spring was underdamped (zeta 0.56) so that a change would
+         * overshoot by about a tenth and settle back, which reads as physical. But a bar
+         * is a bounded quantity. Heading to 94% it overshot past 100%, clamped flat
+         * against the top, and crept back down; heading to 0% it went negative and
+         * clamped at empty. The overshoot that makes a spring feel alive makes a
+         * PERCENTAGE look wrong — it reports a value the data never held.
          *
-         * THESE TWO ARE COUPLED. Retuning one alone silently changes the character of
-         * the motion, not just its speed: the damping ratio is what decides whether a
-         * bar overshoots, glides, or crawls, and it depends on both. To change only the
-         * DURATION, scale them together —
-         *
-         *     omega    = sqrt(STIFFNESS)          duration is proportional to 1 / omega
-         *     zeta     = DAMPING / (2 * omega)    keep this fixed to keep the feel
-         *
-         * so halving the speed means STIFFNESS / 4 and DAMPING / 2. That is exactly
-         * this edit: 14/4.2 became 3.5/2.1, doubling the settle from ~2s to ~4s with
-         * zeta unchanged at 0.56. Dropping STIFFNESS alone would have pushed zeta to
-         * 1.12 — overdamped, no overshoot, and the spring would have become the slow
-         * lerp it exists to avoid.
+         * A cubic in-out cannot pass its target, so there is nothing to clamp.
          */
-        private const val STIFFNESS = 3.5f
-        private const val DAMPING = 2.1f
-
-        /** Below this, in both value and velocity, a spring counts as arrived. */
-        private const val EPSILON = 0.0005f
-
-        /** Longest dt any single frame may integrate. See onDraw. */
-        private const val MAX_FRAME_DT = 0.05f
+        private const val DURATION_MS = 1800f
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
