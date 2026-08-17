@@ -25,11 +25,37 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    /**
+     * Release signing, from the environment — never from a file in this repository.
+     *
+     * This used to be `signingConfigs.getByName("debug")`, which is fine for a build you
+     * install on your own phone over a cable and actively wrong for one you hand to
+     * anyone else: the debug key is not a secret, so anyone can forge an update for it.
+     *
+     * Absent credentials produce an UNSIGNED release rather than a debug-signed one. An
+     * unsigned APK refuses to install and says so; a debug-signed one installs happily
+     * and is the thing we are trying not to publish.
+     */
+    val releaseStore = System.getenv("KEYSTORE_PATH")
+    if (releaseStore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(releaseStore)
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            // Explicitly NOT debuggable, and explicitly not the debug key. The token
+            // store is only as private as the app's uid: `run-as` on a debuggable build
+            // runs AS that uid, so it can read the encrypted tokens and use the very
+            // Keystore key that encrypted them.
+            isDebuggable = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

@@ -1,0 +1,108 @@
+# Build, sign and publish an APK when a version tag is pushed.
+#
+#     git tag v0.2 && git push origin v0.2
+#
+# GitLab Releases do not host binaries the way GitHub's do — a release carries *links*.
+# So the APK goes to the project's Generic Package Registry first, and the release then
+# points at it. Both live under the same project; nothing leaves GitLab.
+#
+# Required CI/CD variables (Settings → CI/CD → Variables), all masked and protected:
+#
+#   KEYSTORE_BASE64     base64 of your release keystore   (type: variable, masked)
+#   KEYSTORE_PASSWORD   its password                      (masked)
+#   KEY_ALIAS           the key alias inside it           (masked)
+#   KEY_PASSWORD        that key's password               (masked)
+#
+# Create the keystore once, and keep it somewhere you will not lose it — losing it means
+# never being able to update this app on a device that has it installed:
+#
+#   keytool -genkey -v -keystore release.jks -alias release \
+#           -keyalg RSA -keysize 4096 -validity 10000
+#   base64 -i release.jks | pbcopy      # paste into KEYSTORE_BASE64
+#
+# NEVER commit release.jks.
+
+stages: [test, build, release]
+
+default:
+  image: ghcr.io/cirruslabs/android-sdk:36
+  before_script:
+    - export GRADLE_USER_HOME="$CI_PROJECT_DIR/.gradle"
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths: [.gradle/wrapper, .gradle/caches]
+
+test:
+  stage: test
+  script:
+    - ./gradlew --no-daemon :app:testDebugUnitTest
+  artifacts:
+    when: always
+    reports:
+      junit: app/build/test-results/testDebugUnitTest/TEST-*.xml
+    expire_in: 1 week
+
+# Every push builds an unsigned release, so a broken release build is caught on the
+# branch rather than at tag time when you are trying to ship.
+build:
+  stage: build
+  script:
+    - ./gradlew --no-daemon :app:assembleRelease
+  artifacts:
+    paths: [app/build/outputs/apk/release/]
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+
+package:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - |
+      if [ -z "$KEYSTORE_BASE64" ]; then
+        echo "KEYSTORE_BASE64 is not set — refusing to publish an unsigned or debug-signed APK."
+        echo "See the header of .gitlab-ci.yml."
+        exit 1
+      fi
+    - echo "$KEYSTORE_BASE64" | base64 -d > "$CI_PROJECT_DIR/release.jks"
+    - export KEYSTORE_PATH="$CI_PROJECT_DIR/release.jks"
+    - ./gradlew --no-daemon :app:assembleRelease
+    # Prove it is signed AND not debuggable before anything is published. A silently
+    # unsigned build is the failure this whole job exists to prevent.
+    - APK=app/build/outputs/apk/release/app-release.apk
+    - test -f "$APK" || { echo "no signed APK produced — check the signing variables"; exit 1; }
+    - $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs "$APK"
+    - $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | grep -q "application-debuggable" && { echo "APK is debuggable — refusing to publish"; exit 1; } || true
+    - cp "$APK" "claude-rear-$CI_COMMIT_TAG.apk"
+    - |
+      curl --fail --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+           --upload-file "claude-rear-$CI_COMMIT_TAG.apk" \
+           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/claude-rear/$CI_COMMIT_TAG/claude-rear-$CI_COMMIT_TAG.apk"
+  artifacts:
+    paths: ["claude-rear-*.apk"]
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs: [package]
+  script:
+    - echo "Releasing $CI_COMMIT_TAG"
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "$CI_COMMIT_TAG"
+    description: |
+      Install the APK below on a Xiaomi 17 Pro running HyperOS 3.
+
+      Read the README's **Please read this first** and **Shizuku** sections before
+      signing in — this app holds account credentials and cannot place the panel
+      without Shizuku running.
+    assets:
+      links:
+        - name: "claude-rear-$CI_COMMIT_TAG.apk"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/claude-rear/$CI_COMMIT_TAG/claude-rear-$CI_COMMIT_TAG.apk"
+          link_type: package
