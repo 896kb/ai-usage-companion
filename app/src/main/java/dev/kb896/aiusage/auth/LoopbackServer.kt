@@ -45,7 +45,7 @@ class LoopbackServer(private val port: Int = 54545) {
                 }.toMap()
 
                 val ok = params["state"] == expectedState && !params["code"].isNullOrEmpty()
-                val body = if (ok) "Signed in. Return to Claude Status." else "Sign-in failed."
+                val body = if (ok) "Signed in. Return to AI Usage." else "Sign-in failed."
                 try {
                     s.getOutputStream().writer().apply {
                         write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n$body")

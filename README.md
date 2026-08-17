@@ -105,7 +105,7 @@ and all of it is designed to become editable:
 | | |
 |---|---|
 | **Titles** | The masthead — `CLAUDE USAGE` today — and both account names. All three are free text; the masthead is a label, not a brand mark. |
-| **Colours** | Panel background, each account's accent, each mascot's body and hardware colour, and the ramp stops from mild to spent. |
+| **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour; and the ramp stops from mild to spent. |
 | **Layout** | The order of the bar rows, and what each ring reports — which window, and whether it shows time-to-reset or utilisation. |
 | **Bottom artwork** | Replace the built-in mark with your own image, positioned and zoomed within its region. |
 | **Extras** | A clock and a battery readout on the panel. |
@@ -117,6 +117,8 @@ and all of it is designed to become editable:
 - **Android widget** — the same readings on the home screen, for phones with no rear display.
 - **iOS widget.**
 - **macOS widget.**
+- **More than two accounts**, scrolled vertically on the panel rather than stacked — which
+  is why colours are named per account rather than "primary" and "secondary".
 - **Automatic show-on-rear**, so the manual step below stops being manual.
 
 ---

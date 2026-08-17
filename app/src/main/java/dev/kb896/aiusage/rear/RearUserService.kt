@@ -359,7 +359,7 @@ class RearUserService : IRearService.Stub {
         /** Corrective moves to try before evicting a panel stuck on the main display. */
         const val MAX_STRAND_STRIKES = 3
 
-        const val TAG = "ClaudeStatusRear"
+        const val TAG = "AiUsageRear"
         const val PKG = "dev.kb896.aiusage"
         const val ACTIVITY = ".rear.RearActivity"
         const val ACTION_STATE = "dev.kb896.aiusage.STATE"

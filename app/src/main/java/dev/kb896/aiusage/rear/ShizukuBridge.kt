@@ -182,5 +182,5 @@ class ShizukuBridge(private val context: Context) {
      */
     fun isCalibrating(): Boolean = calibrating
 
-    private companion object { const val TAG = "ClaudeStatusBridge" }
+    private companion object { const val TAG = "AiUsageBridge" }
 }

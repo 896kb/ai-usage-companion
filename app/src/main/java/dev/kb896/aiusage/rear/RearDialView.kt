@@ -93,9 +93,17 @@ class RearDialView(context: Context) : View(context) {
         color = Panel.Palette.BG
     }
 
+    /**
+     * Plan tag. Coloured per ACCOUNT, like its heading and its row labels.
+     *
+     * It used to be a fixed green for both, which made the one element on the row that
+     * is not a live reading the only element that did not say which account it belonged
+     * to — two identical green "MAX 5X" tags on a panel whose whole colour language is
+     * "this hue means this account".
+     */
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
-        textAlign = Paint.Align.RIGHT; color = Panel.Palette.WORK
+        textAlign = Paint.Align.RIGHT
     }
 
     /** One eased tween per animated quantity, keyed by what it drives. See Tween. */
@@ -348,7 +356,10 @@ class RearDialView(context: Context) : View(context) {
             // not how much of it is left. Only the tier is shown — the profile response
             // also carries a name, an email and an org, none of which belong on a
             // panel that faces outward from the back of the phone.
-            status?.planTier?.let { canvas.drawText(it, right, y, planTag) }
+            status?.planTier?.let {
+                planTag.color = if (status.health == Health.OK) account.accent else Panel.Palette.DIM
+                canvas.drawText(it, right, y, planTag)
+            }
             val tagX = left + heading.measureText(account.label) + 14f
             // Kept alongside the dimming: grey alone says "something is wrong" without
             // saying what, which is what made an all-grey panel read as broken rather

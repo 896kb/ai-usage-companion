@@ -256,7 +256,7 @@ class UsageRepository(
          * from a token or a response body. Without this a dimmed panel gives the user
          * no way at all to find out why.
          */
-        const val TAG = "ClaudeStatusRepo"
+        const val TAG = "AiUsageRepo"
 
         /**
          * `when` over an enum class used as an expression is exhaustive by construction:

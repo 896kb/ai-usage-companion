@@ -29,7 +29,7 @@ class RearActivity : Activity() {
         const val ACTION_STRANDED = "dev.kb896.aiusage.STRANDED"
         const val ACTION_FINISH = "dev.kb896.aiusage.FINISH"
         const val EXTRA_STATE = "state"
-        private const val TAG = "ClaudeStatusRear"
+        private const val TAG = "AiUsageRear"
 
         /**
          * How long the activity may sit on a non-rear display before evicting itself.

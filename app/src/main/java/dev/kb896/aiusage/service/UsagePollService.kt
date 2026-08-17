@@ -403,7 +403,7 @@ class UsagePollService : Service() {
     private fun notification(): Notification {
         val mgr = getSystemService(NotificationManager::class.java)
         mgr.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Claude Status", NotificationManager.IMPORTANCE_LOW))
+            NotificationChannel(CHANNEL, "AI Usage", NotificationManager.IMPORTANCE_LOW))
         // Tapping the notification re-places the panel. This is the only recovery path
         // that does not require opening the app, and it exists because the panel can
         // end up in states the watchdog cannot see — a task that still exists while
@@ -414,7 +414,7 @@ class UsagePollService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = Notification.Builder(this, CHANNEL)
-            .setContentTitle("Claude Status")
+            .setContentTitle("AI Usage")
             .setContentText("Tap to show on the rear panel")
             // Ours, not a stock system glyph — this one is permanently in the
             // status bar, so it is the app's face more than any other icon.
@@ -488,7 +488,7 @@ class UsagePollService : Service() {
         /** Notification tap → re-place the panel. See onStartCommand. */
         const val ACTION_SHOW_PANEL = "dev.kb896.aiusage.SHOW_PANEL"
 
-        private const val TAG = "ClaudeStatusPoll"
+        private const val TAG = "AiUsagePoll"
         private const val CHANNEL = "usage"
         private const val NOTIFICATION_ID = 1
 
