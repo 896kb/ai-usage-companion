@@ -47,6 +47,23 @@ STAGE=/data/local/tmp/claude-status.apk
 : "${JAVA_HOME:=/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
 export JAVA_HOME
 
+# Refuse anything that is not the phone.
+#
+# The glasses (Rokid RG-glasses) and a OnePlus have both been attached to this machine,
+# and resolve_device picks "the only attached device" — so with the phone unplugged and
+# the glasses plugged in, this script will cheerfully install the rear-panel app onto
+# the glasses. That happened. The model check is the backstop; ANDROID_SERIAL still
+# overrides for the rare case of deliberately targeting something else.
+EXPECT_MODEL=25098PN5AC
+if [ -z "${ANDROID_SERIAL:-}" ]; then
+  GOT=$("$ADB" -s "$DEVICE" shell getprop ro.product.model 2>/dev/null | tr -d '\r')
+  if [ "$GOT" != "$EXPECT_MODEL" ]; then
+    echo "✗ $DEVICE is a '$GOT', not the phone ($EXPECT_MODEL)." >&2
+    echo "  Plug in the Xiaomi, or set ANDROID_SERIAL to install elsewhere on purpose." >&2
+    exit 1
+  fi
+fi
+
 ./gradlew :app:assembleDebug
 "$ADB" -s "$DEVICE" push app/build/outputs/apk/debug/app-debug.apk "$STAGE" >/dev/null
 "$ADB" -s "$DEVICE" shell pm install -r "$STAGE"
