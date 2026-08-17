@@ -22,3 +22,4 @@ credentials.json
 # macos
 .DS_Store
 .rear-demo/
+.readme-preview.html
