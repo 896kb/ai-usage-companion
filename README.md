@@ -5,8 +5,6 @@ how much of your window is left without unlocking anything, opening anything, or
 
 ![The panel running on the phone's rear display](docs/media/rear-panel-poster.png)
 
-*[Watch it run](docs/media/rear-panel.mp4) — 17 seconds, every state.*
-
 Two accounts, three windows each, and a mascot that tells you the state at a glance from
 across a desk.
 
@@ -15,37 +13,87 @@ across a desk.
 
 ---
 
-## What it shows
-
-| | |
-|---|---|
-| **Rings** | Time until the 5-hour window resets. A ring is a *clock*, not a gauge — it fills as the window runs out, and a full ring is good news. Drawn concentric with the camera lenses. |
-| **Bars** | Utilisation of each window: the 5-hour session, the 7-day all-models limit, and the 7-day limit for one scoped model. Green through to red as they fill. |
-| **Percentages** | The reading itself, and beside it the time until that window resets. |
-| **Mascot** | The state, as a picture. One per account, standing on its own 5-hour bar. |
-
-Values animate between readings rather than snapping, so a change catches your eye
-without you watching for it.
-
 ## The mascot
 
-| | state | shown when |
-|---|---|---|
-| ![idle](docs/media/states/walk.png) | **walk** | Idle. It walks the length of its own bar and back. |
-| ![lifting](docs/media/states/muscle.png) | **lifting** | 1% or more of the window went in the last ten minutes. You are working. |
-| ![flag](docs/media/states/flag.png) | **flag** | The 5-hour window is past 90%. |
-| ![confetti](docs/media/states/confetti.png) | **confetti** | The window is at 0% — a fresh start. |
-| ![dead](docs/media/states/dead.png) | **dead** | The 7-day window is spent. Nothing left to celebrate a fresh 5-hour window with. |
+One per account, standing on its own 5-hour bar. Which one is playing tells you the state
+without reading a single number.
 
-The last one is keyed on the **weekly** limit specifically, because that is the one you
-cannot wait out. A 5-hour window refills every five hours, so at the moment one rolls
-over you have a session at 0% and a week at 100% — and a mascot throwing confetti at an
-account with nothing left to spend.
+### Walking — idle
+
+![walking](docs/media/states/walk.png)
+
+**Nothing to report.** The window is somewhere in the middle and you are not currently
+burning through it. It walks the length of its own bar, jumps back to the start, and
+walks it again — a full crossing takes **11.5 seconds**, and it never leaves the bar it
+belongs to.
+
+### Lifting — you are working
+
+![lifting](docs/media/states/muscle.png)
+
+**1% or more of the 5-hour window went in the last ten minutes.** It holds the pose for
+five minutes after the last burst, and each new burst restarts that clock — so working
+steadily keeps it lifting continuously rather than flickering between poses on every
+poll.
+
+### Flag — nearly out
+
+![flag](docs/media/states/flag.png)
+
+**The 5-hour window is past 90%.** This outranks the lifting pose deliberately: checking
+"are you working" first would hide the warning at exactly the moment it matters most.
+
+### Confetti — a fresh start
+
+![confetti](docs/media/states/confetti.png)
+
+**The window is at 0%.** Nothing spent, everything ahead of you.
+
+### Dead — the week is gone
+
+![dead](docs/media/states/dead.png)
+
+**The 7-day window is spent** (99% or above). The mascot lies on its side with X-ed eyes.
+
+Keyed on the *weekly* limit specifically, because that is the one you cannot wait out. A
+5-hour window refills every five hours, so the moment one rolls over you have a session
+at 0% and a week at 100% — and without this rule the mascot throws confetti at an account
+with nothing left to spend it on.
+
+## See it running
+
+*[Watch the panel](docs/media/rear-panel.mp4) — 17 seconds, both accounts, every state.*
+
+The left account walks its bar and then raises the flag; the right one runs through
+confetti, lifting, and dead at 100%. Bars and rings animate between readings throughout.
+
+## The rings and the bars
+
+**The rings are clocks, not gauges.** Each one shows the time remaining until that
+account's 5-hour window resets, drawn concentric with the phone's actual camera lenses.
+They fill as the window runs down, so a full ring means a reset is imminent — good news.
+That is also why they are accent-coloured rather than ramped: a green-to-red ramp would
+say the opposite of what a full ring means.
+
+**The bars are utilisation**, one row per window:
+
+| row | window |
+|---|---|
+| `ALL 5H` | the 5-hour session limit |
+| `ALL 7D` | the 7-day limit across all models |
+| `<MODEL> 7D` | the 7-day limit for the scoped model |
+
+Each bar carries its percentage and the time until that window resets. They ramp green
+through amber to red as they fill.
+
+Both animate with a 1.8s ease-in-out rather than snapping to new values, so a change
+catches your eye without you watching for it — and never overshoots, because a bar that
+punched past 100% and settled back would be reporting a number the data never held.
 
 ## On the front screen too
 
-An ongoing notification carries both accounts, and on HyperOS it drives the **HyperIsland**
-around the front camera:
+An ongoing notification carries both accounts, and on HyperOS it drives the
+**HyperIsland** around the front camera:
 
 ```
 CLAUDE USAGE
@@ -56,14 +104,68 @@ Separate warnings fire at half of a limit, then at 90% and every 2% after that.
 
 ---
 
+## Customisation
+
+**Not yet — this is the next piece of work.** Everything below is currently compiled in,
+and all of it is designed to become editable:
+
+| | |
+|---|---|
+| **Titles** | The masthead — `CLAUDE USAGE` today — and both account names. All three are free text; the masthead is a label, not a brand mark. |
+| **Colours** | Panel background, each account's accent, each mascot's body and hardware colour, and the ramp stops from mild to spent. |
+| **Layout** | The order of the bar rows, and what each ring reports — which window, and whether it shows time-to-reset or utilisation. |
+| **Bottom artwork** | Replace the built-in mark with your own image, positioned and zoomed within its region. |
+| **Extras** | A clock and a battery readout on the panel. |
+| **Accounts** | One or two, rather than exactly two. Each with its own name, colour, and choice of browser sign-in or pasted token. |
+
+## Future plans
+
+- **ChatGPT Codex** — a second provider beside Claude, so one panel covers both.
+- **Android widget** — the same readings on the home screen, for phones with no rear display.
+- **iOS widget.**
+- **macOS widget.**
+- **Automatic show-on-rear**, so the manual step below stops being manual.
+
+---
+
 ## Requirements
 
 - **A Xiaomi 17 Pro.** The rear display's size, position and lens geometry are measured
   into this app. It will not do anything useful on another phone.
-- **HyperOS 3** (Android 16). Developed and verified against `3.0.318.0`.
-- **[Shizuku](https://shizuku.rikka.app/)**, running. The rear panel cannot be reached by
-  an ordinary app — see below.
+- **HyperOS 3, Android 16.** Developed and verified against **`3.0.318.0`**, the current
+  stable. **It has not been tested against the HyperOS 4 beta** — the placement mechanism
+  depends on system internals that have already changed once between releases, so assume
+  it needs re-verifying there.
+- **[Shizuku](https://shizuku.rikka.app/)**, running. Non-negotiable — see below.
 - A Claude account with Claude Code access.
+
+## Shizuku, and why you cannot skip it
+
+The rear display will not host an app you simply launch at it. Getting a window there
+needs a privileged call that no ordinary app may make. **[Shizuku](https://shizuku.rikka.app/)**
+is what bridges that: it runs a small service with shell-level privileges and lends them
+to apps you approve. Without it running, this app has no way to put anything on the back
+of your phone.
+
+**Be warned that it is finnicky.** It does not survive a reboot on its own, some ADB
+operations knock it over, and when it is down this app simply cannot place the panel.
+
+### Starting it
+
+1. Install **Shizuku** from [shizuku.rikka.app](https://shizuku.rikka.app/) or the Play
+   Store.
+2. On the phone, enable **Developer options** → **Wireless debugging** (Settings → About
+   phone → tap *OS version* seven times, then Settings → Additional settings → Developer
+   options).
+3. Open Shizuku and use **Start via Wireless debugging**. It walks you through pairing.
+4. Open this app and grant Shizuku permission when it asks.
+
+**After every reboot, Shizuku must be started again.** Its own notification is the
+quickest route back.
+
+If you have a computer to hand, `adb shell sh /storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh`
+restarts it without touching the phone — useful when an ADB session has killed it, which
+does happen.
 
 ## Please read this first
 
@@ -106,19 +208,30 @@ phone, understanding all of the above.
 
 ## Setup
 
-1. **Install Shizuku** and start it. Wireless debugging is the usual route; Shizuku's own
-   documentation covers it better than this README could.
+1. **Get Shizuku running** — see [above](#shizuku-and-why-you-cannot-skip-it).
 2. **Build and install:**
    ```bash
    ./build-install.sh
    ```
 3. **Sign in.** Open the app and either log in through your browser, or paste a token if
    your account is managed and device login is impractical.
-4. **Turn off battery restrictions** for the app. Android will otherwise stop the poll
-   service and the panel will freeze on its last reading.
-5. **Background the app, then tap its notification** to put the panel on the back.
+4. **Allow notifications.** Without them you lose both the limit warnings and the ongoing
+   notification that carries the HyperIsland readout — and nothing on screen will tell you
+   why.
+5. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
+   HyperOS is aggressive here: with restrictions on it stops the poll service, and the
+   panel freezes on its last reading — showing stale numbers as though they were current.
+6. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
+   "close all" clears it, which kills the poll service and takes the panel down with it.
+   A suggestion rather than a requirement, but it is the difference between the panel
+   surviving your day and dying to a reflex.
+7. **Background the app, then tap its notification** to put the panel on the back.
 
-Step 5 is the awkward one and it is known — see the roadmap.
+Step 7 is the awkward one and it is known — see [Future plans](#future-plans).
+
+**The app must stay running in the background.** The panel is drawn by this app; nothing
+renders it on your behalf. If the app is killed, the back goes dark until you open it
+again.
 
 ## How it works
 
@@ -137,30 +250,13 @@ transaction numbers are positional in the AIDL and Android 16 moved this one, af
 the call kept reporting success while doing nothing at all.
 
 The panel lives in its own `:rear` process, which the system destroys and recreates
-constantly. It holds no state — everything it draws arrives in one payload, so a respawned
-panel is never briefly wrong.
+constantly. It holds no state — everything it draws arrives in one payload, so a
+respawned panel is never briefly wrong.
 
 The display is always-on with no idle timeout, which is close to worst-case burn-in
-geometry for OLED. The whole composition drifts by ±4px on a ten-minute
-cycle, and the rings — which must stay concentric with the lenses — instead breathe their
-radius by ±3px. That is load-bearing, not decoration.
-
-## Configuration
-
-Not yet. Titles — including the masthead — colours, bar order, ring meaning, the bottom
-artwork and the number of accounts are all currently compiled in. Making them
-configurable is the next piece of work.
-
-## Roadmap
-
-Coming, not here yet:
-
-- **ChatGPT Codex** — a second provider beside Claude, so one panel covers both.
-- **Android widget** — the same readings on the home screen.
-- **iOS widget.**
-- **macOS widget.**
-- **Configuration** — everything under Configuration above.
-- **Automatic show-on-rear**, so step 5 of the setup stops being a manual step.
+geometry for OLED. The whole composition drifts by ±4px on a ten-minute cycle, and the
+rings — which must stay concentric with the lenses — instead breathe their radius by
+±3px. That is load-bearing, not decoration.
 
 ## Regenerating the media
 
