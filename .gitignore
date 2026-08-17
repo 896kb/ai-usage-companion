@@ -23,3 +23,11 @@ credentials.json
 .DS_Store
 .rear-demo/
 .readme-preview.html
+
+# Signing material. NEVER commit these — the release key is the one secret in this
+# project that cannot be rotated: losing control of it means anyone can forge an update,
+# and losing the file itself means nobody who installed the app can ever be updated.
+*.jks
+*.keystore
+keystore.properties
+release.jks
