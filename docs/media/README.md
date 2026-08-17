@@ -72,6 +72,11 @@ drag.
 Every segment is longer than the 1.8s `Tween.DURATION_MS`, so each bar and ring
 transition completes rather than being cut off mid-move.
 
+`TAIL_S` holds the closing state for a further **2s** after the timeline ends. Without it
+the video cuts on the same beat as the last transition, and B's dead-at-100/100/100 —
+the note the whole sequence lands on — is gone before it can be read. Total runtime is
+therefore `15.51 + 2.0 = 17.51s`.
+
 ## Two traps
 
 **The walk's phase runs off the wall clock**, not off when the clip is selected. Recording

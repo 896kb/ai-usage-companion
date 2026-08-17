@@ -65,6 +65,10 @@ WORK = [(0.0, ("confetti", 0.00, 0.04, 0.02, 4.6)),
         (THIRD_S, ("muscle", 0.52, 0.33, 0.24, 3.0)),
         (2 * THIRD_S, ("dead", 1.00, 1.00, 1.00, 0.02))]
 
+# Held after the timeline ends, so the closing state — the second account dead at
+# 100/100/100 — sits still long enough to be read instead of being cut on the beat.
+TAIL_S = 2.0
+
 # How long before the walk's phase-0 boundary to push the opening state. The panel must
 # already be showing the right numbers when recording starts, or the first seconds show
 # whatever was on screen easing away. One tween (1.8s) plus slack.
@@ -156,14 +160,15 @@ def record():
         print(f"  t={t:5.2f}  personal={specs['personal'][0]:8} work={specs['work'][0]:8} "
               f"{'ok' if ok else 'FAILED'}")
 
-    while time.time() - t0 < TOTAL_S:
+    while time.time() - t0 < TOTAL_S + TAIL_S:
         time.sleep(0.05)
     rec.terminate()
     time.sleep(5)
     sh("pull", "/sdcard/rear_demo.mp4", str(SCRATCH / "raw.mp4"))
     (SCRATCH / "trim.json").write_text(json.dumps({"ss": round(t0 - rec_start, 2),
-                                                "dur": round(TOTAL_S, 2)}))
-    print(f"  trim: start {t0 - rec_start:.2f}s length {TOTAL_S:.2f}s")
+                                                    "dur": round(TOTAL_S + TAIL_S, 2)}))
+    print(f"  trim: start {t0 - rec_start:.2f}s length {TOTAL_S + TAIL_S:.2f}s "
+          f"({TOTAL_S:.2f} timeline + {TAIL_S:.1f} tail)")
 
 
 def build_mask():
