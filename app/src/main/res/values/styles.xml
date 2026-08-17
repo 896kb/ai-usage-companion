@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Theme for RearActivity, copied from the another project rear-panel app, which has never
+      Theme for RearActivity, taken from another rear-panel app that has never
       exhibited the failure this fixes.
 
       THE SYMPTOM: locking the device made the rear panel's override appear on the

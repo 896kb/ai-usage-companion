@@ -523,7 +523,7 @@ class RearDialView(context: Context) : View(context) {
     /**
      * Re-tints the mascot's HARDWARE per account: headband, dumbbells and flag pole.
      *
-     * The work account's kit is the company blue, the personal account's stays
+     * The work account's kit takes the second accent, the personal account's stays
      * Anthropic orange, so a glance at which figure is which needs no label. Applied at
      * draw time rather than baked into MascotFrames because the frame data is shared by
      * both accounts — baking it would mean generating and holding two copies of every
@@ -688,7 +688,7 @@ class RearDialView(context: Context) : View(context) {
 
         /**
          * Mascot hardware accents. The orange is Anthropic's brand colour and is what
-         * MascotFrames bakes in; the blue is the company's, swapped in for the work
+         * MascotFrames bakes in; the blue is the second accent, swapped in for the work
          * account at draw time. Neither belongs in Panel.Palette — that is the Tomorrow
          * Night set the whole panel is drawn from, and these two are brand colours that
          * appear on exactly one element each.
