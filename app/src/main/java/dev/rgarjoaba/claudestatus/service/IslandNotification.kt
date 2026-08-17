@@ -69,22 +69,30 @@ internal object IslandNotification {
     private fun percent(w: UsageWindow) = (w.utilization * 100f).toInt()
 
     /**
-     * "PERSONAL 100% · WORK 42%", with any account that cannot vouch for its numbers
-     * carrying why.
+     * The masthead, and nothing else. The same words the panel wears.
      *
-     * Stale numbers are labelled because an island is glanceable by design, which makes
-     * it the easiest place to mislead: a percentage with no qualifier reads as current no
-     * matter how many hours old it is.
+     * A title is a name, not a readout. This one held the readings, which made it long
+     * enough to be truncated in the very places it has to survive — the collapsed shade
+     * row and the island — so the numbers went missing exactly where a glance happens.
+     * They are all in the description now, which is the line built to hold a sentence.
      */
-    private fun title(lines: List<Line>) = lines.joinToString("  ·  ") {
-        val health = if (it.status.health == Health.OK) "" else " (${it.status.health.wire})"
-        "${it.status.account.label} ${percent(it.window)}%$health"
-    }
+    private const val TITLE = "CLAUDE USAGE"
 
+    /**
+     * "PERSONAL 100% · WORK 37% · ALL 5H resets 13m / 53m" — every reading, in order.
+     *
+     * Any account that cannot vouch for its numbers carries why. An island is glanceable
+     * by design, which makes it the easiest place to mislead: a percentage with no
+     * qualifier reads as current no matter how many hours old it is.
+     */
     private fun content(lines: List<Line>): String {
+        val usage = lines.joinToString(" · ") {
+            val health = if (it.status.health == Health.OK) "" else " (${it.status.health.wire})"
+            "${it.status.account.label} ${percent(it.window)}%$health"
+        }
         val label = lines.map { it.window.label }.distinct().singleOrNull() ?: "5H"
         val resets = lines.joinToString(" / ") { ResetClock.short(it.window.resetsAt) ?: "—" }
-        return "$label · resets in $resets"
+        return "$usage · $label resets $resets"
     }
 
     /**
@@ -97,7 +105,6 @@ internal object IslandNotification {
         val lines = lines(state)
         if (lines.isEmpty()) return builder
 
-        val title = title(lines)
         val content = content(lines)
 
         // ALWAYS the plain standing mascot, never the mood.
@@ -111,7 +118,7 @@ internal object IslandNotification {
         val mascot = runCatching { MascotRenderer.bitmap(MascotMood.STAND, PIC_PX) }.getOrNull()
 
         val extras = Bundle().apply {
-            putString("miui.focus.param", param(title, content, lines))
+            putString("miui.focus.param", param(content, lines))
             if (mascot != null) {
                 putBundle(
                     "miui.focus.pics",
@@ -121,8 +128,12 @@ internal object IslandNotification {
         }
 
         return builder
-            .setContentTitle(title)
+            .setContentTitle(TITLE)
             .setContentText(content)
+            // The description is now one line carrying four readings, which the collapsed
+            // row will truncate. BigTextStyle is what lets an expand show all of it
+            // rather than leaving the tail permanently unreachable.
+            .setStyle(Notification.BigTextStyle().bigText(content))
             .addExtras(extras)
     }
 
@@ -136,7 +147,7 @@ internal object IslandNotification {
      *    order is fixed and there is no room to name them.
      *  * `bigIslandArea` is what a tap expands to, and can afford the full sentence.
      */
-    private fun param(title: String, content: String, lines: List<Line>): String {
+    private fun param(content: String, lines: List<Line>): String {
         val pic = JSONObject().put("type", 1).put("pic", PIC_MASCOT)
 
         val small = JSONObject()
@@ -161,7 +172,7 @@ internal object IslandNotification {
                 JSONObject().put("type", 1).put(
                     "textInfo",
                     JSONObject()
-                        .put("title", title)
+                        .put("title", TITLE)
                         .put("content", content)
                         .put("showHighlightColor", false),
                 ),
