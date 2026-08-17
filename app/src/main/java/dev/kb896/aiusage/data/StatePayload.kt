@@ -20,10 +20,26 @@ import kotlinx.serialization.json.putJsonArray
  * kotlinx.serialization, not org.json: org.json is a stub in local JVM unit tests
  * and throws "not mocked". See Global Constraints.
  */
+/**
+ * Everything the rear process needs, in one object.
+ *
+ * State and config travel together because they ARRIVE together — the panel is
+ * relaunched constantly and gets both in its launch intent. Two channels would let a
+ * respawned panel draw one poll's numbers with another edit's colours.
+ */
+data class PanelPayload(
+    val state: DashboardState,
+    val config: PanelConfig = PanelConfig.DEFAULT,
+)
+
 object StatePayload {
 
-    fun encode(state: DashboardState): String = buildJsonObject {
+    fun encode(
+        state: DashboardState,
+        config: PanelConfig = PanelConfig.DEFAULT,
+    ): String = buildJsonObject {
         put("fetchedAt", state.fetchedAt)
+        put("config", Json.parseToJsonElement(PanelConfig.encode(config)))
         putJsonArray("accounts") {
             for (s in state.statuses) {
                 addJsonObject {
@@ -53,8 +69,8 @@ object StatePayload {
         }
     }.toString()
 
-    fun decode(json: String): DashboardState = try {
-        val root = Json.parseToJsonElement(json) as? JsonObject ?: return DashboardState.EMPTY
+    fun decode(json: String): PanelPayload = try {
+        val root = Json.parseToJsonElement(json) as? JsonObject ?: return PanelPayload(DashboardState.EMPTY)
         val arr = root["accounts"] as? JsonArray ?: JsonArray(emptyList())
         val statuses = ArrayList<AccountStatus>(arr.size)
         for (element in arr) {
@@ -82,9 +98,12 @@ object StatePayload {
                 mascot = o.str("mascot") ?: MascotMood.WALK,
             )
         }
-        DashboardState((root["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, statuses)
+        PanelPayload(
+            DashboardState((root["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, statuses),
+            PanelConfig.decode(root["config"]?.toString()),
+        )
     } catch (_: Exception) {
-        DashboardState.EMPTY
+        PanelPayload(DashboardState.EMPTY)
     }
 
     private fun JsonObject.str(key: String): String? =

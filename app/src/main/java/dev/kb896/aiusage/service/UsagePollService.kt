@@ -18,6 +18,7 @@ import android.util.Log
 import android.view.Display
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
+import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.GeometryStore
 import dev.kb896.aiusage.rear.RearActivity
@@ -106,7 +107,7 @@ class UsagePollService : Service() {
         }
         // Render the last known values immediately rather than waiting out the
         // remaining interval with a blank panel.
-        cachedState()?.let { app.repository.restore(StatePayload.decode(it)) }
+        cachedState()?.let { app.repository.restore(StatePayload.decode(it).state) }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displays.registerDisplayListener(displayListener, null)
         // RECEIVER_NOT_EXPORTED is required, not optional: on API 34+ a receiver whose
@@ -233,7 +234,7 @@ class UsagePollService : Service() {
         try {
             val app = Graph.of(this)
             if (app.bridge.ensureOnRear()) Log.w(TAG, "panel was on the main display — moved back")
-            ensurePlaced(app, StatePayload.encode(app.repository.state.value))
+            ensurePlaced(app, StatePayload.encode(app.repository.state.value, config()))
         } catch (e: Exception) {
             Log.e(TAG, "supervise failed", e)
         }
@@ -298,6 +299,12 @@ class UsagePollService : Service() {
         return (Cadence.FAST_MS - since).coerceIn(0L, Cadence.FAST_MS)
     }
 
+    /**
+     * Read fresh on every send, never cached in a field. A settings edit must reach the
+     * panel on the next push without this service being restarted to notice it.
+     */
+    private fun config() = ConfigStore(this).load()
+
     private suspend fun tick() {
         val app = Graph.of(this)
         app.repository.refresh()
@@ -317,7 +324,7 @@ class UsagePollService : Service() {
         getSystemService(NotificationManager::class.java)
             ?.notify(NOTIFICATION_ID, notification())
 
-        val payload = StatePayload.encode(app.repository.state.value)
+        val payload = StatePayload.encode(app.repository.state.value, config())
         val decision = ensurePlaced(app, payload)
         // A fresh respawn already delivered `payload` via the launch intent extra
         // (RearUserService.show()'s `am start --es state ...`), and calibrate mode
@@ -452,7 +459,7 @@ class UsagePollService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SHOW_PANEL) {
             val app = Graph.of(this)
-            app.bridge.show(StatePayload.encode(app.repository.state.value))
+            app.bridge.show(StatePayload.encode(app.repository.state.value, config()))
         }
         return START_STICKY
     }

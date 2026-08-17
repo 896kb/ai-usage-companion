@@ -21,23 +21,45 @@ class StatePayloadTest {
     )
 
     @Test fun `round-trips without loss`() {
-        assertEquals(state, StatePayload.decode(StatePayload.encode(state)))
+        assertEquals(state, StatePayload.decode(StatePayload.encode(state)).state)
     }
 
     @Test fun `preserves a null resetsAt`() {
         val back = StatePayload.decode(StatePayload.encode(state))
-        assertNull(back.statuses[0].snapshot!!.windows[2].resetsAt)
+        assertNull(back.state.statuses[0].snapshot!!.windows[2].resetsAt)
     }
 
     @Test fun `preserves an account with no snapshot`() {
         val back = StatePayload.decode(StatePayload.encode(state))
-        assertNull(back.statuses[1].snapshot)
-        assertEquals(Health.STALE, back.statuses[1].health)
+        assertNull(back.state.statuses[1].snapshot)
+        assertEquals(Health.STALE, back.state.statuses[1].health)
     }
 
     @Test fun `decoding garbage yields an empty state rather than throwing`() {
-        assertEquals(0, StatePayload.decode("nonsense").statuses.size)
-        assertEquals(0, StatePayload.decode("").statuses.size)
+        assertEquals(0, StatePayload.decode("nonsense").state.statuses.size)
+        assertEquals(0, StatePayload.decode("").state.statuses.size)
+    }
+
+    @Test fun `carries the config alongside the state`() {
+        val config = PanelConfig.DEFAULT.copy(
+            title = "PANEL",
+            showClock = true,
+            ringLayout = RingLayout(cx = 161, cyFirst = 150, cySecond = 430, radius = 120, stroke = 20),
+        )
+        val back = StatePayload.decode(StatePayload.encode(state, config))
+        assertEquals(config, back.config)
+        assertEquals(state, back.state)
+    }
+
+    /** A payload written before configs existed must still decode, with defaults. */
+    @Test fun `a payload with no config yields defaults`() {
+        assertEquals(PanelConfig.DEFAULT, StatePayload.decode(StatePayload.encode(state)).config)
+    }
+
+    @Test fun `garbage yields an empty state AND a default config`() {
+        val back = StatePayload.decode("nonsense")
+        assertEquals(0, back.state.statuses.size)
+        assertEquals(PanelConfig.DEFAULT, back.config)
     }
 
     @Test fun `payload contains no token-like material`() {

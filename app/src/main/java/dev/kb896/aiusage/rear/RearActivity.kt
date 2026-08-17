@@ -122,7 +122,9 @@ class RearActivity : Activity() {
             setContentView(if (calibrating) calibrationView else dial)
         }
         if (!calibrating) {
-            dial.state = StatePayload.decode(payload)
+            val decoded = StatePayload.decode(payload)
+            dial.config = decoded.config
+            dial.state = decoded.state
         }
     }
 

@@ -11,6 +11,7 @@ import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.DashboardState
+import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.Health
 import dev.kb896.aiusage.data.WindowKind
 
@@ -25,6 +26,10 @@ class RearDialView(context: Context) : View(context) {
         set(value) { field = value; invalidate() }
 
     var geometry: PanelGeometry = PanelGeometry.DEFAULT
+        set(value) { field = value; invalidate() }
+
+    /** Everything the user can change. Arrives in the same payload as [state]. */
+    var config: PanelConfig = PanelConfig.DEFAULT
         set(value) { field = value; invalidate() }
 
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -297,7 +302,7 @@ class RearDialView(context: Context) : View(context) {
         // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
         // maker's mark follows, so the masthead and the artwork share one axis instead
         // of each being centred on something different.
-        canvas.drawText("CLAUDE USAGE", (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
+        canvas.drawText(config.title, (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
     }
 
 

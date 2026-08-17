@@ -18,6 +18,7 @@ import dev.kb896.aiusage.auth.PkceChallenge
 import dev.kb896.aiusage.auth.TokenImport
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.CallLog
+import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.DashboardState
 import android.widget.SeekBar
 import dev.kb896.aiusage.data.StatePayload
@@ -161,7 +162,7 @@ class MainActivity : ComponentActivity() {
         // blank on placement and stayed blank until the next poll, now up to five
         // minutes away.
         showButton.setOnClickListener {
-            graph.bridge.show(StatePayload.encode(graph.repository.state.value))
+            graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load()))
         }
         hideButton.setOnClickListener { graph.bridge.hide() }
     }
@@ -240,7 +241,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun refreshNow() = lifecycleScope.launch {
         graph.repository.refresh(force = true)
-        graph.bridge.update(StatePayload.encode(graph.repository.state.value))
+        graph.bridge.update(
+            StatePayload.encode(graph.repository.state.value, ConfigStore(this@MainActivity).load()))
     }
 
     /**
