@@ -98,49 +98,7 @@ class RearDialView(context: Context) : View(context) {
         textAlign = Paint.Align.RIGHT; color = Panel.Palette.WORK
     }
 
-    /**
-     * One eased tween per animated quantity, keyed by what it drives.
-     *
-     * Values arrive as steps — a poll completes and a bar jumps — which on an
-     * always-on panel reads as a glitch rather than as news. Easing them makes a change
-     * something you notice out of the corner of your eye, which is the entire job of a
-     * display nobody is looking at directly.
-     *
-     * This was a damped spring until the overshoot proved wrong for the quantity being
-     * shown. See DURATION_MS.
-     */
-    private class Tween {
-        /** NaN until the first frame, so the panel opens on the real values rather
-         *  than animating up from zero every time the activity is re-placed — and
-         *  respawns are frequent here. Only genuine CHANGES animate. */
-        var value = Float.NaN
-        private var from = 0f
-        private var to = Float.NaN
-        private var startMs = 0L
-
-        fun advance(target: Float, nowMs: Long): Float {
-            if (value.isNaN()) { value = target; from = target; to = target; return value }
-            // Retarget from wherever it currently IS, not from where the last leg
-            // began, so a change arriving mid-flight continues smoothly instead of
-            // snapping back to restart.
-            if (target != to) { from = value; to = target; startMs = nowMs }
-            if (to == from) { value = to; return value }
-            val t = ((nowMs - startMs).toFloat() / DURATION_MS).coerceIn(0f, 1f)
-            value = from + (to - from) * easeInOut(t)
-            return value
-        }
-
-        fun settled(nowMs: Long): Boolean = to == from || nowMs - startMs >= DURATION_MS
-
-        /**
-         * Cubic in-out. Starts slow, accelerates, decelerates into the target, and
-         * NEVER passes it — which is the whole reason this replaced a spring.
-         */
-        private fun easeInOut(t: Float): Float =
-            if (t < 0.5f) 4f * t * t * t
-            else 1f - (-2f * t + 2f).let { it * it * it } / 2f
-    }
-
+    /** One eased tween per animated quantity, keyed by what it drives. See Tween. */
     private val tweens = mutableMapOf<String, Tween>()
     private var frameNowMs = 0L
     private var animating = false
@@ -237,11 +195,32 @@ class RearDialView(context: Context) : View(context) {
         // monotonic so an NTP correction or timezone change can't produce a sudden,
         // meaningless jump in drawn position. Same reasoning as RearActivity's
         // armEvictionTimer() guard, which uses the same clock for the same reason.
-        val (dx, dy) = driftOffset(SystemClock.elapsedRealtime())
+        val nowReal = SystemClock.elapsedRealtime()
+        val (dx, dy) = driftOffset(nowReal)
+
+        // The rings do NOT translate, and that is a deliberate exception to the
+        // paragraph above rather than an oversight.
+        //
+        // These two rings are drawn concentric with the phone's actual camera lenses.
+        // Sliding them ±4px slides them off the lenses, and because the lens is a hard
+        // physical edge sitting right there for comparison, a 4px error is glaring in a
+        // way the same 4px on a bar is not — the user noticed it and assumed the OS was
+        // shifting pixels underneath us.
+        //
+        // They are still protected, just along the axis that alignment does not care
+        // about. Breathing the RADIUS moves which pixels of the annulus are lit while
+        // leaving the centre exactly on the lens, because a circle's centre is what
+        // "aligned" means here and its radius is free. Rotation would not do: a full
+        // circle is invariant under it, so the track — the static part, and the part
+        // most at risk — would not move at all.
+        val breath = ringBreath(nowReal)
+        drawRing(canvas, geometry.personal, Account.PERSONAL, breath)
+        drawRing(canvas, geometry.work, Account.WORK, breath)
+
+        canvas.save()
         canvas.translate(dx, dy)
-        drawRing(canvas, geometry.personal, Account.PERSONAL)
-        drawRing(canvas, geometry.work, Account.WORK)
         drawCanvasSide(canvas)
+        canvas.restore()
 
         // Next frame only while something is still moving. When everything has settled
         // this stops entirely and the view falls back to the 15s idle tick — an
@@ -249,12 +228,14 @@ class RearDialView(context: Context) : View(context) {
         if (animating) postInvalidateOnAnimation()
     }
 
-    private fun drawRing(canvas: Canvas, g: RingGeometry, account: Account) {
+    /** @param breath radial burn-in offset, added to the ring's radius. See onDraw. */
+    private fun drawRing(canvas: Canvas, g: RingGeometry, account: Account, breath: Float = 0f) {
         val status = state.statuses.firstOrNull { it.account == account }
         val session = status?.snapshot?.windows?.firstOrNull { it.kind == WindowKind.SESSION }
 
         track.strokeWidth = g.stroke
-        scratch.set(g.cx - g.radius, g.cy - g.radius, g.cx + g.radius, g.cy + g.radius)
+        val r = g.radius + breath
+        scratch.set(g.cx - r, g.cy - r, g.cx + r, g.cy + r)
         canvas.drawArc(scratch, 0f, 360f, false, track)
 
         // No data, or data we can't vouch for: dim ring, no arc. Never render
@@ -747,7 +728,7 @@ class RearDialView(context: Context) : View(context) {
          *
          * A cubic in-out cannot pass its target, so there is nothing to clamp.
          */
-        private const val DURATION_MS = 1800f
+
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
@@ -772,6 +753,23 @@ class RearDialView(context: Context) : View(context) {
          * pins the amplitude, and PanelGeometry's default ring placement has as
          * little as ~1-2px of margin from the panel edge at this amplitude already.
          */
+        /**
+         * Radial burn-in offset for the rings, in px.
+         *
+         * ±3 against a 25px stroke, so about a quarter of the annulus is fresh at each
+         * extreme — comparable to what the ±4px translation achieved for a shape of
+         * this size, without moving the centre off the lens.
+         *
+         * A 7-minute period, deliberately coprime-ish with driftOffset's 10, so the two
+         * mitigations do not lock into a common phase and leave some pixel pair lit
+         * together every cycle.
+         */
+        @JvmStatic
+        fun ringBreath(now: Long): Float {
+            val period = 420_000.0
+            return (Math.sin((now % period.toLong()) / period * 2 * Math.PI) * 3).toFloat()
+        }
+
         @JvmStatic
         fun driftOffset(now: Long): Pair<Float, Float> {
             val period = 600_000.0
