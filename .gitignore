@@ -1,5 +1,3 @@
-# design scratch
-
 # android / gradle
 *.iml
 .gradle/
@@ -20,6 +18,8 @@ credentials.json
 
 # macos
 .DS_Store
+
+# generated media working files, and the local README render
 .rear-demo/
 .readme-preview.html
 
