@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MascotMoodTest {
@@ -128,5 +129,41 @@ class MascotMoodTest {
         val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
         val d = MascotMood.decide(0f, 0.20f, start.holdUntil, T + 60_000L)
         assertEquals(MascotMood.CONFETTI, d.clip)
+    }
+
+    // ---- everything spent -----------------------------------------------------------
+
+    @Test fun `every window at or above 99 percent is dead`() {
+        assertTrue(MascotMood.allSpent(listOf(0.99f, 1.0f, 0.995f)))
+        assertEquals(MascotMood.DEAD, MascotMood.decide(1.0f, null, 0L, T, allSpent = true).clip)
+    }
+
+    /** One window with room left means the account is not dead. */
+    @Test fun `a single unspent window is enough to live`() {
+        assertTrue(!MascotMood.allSpent(listOf(0.99f, 1.0f, 0.98f)))
+    }
+
+    /**
+     * An account with no windows is not "all spent" — that is missing data, and
+     * reporting it as dead would turn a fetch problem into a false alarm.
+     */
+    @Test fun `no windows is not dead`() {
+        assertTrue(!MascotMood.allSpent(emptyList()))
+    }
+
+    /**
+     * Death outranks a live lifting hold. What the user is currently doing stops
+     * mattering once there is nothing left to do it with.
+     */
+    @Test fun `dead outranks an active burst hold`() {
+        val burst = MascotMood.decide(0.50f, 0.40f, 0L, T)
+        assertEquals(MascotMood.MUSCLE, burst.clip)
+        val dead = MascotMood.decide(1.0f, 0.99f, burst.holdUntil, T + 60_000L, allSpent = true)
+        assertEquals(MascotMood.DEAD, dead.clip)
+    }
+
+    /** ...and outranks the flag, which is only about the 5-hour window. */
+    @Test fun `dead outranks the flag`() {
+        assertEquals(MascotMood.DEAD, MascotMood.decide(0.95f, null, 0L, T, allSpent = true).clip)
     }
 }

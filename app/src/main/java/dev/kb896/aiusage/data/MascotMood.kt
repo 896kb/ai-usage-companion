@@ -21,8 +21,21 @@ object MascotMood {
     const val FLAG = "flag"
     const val CONFETTI = "confetti"
 
+    /**
+     * Every limit spent. Rendered as the standing rig on its side with X-ed eyes — the
+     * mascot has died of overuse.
+     *
+     * Distinct from FLAG, which is the 5-hour window alone being nearly gone. This one
+     * means there is nothing left anywhere: session, weekly and the scoped weekly all
+     * at [SPENT] or above.
+     */
+    const val DEAD = "dead"
+
     /** Above this, the window is effectively spent. */
     const val HIGH = 0.90f
+
+    /** Above this, a window has nothing meaningful left. */
+    const val SPENT = 0.99f
 
     /**
      * Recent burn that counts as "working hard", INCLUSIVE.
@@ -98,10 +111,19 @@ object MascotMood {
      * while the latch is live shows that instead — the latch describes what you are
      * doing, those describe where you stand, and where you stand wins.
      */
-    fun decide(utilization: Float, earlier: Float?, holdUntil: Long, now: Long): Decision {
+    fun decide(
+        utilization: Float,
+        earlier: Float?,
+        holdUntil: Long,
+        now: Long,
+        allSpent: Boolean = false,
+    ): Decision {
         val burst = earlier != null && utilization - earlier >= BURST - EPSILON
         val hold = if (burst) now + HOLD_MS else holdUntil
         val clip = when {
+            // Outranks everything, including a live burst hold. If nothing is left
+            // anywhere, what the user is currently doing is beside the point.
+            allSpent -> DEAD
             utilization <= 0f -> CONFETTI
             utilization >= HIGH -> FLAG
             now < hold -> MUSCLE
@@ -109,6 +131,13 @@ object MascotMood {
         }
         return Decision(clip, hold)
     }
+
+    /**
+     * Whether EVERY window is spent. An empty list is not "all spent" — that is an
+     * account with no data, which must not be reported as dead.
+     */
+    fun allSpent(utilizations: List<Float>): Boolean =
+        utilizations.isNotEmpty() && utilizations.all { it >= SPENT }
 
     /**
      * @param utilization current 5h usage, 0..1
@@ -130,7 +159,8 @@ object MascotMood {
      * "unknown", and inventing one from a single sample would fire the lifting animation
      * on the first poll after every restart.
      */
-    fun of(utilization: Float, earlier: Float?): String = when {
+    fun of(utilization: Float, earlier: Float?, allSpent: Boolean = false): String = when {
+        allSpent -> DEAD
         utilization <= 0f -> CONFETTI
         utilization >= HIGH -> FLAG
         earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE

@@ -208,7 +208,8 @@ class UsageRepository(
     private fun moodStale(last: UsageSnapshot?): String {
         val session = last?.windows?.firstOrNull { it.kind == WindowKind.SESSION }
             ?: return MascotMood.STAND
-        return MascotMood.of(session.utilization, null)
+        return MascotMood.of(
+            session.utilization, null, MascotMood.allSpent(last.windows.map { it.utilization }))
     }
 
     private fun moodFor(account: Account, snapshot: UsageSnapshot): String {
@@ -218,7 +219,9 @@ class UsageRepository(
         val now = System.currentTimeMillis()
         val earlier = h.before(account, MascotMood.WINDOW_MS, now)
         h.record(account, session.utilization, now)
-        val decision = MascotMood.decide(session.utilization, earlier, h.holdUntil(account), now)
+        val spent = MascotMood.allSpent(snapshot.windows.map { it.utilization })
+        val decision =
+            MascotMood.decide(session.utilization, earlier, h.holdUntil(account), now, spent)
         h.saveHoldUntil(account, decision.holdUntil)
         return decision.clip
     }
