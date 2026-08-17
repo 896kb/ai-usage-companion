@@ -311,6 +311,12 @@ class UsagePollService : Service() {
         // crossed a band.
         limitNotifier.onState(app.repository.state.value)
 
+        // Re-post the ongoing notification so the shade and the island follow the new
+        // reading. startForeground is not repeated — the service is already foreground,
+        // and notify() on the same id is the documented way to update it.
+        getSystemService(NotificationManager::class.java)
+            ?.notify(NOTIFICATION_ID, notification())
+
         val payload = StatePayload.encode(app.repository.state.value)
         val decision = ensurePlaced(app, payload)
         // A fresh respawn already delivered `payload` via the launch intent extra
@@ -407,7 +413,7 @@ class UsagePollService : Service() {
             Intent(this, UsagePollService::class.java).setAction(ACTION_SHOW_PANEL),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Builder(this, CHANNEL)
+        val builder = Notification.Builder(this, CHANNEL)
             .setContentTitle("Claude Status")
             .setContentText("Tap to show on the rear panel")
             // Ours, not a stock system glyph — this one is permanently in the
@@ -416,7 +422,11 @@ class UsagePollService : Service() {
             .setColor(Panel.Palette.WORK)
             .setContentIntent(tap)
             .setOngoing(true)
-            .build()
+            // Once the numbers exist, this notification carries them — into the shade
+            // and, on HyperOS, into the island. Decorating the notification the service
+            // must keep alive anyway costs nothing; a second permanent one would.
+            .let { IslandNotification.decorate(it, Graph.of(this).repository.state.value) }
+        return builder.build()
     }
 
     override fun onDestroy() {

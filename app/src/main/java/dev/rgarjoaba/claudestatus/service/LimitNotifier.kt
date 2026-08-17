@@ -56,9 +56,9 @@ class LimitNotifier(private val context: Context) {
             "${a.account.label} at ${a.percent}%"
         }
         val text = if (a.isMilestone) {
-            "$what · ${a.percent}% — ${resetPhrase(a.resetsAt)}"
+            "$what · ${a.percent}% — ${ResetClock.phrase(a.resetsAt)}"
         } else {
-            "$what limit — ${resetPhrase(a.resetsAt)}"
+            "$what limit — ${ResetClock.phrase(a.resetsAt)}"
         }
         return Notification.Builder(context, CHANNEL)
             .setContentTitle(title)
@@ -78,20 +78,6 @@ class LimitNotifier(private val context: Context) {
             // app drives already faces outward. Keep the detail behind an unlock.
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .build()
-    }
-
-    private fun resetPhrase(resetsAt: Long?): String {
-        if (resetsAt == null) return "no reset time reported"
-        val ms = resetsAt - System.currentTimeMillis()
-        if (ms <= 0) return "resetting now"
-        val minutes = ms / 60_000
-        val hours = minutes / 60
-        val days = hours / 24
-        return when {
-            days > 0 -> "resets in ${days}d ${hours % 24}h"
-            hours > 0 -> "resets in ${hours}h ${minutes % 60}m"
-            else -> "resets in ${minutes}m"
-        }
     }
 
     /**
