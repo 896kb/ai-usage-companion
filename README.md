@@ -60,18 +60,6 @@ Keyed on the *weekly* limit specifically, because that is the one you cannot wai
 at 0% and a week at 100% — and without this rule the mascot throws confetti at an account
 with nothing left to spend it on.
 
-## See it running
-
-![Every state, both accounts](docs/media/rear-panel.mp4)
-
-Seventeen seconds. The left account walks its bar and then raises the flag; the right one
-runs through confetti, lifting, and dead at 100%. Bars and rings animate between readings
-throughout.
-
-*(If your viewer does not play it inline:
-[rear-panel.mp4](docs/media/rear-panel.mp4), or a still frame:
-[poster](docs/media/rear-panel-poster.png).)*
-
 ## The rings and the bars
 
 **The rings are clocks, not gauges.** Each one shows the time remaining until that
