@@ -69,6 +69,7 @@ package:
       fi
     - echo "$KEYSTORE_BASE64" | base64 -d > "$CI_PROJECT_DIR/release.jks"
     - export KEYSTORE_PATH="$CI_PROJECT_DIR/release.jks"
+    - export VERSION_CODE="$CI_PIPELINE_IID"
     - ./gradlew --no-daemon :app:assembleRelease
     # Prove it is signed AND not debuggable before anything is published. A silently
     # unsigned build is the failure this whole job exists to prevent.
