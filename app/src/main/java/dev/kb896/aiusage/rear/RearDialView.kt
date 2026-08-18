@@ -33,6 +33,22 @@ class RearDialView(context: Context) : View(context) {
     var config: PanelConfig = PanelConfig.DEFAULT
         set(value) { field = value; invalidate() }
 
+    /**
+     * Draw only this account, filling the panel with it. Null draws all of them.
+     *
+     * This is how the per-account preview works, and it is a FILTER rather than a second
+     * renderer: the same layout code runs, over a shorter list. A preview that drew its
+     * own version of one block would be a second implementation of a layout this project
+     * has already had to keep in step twice.
+     *
+     * It replaced a crop of the full panel, which worked only while every account fit on
+     * it. They stop fitting at four — 516px of content into 396px of room — so past three
+     * accounts the one being edited might not be rendered at all, and there would be
+     * nothing to crop.
+     */
+    var onlyAccount: Account? = null
+        set(value) { field = value; invalidate() }
+
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; color = Panel.Palette.TRACK; strokeCap = Paint.Cap.BUTT
     }
@@ -271,8 +287,17 @@ class RearDialView(context: Context) : View(context) {
         // its own account: pointing both rings at one account's two limits is a
         // legitimate thing to want, and the ring's colour follows the account it reports
         // on rather than the slot it occupies.
-        drawRing(canvas, geometry.personal, config.rings.getOrElse(0) { RingSpec(0) }, breath)
-        drawRing(canvas, geometry.work, config.rings.getOrElse(1) { RingSpec(1) }, breath)
+        // In single-account mode only that account's ring is drawn, and it takes the
+        // first ring position — the preview is showing one account's panel, not its
+        // slot in someone else's.
+        val specs = listOfNotNull(
+            config.rings.getOrElse(0) { RingSpec(0) },
+            config.rings.getOrElse(1) { RingSpec(1) },
+        ).filter { spec ->
+            onlyAccount == null || Account.entries.getOrNull(spec.account) == onlyAccount
+        }
+        specs.getOrNull(0)?.let { drawRing(canvas, geometry.personal, it, breath) }
+        specs.getOrNull(1)?.let { drawRing(canvas, geometry.work, it, breath) }
 
         canvas.save()
         canvas.translate(dx, dy)
@@ -503,7 +528,6 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawBars(canvas: Canvas) {
         sessionBars.clear()
-        accountBounds.clear()
         val left = CONTENT_LEFT
         val right = CONTENT_RIGHT
 
@@ -516,7 +540,7 @@ class RearDialView(context: Context) : View(context) {
 
         // Measure both account blocks before drawing anything, so the leftover space
         // can be shared out evenly instead of accumulating at the bottom.
-        val blocks = Account.entries.map { account ->
+        val blocks = Account.entries.filter { onlyAccount == null || it == onlyAccount }.map { account ->
             val status = state.statuses.firstOrNull { it.account == account }
             // The session window is included now. It used to be filtered out because the
             // rings already show its UTILISATION — but this row shows its TIME, which
@@ -576,7 +600,6 @@ class RearDialView(context: Context) : View(context) {
             }
             y += headingAdvance
 
-            val blockTop = y - headingAdvance
             for (w in rows) {
                 // Row labels take the account accent while the data is good, and only
                 // go grey when it cannot be vouched for — same rule as the heading and
@@ -642,10 +665,6 @@ class RearDialView(context: Context) : View(context) {
                 }
                 y += rowPitch
             }
-            // The block, from its heading to the bottom of its last row. Padded a little
-            // so a crop of it does not shave the mascot standing on the first bar.
-            accountBounds[account] = android.graphics.RectF(
-                CONTENT_LEFT, blockTop - MASCOT_HEIGHT, CONTENT_RIGHT, y)
             y += gap
         }
     }
@@ -867,17 +886,6 @@ class RearDialView(context: Context) : View(context) {
     private class SessionBar(val left: Float, val right: Float, val top: Float, val fill: Float)
 
     private val sessionBars = LinkedHashMap<Account, SessionBar>()
-
-    /**
-     * Where each account's block ended up, in panel units, as of the last frame.
-     *
-     * Recorded rather than derived. The row layout is computed at draw time and depends
-     * on the data — how many windows each account reports, whether the extras are shown,
-     * how the leftover space divides — so a crop rectangle worked out anywhere else
-     * would be a copy of that arithmetic, and would drift the first time any of it
-     * changed. The view is the only thing that knows, so the view says.
-     */
-    val accountBounds = LinkedHashMap<Account, android.graphics.RectF>()
 
     /**
      * Short marker shown beside an account whose numbers cannot be vouched for.

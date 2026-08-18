@@ -10,17 +10,17 @@ import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.rear.RearDialView
 
 /**
- * One account's ring and rows, cropped live out of the real panel.
+ * One account, rendered as a panel of its own.
  *
- * The same argument as PanelPreviewView, one step further: rather than draw a smaller
- * version of one account's block, this draws the WHOLE panel and shows the part of it
- * that belongs to this account. Nothing here knows the panel's layout, so nothing here
- * can disagree with it.
+ * A real [RearDialView] with [RearDialView.onlyAccount] set, scaled to fit — so the same
+ * layout code runs, over a list of one. Nothing here knows how a row is placed, so
+ * nothing here can disagree with the panel about it.
  *
- * The crop comes from RearDialView.accountBounds, which the view fills in as it draws.
- * That matters because the layout is data-dependent — how many windows an account
- * reports, whether the clock and battery are shown, how the leftover space divides — so
- * a rectangle computed here would be a second copy of that arithmetic and would drift.
+ * This replaced a CROP of the full panel, and the reason it had to is worth keeping: the
+ * panel fits three accounts and overflows at four — 516px of content into 396px of room.
+ * Past three, the account being edited might not be drawn at all, and a crop would be
+ * cropping something that was not there. Rendering one account has no such limit, and it
+ * also fills the width instead of showing one block adrift in a mostly empty panel.
  */
 class AccountPreviewView @JvmOverloads constructor(
     context: Context,
@@ -29,38 +29,26 @@ class AccountPreviewView @JvmOverloads constructor(
 
     private val dial = RearDialView(context)
 
-    /** Which account to show. */
     var account: Account = Account.PERSONAL
-        set(value) { field = value; requestLayout(); invalidate() }
+        set(value) { field = value; dial.onlyAccount = value }
 
     var state: DashboardState
         get() = dial.state
-        set(value) { dial.state = value; requestLayout() }
+        set(value) { dial.state = value }
 
     var config: PanelConfig
         get() = dial.config
-        set(value) { dial.config = value; requestLayout() }
+        set(value) { dial.config = value }
 
     init {
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
-        setWillNotDraw(false)
+        dial.onlyAccount = account
         clipChildren = true
     }
 
-    /** Whatever the panel last recorded for this account, or the whole panel if it has
-     *  not drawn yet — better a correct full panel for one frame than an empty box. */
-    private fun crop(): android.graphics.RectF =
-        dial.accountBounds[account] ?: android.graphics.RectF(
-            0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
-
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         val width = MeasureSpec.getSize(widthSpec)
-        val box = crop()
-        // The ring column is included whatever the block's own left edge is: this
-        // account's ring lives there, and it is half of what is being previewed.
-        val cropW = box.right
-        val cropH = box.height().coerceAtLeast(1f)
-        setMeasuredDimension(width, (width * cropH / cropW).toInt())
+        setMeasuredDimension(width, (width * Panel.HEIGHT / Panel.WIDTH.toFloat()).toInt())
         dial.measure(
             MeasureSpec.makeMeasureSpec(Panel.WIDTH, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(Panel.HEIGHT, MeasureSpec.EXACTLY),
@@ -69,13 +57,10 @@ class AccountPreviewView @JvmOverloads constructor(
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         dial.layout(0, 0, Panel.WIDTH, Panel.HEIGHT)
-        val box = crop()
-        val scale = width / box.right
+        val scale = width / Panel.WIDTH.toFloat()
         dial.pivotX = 0f
         dial.pivotY = 0f
         dial.scaleX = scale
         dial.scaleY = scale
-        // Slide the scaled panel up so the account's block starts at this view's top.
-        dial.translationY = -box.top * scale
     }
 }
