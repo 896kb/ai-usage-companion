@@ -8,11 +8,14 @@ package dev.kb896.aiusage.rear
  * rather than one — and when a setting is being dragged in the app, an instant repaint
  * makes the panel look like it flickered rather than responded.
  *
+ * Not internal: the settings previews use it too, so a colour transition shown in the
+ * app is the same transition the panel performs.
+ *
  * Kept separate from Tween rather than made generic: Tween's whole job is arithmetic on
  * one float, and a colour is four channels that must be interpolated together and
  * rounded per channel. Sharing the timing is what matters, and that is one constant.
  */
-internal class ColorTween {
+class ColorTween {
 
     /** NaN-equivalent: no colour yet, so the first value is adopted rather than eased
      *  from black — every panel respawn would otherwise fade in from nothing. */

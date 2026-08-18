@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyPalette() {
-        findViewById<View>(R.id.root_layout).setBackgroundColor(Panel.Palette.BG)
+        findViewById<View>(R.id.root_host).setBackgroundColor(Panel.Palette.BG)
         val mono = resources.getFont(R.font.departure_mono)
 
         // Every TextView in the tree, found by walking it rather than by listing them.
@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
                 is ViewGroup -> for (i in 0 until view.childCount) applyFont(view.getChildAt(i))
             }
         }
-        applyFont(findViewById(R.id.root_layout))
+        applyFont(findViewById(R.id.root_host))
 
         recoveryNote.setTextColor(Panel.Palette.FG)
         recoveryCommand.setTextColor(Panel.Palette.FG)
@@ -422,7 +422,7 @@ class MainActivity : ComponentActivity() {
                     buildSettingsRows()
                 },
             ) {
-                AccountSettingsSheet.show(this, findViewById(R.id.root_layout), index,
+                AccountSettingsSheet.show(this, findViewById(R.id.root_host), index,
                     graph.repository.state.value) { edited ->
                     graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited))
                     refreshPreview()

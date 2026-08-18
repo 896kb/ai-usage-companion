@@ -13,7 +13,18 @@
   settings beneath it scroll. A setting you cannot see the effect of while you change it
   is a setting you set three times.
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  A FrameLayout root, so a sheet added on top of it genuinely covers the screen. It was a
+  LinearLayout, which ignores FrameLayout params and appends a "sheet" as one more
+  vertical child — it got the leftover height, its weighted scroller had almost nothing
+  to divide, and the rows would not scroll.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_host"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+<LinearLayout
     android:id="@+id/root_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -372,3 +383,4 @@
         </LinearLayout>
     </ScrollView>
 </LinearLayout>
+</FrameLayout>

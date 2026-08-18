@@ -1111,7 +1111,8 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val ROW_PITCH = 33f
 
-        private const val MASCOT_HEIGHT = 62f
+        /** Nominal mascot height in panel units; each clip scales it by its own factor. */
+        const val MASCOT_HEIGHT = 62f
         // 1.5x the original 125ms pace, at the user's request. Every clip shares it, so
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
         // play in slow motion.

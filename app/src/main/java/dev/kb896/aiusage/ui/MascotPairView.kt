@@ -6,8 +6,10 @@ import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
 import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.rear.ColorTween
 import dev.kb896.aiusage.rear.MascotFrames
 import dev.kb896.aiusage.rear.MascotRenderer
+import dev.kb896.aiusage.rear.RearDialView
 
 /**
  * The flag and the lifting mascots, side by side, in the colours currently chosen.
@@ -36,6 +38,13 @@ class MascotPairView @JvmOverloads constructor(
         strokeCap = Paint.Cap.SQUARE
         color = Panel.Palette.BG
     }
+
+    // Eased, exactly as the panel eases them — the same ColorTween, so the preview
+    // cannot show a transition the panel would not. Without it a colour lands in one
+    // frame here and glides over there, which makes the preview feel like a different
+    // thing rather than the same thing smaller.
+    private val bodyTween = ColorTween()
+    private val accentTween = ColorTween()
 
     var bodyColor: Int = MascotRenderer.BODY_GREEN
         set(value) { field = value; invalidate() }
@@ -66,9 +75,26 @@ class MascotPairView @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
+    /**
+     * Sized to the mascot as it appears in the preview above, not to the width available.
+     *
+     * The preview scales the whole 904-unit panel to this view's width, so a mascot ends
+     * up at MASCOT_HEIGHT * scale on screen. Matching that means the figure a colour is
+     * being chosen for is the size it will actually be — a large version can look right
+     * while the real one is a smudge.
+     */
+    private fun figureHeight(): Float {
+        val panelScale = width / dev.kb896.aiusage.Panel.WIDTH.toFloat()
+        return RearDialView.MASCOT_HEIGHT * panelScale
+    }
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         val width = MeasureSpec.getSize(widthSpec)
-        setMeasuredDimension(width, (width * HEIGHT_RATIO).toInt())
+        val panelScale = width / dev.kb896.aiusage.Panel.WIDTH.toFloat()
+        // Headroom above, because the flag and the confetti reach well outside their
+        // clip's own box — the flag was being clipped at the top by exactly this.
+        val h = RearDialView.MASCOT_HEIGHT * panelScale * (1f + HEADROOM)
+        setMeasuredDimension(width, h.toInt())
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -76,30 +102,36 @@ class MascotPairView @JvmOverloads constructor(
         val now = System.currentTimeMillis()
         val cell = width.toFloat() / clips.size
 
+        val base = figureHeight()
         for ((i, clip) in clips.withIndex()) {
-            // Bounded by the CELL as well as by the height: a clip's width is its height
-            // times its aspect, and the flag's box is wide, so sizing on height alone
-            // would let the two overlap.
-            val h = minOf(height * FILL, (cell * CELL_FILL) / clip.aspect)
+            // Each clip's own scale, exactly as the panel applies it — the flag's box is
+            // dominated by the cloth, so at a shared height its character comes out
+            // smaller than the others'.
+            val h = minOf(base * clip.scale, (cell * CELL_FILL) / clip.aspect)
             val w = h * clip.aspect
             MascotRenderer.draw(
                 canvas, clip, now,
                 x = i * cell + (cell - w) / 2f,
-                top = (height - h) / 2f,
+                // Bottom-aligned, leaving the headroom above where the flag needs it.
+                top = height - h - dp(4f),
                 h = h,
                 body = body,
                 eye = eye,
-                accent = accentColor,
-                bodyColor = bodyColor,
+                accent = accentTween.advance(accentColor, now),
+                bodyColor = bodyTween.advance(bodyColor, now),
             )
         }
     }
 
+    private fun dp(value: Float) = value * resources.displayMetrics.density
+
     private companion object {
         /** Fast enough for the quickest clip (83ms) without pinning a redraw loop. */
         const val FRAME_MS = 40L
-        const val HEIGHT_RATIO = 0.34f
-        const val FILL = 0.86f
+
+        /** Extra height above the figures, as a fraction of one. The flag's pole and the
+         *  confetti reach outside their clip's box and were being cut off. */
+        const val HEADROOM = 0.5f
 
         /** Fraction of its cell a figure may occupy, leaving a gutter between them. */
         const val CELL_FILL = 0.78f
