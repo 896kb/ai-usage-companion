@@ -3,7 +3,7 @@
 Your Claude Code rate limits, live on the Xiaomi 17 Pro's rear display — so you can see
 how much of your window is left without unlocking anything, opening anything, or asking.
 
-![The panel running on the phone's rear display](docs/media/rear-panel.mp4)
+![The panel running on the phone's rear display](assets/rear-panel.mp4)
 
 Two accounts, three windows each, and a mascot that tells you the state at a glance from
 across a desk.
@@ -20,7 +20,7 @@ without reading a single number.
 
 ### Walking — idle
 
-![walking](docs/media/states/walk.png)
+![walking](assets/states/walk.png)
 
 **Nothing to report.** The window is somewhere in the middle and you are not currently
 burning through it. It walks the length of its own bar, jumps back to the start, and
@@ -29,7 +29,7 @@ belongs to.
 
 ### Lifting — you are working
 
-![lifting](docs/media/states/muscle.png)
+![lifting](assets/states/muscle.png)
 
 **1% or more of the 5-hour window went in the last ten minutes.** It holds the pose for
 five minutes after the last burst, and each new burst restarts that clock — so working
@@ -38,20 +38,20 @@ poll.
 
 ### Flag — nearly out
 
-![flag](docs/media/states/flag.png)
+![flag](assets/states/flag.png)
 
 **The 5-hour window is past 90%.** This outranks the lifting pose deliberately: checking
 "are you working" first would hide the warning at exactly the moment it matters most.
 
 ### Confetti — a fresh start
 
-![confetti](docs/media/states/confetti.png)
+![confetti](assets/states/confetti.png)
 
 **The window is at 0%.** Nothing spent, everything ahead of you.
 
 ### Dead — the week is gone
 
-![dead](docs/media/states/dead.png)
+![dead](assets/states/dead.png)
 
 **The 7-day window is spent** (99% or above). The mascot lies on its side with X-ed eyes.
 
@@ -264,16 +264,6 @@ The display is always-on with no idle timeout, which is close to worst-case burn
 geometry for OLED. The whole composition drifts by ±4px on a ten-minute cycle, and the
 rings — which must stay concentric with the lenses — instead breathe their radius by
 ±3px. That is load-bearing, not decoration.
-
-## Regenerating the media
-
-```bash
-python3 tools/rear-demo.py       # record the panel and composite it into the phone photo
-python3 tools/mascot-stills.py   # re-render the state stills above
-```
-
-The compositing geometry, and how each number was measured, is in
-[`docs/media/README.md`](docs/media/README.md).
 
 ## Attribution
 
