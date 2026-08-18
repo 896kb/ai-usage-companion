@@ -128,6 +128,9 @@ data class PanelConfig(
     val barOrder: List<String> = listOf("session", "weekly_all", "weekly_scoped"),
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
+    /** Colour for both extras. Defaults to the panel's green rather than DIM: they are
+     *  small and sit alone in a corner, and dim made them read as disabled. */
+    val extrasColor: Int = Panel.Palette.WORK,
     val art: ArtConfig = ArtConfig(),
     /** Appearance per account, by index. Short lists are fine — a missing entry is
      *  the same as an entry of all-nulls: use the built-ins. */

@@ -424,7 +424,10 @@ class MainActivity : ComponentActivity() {
         val swatches = mutableListOf(
             SettingsRows.Swatch("BACKGROUND", config.background) { c ->
                 write { it.copy(background = c) }
-            }
+            },
+            SettingsRows.Swatch("CLOCK & BATT", config.extrasColor) { c ->
+                write { it.copy(extrasColor = c) }
+            },
         )
         Account.entries.forEachIndexed { index, account ->
             val style = config.styleFor(index)
@@ -503,7 +506,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindDiagnostics() {
-        Diagnostics.install(findViewById(R.id.debug_slot))
+        Diagnostics.install(findViewById(R.id.debug_slot)) {
+            buildSettingsRows()
+            refreshPreview()
+            toast("Settings reset")
+        }
         lifecycleScope.launch {
             graph.repository.state.collect { Diagnostics.render(it, ConfigStore(this@MainActivity).load()) }
         }

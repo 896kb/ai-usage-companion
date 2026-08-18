@@ -10,6 +10,22 @@
     android:layout_height="wrap_content"
     android:orientation="vertical">
 
+    <Button
+        android:id="@+id/debug_reset_all"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Reset every setting to its default"
+        android:textSize="13sp" />
+
+    <Button
+        android:id="@+id/debug_reset_art"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Restore the built-in mark"
+        android:textSize="13sp" />
+
 <View
             android:id="@+id/rule_3"
             android:layout_width="match_parent"

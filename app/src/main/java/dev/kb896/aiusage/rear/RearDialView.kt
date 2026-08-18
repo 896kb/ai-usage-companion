@@ -113,9 +113,9 @@ class RearDialView(context: Context) : View(context) {
      * to — two identical green "MAX 5X" tags on a panel whose whole colour language is
      * "this hue means this account".
      */
-    /** Clock and battery. Dim: context, not a reading. */
+    /** Clock and battery. Colour comes from the config on every frame. */
     private val extras = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 18f; typeface = label.typeface; color = Panel.Palette.DIM
+        textSize = 18f; typeface = label.typeface
     }
 
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -364,7 +364,18 @@ class RearDialView(context: Context) : View(context) {
      * Dim rather than accent-coloured. They are context, not readings — the panel is
      * about usage, and a bright clock would compete with the numbers it sits above.
      */
+    /**
+     * Clock and battery, stacked in the top-right corner.
+     *
+     * Both on the right, one above the other, rather than flanking the title. The
+     * masthead is centred on the bar column, so anything on the left of it sat over the
+     * ring column and read as belonging to the rings. Stacked in one corner they are
+     * plainly a separate block of context, and the second line costs nothing: the band
+     * above the first account heading is empty.
+     */
     private fun drawExtras(canvas: Canvas) {
+        extras.color = config.extrasColor
+        var baseline = TITLE_BASELINE
         if (config.showClock) {
             val now = java.util.Calendar.getInstance()
             val text = String.format(
@@ -372,11 +383,13 @@ class RearDialView(context: Context) : View(context) {
                 now.get(java.util.Calendar.HOUR_OF_DAY),
                 now.get(java.util.Calendar.MINUTE),
             )
-            extras.textAlign = Paint.Align.LEFT
+            extras.textAlign = Paint.Align.RIGHT
+            canvas.drawText(text, CONTENT_RIGHT, baseline, extras)
             val iconW = EXTRA_ICON_H * PanelIcons.CLOCK_ASPECT
-            drawIcon(canvas, PanelIcons.CLOCK, CONTENT_LEFT,
-                TITLE_BASELINE - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            canvas.drawText(text, CONTENT_LEFT + iconW + 8f, TITLE_BASELINE, extras)
+            drawIcon(canvas, PanelIcons.CLOCK,
+                CONTENT_RIGHT - extras.measureText(text) - 8f - iconW,
+                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
+            baseline += EXTRA_LINE_H
         }
         if (config.showBattery) {
             // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
@@ -386,11 +399,11 @@ class RearDialView(context: Context) : View(context) {
             val level = batteryPercent()
             if (level >= 0) {
                 extras.textAlign = Paint.Align.RIGHT
-                canvas.drawText("$level%", CONTENT_RIGHT, TITLE_BASELINE, extras)
+                canvas.drawText("$level%", CONTENT_RIGHT, baseline, extras)
                 val iconW = EXTRA_ICON_H * PanelIcons.BATTERY_ASPECT
                 val textW = extras.measureText("$level%")
                 val iconX = CONTENT_RIGHT - textW - 8f - iconW
-                val iconY = TITLE_BASELINE - EXTRA_ICON_H + 2f
+                val iconY = baseline - EXTRA_ICON_H + 2f
                 // The charging glyph replaces the outline entirely rather than being
                 // overlaid: it already contains the bolt, and two glyphs stacked would
                 // read as one badly drawn one.
@@ -497,7 +510,11 @@ class RearDialView(context: Context) : View(context) {
         }
 
         // The region the bars own: below the masthead, above the ACRNM mark.
-        val regionTop = TITLE_BASELINE + 26f
+        // The bars start below whatever the extras occupy. Stacked, the battery's
+        // baseline lands exactly on the first account heading — the two collided by
+        // arithmetic rather than by accident, so the region has to know they are there.
+        val extraLines = (if (config.showClock) 1 else 0) + (if (config.showBattery) 1 else 0)
+        val regionTop = TITLE_BASELINE + 26f + (extraLines - 1).coerceAtLeast(0) * EXTRA_LINE_H
         val regionBottom = Panel.HEIGHT - MARK_BOTTOM - MARK_H
         // One gap above the first block, one between, one below the last — so the
         // blocks sit evenly rather than hugging the top.
@@ -1001,6 +1018,9 @@ class RearDialView(context: Context) : View(context) {
 
         /** Icon height for the clock and battery, matched to the extras' text size. */
         private const val EXTRA_ICON_H = 20f
+
+        /** Line pitch when both extras are shown. */
+        private const val EXTRA_LINE_H = 26f
 
         private const val TITLE_BASELINE = 54f
 /**

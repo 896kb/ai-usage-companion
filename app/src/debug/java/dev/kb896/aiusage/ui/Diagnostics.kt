@@ -7,6 +7,8 @@ import android.widget.TextView
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.DashboardState
+import dev.kb896.aiusage.data.ArtImport
+import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.StatePayload
 import kotlinx.serialization.json.Json
@@ -27,8 +29,12 @@ object Diagnostics {
     private val pretty = Json { prettyPrint = true }
     private var preview: TextView? = null
 
-    /** Inflates the panel into [slot]. Call once, from onCreate. */
-    fun install(slot: ViewGroup) {
+    /**
+     * @param onReset run after a reset, to rebuild the settings rows and repaint the
+     *   preview — the stored values changed underneath them and every seeded control is
+     *   now showing something that is no longer true.
+     */
+    fun install(slot: ViewGroup, onReset: () -> Unit = {}) {
         LayoutInflater.from(slot.context).inflate(R.layout.debug_panel, slot, true)
         preview = slot.findViewById(R.id.preview_text)
         // The debug panel styles its own views: MainActivity cannot, because these ids
@@ -38,6 +44,21 @@ object Diagnostics {
         slot.findViewById<View>(R.id.rule_3).setBackgroundColor(Panel.Palette.RULE)
         // Same typeface as everything else. The panel is drawn in Departure Mono and a
         // diagnostics block in the system sans would read as a different application.
+        // Reset lives in DEBUG only. Wiping every setting is a development convenience —
+        // getting back to a known state to check a default still looks right — and a
+        // one-tap way for a user to lose an afternoon's configuration.
+        slot.findViewById<android.widget.Button>(R.id.debug_reset_all).setOnClickListener {
+            ConfigStore(slot.context).save(PanelConfig.DEFAULT)
+            ArtImport.clear(slot.context)
+            onReset()
+        }
+        slot.findViewById<android.widget.Button>(R.id.debug_reset_art).setOnClickListener {
+            val store = ConfigStore(slot.context)
+            ArtImport.clear(slot.context)
+            store.save(store.load().copy(art = dev.kb896.aiusage.data.ArtConfig()))
+            onReset()
+        }
+
         val mono = slot.context.resources.getFont(R.font.departure_mono)
         for (id in intArrayOf(R.id.preview_label, R.id.preview_text, R.id.mascot_heading)) {
             slot.findViewById<TextView>(id).typeface = mono
