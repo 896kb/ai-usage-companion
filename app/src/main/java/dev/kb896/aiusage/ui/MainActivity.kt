@@ -24,6 +24,10 @@ import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.ArtConfig
 import dev.kb896.aiusage.data.ArtImport
+import android.widget.LinearLayout
+import dev.kb896.aiusage.data.RingWindow
+import dev.kb896.aiusage.data.RingMetric
+import dev.kb896.aiusage.rear.MascotRenderer
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.RingLayout
 import dev.kb896.aiusage.data.DashboardState
@@ -116,6 +120,7 @@ class MainActivity : ComponentActivity() {
         hideButton = findViewById(R.id.hide_button)
         bindPreview()
         bindSettings()
+        buildSettingsRows()
         bindArt()
         bindDiagnostics()
         bindAdvancedToggle()
@@ -367,6 +372,100 @@ class MainActivity : ComponentActivity() {
         graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
         refreshPreview()
         toast("Artwork set")
+    }
+
+    /**
+     * Everything else the panel exposes, built as rows rather than markup.
+     *
+     * Rebuilt wholesale when a structural choice changes — a ring pointing at a
+     * different account renames the rows below it — because reconciling views in place
+     * is more code than throwing them away, and this list is short.
+     */
+    private fun buildSettingsRows() {
+        val container = findViewById<LinearLayout>(R.id.settings_rows)
+        container.removeAllViews()
+        val store = ConfigStore(this)
+
+        fun write(edit: (PanelConfig) -> PanelConfig) {
+            val config = edit(store.load())
+            store.save(config)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            refreshPreview()
+        }
+
+        val config = store.load()
+
+        SettingsRows.toggle(container, "Show the clock", config.showClock) { on ->
+            write { it.copy(showClock = on) }
+        }
+        SettingsRows.toggle(container, "Show the battery", config.showBattery) { on ->
+            write { it.copy(showBattery = on) }
+        }
+
+        SettingsRows.color(container, "BACKGROUND", config.background) { c ->
+            write { it.copy(background = c) }
+        }
+
+        // Per account. Labels come from the account's own default when unset, so the
+        // heading here says which one you are editing even before you rename it.
+        Account.entries.forEachIndexed { index, account ->
+            val style = config.styleFor(index)
+            SettingsRows.color(container, "${account.label} ACCENT",
+                style.accent ?: account.accent) { c ->
+                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(accent = c) }) }
+            }
+            SettingsRows.color(container, "${account.label} MASCOT",
+                style.mascotBody ?: MascotRenderer.BODY_GREEN) { c ->
+                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotBody = c) }) }
+            }
+            SettingsRows.color(container, "${account.label} MASCOT KIT",
+                style.mascotAccent ?: if (account == Account.WORK) MascotRenderer.ACCENT_WORK
+                    else MascotRenderer.ACCENT_ORANGE) { c ->
+                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotAccent = c) }) }
+            }
+        }
+
+        // The ramp, mild to spent. Positions are fixed; only these move.
+        config.rampColors.forEachIndexed { i, colour ->
+            SettingsRows.color(container, "RAMP ${i + 1} OF ${config.rampColors.size}", colour) { c ->
+                write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
+            }
+        }
+
+        // Rings. Each picks an account, a window and what to show about it.
+        val accountNames = Account.entries.map { it.label }
+        val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
+        val metricNames = listOf("Time to reset", "Utilisation")
+        config.rings.forEachIndexed { index, ring ->
+            SettingsRows.choice(container, "RING ${index + 1} ACCOUNT", accountNames,
+                ring.account) { pos ->
+                write { it.copy(rings = it.withRing(index) { r -> r.copy(account = pos) }) }
+                buildSettingsRows()
+            }
+            SettingsRows.choice(container, "RING ${index + 1} WINDOW", windowNames,
+                RingWindow.entries.indexOf(ring.window)) { pos ->
+                write { it.copy(rings = it.withRing(index) { r ->
+                    r.copy(window = RingWindow.entries[pos]) }) }
+            }
+            SettingsRows.choice(container, "RING ${index + 1} SHOWS", metricNames,
+                RingMetric.entries.indexOf(ring.metric)) { pos ->
+                write { it.copy(rings = it.withRing(index) { r ->
+                    r.copy(metric = RingMetric.entries[pos]) }) }
+            }
+        }
+
+        // Bar rows: which windows appear, in the order they are listed here.
+        val allKinds = listOf("session" to "5-hour", "weekly_all" to "7-day all",
+            "weekly_scoped" to "7-day scoped")
+        allKinds.forEach { (wire, name) ->
+            SettingsRows.toggle(container, "Show the $name bar", wire in config.barOrder) { on ->
+                write { cfg ->
+                    val kept = allKinds.map { it.first }
+                        .filter { if (it == wire) on else it in cfg.barOrder }
+                    cfg.copy(barOrder = kept)
+                }
+            }
+        }
     }
 
     private fun bindArt() {

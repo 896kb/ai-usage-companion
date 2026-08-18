@@ -137,6 +137,28 @@ data class PanelConfig(
     /** This account's appearance, or an all-defaults one if it has no entry. */
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
 
+    /**
+     * The account list with one entry edited, GROWN if it does not reach that far.
+     *
+     * A stored config can be shorter than the number of accounts — it was written when
+     * there were fewer, or by hand. Editing account 1 of a one-entry list must add the
+     * second rather than silently do nothing, which is what a plain map would do.
+     */
+    fun withStyle(index: Int, edit: (AccountStyle) -> AccountStyle): List<AccountStyle> {
+        val grown = accounts.toMutableList()
+        while (grown.size <= index) grown.add(AccountStyle())
+        grown[index] = edit(grown[index])
+        return grown
+    }
+
+    /** The ring list with one entry edited, grown if short — same reasoning. */
+    fun withRing(index: Int, edit: (RingSpec) -> RingSpec): List<RingSpec> {
+        val grown = rings.toMutableList()
+        while (grown.size <= index) grown.add(RingSpec(account = grown.size))
+        grown[index] = edit(grown[index])
+        return grown
+    }
+
     companion object {
         val DEFAULT = PanelConfig()
 

@@ -105,4 +105,38 @@ class PanelConfigTest {
     @Test fun `bar order defaults to all three, in reading order`() {
         assertEquals(listOf("session", "weekly_all", "weekly_scoped"), PanelConfig.DEFAULT.barOrder)
     }
+
+    // ---- editing short lists ---------------------------------------------------------
+
+    /**
+     * A stored config can be shorter than the number of accounts — written when there
+     * were fewer, or by hand. Editing past the end must GROW the list; a plain map would
+     * silently do nothing and the setting would appear not to work.
+     */
+    @Test fun `editing a style past the end grows the list`() {
+        val c = PanelConfig.DEFAULT.copy(accounts = listOf(AccountStyle()))
+        val grown = c.withStyle(1) { it.copy(label = "SECOND") }
+        assertEquals(2, grown.size)
+        assertEquals("SECOND", grown[1].label)
+        assertEquals(null, grown[0].label)
+    }
+
+    @Test fun `editing a ring past the end grows the list`() {
+        val c = PanelConfig.DEFAULT.copy(rings = listOf(RingSpec(account = 0)))
+        val grown = c.withRing(1) { it.copy(metric = RingMetric.UTILIZATION) }
+        assertEquals(2, grown.size)
+        assertEquals(RingMetric.UTILIZATION, grown[1].metric)
+        // a grown ring defaults to its own index rather than to account 0, so two rings
+        // do not silently report on the same account
+        assertEquals(1, grown[1].account)
+    }
+
+    @Test fun `editing an existing entry leaves its neighbours alone`() {
+        val c = PanelConfig.DEFAULT.copy(accounts = listOf(
+            AccountStyle(label = "A"), AccountStyle(label = "B")))
+        val edited = c.withStyle(0) { it.copy(accent = 1) }
+        assertEquals("B", edited[1].label)
+        assertEquals(1, edited[0].accent)
+        assertEquals("A", edited[0].label)
+    }
 }
