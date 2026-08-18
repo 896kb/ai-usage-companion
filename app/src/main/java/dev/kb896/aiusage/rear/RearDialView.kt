@@ -348,7 +348,19 @@ class RearDialView(context: Context) : View(context) {
         }
         val window = status?.snapshot?.windows?.firstOrNull { it.kind == kind }
 
+        // NONE empties the ring rather than switching it off. A ring that vanishes
+        // between two frames reads as a rendering fault: the panel is always on, nobody
+        // is watching the moment a setting changes, and the first thing they see is a
+        // ring that used to be there. So "off" is said in the motion the ring already
+        // makes — it unwinds to empty and dims away as it goes. The same Tween at the
+        // same 1800ms, started by the same config change, so the sweep and the fade
+        // land together rather than reading as two events.
+        val presence = animateTo("ring:${account.name}:presence",
+            if (spec.metric == RingMetric.NONE) 0f else 1f)
+        if (presence <= 0f) return
+
         track.strokeWidth = g.stroke
+        track.alpha = (255 * presence).toInt()
         val r = g.radius + breath
         scratch.set(g.cx - r, g.cy - r, g.cx + r, g.cy + r)
         canvas.drawArc(scratch, 0f, 360f, false, track)
@@ -380,14 +392,21 @@ class RearDialView(context: Context) : View(context) {
         val target = when (spec.metric) {
             RingMetric.TIME_TO_RESET -> windowElapsed(window)
             RingMetric.UTILIZATION -> window.utilization
+            // Not a reading the ring reports — the value it retreats to.
+            RingMetric.NONE -> 0f
         }
-        val shown = animateTo("ring:${account.name}:${spec.window}:${spec.metric}", target)
-            .coerceIn(0f, 1f)
+        // Keyed by the ACCOUNT alone, not by what its ring currently shows. A Tween
+        // opens on its first target instead of animating up from zero, so folding the
+        // window and the metric into the key meant every change to what a ring reports
+        // built a fresh tween and snapped — including the change to NONE, where the
+        // unwind is the whole point.
+        val shown = animateTo("ring:${account.name}", target).coerceIn(0f, 1f)
         arc.color = when {
             status.health != Health.OK -> Panel.Palette.DIM
             spec.metric == RingMetric.UTILIZATION -> RampColor.at(shown, config.rampColors)
             else -> accentOf(account)
         }
+        arc.alpha = (255 * presence).toInt()
         canvas.drawArc(scratch, -90f, 360f * shown, false, arc)
     }
 

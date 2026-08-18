@@ -106,7 +106,7 @@ and all of it is designed to become editable:
 |---|---|
 | **Titles** | The masthead — `CLAUDE USAGE` today — and both account names. All three are free text; the masthead is a label, not a brand mark. |
 | **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour; and the ramp stops from mild to spent. |
-| **Layout** | The order of the bar rows, and what each ring reports — which window, and whether it shows time-to-reset or utilisation. |
+| **Layout** | The order of the bar rows, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing at all. |
 | **Bottom artwork** | Replace the built-in mark with your own image, positioned and zoomed within its region. |
 | **Extras** | A clock and a battery readout on the panel. |
 | **Accounts** | One or two, rather than exactly two. Each with its own name, colour, and choice of browser sign-in or pasted token. |

@@ -8,9 +8,19 @@ import kotlinx.serialization.json.Json
 @Serializable
 enum class RingWindow { SESSION, WEEKLY_ALL, WEEKLY_SCOPED }
 
-/** What about that window the ring shows. */
+/**
+ * What about that window the ring shows.
+ *
+ * [NONE] is a real choice, not an absence of one. The rings are drawn concentric with
+ * the phone's camera lenses, which is lovely on a panel that wants them and clutter on
+ * one that does not — a bare lens surround is a legitimate look, and there was no way
+ * to ask for it.
+ *
+ * Appended rather than inserted: these are stored by name, and the settings list maps
+ * position to entry, so order is load-bearing in two directions.
+ */
 @Serializable
-enum class RingMetric { TIME_TO_RESET, UTILIZATION }
+enum class RingMetric { TIME_TO_RESET, UTILIZATION, NONE }
 
 /**
  * What one ring reports.

@@ -137,6 +137,17 @@ class PanelConfigTest {
         assertEquals(null, grown[0].label)
     }
 
+    /** Appended to the enum, so the concern is whether the older names still decode. */
+    @Test fun `a ring set to NONE survives the round trip`() {
+        val c = PanelConfig(rings = listOf(
+            RingSpec(metric = RingMetric.NONE),
+            RingSpec(metric = RingMetric.UTILIZATION),
+        ))
+        val back = PanelConfig.decode(PanelConfig.encode(c))
+        assertEquals(RingMetric.NONE, back.rings[0].metric)
+        assertEquals(RingMetric.UTILIZATION, back.rings[1].metric)
+    }
+
     @Test fun `editing a ring past the end grows the list`() {
         val c = PanelConfig.DEFAULT.copy(rings = listOf(RingSpec()))
         val grown = c.withRing(1) { it.copy(metric = RingMetric.UTILIZATION) }

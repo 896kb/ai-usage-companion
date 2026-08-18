@@ -32,14 +32,6 @@
         android:visibility="gone">
 
     <Button
-        android:id="@+id/debug_reset_all"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Reset every setting to its default"
-        android:textSize="13sp" />
-
-    <Button
         android:id="@+id/debug_reset_art"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

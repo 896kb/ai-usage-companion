@@ -462,6 +462,84 @@ class MainActivity : ComponentActivity() {
                 write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
             }
         })
+
+        // Last row of the last section, and the only destructive control in the app.
+        // It used to be debug-only, on the reasoning that a user has no business
+        // wiping their own configuration — but they do: a panel tuned into a corner is
+        // easier to start over than to unpick, and "reinstall the app" was the only
+        // way out. What made it dangerous was being one tap from a colour swatch, and
+        // that is what the confirmation fixes.
+        Button(this).apply {
+            text = "Reset every setting to its default"
+            textSize = 14f
+            setTextColor(Panel.Palette.CRIT)
+            typeface = resources.getFont(R.font.departure_mono)
+            setOnClickListener { confirmResetEverything() }
+            advanced.addView(this, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = (16 * resources.displayMetrics.density).toInt() })
+        }
+    }
+
+    /**
+     * Confirm before wiping every setting, and hold the button shut for [RESET_HOLD_MS].
+     *
+     * The delay is not there to be read — it is there to break the rhythm. A dialog
+     * whose confirm button is live on arrival is dismissed by the same reflex that
+     * opened it, and this is the one action in the app with nothing behind it: no undo,
+     * and the previous configuration is gone the moment it runs. Five seconds is long
+     * enough that finishing the tap is a second decision rather than the end of the
+     * first one.
+     *
+     * Counting down out loud, rather than a button that silently becomes tappable —
+     * otherwise a disabled button with no explanation reads as the dialog being broken.
+     */
+    private fun confirmResetEverything() {
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("Reset every setting?")
+            .setMessage(
+                "Titles, colours, bar order, the ring settings and the bottom art all " +
+                    "go back to how they shipped. Your connected accounts stay signed " +
+                    "in. This cannot be undone."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Reset", null)   // wired in onShow, so it can start shut
+            .create()
+
+        var timer: android.os.CountDownTimer? = null
+        dialog.setOnShowListener {
+            val confirm = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+            confirm.isEnabled = false
+            confirm.text = "Reset (${RESET_HOLD_MS / 1000})"
+            // Set only once the wait is over. Wiring it in the builder would leave the
+            // action attached to a button that is merely disabled, and a disabled
+            // button is a weaker guarantee than one with nothing behind it.
+            confirm.setOnClickListener { dialog.dismiss(); resetEverything() }
+            timer = object : android.os.CountDownTimer(RESET_HOLD_MS, 1000L) {
+                // Rounded UP: the first tick lands just under four seconds and would
+                // otherwise read 3, skipping a number off a five-second count.
+                override fun onTick(left: Long) { confirm.text = "Reset (${(left + 999) / 1000})" }
+                override fun onFinish() { confirm.isEnabled = true; confirm.text = "Reset" }
+            }.start()
+        }
+        // A dialog dismissed mid-count leaves a timer holding a button from a window
+        // that is gone.
+        dialog.setOnDismissListener { timer?.cancel() }
+        dialog.show()
+    }
+
+    private fun resetEverything() {
+        val store = ConfigStore(this)
+        // The imported image too. Leaving the file behind and only clearing the config
+        // that points at it means "reset" restores the default art while the picture
+        // the user chose sits in app storage forever.
+        ArtImport.clear(this)
+        store.save(PanelConfig.DEFAULT)
+        graph.bridge.update(StatePayload.encode(graph.repository.state.value, PanelConfig.DEFAULT))
+        buildSettingsRows()
+        refreshPreview()
+        toast("Every setting reset")
     }
 
     /**
@@ -516,10 +594,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindDiagnostics() {
+        // Restoring the built-in mark is the only reset left in here — wiping every
+        // setting moved to ADVANCED, behind a confirmation, where a user can reach it.
         Diagnostics.install(findViewById(R.id.debug_slot)) {
             buildSettingsRows()
             refreshPreview()
-            toast("Settings reset")
+            toast("Built-in mark restored")
         }
         lifecycleScope.launch {
             graph.repository.state.collect { Diagnostics.render(it, ConfigStore(this@MainActivity).load()) }
@@ -654,6 +734,11 @@ class MainActivity : ComponentActivity() {
         // undone — a permission revoked, Shizuku not restarted after a reboot.
         val done = Setup.allDone(steps)
         heading.visibility = if (done) View.VISIBLE else View.GONE
+        // Green, like every other accordion title, and without the rule that used to
+        // sit above it — a heading and a divider one line apart draw the same line
+        // twice, and the heading is already the thing that says a section starts here.
+        heading.setTextColor(Panel.Palette.WORK)
+        findViewById<View>(R.id.rule_1)?.visibility = if (done) View.GONE else View.VISIBLE
         if (done) {
             // Expanded state is not remembered across launches: the reason to open this
             // is to fix something, and that is a fresh decision each time.
@@ -799,6 +884,9 @@ class MainActivity : ComponentActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     companion object {
+        /** How long the reset dialog holds its confirm button shut. */
+        private const val RESET_HOLD_MS = 5_000L
+
         private val GOOD_COLOR = Panel.RAMP_STOPS.first().second
 
         /**

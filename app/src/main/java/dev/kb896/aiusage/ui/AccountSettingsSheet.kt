@@ -204,7 +204,9 @@ object AccountSettingsSheet {
             // reports on, not to the slot it occupies, so this list is a filter rather
             // than an index — and an account with no ring simply shows no ring settings.
             val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
-            val metricNames = listOf("Time to reset", "Utilisation")
+            // Positional against RingMetric.entries, so this list and that enum have
+            // to stay in the same order.
+            val metricNames = listOf("Time to reset", "Utilisation", "None")
             // The ring in this account's position. Ring N belongs to the Nth account in
             // display order, so the account's place in that order is which ring is its.
             val position = config.orderedAccounts(Account.entries.size).indexOf(index)

@@ -44,14 +44,6 @@ object Diagnostics {
         slot.findViewById<View>(R.id.rule_3).setBackgroundColor(Panel.Palette.RULE)
         // Same typeface as everything else. The panel is drawn in Departure Mono and a
         // diagnostics block in the system sans would read as a different application.
-        // Reset lives in DEBUG only. Wiping every setting is a development convenience —
-        // getting back to a known state to check a default still looks right — and a
-        // one-tap way for a user to lose an afternoon's configuration.
-        slot.findViewById<android.widget.Button>(R.id.debug_reset_all).setOnClickListener {
-            ConfigStore(slot.context).save(PanelConfig.DEFAULT)
-            ArtImport.clear(slot.context)
-            onReset()
-        }
         // The only way back to the built-in mark, and deliberately debug-only: the mark
         // is a third party's, shipped for fidelity rather than as a choice on offer, so
         // "use the ACRNM mark" is not a button to put in front of a user.
