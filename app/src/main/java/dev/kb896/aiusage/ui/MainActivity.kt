@@ -383,7 +383,9 @@ class MainActivity : ComponentActivity() {
      */
     private fun buildSettingsRows() {
         val container = findViewById<LinearLayout>(R.id.settings_rows)
+        val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
         container.removeAllViews()
+        advanced.removeAllViews()
         val store = ConfigStore(this)
 
         fun write(edit: (PanelConfig) -> PanelConfig) {
@@ -395,6 +397,21 @@ class MainActivity : ComponentActivity() {
 
         val config = store.load()
 
+        // Accounts are #1 and #2, never "personal" and "work". Those were this author's
+        // two accounts, not a taxonomy — someone else has a client and a side project,
+        // or one account and nothing else. The number is the identity; the name is
+        // theirs to write.
+        Account.entries.forEachIndexed { index, account ->
+            SettingsRows.textField(
+                container,
+                "ACCOUNT #${index + 1} NAME",
+                config.styleFor(index).label ?: account.label,
+            ) { typed ->
+                write { it.copy(accounts = it.withStyle(index) { s ->
+                    s.copy(label = typed.ifBlank { null }) }) }
+            }
+        }
+
         SettingsRows.toggle(container, "Show the clock", config.showClock) { on ->
             write { it.copy(showClock = on) }
         }
@@ -402,45 +419,41 @@ class MainActivity : ComponentActivity() {
             write { it.copy(showBattery = on) }
         }
 
-        SettingsRows.color(container, "BACKGROUND", config.background) { c ->
-            write { it.copy(background = c) }
-        }
-
-        // Per account. Labels come from the account's own default when unset, so the
-        // heading here says which one you are editing even before you rename it.
+        // Colours as one grid, so they can be judged against each other — which is how
+        // they are actually chosen — rather than down a column one at a time.
+        val swatches = mutableListOf(
+            SettingsRows.Swatch("BACKGROUND", config.background) { c ->
+                write { it.copy(background = c) }
+            }
+        )
         Account.entries.forEachIndexed { index, account ->
             val style = config.styleFor(index)
-            SettingsRows.color(container, "${account.label} ACCENT",
-                style.accent ?: account.accent) { c ->
+            val n = index + 1
+            swatches += SettingsRows.Swatch("#$n ACCENT", style.accent ?: account.accent) { c ->
                 write { it.copy(accounts = it.withStyle(index) { s -> s.copy(accent = c) }) }
             }
-            SettingsRows.color(container, "${account.label} MASCOT",
+            swatches += SettingsRows.Swatch("#$n MASCOT",
                 style.mascotBody ?: MascotRenderer.BODY_GREEN) { c ->
                 write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotBody = c) }) }
             }
-            SettingsRows.color(container, "${account.label} MASCOT KIT",
-                style.mascotAccent ?: if (account == Account.WORK) MascotRenderer.ACCENT_WORK
+            swatches += SettingsRows.Swatch("#$n KIT",
+                style.mascotAccent ?: if (index == 1) MascotRenderer.ACCENT_WORK
                     else MascotRenderer.ACCENT_ORANGE) { c ->
                 write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotAccent = c) }) }
             }
         }
+        SettingsRows.colorGrid(container, swatches)
 
-        // The ramp, mild to spent. Positions are fixed; only these move.
-        config.rampColors.forEachIndexed { i, colour ->
-            SettingsRows.color(container, "RAMP ${i + 1} OF ${config.rampColors.size}", colour) { c ->
-                write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
-            }
+        // Rings. Each picks an account, a window, and what to show about it.
+        val accountNames = Account.entries.mapIndexed { i, a ->
+            "#${i + 1} ${config.styleFor(i).label ?: a.label}"
         }
-
-        // Rings. Each picks an account, a window and what to show about it.
-        val accountNames = Account.entries.map { it.label }
         val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
         val metricNames = listOf("Time to reset", "Utilisation")
         config.rings.forEachIndexed { index, ring ->
             SettingsRows.choice(container, "RING ${index + 1} ACCOUNT", accountNames,
                 ring.account) { pos ->
                 write { it.copy(rings = it.withRing(index) { r -> r.copy(account = pos) }) }
-                buildSettingsRows()
             }
             SettingsRows.choice(container, "RING ${index + 1} WINDOW", windowNames,
                 RingWindow.entries.indexOf(ring.window)) { pos ->
@@ -454,18 +467,26 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Bar rows: which windows appear, in the order they are listed here.
         val allKinds = listOf("session" to "5-hour", "weekly_all" to "7-day all",
             "weekly_scoped" to "7-day scoped")
         allKinds.forEach { (wire, name) ->
             SettingsRows.toggle(container, "Show the $name bar", wire in config.barOrder) { on ->
                 write { cfg ->
-                    val kept = allKinds.map { it.first }
-                        .filter { if (it == wire) on else it in cfg.barOrder }
-                    cfg.copy(barOrder = kept)
+                    cfg.copy(barOrder = allKinds.map { it.first }
+                        .filter { if (it == wire) on else it in cfg.barOrder })
                 }
             }
         }
+
+        // The ramp belongs in ADVANCED. It is five colours that already work together,
+        // and the common case for touching them is not "I want a different green" but
+        // "I am adapting this to a different display" — the same reason the ring geometry
+        // lives there.
+        SettingsRows.colorGrid(advanced, config.rampColors.mapIndexed { i, colour ->
+            SettingsRows.Swatch("RAMP ${i + 1}", colour) { c ->
+                write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
+            }
+        })
     }
 
     private fun bindArt() {

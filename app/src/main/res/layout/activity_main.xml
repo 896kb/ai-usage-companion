@@ -273,6 +273,12 @@
             android:text="For a phone whose rear display is not the one this was measured on — a larger model, say. Both rings share X and radius so they cannot drift apart. Changes show on the back as you drag."
             android:textSize="10sp" />
 
+        <LinearLayout
+            android:id="@+id/advanced_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
         <TextView
             android:id="@+id/geo_cx_label"
             android:layout_width="match_parent"

@@ -1,16 +1,11 @@
 package dev.kb896.aiusage.ui
 
 import android.content.Context
-import android.graphics.Color
-import android.text.InputFilter
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
@@ -29,6 +24,9 @@ import dev.kb896.aiusage.R
  */
 object SettingsRows {
 
+    /** Swatches per row. Three fits the names and keeps related colours on one line. */
+    private const val COLUMNS = 3
+
     private fun label(context: Context, text: String) = TextView(context).apply {
         this.text = text
         textSize = 11f
@@ -40,82 +38,79 @@ object SettingsRows {
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
     ).apply { topMargin = topDp }
 
-    /**
-     * A colour: a hex field, and a swatch that opens the picker.
-     *
-     * Both, because they serve different tasks. "Match this exact palette colour" is
-     * typing; "find a green I like" is dragging. Either one alone makes the other job
-     * tedious.
-     *
-     * [onChange] fires only for a COMPLETE, valid colour. Reacting to every keystroke
-     * would push a half-typed "#1D1" to the panel and repaint it in whatever that
-     * happens to parse as.
-     */
-    fun color(
-        parent: LinearLayout,
-        name: String,
-        initial: Int,
-        onChange: (Int) -> Unit,
-    ) {
-        val context = parent.context
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        // Tapping the swatch opens the picker; the field stays for typing a known value.
-        // Two ways in, because the two tasks are different: "match this exact palette
-        // colour" is typing, "find a green I like" is dragging.
-        val swatch = View(context).apply {
-            setBackgroundColor(initial)
-            layoutParams = LinearLayout.LayoutParams(dp(context, 28), dp(context, 28))
-        }
-        val field = EditText(context).apply {
-            setText(String.format("#%06X", initial and 0xFFFFFF))
-            inputType = InputType.TYPE_CLASS_TEXT
-            filters = arrayOf(InputFilter.LengthFilter(7))
-            textSize = 14f
-            setTextColor(Panel.Palette.FG)
-            setHintTextColor(Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
-            layoutParams = LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            doAfterTextChanged { text ->
-                val parsed = parseColor(text?.toString())
-                if (parsed != null) {
-                    swatch.setBackgroundColor(parsed)
-                    onChange(parsed)
-                }
-            }
-        }
-        swatch.setOnClickListener {
-            val from = parseColor(field.text?.toString()) ?: initial
-            ColorPickerDialog.show(context, from) { picked ->
-                // Writing the field is what commits the change: its watcher validates the
-                // value and calls onChange, so the picker has exactly one way to apply a
-                // colour rather than a second path that could drift from it.
-                field.setText(String.format("#%06X", picked and 0xFFFFFF))
-            }
-        }
+    /** One swatch's worth of work: what it is called, what it is now, what to do next. */
+    data class Swatch(val name: String, val color: Int, val onChange: (Int) -> Unit)
 
-        row.addView(field)
-        row.addView(swatch)
-        parent.addView(label(context, name), rowParams(dp(context, 10)))
-        parent.addView(row, rowParams(dp(context, 2)))
+    /**
+     * Colours as a grid of swatches, three across.
+     *
+     * One full-width row per colour, each with its own hex field, made a column too busy
+     * to scan — and scanning is the actual task here, since these are chosen against each
+     * other rather than in isolation. Three across fits the names, keeps related colours
+     * on one line, and lets you see the set as a set.
+     *
+     * The swatch IS the control. Editing moved into the picker, where a hex field is the
+     * second way of doing that dialog's one job rather than clutter in a list.
+     */
+    fun colorGrid(parent: LinearLayout, swatches: List<Swatch>) {
+        val context = parent.context
+        swatches.chunked(COLUMNS).forEach { row ->
+            val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            row.forEach { swatch -> line.addView(cell(context, swatch)) }
+            // Pad a short last row with empty weight, so three items and four items line
+            // up on the same columns instead of the last row stretching to fill.
+            repeat(COLUMNS - row.size) {
+                line.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+            }
+            parent.addView(line, rowParams(dp(context, 10)))
+        }
+    }
+
+    private fun cell(context: Context, swatch: Swatch): View {
+        val cell = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(context, 8) }
+        }
+        val block = View(context).apply {
+            setBackgroundColor(swatch.color)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34))
+        }
+        block.setOnClickListener {
+            ColorPickerDialog.show(context, swatch.color) { picked ->
+                block.setBackgroundColor(picked)
+                swatch.onChange(picked)
+            }
+        }
+        cell.addView(label(context, swatch.name))
+        cell.addView(block, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34)).apply { topMargin = dp(context, 4) })
+        return cell
     }
 
     /**
-     * Opaque only. A translucent panel background is not a preference, it is a way to
-     * break the panel — with nothing occluding it the system's own rear launcher resumes
-     * and takes the display. Alpha typed into the field is ignored rather than obeyed.
+     * A named free-text field. Blank is passed through as blank so the caller can decide
+     * what it means — for a name it means "use the built-in", which is not this
+     * component's business to know.
      */
-    private fun parseColor(raw: String?): Int? {
-        val text = raw?.trim()?.removePrefix("#") ?: return null
-        if (text.length != 6) return null
-        return try {
-            Color.parseColor("#$text") or (0xFF shl 24)
-        } catch (_: IllegalArgumentException) {
-            null
-        }
+    fun textField(
+        parent: LinearLayout,
+        name: String,
+        initial: String,
+        onChange: (String) -> Unit,
+    ) {
+        val context = parent.context
+        parent.addView(label(context, name), rowParams(dp(context, 10)))
+        parent.addView(android.widget.EditText(context).apply {
+            setText(initial)
+            textSize = 14f
+            maxLines = 1
+            setTextColor(Panel.Palette.FG)
+            setHintTextColor(Panel.Palette.DIM)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            doAfterTextChanged { onChange(it?.toString().orEmpty().trim()) }
+        }, rowParams(dp(context, 2)))
     }
 
     fun toggle(
@@ -125,7 +120,10 @@ object SettingsRows {
         onChange: (Boolean) -> Unit,
     ) {
         val context = parent.context
-        parent.addView(CheckBox(context).apply {
+        // A Switch, not a CheckBox. These are settings that take effect immediately and
+        // stay that way, which is what a switch means; a checkbox reads as one of several
+        // selections waiting to be confirmed, and there is nothing here to confirm.
+        parent.addView(android.widget.Switch(context).apply {
             text = name
             textSize = 13f
             isChecked = initial

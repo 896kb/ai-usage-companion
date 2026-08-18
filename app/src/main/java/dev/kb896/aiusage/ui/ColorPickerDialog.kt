@@ -49,15 +49,43 @@ object ColorPickerDialog {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 56))
         }
-        val readout = text(context, hex(initial), Panel.Palette.FG, 14f)
+        // The hex field lives HERE rather than in the settings list. Out there it was one
+        // more thing in a column that was already too busy; in here it is the second way
+        // of doing the one job this dialog exists for.
+        val field = android.widget.EditText(context).apply {
+            setText(hex(initial))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            filters = arrayOf(android.text.InputFilter.LengthFilter(7))
+            textSize = 15f
+            gravity = Gravity.CENTER_HORIZONTAL
+            setTextColor(Panel.Palette.FG)
+            typeface = context.resources.getFont(R.font.departure_mono)
+        }
         root.addView(preview)
-        root.addView(readout, params(context, 8))
+        root.addView(field, params(context, 8))
 
         fun current() = Color.HSVToColor(hsv) or (0xFF shl 24)
+
+        var syncing = false
         fun refresh() {
             preview.setBackgroundColor(current())
-            readout.text = hex(current())
+            syncing = true
+            field.setText(hex(current()))
+            syncing = false
         }
+        // Typing drives the sliders, dragging drives the field, and the guard stops the
+        // two chasing each other — without it, setText from a drag re-parses and re-seeds
+        // the very sliders being dragged.
+        field.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(e: android.text.Editable?) {
+                if (syncing) return
+                val parsed = parse(e?.toString()) ?: return
+                Color.colorToHSV(parsed, hsv)
+                preview.setBackgroundColor(parsed)
+            }
+            override fun beforeTextChanged(c: CharSequence?, a: Int, b: Int, d: Int) = Unit
+            override fun onTextChanged(c: CharSequence?, a: Int, b: Int, d: Int) = Unit
+        })
 
         // Hue is 0..360, the other two 0..100 — the slider works in whole numbers, and a
         // degree of hue or a percent of saturation is finer than the eye resolves here.
@@ -83,7 +111,9 @@ object ColorPickerDialog {
 
         AlertDialog.Builder(context)
             .setView(root)
-            .setPositiveButton("Use it") { _, _ -> onPick(current()) }
+            // Read the FIELD, not the sliders: a typed value that was never dragged has
+            // not reached them, and taking the sliders would silently discard it.
+            .setPositiveButton("Use it") { _, _ -> onPick(parse(field.text?.toString()) ?: current()) }
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -127,6 +157,16 @@ object ColorPickerDialog {
     private fun params(context: Context, topDp: Int) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
     ).apply { topMargin = dp(context, topDp) }
+
+    private fun parse(raw: String?): Int? {
+        val text = raw?.trim()?.removePrefix("#") ?: return null
+        if (text.length != 6) return null
+        return try {
+            Color.parseColor("#$text") or (0xFF shl 24)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
 
     private fun hex(colour: Int) = String.format("#%06X", colour and 0xFFFFFF)
 

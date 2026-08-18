@@ -373,7 +373,10 @@ class RearDialView(context: Context) : View(context) {
                 now.get(java.util.Calendar.MINUTE),
             )
             extras.textAlign = Paint.Align.LEFT
-            canvas.drawText(text, CONTENT_LEFT, TITLE_BASELINE, extras)
+            val iconW = EXTRA_ICON_H * PanelIcons.CLOCK_ASPECT
+            drawIcon(canvas, PanelIcons.CLOCK, CONTENT_LEFT,
+                TITLE_BASELINE - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
+            canvas.drawText(text, CONTENT_LEFT + iconW + 8f, TITLE_BASELINE, extras)
         }
         if (config.showBattery) {
             // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
@@ -384,8 +387,50 @@ class RearDialView(context: Context) : View(context) {
             if (level >= 0) {
                 extras.textAlign = Paint.Align.RIGHT
                 canvas.drawText("$level%", CONTENT_RIGHT, TITLE_BASELINE, extras)
+                val iconW = EXTRA_ICON_H * PanelIcons.BATTERY_ASPECT
+                val textW = extras.measureText("$level%")
+                val iconX = CONTENT_RIGHT - textW - 8f - iconW
+                val iconY = TITLE_BASELINE - EXTRA_ICON_H + 2f
+                // The charging glyph replaces the outline entirely rather than being
+                // overlaid: it already contains the bolt, and two glyphs stacked would
+                // read as one badly drawn one.
+                if (charging()) {
+                    drawIcon(canvas, PanelIcons.CHARGING, iconX, iconY, EXTRA_ICON_H)
+                } else {
+                    // Outline, then filled from the bottom to the actual charge — a full
+                    // battery drawn at 12% is only ever right once.
+                    drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
+                    val inset = EXTRA_ICON_H * 0.16f
+                    val top = iconY + inset
+                    val bottom = iconY + EXTRA_ICON_H - inset
+                    val fillTop = bottom - (bottom - top) * (level / 100f)
+                    canvas.drawRect(iconX + inset, fillTop,
+                        iconX + iconW - inset, bottom, extras)
+                }
             }
         }
+    }
+
+    /** Rectangles in a 0..1 box, scaled to [h] and drawn at [x],[y]. */
+    private fun drawIcon(canvas: Canvas, icon: List<PanelIcons.Rect>, x: Float, y: Float, h: Float) {
+        val w = h * (if (icon === PanelIcons.CLOCK) PanelIcons.CLOCK_ASPECT
+            else PanelIcons.BATTERY_ASPECT)
+        for (r in icon) {
+            canvas.drawRect(
+                x + r.x * w, y + r.y * h,
+                x + (r.x + r.w) * w, y + (r.y + r.h) * h,
+                extras,
+            )
+        }
+    }
+
+    private fun charging(): Boolean {
+        val intent = context.registerReceiver(
+            null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        ) ?: return false
+        val status = intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+        return status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == android.os.BatteryManager.BATTERY_STATUS_FULL
     }
 
     private fun batteryPercent(): Int {
@@ -953,6 +998,9 @@ class RearDialView(context: Context) : View(context) {
         /** The 7-day windows' length, for the same reason SESSION_WINDOW_MS exists: the
          *  API says when a window resets, never how long it ran. */
         private const val WEEKLY_WINDOW_MS = 7f * 24f * 60f * 60f * 1000f
+
+        /** Icon height for the clock and battery, matched to the extras' text size. */
+        private const val EXTRA_ICON_H = 20f
 
         private const val TITLE_BASELINE = 54f
 /**
