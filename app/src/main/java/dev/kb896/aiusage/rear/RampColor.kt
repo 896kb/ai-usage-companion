@@ -44,7 +44,9 @@ object RampColor {
         return stops.last().second
     }
 
-    private fun lerp(a: Int, b: Int, f: Float): Int {
+    /** Blend two colours. Public because ColorTween needs exactly this and a second
+     *  implementation would eventually round differently from the ramp. */
+    fun lerp(a: Int, b: Int, f: Float): Int {
         fun ch(shift: Int): Int {
             val x = (a ushr shift) and 0xFF
             val y = (b ushr shift) and 0xFF

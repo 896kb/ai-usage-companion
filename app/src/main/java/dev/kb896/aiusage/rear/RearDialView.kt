@@ -125,6 +125,7 @@ class RearDialView(context: Context) : View(context) {
 
     /** One eased tween per animated quantity, keyed by what it drives. See Tween. */
     private val tweens = mutableMapOf<String, Tween>()
+    private val colorTweens = mutableMapOf<String, ColorTween>()
     private var frameNowMs = 0L
     private var animating = false
 
@@ -132,6 +133,21 @@ class RearDialView(context: Context) : View(context) {
      * Current animated value for [key], advancing toward [target] by wall clock.
      * Flags the frame as animating so onDraw knows to schedule another one.
      */
+    /**
+     * The animated form of a colour, keyed by what it paints.
+     *
+     * Everything the user can recolour goes through here — accents, mascot bodies and
+     * kit, the background, the extras, the ramp. A colour that snapped while the value
+     * beside it eased read as two unrelated events, and made a setting being dragged in
+     * the app look like the panel had flickered rather than responded.
+     */
+    private fun colorFor(key: String, target: Int): Int {
+        val tween = colorTweens.getOrPut(key) { ColorTween() }
+        val v = tween.advance(target, frameNowMs)
+        if (!tween.settled(frameNowMs)) animating = true
+        return v
+    }
+
     private fun animateTo(key: String, target: Float): Float {
         val tween = tweens.getOrPut(key) { Tween() }
         val v = tween.advance(target, frameNowMs)
@@ -189,7 +205,7 @@ class RearDialView(context: Context) : View(context) {
         // SubScreenLauncher resumes, takes the display, and leaves RearActivity's window
         // out of the window list while its task record stays alive, which the respawn
         // watchdog cannot see. Any colour is fine; transparency is not.
-        canvas.drawColor(config.background or (0xFF shl 24))
+        canvas.drawColor(colorFor("bg", config.background or (0xFF shl 24)))
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
         // — it was in place for a full build while this line painted Palette.BG at full
@@ -272,7 +288,8 @@ class RearDialView(context: Context) : View(context) {
 
     /** This account's configured accent, falling back to its built-in. */
     private fun accentOf(account: Account): Int =
-        config.styleFor(account.ordinal).accent ?: account.accent
+        colorFor("accent:${account.name}",
+            config.styleFor(account.ordinal).accent ?: account.accent)
 
     /** Its configured label, falling back to its built-in. */
     private fun labelOf(account: Account): String =
@@ -374,7 +391,7 @@ class RearDialView(context: Context) : View(context) {
      * above the first account heading is empty.
      */
     private fun drawExtras(canvas: Canvas) {
-        extras.color = config.extrasColor
+        extras.color = colorFor("extras", config.extrasColor)
         var baseline = TITLE_BASELINE
         if (config.showClock) {
             val now = java.util.Calendar.getInstance()
@@ -386,11 +403,10 @@ class RearDialView(context: Context) : View(context) {
             // Icon on the RIGHT, text to its left. Both icons then share one edge at
             // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
             // ending wherever its own text happens to stop.
-            val iconW = EXTRA_ICON_H * PanelIcons.CLOCK_ASPECT
-            drawIcon(canvas, PanelIcons.CLOCK, CONTENT_RIGHT - iconW,
+            drawIcon(canvas, PanelIcons.CLOCK, CONTENT_RIGHT - EXTRA_ICON_H,
                 baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
             extras.textAlign = Paint.Align.RIGHT
-            canvas.drawText(text, CONTENT_RIGHT - iconW - 8f, baseline, extras)
+            canvas.drawText(text, CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
             baseline += EXTRA_LINE_H
         }
         if (config.showBattery) {
@@ -400,8 +416,7 @@ class RearDialView(context: Context) : View(context) {
             // not own. A sticky read is a snapshot with nothing to leak.
             val level = batteryPercent()
             if (level >= 0) {
-                val iconW = EXTRA_ICON_H * PanelIcons.BATTERY_ASPECT
-                val iconX = CONTENT_RIGHT - iconW
+                val iconX = CONTENT_RIGHT - EXTRA_ICON_H
                 val iconY = baseline - EXTRA_ICON_H + 2f
                 extras.textAlign = Paint.Align.RIGHT
                 canvas.drawText("$level%", iconX - 8f, baseline, extras)
@@ -414,25 +429,39 @@ class RearDialView(context: Context) : View(context) {
                     // Outline, then filled from the bottom to the actual charge — a full
                     // battery drawn at 12% is only ever right once.
                     drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
+                    // The fill follows the GLYPH inside the cell, not the cell itself,
+                    // or it would spill into the padding the square adds either side.
+                    val glyphW = EXTRA_ICON_H * PanelIcons.BATTERY_ASPECT
+                    val glyphX = iconX + (EXTRA_ICON_H - glyphW) / 2f
                     val inset = EXTRA_ICON_H * 0.16f
                     val top = iconY + inset
                     val bottom = iconY + EXTRA_ICON_H - inset
                     val fillTop = bottom - (bottom - top) * (level / 100f)
-                    canvas.drawRect(iconX + inset, fillTop,
-                        iconX + iconW - inset, bottom, extras)
+                    canvas.drawRect(glyphX + inset * 0.6f, fillTop,
+                        glyphX + glyphW - inset * 0.6f, bottom, extras)
                 }
             }
         }
     }
 
-    /** Rectangles in a 0..1 box, scaled to [h] and drawn at [x],[y]. */
+    /**
+     * Draws an icon centred in a fixed SQUARE cell of side [h] at [x],[y].
+     *
+     * The cell is the point. These glyphs are not monospaced — the clock is 0.947 of its
+     * height and the battery 0.579, which at h=20 is a 7px difference — so drawing each
+     * at its natural width left the two lines' text ending at different x and nothing
+     * lining up. A square cell gives every icon the same footprint whatever its shape,
+     * and the readings beside them share one right edge.
+     */
     private fun drawIcon(canvas: Canvas, icon: List<PanelIcons.Rect>, x: Float, y: Float, h: Float) {
-        val w = h * (if (icon === PanelIcons.CLOCK) PanelIcons.CLOCK_ASPECT
-            else PanelIcons.BATTERY_ASPECT)
+        val aspect = if (icon === PanelIcons.CLOCK) PanelIcons.CLOCK_ASPECT
+            else PanelIcons.BATTERY_ASPECT
+        val w = h * aspect
+        val left = x + (h - w) / 2f          // centred in the cell, not left-aligned in it
         for (r in icon) {
             canvas.drawRect(
-                x + r.x * w, y + r.y * h,
-                x + (r.x + r.w) * w, y + (r.y + r.h) * h,
+                left + r.x * w, y + r.y * h,
+                left + (r.x + r.w) * w, y + (r.y + r.h) * h,
                 extras,
             )
         }
@@ -584,7 +613,11 @@ class RearDialView(context: Context) : View(context) {
                 // The ramp reads the animated value, like the ring, so the colour
                 // travels with the bar rather than snapping ahead of it.
                 barFill.color =
-                    if (status?.health != Health.OK) Panel.Palette.DIM else RampColor.at(fraction, config.rampColors)
+                    // NOT run through colorFor. `fraction` is already the eased value,
+                    // so this colour is animating with the bar's own width; easing it a
+                    // second time would make a bar's colour lag behind its own length.
+                    if (status?.health != Health.OK) Panel.Palette.DIM
+                    else RampColor.at(fraction, config.rampColors)
                 canvas.drawRect(
                     barLeft, y,
                     barLeft + (barRight - barLeft) * fraction.coerceIn(0f, 1f),
@@ -689,8 +722,8 @@ class RearDialView(context: Context) : View(context) {
             MascotRenderer.draw(
                 canvas, clip, now, x, top, h, mascotPaint, deadEye,
                 accent = mascotAccentOf(account),
-                bodyColor = config.styleFor(account.ordinal).mascotBody
-                    ?: MascotRenderer.BODY_GREEN,
+                bodyColor = colorFor("body:${account.name}",
+                    config.styleFor(account.ordinal).mascotBody ?: MascotRenderer.BODY_GREEN),
                 dead = accountMascot(account) == MascotMood.DEAD,
             )
         }
@@ -812,8 +845,10 @@ class RearDialView(context: Context) : View(context) {
 
     /** The mascot's hardware colour: configured, else the account's built-in. */
     private fun mascotAccentOf(account: Account): Int =
-        config.styleFor(account.ordinal).mascotAccent
-            ?: if (account == Account.WORK) MascotRenderer.ACCENT_WORK else MascotRenderer.ACCENT_ORANGE
+        colorFor("kit:${account.name}",
+            config.styleFor(account.ordinal).mascotAccent
+                ?: if (account == Account.WORK) MascotRenderer.ACCENT_WORK
+                    else MascotRenderer.ACCENT_ORANGE)
 
     private fun accountMascot(account: Account): String =
         state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.WALK
