@@ -8,32 +8,53 @@
   resources.getFont(R.font.departure_mono), matching the pattern already used
   by RearDialView, rather than android:fontFamily on every node.
 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/root_scroll"
+<!--
+  The preview is PINNED: it sits outside the ScrollView so it stays in view while the
+  settings beneath it scroll. A setting you cannot see the effect of while you change it
+  is a setting you set three times.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_layout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
-    <LinearLayout
-        android:id="@+id/root_layout"
+    <TextView
+        android:id="@+id/preview_heading"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="24dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="24dp"
+        android:text="ON THE BACK"
+        android:textSize="12sp" />
 
-        <!-- Status block: Shizuku running / permission / rear display id, one line each. -->
-        <TextView
-            android:id="@+id/preview_heading"
+    <dev.kb896.aiusage.ui.PanelPreviewView
+        android:id="@+id/panel_preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="24dp" />
+
+    <View
+        android:id="@+id/rule_pinned"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="16dp" />
+
+    <ScrollView
+        android:id="@+id/root_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/settings_layout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="ON THE BACK"
-            android:textSize="12sp" />
-
-        <dev.kb896.aiusage.ui.PanelPreviewView
-            android:id="@+id/panel_preview"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="16dp" />
+            android:orientation="vertical"
+            android:padding="24dp">
 
         <TextView
             android:id="@+id/status_running"
@@ -336,5 +357,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
-    </LinearLayout>
-</ScrollView>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

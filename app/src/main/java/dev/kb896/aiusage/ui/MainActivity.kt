@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
         pasteField.setTextColor(Panel.Palette.FG)
         pasteField.setHintTextColor(Panel.Palette.DIM)
 
-        listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings).forEach {
+        listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings, R.id.rule_pinned).forEach {
             findViewById<View>(it).setBackgroundColor(Panel.Palette.RULE)
         }
 
