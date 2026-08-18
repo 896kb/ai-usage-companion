@@ -383,12 +383,14 @@ class RearDialView(context: Context) : View(context) {
                 now.get(java.util.Calendar.HOUR_OF_DAY),
                 now.get(java.util.Calendar.MINUTE),
             )
-            extras.textAlign = Paint.Align.RIGHT
-            canvas.drawText(text, CONTENT_RIGHT, baseline, extras)
+            // Icon on the RIGHT, text to its left. Both icons then share one edge at
+            // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
+            // ending wherever its own text happens to stop.
             val iconW = EXTRA_ICON_H * PanelIcons.CLOCK_ASPECT
-            drawIcon(canvas, PanelIcons.CLOCK,
-                CONTENT_RIGHT - extras.measureText(text) - 8f - iconW,
+            drawIcon(canvas, PanelIcons.CLOCK, CONTENT_RIGHT - iconW,
                 baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
+            extras.textAlign = Paint.Align.RIGHT
+            canvas.drawText(text, CONTENT_RIGHT - iconW - 8f, baseline, extras)
             baseline += EXTRA_LINE_H
         }
         if (config.showBattery) {
@@ -398,12 +400,11 @@ class RearDialView(context: Context) : View(context) {
             // not own. A sticky read is a snapshot with nothing to leak.
             val level = batteryPercent()
             if (level >= 0) {
-                extras.textAlign = Paint.Align.RIGHT
-                canvas.drawText("$level%", CONTENT_RIGHT, baseline, extras)
                 val iconW = EXTRA_ICON_H * PanelIcons.BATTERY_ASPECT
-                val textW = extras.measureText("$level%")
-                val iconX = CONTENT_RIGHT - textW - 8f - iconW
+                val iconX = CONTENT_RIGHT - iconW
                 val iconY = baseline - EXTRA_ICON_H + 2f
+                extras.textAlign = Paint.Align.RIGHT
+                canvas.drawText("$level%", iconX - 8f, baseline, extras)
                 // The charging glyph replaces the outline entirely rather than being
                 // overlaid: it already contains the bolt, and two glyphs stacked would
                 // read as one badly drawn one.
