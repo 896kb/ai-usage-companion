@@ -25,9 +25,6 @@ class RearDialView(context: Context) : View(context) {
     var state: DashboardState = DashboardState.EMPTY
         set(value) { field = value; invalidate() }
 
-    var geometry: PanelGeometry = PanelGeometry.DEFAULT
-        set(value) { field = value; invalidate() }
-
     /** Everything the user can change. Arrives in the same payload as [state]. */
     var config: PanelConfig = PanelConfig.DEFAULT
         set(value) { field = value; invalidate() }
@@ -227,6 +224,9 @@ class RearDialView(context: Context) : View(context) {
         // circle is invariant under it, so the track — the static part, and the part
         // most at risk — would not move at all.
         val breath = ringBreath(nowReal)
+        // Derived from the config that arrived with the state, not held separately —
+        // one payload in, one appearance out, with no second channel that can disagree.
+        val geometry = PanelGeometry.of(config.ringLayout)
         drawRing(canvas, geometry.personal, Account.PERSONAL, breath)
         drawRing(canvas, geometry.work, Account.WORK, breath)
 

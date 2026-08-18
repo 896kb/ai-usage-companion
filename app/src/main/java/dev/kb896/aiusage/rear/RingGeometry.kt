@@ -5,6 +5,12 @@ import dev.kb896.aiusage.Panel
 
 data class RingGeometry(val cx: Float, val cy: Float, val radius: Float, val stroke: Float)
 
+/**
+ * Where the two rings are drawn, in panel units.
+ *
+ * Built from [dev.kb896.aiusage.data.RingLayout], which is the persisted, user-editable
+ * form. This type is the drawing form: floats, and one entry per ring.
+ */
 data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
 
     companion object {
@@ -71,28 +77,18 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
 
         private const val RING_RADIUS = LENS_RADIUS + RING_OFFSET
 
+        /** The drawing form of a stored [dev.kb896.aiusage.data.RingLayout]. */
+        fun of(layout: dev.kb896.aiusage.data.RingLayout) = PanelGeometry(
+            personal = RingGeometry(layout.cx.toFloat(), layout.cyFirst.toFloat(),
+                layout.radius.toFloat(), layout.stroke.toFloat()),
+            work = RingGeometry(layout.cx.toFloat(), layout.cySecond.toFloat(),
+                layout.radius.toFloat(), layout.stroke.toFloat()),
+        )
+
         val DEFAULT = PanelGeometry(
             personal = RingGeometry(LENS_CX, PERSONAL_LENS_CY, RING_RADIUS, RING_STROKE),
             work = RingGeometry(LENS_CX, WORK_LENS_CY, RING_RADIUS, RING_STROKE),
         )
 
-        /**
-         * Overlays adb-pushed intent extras onto [base] so ring placement can be
-         * dialled in without a rebuild: cx1 cy1 r1 cx2 cy2 r2 stroke.
-         */
-        fun fromExtras(extras: Bundle?, base: PanelGeometry): PanelGeometry {
-            if (extras == null) return base
-            fun f(key: String, fallback: Float) =
-                if (extras.containsKey(key)) extras.getInt(key).toFloat() else fallback
-            val stroke = f("stroke", base.personal.stroke)
-            return PanelGeometry(
-                personal = RingGeometry(
-                    f("cx1", base.personal.cx), f("cy1", base.personal.cy),
-                    f("r1", base.personal.radius), stroke),
-                work = RingGeometry(
-                    f("cx2", base.work.cx), f("cy2", base.work.cy),
-                    f("r2", base.work.radius), stroke),
-            )
-        }
     }
 }

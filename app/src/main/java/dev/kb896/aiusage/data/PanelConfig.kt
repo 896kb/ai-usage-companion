@@ -44,7 +44,23 @@ data class RingLayout(
     val cySecond: Int = 420,
     val radius: Int = 128,
     val stroke: Int = 25,
-)
+) {
+    companion object {
+        /**
+         * Bounds for the controls that edit these.
+         *
+         * Generous rather than tight. They exist to stop a slider producing a value that
+         * cannot be drawn at all, not to keep the rings where they look right on one
+         * particular phone — the whole reason these are adjustable is that a different
+         * rear display puts the lenses somewhere else.
+         */
+        val CX_RANGE = 0..300
+        val CY_FIRST_RANGE = 0..300
+        val CY_SECOND_RANGE = 280..572
+        val RADIUS_RANGE = 60..200
+        val STROKE_RANGE = 4..60
+    }
+}
 
 /**
  * Bottom art. [imagePath] null means the built-in mark.

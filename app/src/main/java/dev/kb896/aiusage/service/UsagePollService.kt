@@ -20,7 +20,6 @@ import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.StatePayload
-import dev.kb896.aiusage.rear.GeometryStore
 import dev.kb896.aiusage.rear.RearActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -387,15 +386,12 @@ class UsagePollService : Service() {
                 Log.i(TAG, "panel needs re-placing but the keyguard is up — deferring to unlock")
                 return decision
             }
+            // `payload` carries the config, so a freshly launched panel comes up with
+            // the user's ring geometry already applied. This used to need a second,
+            // delayed push from a separate store — the panel runs in ":rear" and could
+            // not see values kept only in this process — and that delay was a visible
+            // window in which every respawn showed the compiled-in defaults.
             app.bridge.show(payload)
-            // A freshly launched panel starts on PanelGeometry.DEFAULT — it runs in
-            // ":rear" and cannot see the tuned values, which live in this process's
-            // preferences. Push them once it is up, or every respawn would silently
-            // revert the user's ring adjustments to the compiled-in defaults.
-            scope.launch {
-                delay(GEOMETRY_PUSH_DELAY_MS)
-                GeometryStore(this@UsagePollService).push()
-            }
             scope.launch { verifyPlacement(app) }
         }
         return decision

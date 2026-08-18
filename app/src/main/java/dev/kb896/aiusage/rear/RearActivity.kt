@@ -44,7 +44,6 @@ class RearActivity : Activity() {
     private lateinit var dial: RearDialView
     private lateinit var calibrationView: CalibrationView
     private var calibrating = false
-    private var geometry = PanelGeometry.DEFAULT
 
     /** -1 while on the rear panel; set once, to the elapsed-time clock, on the first
      *  wrong-display detection. See armEvictionTimer(). */
@@ -56,9 +55,6 @@ class RearActivity : Activity() {
             // updates (`--ei cx1 148 ...`, independent of the `state` payload) so a
             // human can dial the rings in live, without relaunching. Apply before
             // dispatching on action.
-            geometry = PanelGeometry.fromExtras(intent?.extras, geometry)
-            calibrationView.geometry = geometry
-            dial.geometry = geometry
             when (intent?.action) {
                 ACTION_FINISH -> finish()
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
@@ -125,6 +121,7 @@ class RearActivity : Activity() {
             val decoded = StatePayload.decode(payload)
             dial.config = decoded.config
             dial.state = decoded.state
+            calibrationView.geometry = PanelGeometry.of(decoded.config.ringLayout)
         }
     }
 

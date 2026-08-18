@@ -21,10 +21,10 @@ import dev.kb896.aiusage.auth.TokenImport
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.CallLog
 import dev.kb896.aiusage.data.ConfigStore
+import dev.kb896.aiusage.data.RingLayout
 import dev.kb896.aiusage.data.DashboardState
 import android.widget.SeekBar
 import dev.kb896.aiusage.data.StatePayload
-import dev.kb896.aiusage.rear.GeometryStore
 import dev.kb896.aiusage.rear.ShizukuBridge
 import dev.kb896.aiusage.service.Graph
 import dev.kb896.aiusage.service.UsagePollService
@@ -283,25 +283,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Live ring tuning, writing through to the panel config on every move.
+     *
+     * These edit the same PanelConfig everything else does and reach the panel by the
+     * same payload, so the rings track the drag on the rear display in real time. They
+     * previously wrote to a separate GeometryStore with its own broadcast — two stores
+     * and two channels aimed at one panel, which is how a panel ends up drawing one
+     * source's numbers with another's layout.
+     *
+     * Only fromUser events are acted on. setProgress() during seeding fires the listener
+     * too, and reacting to that would push five times on every open and — worse — write
+     * the seeded values back over stored ones.
+     */
     private fun bindGeometrySliders() {
-        val store = GeometryStore(this)
-        var current = store.load()
+        val store = ConfigStore(this)
+        var current = store.load().ringLayout
 
-        data class Slider(val bar: SeekBar, val label: TextView, val name: String,
-                          val range: IntRange, val get: () -> Int,
-                          val set: (Int) -> GeometryStore.Values)
+        data class Slider(
+            val bar: SeekBar, val label: TextView, val name: String,
+            val range: IntRange, val get: () -> Int, val set: (Int) -> RingLayout,
+        )
 
         val sliders = listOf(
             Slider(findViewById(R.id.geo_cx), findViewById(R.id.geo_cx_label), "RING X",
-                GeometryStore.CX_RANGE, { current.cx }, { current.copy(cx = it) }),
-            Slider(findViewById(R.id.geo_cy1), findViewById(R.id.geo_cy1_label), "PERSONAL Y",
-                GeometryStore.CY1_RANGE, { current.personalCy }, { current.copy(personalCy = it) }),
-            Slider(findViewById(R.id.geo_cy2), findViewById(R.id.geo_cy2_label), "WORK Y",
-                GeometryStore.CY2_RANGE, { current.workCy }, { current.copy(workCy = it) }),
+                RingLayout.CX_RANGE, { current.cx }, { current.copy(cx = it) }),
+            Slider(findViewById(R.id.geo_cy1), findViewById(R.id.geo_cy1_label), "FIRST Y",
+                RingLayout.CY_FIRST_RANGE, { current.cyFirst }, { current.copy(cyFirst = it) }),
+            Slider(findViewById(R.id.geo_cy2), findViewById(R.id.geo_cy2_label), "SECOND Y",
+                RingLayout.CY_SECOND_RANGE, { current.cySecond }, { current.copy(cySecond = it) }),
             Slider(findViewById(R.id.geo_radius), findViewById(R.id.geo_radius_label), "RADIUS",
-                GeometryStore.RADIUS_RANGE, { current.radius }, { current.copy(radius = it) }),
+                RingLayout.RADIUS_RANGE, { current.radius }, { current.copy(radius = it) }),
             Slider(findViewById(R.id.geo_stroke), findViewById(R.id.geo_stroke_label), "STROKE",
-                GeometryStore.STROKE_RANGE, { current.stroke }, { current.copy(stroke = it) }),
+                RingLayout.STROKE_RANGE, { current.stroke }, { current.copy(stroke = it) }),
         )
 
         fun seed() {
@@ -313,6 +327,12 @@ class MainActivity : ComponentActivity() {
         }
         seed()
 
+        fun pushLayout(layout: RingLayout) {
+            val config = store.load().copy(ringLayout = layout)
+            store.save(config)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+        }
+
         for (s in sliders) {
             s.bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -320,8 +340,7 @@ class MainActivity : ComponentActivity() {
                     val value = progress + s.range.first
                     current = s.set(value)
                     s.label.text = "${s.name}  $value"
-                    store.save(current)
-                    store.broadcast(current)
+                    pushLayout(current)
                 }
                 override fun onStartTrackingTouch(bar: SeekBar) {}
                 override fun onStopTrackingTouch(bar: SeekBar) {}
@@ -329,10 +348,9 @@ class MainActivity : ComponentActivity() {
         }
 
         findViewById<Button>(R.id.geo_reset).setOnClickListener {
-            store.reset()
-            current = store.load()
+            current = RingLayout()
             seed()
-            store.broadcast(current)
+            pushLayout(current)
             toast("Ring geometry reset")
         }
     }
