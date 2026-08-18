@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Every dialog this app shows. Set via AlertDialog.Builder(context, R.style.PanelDialog)
+      — see Modal, which is the only thing that should be constructing one.
+
+      Half the job is here and half is in code, and the split is not arbitrary. A theme
+      can set colours on views the framework inflates before anyone can reach them, which
+      is why the accent, the text colours and the window background live here. It cannot
+      reliably set a TYPEFACE on them: the framework's own dialog layout hands its title
+      and buttons text appearances that name a family, and a font resource set at theme
+      level does not travel into all of them. Modal walks the finished dialog for that.
+
+      Colours are Panel.Palette's, repeated because a style cannot read a Kotlin object.
+        BG #1D1F21   FG #C5C8C6   DIM #555555   WORK/green #B5BD68   RULE #2F3234
+    -->
+    <style name="PanelDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_bg</item>
+
+        <!-- Buttons, the text cursor, the EditText underline and every other tinted
+             control take this. It was the single loudest stock colour: a blue "IMPORT"
+             on a green-and-grey panel app. -->
+        <item name="android:colorAccent">#B5BD68</item>
+        <item name="android:colorControlActivated">#B5BD68</item>
+        <item name="android:colorControlNormal">#555555</item>
+
+        <item name="android:textColorPrimary">#C5C8C6</item>
+        <item name="android:textColorSecondary">#555555</item>
+        <item name="android:textColorHint">#555555</item>
+
+        <!-- Title in green, matching the section headings it is one tap away from. -->
+        <item name="android:windowTitleStyle">@style/PanelDialog.Title</item>
+    </style>
+
+    <style name="PanelDialog.Title" parent="@android:style/TextAppearance.Material.DialogWindowTitle">
+        <item name="android:textColor">#B5BD68</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+</resources>

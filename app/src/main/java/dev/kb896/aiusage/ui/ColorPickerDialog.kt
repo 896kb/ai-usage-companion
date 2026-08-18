@@ -109,13 +109,12 @@ object ColorPickerDialog {
         }
         root.addView(presets, params(context, 4))
 
-        AlertDialog.Builder(context)
+        Modal.show(Modal.builder(context)
             .setView(root)
             // Read the FIELD, not the sliders: a typed value that was never dragged has
             // not reached them, and taking the sliders would silently discard it.
             .setPositiveButton("Use it") { _, _ -> onPick(parse(field.text?.toString()) ?: current()) }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .setNegativeButton("Cancel", null))
     }
 
     private fun slider(

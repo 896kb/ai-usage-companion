@@ -12,6 +12,13 @@ release/
 *.token.json
 credentials.json
 
+# The keychain export helper. It carries no secret of its own, but it is a recipe for
+# lifting a live credential off a particular machine, and it names the devices and paths
+# of the one it was written for. It lives outside this repo now:
+#   ~/Personal/ai-usage-companion-notes/tools/export-token.sh
+tools/export-token.sh
+tools/export-work-token.sh
+
 # ide
 .idea/
 *.hprof

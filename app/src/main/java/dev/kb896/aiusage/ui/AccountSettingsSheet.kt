@@ -118,14 +118,17 @@ object AccountSettingsSheet {
                     // Confirmed, because it is not undoable by tapping again: signing back
                     // in means a browser round trip, or finding the credential JSON a
                     // second time.
-                    android.app.AlertDialog.Builder(context)
-                        .setMessage("Forget this account's credential?")
-                        .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Sign out") { _, _ ->
-                            dev.kb896.aiusage.service.Graph.of(context).store.clear(account)
-                            build()
-                        }
-                        .show()
+                    Modal.show(
+                        Modal.builder(context)
+                            .setTitle("Sign out")
+                            .setMessage("Forget this account's credential?")
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Sign out") { _, _ ->
+                                dev.kb896.aiusage.service.Graph.of(context).store.clear(account)
+                                build()
+                            },
+                        danger = true,
+                    )
                 }
             } else {
                 SettingsRows.navigation(rows, "CONNECT THIS ACCOUNT") {
@@ -413,21 +416,32 @@ object AccountSettingsSheet {
      * afterwards, with a paste field between them, made the common case look unfinished.
      */
     private fun chooseConnection(context: Context, account: Account, onDone: () -> Unit) {
-        android.app.AlertDialog.Builder(context)
+        // Two of the app's own buttons rather than setItems. A dialog's list rows are
+        // built by an adapter as they appear, so they arrive in the platform's typeface
+        // and colours and there is no reliable moment at which to repaint them — and
+        // these two rows are the first thing a new user sees.
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(context, 20), dp(context, 4), dp(context, 20), 0)
+        }
+        val dialog = Modal.builder(context)
             .setTitle("Connect this account")
-            .setItems(arrayOf("Sign in with a browser", "Import a token")) { _, which ->
-                if (which == 0) {
-                    (context as? MainActivity)?.signInFor(account) { failure ->
-                        android.widget.Toast.makeText(context,
-                            failure ?: "Signed in", android.widget.Toast.LENGTH_SHORT).show()
-                        onDone()
-                    }
-                } else {
-                    promptForToken(context, account, onDone)
-                }
-            }
+            .setView(box)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        SettingsRows.navigation(box, "SIGN IN WITH A BROWSER") {
+            dialog.dismiss()
+            (context as? MainActivity)?.signInFor(account) { failure ->
+                android.widget.Toast.makeText(context,
+                    failure ?: "Signed in", android.widget.Toast.LENGTH_SHORT).show()
+                onDone()
+            }
+        }
+        SettingsRows.navigation(box, "IMPORT A TOKEN") {
+            dialog.dismiss()
+            promptForToken(context, account, onDone)
+        }
+        Modal.show(dialog)
     }
 
     /**
@@ -459,7 +473,8 @@ object AccountSettingsSheet {
             setPadding(0, dp(context, 8), 0, 0)
         })
 
-        android.app.AlertDialog.Builder(context)
+        Modal.show(Modal.builder(context)
+            .setTitle("Import a token")
             .setView(box)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Import") { _, _ ->
@@ -471,8 +486,7 @@ object AccountSettingsSheet {
                 android.widget.Toast.makeText(context,
                     failure ?: "Token imported", android.widget.Toast.LENGTH_SHORT).show()
                 onDone()
-            }
-            .show()
+            })
     }
 
     /** Long enough to read as redacted rather than as a value that happens to be short. */

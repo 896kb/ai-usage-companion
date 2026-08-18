@@ -496,7 +496,7 @@ class MainActivity : ComponentActivity() {
      * otherwise a disabled button with no explanation reads as the dialog being broken.
      */
     private fun confirmResetEverything() {
-        val dialog = android.app.AlertDialog.Builder(this)
+        val dialog = Modal.builder(this)
             .setTitle("Reset every setting?")
             .setMessage(
                 "Titles, colours, bar order, the ring settings and the bottom art all " +
@@ -526,7 +526,9 @@ class MainActivity : ComponentActivity() {
         // A dialog dismissed mid-count leaves a timer holding a button from a window
         // that is gone.
         dialog.setOnDismissListener { timer?.cancel() }
-        dialog.show()
+        // Dressed after the show listener above has run, so the colour it puts on the
+        // confirm button is the one that survives.
+        Modal.show(dialog, danger = true)
     }
 
     private fun resetEverything() {
@@ -566,7 +568,7 @@ class MainActivity : ComponentActivity() {
                 if (reuseTransform) existing.zoom else 1f,
             )
         }
-        android.app.AlertDialog.Builder(this)
+        Modal.show(Modal.builder(this)
             .setTitle("Drag to move, pinch to zoom")
             .setView(view)
             .setNegativeButton("Cancel", null)
@@ -577,8 +579,7 @@ class MainActivity : ComponentActivity() {
                 graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
                 refreshPreview()
                 toast("Artwork set")
-            }
-            .show()
+            })
     }
 
     private fun bindArt() {
