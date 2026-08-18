@@ -95,15 +95,32 @@ object AccountSettingsSheet {
                     s.copy(label = typed.ifBlank { null }) }) }
             }
 
+            // The two clips that carry accent-coloured hardware — the flag's pole, and
+            // the headband and dumbbells — sit directly above the swatches that colour
+            // them, animating, so a colour is judged on the artwork it will appear on
+            // rather than on a square.
+            val mascots = MascotPairView(context).apply {
+                bodyColor = style.mascotBody ?: MascotRenderer.BODY_GREEN
+                accentColor = style.mascotAccent
+                    ?: if (index == 1) MascotRenderer.ACCENT_WORK else MascotRenderer.ACCENT_ORANGE
+            }
+            rows.addView(mascots, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
             SettingsRows.colorGrid(rows, listOf(
                 SettingsRows.Swatch("ACCENT", style.accent ?: account.accent) { c ->
                     write { it.copy(accounts = it.withStyle(index) { s -> s.copy(accent = c) }) }
                 },
                 SettingsRows.Swatch("MASCOT", style.mascotBody ?: MascotRenderer.BODY_GREEN) { c ->
+                    // Updated in place rather than by rebuilding: a rebuild would restart
+                    // both clips from frame zero on every colour change, so the artwork
+                    // would twitch each time the picker was used.
+                    mascots.bodyColor = c
                     write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotBody = c) }) }
                 },
                 SettingsRows.Swatch("KIT", style.mascotAccent
                     ?: if (index == 1) MascotRenderer.ACCENT_WORK else MascotRenderer.ACCENT_ORANGE) { c ->
+                    mascots.accentColor = c
                     write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotAccent = c) }) }
                 },
             ))
