@@ -302,7 +302,9 @@ class RearDialView(context: Context) : View(context) {
         canvas.save()
         canvas.translate(dx, dy)
         drawCanvasSide(canvas)
-        drawExtras(canvas)
+        // The extras belong to the panel as a whole, not to an account, so a
+        // single-account preview leaves them out — see onlyAccount.
+        if (onlyAccount == null) drawExtras(canvas)
         canvas.restore()
 
         // Next frame only while something is still moving. When everything has settled
@@ -376,10 +378,16 @@ class RearDialView(context: Context) : View(context) {
 
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
     private fun drawCanvasSide(canvas: Canvas) {
-        drawTitle(canvas)
+        // In single-account mode: the account's own rows and mascot, and nothing else.
+        //
+        // The masthead, the clock and battery, and the maker's mark all describe the
+        // PANEL rather than any account on it. Drawing them into a preview of one
+        // account would make them look like part of that account's block, and would ask
+        // the eye to ignore two thirds of what it is being shown.
+        if (onlyAccount == null) drawTitle(canvas)
         drawBars(canvas)
         drawMascots(canvas)
-        drawMark(canvas)
+        if (onlyAccount == null) drawMark(canvas)
     }
 
     /**
@@ -569,8 +577,11 @@ class RearDialView(context: Context) : View(context) {
         // baseline lands exactly on the first account heading — the two collided by
         // arithmetic rather than by accident, so the region has to know they are there.
         val extraLines = (if (config.showClock) 1 else 0) + (if (config.showBattery) 1 else 0)
-        val regionTop = TITLE_BASELINE + 26f + (extraLines - 1).coerceAtLeast(0) * EXTRA_LINE_H
-        val regionBottom = Panel.HEIGHT - MARK_BOTTOM - MARK_H
+        val regionTop = if (onlyAccount != null) SINGLE_ACCOUNT_TOP
+            else TITLE_BASELINE + 26f + (extraLines - 1).coerceAtLeast(0) * EXTRA_LINE_H
+        // Without a masthead above or a mark below, one account has the whole height.
+        val regionBottom = if (onlyAccount != null) Panel.HEIGHT - SINGLE_ACCOUNT_TOP
+            else Panel.HEIGHT - MARK_BOTTOM - MARK_H
         // One gap above the first block, one between, one below the last — so the
         // blocks sit evenly rather than hugging the top.
         val gap = ((regionBottom - regionTop - contentH) / (blocks.size + 1))
@@ -1082,6 +1093,10 @@ class RearDialView(context: Context) : View(context) {
 
         /** Line pitch when both extras are shown. */
         private const val EXTRA_LINE_H = 26f
+
+        /** Breathing room above and below a single-account preview, replacing the
+         *  masthead and the maker's mark it does not draw. */
+        private const val SINGLE_ACCOUNT_TOP = 24f
 
         private const val TITLE_BASELINE = 54f
 /**
