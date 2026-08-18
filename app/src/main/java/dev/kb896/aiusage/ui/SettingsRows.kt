@@ -77,8 +77,16 @@ object SettingsRows {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34))
         }
+        // Reopen on the CURRENT colour, not the one this row was built with.
+        //
+        // swatch.color is captured when the row is constructed, so passing it meant the
+        // picker always came back with the value from the last rebuild — pick a colour,
+        // reopen, and it offered the previous one as though the change had not happened.
+        // The block's own background is the live value; it is updated on every pick.
+        var current = swatch.color
         block.setOnClickListener {
-            ColorPickerDialog.show(context, swatch.color) { picked ->
+            ColorPickerDialog.show(context, current) { picked ->
+                current = picked
                 block.setBackgroundColor(picked)
                 swatch.onChange(picked)
             }
@@ -141,6 +149,14 @@ object SettingsRows {
             isChecked = initial
             setTextColor(Panel.Palette.FG)
             typeface = context.resources.getFont(R.font.departure_mono)
+            // Boxy and green, matching the sliders and the panel. The platform's pill
+            // and circle are the only rounded things in an app made of rectangles.
+            thumbDrawable = context.getDrawable(R.drawable.switch_thumb)
+            trackDrawable = context.getDrawable(R.drawable.switch_track)
+            // The tints would multiply over drawables that already carry their own
+            // colours, turning the green muddy.
+            thumbTintList = null
+            trackTintList = null
             setOnCheckedChangeListener { _, checked -> onChange(checked) }
         }, rowParams(dp(context, 6)))
     }
