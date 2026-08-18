@@ -133,6 +133,51 @@ object SettingsRows {
         }, rowParams(dp(context, 8)))
     }
 
+    /**
+     * A row that opens something, with a handle for reordering it.
+     *
+     * Reordering by MOVE buttons rather than by dragging. Dragging inside a ScrollView
+     * needs a touch-interception fight with the scroller, and the payoff is worse than
+     * it sounds at this size: two or three rows are reordered in one tap either way, and
+     * a tap target is reachable one-handed where a long-press-and-drag is not.
+     *
+     * @param canMoveUp false for the first row, whose handle is then inert rather than
+     *   absent — a row that loses its control changes width and the column jumps
+     */
+    fun reorderable(
+        parent: LinearLayout,
+        name: String,
+        canMoveUp: Boolean,
+        onMoveUp: () -> Unit,
+        // Last, so the trailing lambda at the call site is the one that opens the row —
+        // which is what the row mostly does.
+        onClick: () -> Unit,
+    ) {
+        val context = parent.context
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(android.widget.Button(context).apply {
+            text = "$name  ›"
+            textSize = 14f
+            setTextColor(Panel.Palette.FG)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            layoutParams = LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { onClick() }
+        })
+        row.addView(android.widget.Button(context).apply {
+            text = "↑"
+            textSize = 15f
+            isEnabled = canMoveUp
+            setTextColor(if (canMoveUp) Panel.Palette.WORK else Panel.Palette.DIM)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            setOnClickListener { onMoveUp() }
+        })
+        parent.addView(row, rowParams(dp(context, 8)))
+    }
+
     fun toggle(
         parent: LinearLayout,
         name: String,

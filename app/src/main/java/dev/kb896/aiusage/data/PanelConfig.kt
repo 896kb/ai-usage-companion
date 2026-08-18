@@ -15,11 +15,17 @@ enum class RingMetric { TIME_TO_RESET, UTILIZATION }
 /**
  * What one ring reports.
  *
- * @param account index of the account this ring belongs to
+ * There is no account field. A ring belongs to the account in the same position — ring
+ * one to the first account, ring two to the second — so reordering the accounts carries
+ * the rings with them and there is nothing to keep in step by hand.
+ *
+ * That does cost something worth naming: both rings can no longer be pointed at one
+ * account. It was possible and nobody asked for it, and it required a dropdown on the
+ * main screen whose meaning ("which account does this ring belong to") was the hardest
+ * thing on that screen to explain.
  */
 @Serializable
 data class RingSpec(
-    val account: Int = 0,
     val window: RingWindow = RingWindow.SESSION,
     val metric: RingMetric = RingMetric.TIME_TO_RESET,
 )
@@ -133,7 +139,16 @@ data class PanelConfig(
      * full bar look emptier than a half one.
      */
     val rampColors: List<Int> = Panel.RAMP_STOPS.map { it.second },
-    val rings: List<RingSpec> = listOf(RingSpec(account = 0), RingSpec(account = 1)),
+    val rings: List<RingSpec> = listOf(RingSpec(), RingSpec()),
+    /**
+     * The order accounts appear in, top to bottom, as indices into Account.entries.
+     *
+     * Stored as an order rather than by reordering the accounts list itself, because
+     * every persisted store — tokens, history, alert thresholds — keys on the account's
+     * own identity. Shuffling that list would renumber those keys and orphan them, which
+     * is the same trap that made labels unusable as keys.
+     */
+    val accountOrder: List<Int> = emptyList(),
     val ringLayout: RingLayout = RingLayout(),
     /** Default window order, for accounts that have not chosen their own. */
     val barOrder: List<String> = listOf("session", "weekly_all", "weekly_scoped"),
@@ -178,10 +193,24 @@ data class PanelConfig(
         return grown
     }
 
+    /**
+     * Account indices in display order, with any the order does not mention appended.
+     *
+     * Tolerating a partial or stale order matters: one written when there were two
+     * accounts must not hide a third, and a duplicate or out-of-range entry must not
+     * drop a real account off the panel.
+     */
+    fun orderedAccounts(count: Int): List<Int> {
+        val seen = LinkedHashSet<Int>()
+        accountOrder.filter { it in 0 until count }.forEach { seen.add(it) }
+        (0 until count).forEach { seen.add(it) }
+        return seen.toList()
+    }
+
     /** The ring list with one entry edited, grown if short — same reasoning. */
     fun withRing(index: Int, edit: (RingSpec) -> RingSpec): List<RingSpec> {
         val grown = rings.toMutableList()
-        while (grown.size <= index) grown.add(RingSpec(account = grown.size))
+        while (grown.size <= index) grown.add(RingSpec())
         grown[index] = edit(grown[index])
         return grown
     }

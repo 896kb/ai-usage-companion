@@ -301,14 +301,19 @@ class RearDialView(context: Context) : View(context) {
         // In single-account mode only that account's ring is drawn, and it takes the
         // first ring position — the preview is showing one account's panel, not its
         // slot in someone else's.
-        val specs = listOfNotNull(
-            config.rings.getOrElse(0) { RingSpec(0) },
-            config.rings.getOrElse(1) { RingSpec(1) },
-        ).filter { spec ->
-            onlyAccount == null || Account.entries.getOrNull(spec.account) == onlyAccount
+        // Ring N belongs to the Nth account in display order, so reordering the accounts
+        // carries the rings with them.
+        val order = orderedAccounts()
+        val positions = listOf(geometry.personal, geometry.work)
+        order.forEachIndexed { position, accountIndex ->
+            val account = Account.entries.getOrNull(accountIndex) ?: return@forEachIndexed
+            if (onlyAccount != null && account != onlyAccount) return@forEachIndexed
+            // A previewed account takes the first ring position whatever its place in
+            // the order: the preview shows that account's panel, not its slot.
+            val at = if (onlyAccount != null) 0 else position
+            val geo = positions.getOrNull(at) ?: return@forEachIndexed
+            drawRing(canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath)
         }
-        specs.getOrNull(0)?.let { drawRing(canvas, geometry.personal, it, breath) }
-        specs.getOrNull(1)?.let { drawRing(canvas, geometry.work, it, breath) }
 
         canvas.save()
         canvas.translate(dx, dy)
@@ -334,8 +339,7 @@ class RearDialView(context: Context) : View(context) {
         config.styleFor(account.ordinal).label?.takeIf { it.isNotBlank() } ?: account.label
 
     /** @param breath radial burn-in offset, added to the ring's radius. See onDraw. */
-    private fun drawRing(canvas: Canvas, g: RingGeometry, spec: RingSpec, breath: Float = 0f) {
-        val account = Account.entries.getOrNull(spec.account) ?: return
+    private fun drawRing(canvas: Canvas, g: RingGeometry, spec: RingSpec, account: Account, breath: Float = 0f) {
         val status = state.statuses.firstOrNull { it.account == account }
         val kind = when (spec.window) {
             RingWindow.SESSION -> WindowKind.SESSION
@@ -545,6 +549,9 @@ class RearDialView(context: Context) : View(context) {
      * verbatim: the third window's name is whatever the live response resolved
      * (`scope.model.display_name`), never a hardcoded model name.
      */
+    /** Account indices in the configured display order. */
+    private fun orderedAccounts(): List<Int> = config.orderedAccounts(Account.entries.size)
+
     private fun drawBars(canvas: Canvas) {
         sessionBars.clear()
         val left = CONTENT_LEFT
@@ -559,7 +566,10 @@ class RearDialView(context: Context) : View(context) {
 
         // Measure both account blocks before drawing anything, so the leftover space
         // can be shared out evenly instead of accumulating at the bottom.
-        val blocks = Account.entries.filter { onlyAccount == null || it == onlyAccount }.map { account ->
+        val blocks = orderedAccounts()
+            .mapNotNull { Account.entries.getOrNull(it) }
+            .filter { onlyAccount == null || it == onlyAccount }
+            .map { account ->
             val status = state.statuses.firstOrNull { it.account == account }
             // The session window is included now. It used to be filtered out because the
             // rings already show its UTILISATION — but this row shows its TIME, which

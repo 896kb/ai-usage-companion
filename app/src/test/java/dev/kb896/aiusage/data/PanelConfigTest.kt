@@ -59,11 +59,27 @@ class PanelConfigTest {
             PanelConfig.DEFAULT.copy(ringLayout = RingLayout(cx = 151)))
     }
 
-    /** Rings are per account and there is no primary/secondary anywhere in the schema. */
-    @Test fun `rings are addressed by account index`() {
+    /**
+     * A ring belongs to the account in the same POSITION, so reordering accounts carries
+     * the rings with them and there is nothing to keep in step by hand.
+     */
+    @Test fun `display order decides which account a ring reports on`() {
         val d = PanelConfig.DEFAULT
-        assertEquals(0, d.rings[0].account)
-        assertEquals(1, d.rings[1].account)
+        assertEquals(listOf(0, 1), d.orderedAccounts(2))
+        val swapped = d.copy(accountOrder = listOf(1, 0))
+        assertEquals(listOf(1, 0), swapped.orderedAccounts(2))
+    }
+
+    /** A stale order — written when there were fewer accounts — must not hide one. */
+    @Test fun `an incomplete order still lists every account`() {
+        val c = PanelConfig.DEFAULT.copy(accountOrder = listOf(1))
+        assertEquals(listOf(1, 0), c.orderedAccounts(2))
+    }
+
+    /** Nor may a duplicated or out-of-range entry drop a real account off the panel. */
+    @Test fun `a malformed order is repaired rather than obeyed`() {
+        val c = PanelConfig.DEFAULT.copy(accountOrder = listOf(1, 1, 7, -3))
+        assertEquals(listOf(1, 0), c.orderedAccounts(2))
     }
 
     // ---- per-account appearance ------------------------------------------------------
@@ -122,13 +138,10 @@ class PanelConfigTest {
     }
 
     @Test fun `editing a ring past the end grows the list`() {
-        val c = PanelConfig.DEFAULT.copy(rings = listOf(RingSpec(account = 0)))
+        val c = PanelConfig.DEFAULT.copy(rings = listOf(RingSpec()))
         val grown = c.withRing(1) { it.copy(metric = RingMetric.UTILIZATION) }
         assertEquals(2, grown.size)
         assertEquals(RingMetric.UTILIZATION, grown[1].metric)
-        // a grown ring defaults to its own index rather than to account 0, so two rings
-        // do not silently report on the same account
-        assertEquals(1, grown[1].account)
     }
 
     @Test fun `editing an existing entry leaves its neighbours alone`() {

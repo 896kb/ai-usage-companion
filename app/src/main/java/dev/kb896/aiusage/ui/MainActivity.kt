@@ -401,9 +401,27 @@ class MainActivity : ComponentActivity() {
         // two accounts, not a taxonomy — someone else has a client and a side project,
         // or one account and nothing else. The number is the identity; the name is
         // theirs to write.
-        Account.entries.forEachIndexed { index, account ->
+        // Accounts in DISPLAY order, numbered by where they appear rather than by which
+        // enum entry they are — the number is a position on the panel, and moving a row
+        // is meant to change it.
+        val order = config.orderedAccounts(Account.entries.size)
+        order.forEachIndexed { position, index ->
+            val account = Account.entries[index]
             val name = config.styleFor(index).label ?: account.label
-            SettingsRows.navigation(container, "ACCOUNT #${index + 1}  $name") {
+            SettingsRows.reorderable(
+                container,
+                "#${position + 1}  $name",
+                canMoveUp = position > 0,
+                onMoveUp = {
+                    write { cfg ->
+                        val moved = cfg.orderedAccounts(Account.entries.size).toMutableList()
+                        moved[position] = moved[position - 1]
+                        moved[position - 1] = index
+                        cfg.copy(accountOrder = moved)
+                    }
+                    buildSettingsRows()
+                },
+            ) {
                 AccountSettingsSheet.show(this, findViewById(R.id.root_layout), index,
                     graph.repository.state.value) { edited ->
                     graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited))
@@ -433,16 +451,6 @@ class MainActivity : ComponentActivity() {
         SettingsRows.colorGrid(container, swatches)
 
         // Rings. Each picks an account, a window, and what to show about it.
-        val accountNames = Account.entries.mapIndexed { i, a ->
-            "#${i + 1} ${config.styleFor(i).label ?: a.label}"
-        }
-        config.rings.forEachIndexed { index, ring ->
-            SettingsRows.choice(container, "RING ${index + 1} ACCOUNT", accountNames,
-                ring.account) { pos ->
-                write { it.copy(rings = it.withRing(index) { r -> r.copy(account = pos) }) }
-            }
-        }
-
         // The ramp belongs in ADVANCED. It is five colours that already work together,
         // and the common case for touching them is not "I want a different green" but
         // "I am adapting this to a different display" — the same reason the ring geometry

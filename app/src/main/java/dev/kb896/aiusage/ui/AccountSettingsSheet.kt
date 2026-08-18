@@ -68,7 +68,12 @@ object AccountSettingsSheet {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(context, 20), dp(context, 12), dp(context, 20), dp(context, 12))
         }
-        root.addView(ScrollView(context).apply { addView(rows) })
+        // Weighted, so it takes the space left after the preview and the back row and
+        // scrolls inside it. Without the weight a ScrollView wraps its content, grows
+        // past the screen, and never scrolls — the rows below the fold are unreachable
+        // and it looks like a bug because it is one.
+        root.addView(ScrollView(context).apply { addView(rows) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         // Rebuilt after every edit, because a change to the label renames the rows below
         // it and a change to a ring renames its own. Reconciling in place would be more
@@ -140,8 +145,11 @@ object AccountSettingsSheet {
             // than an index — and an account with no ring simply shows no ring settings.
             val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
             val metricNames = listOf("Time to reset", "Utilisation")
+            // The ring in this account's position. Ring N belongs to the Nth account in
+            // display order, so the account's place in that order is which ring is its.
+            val position = config.orderedAccounts(Account.entries.size).indexOf(index)
             config.rings.forEachIndexed { ringIndex, ring ->
-                if (ring.account != index) return@forEachIndexed
+                if (ringIndex != position) return@forEachIndexed
                 SettingsRows.choice(rows, "RING WINDOW", windowNames,
                     RingWindow.entries.indexOf(ring.window)) { pos ->
                     write { it.copy(rings = it.withRing(ringIndex) { r ->
@@ -165,11 +173,16 @@ object AccountSettingsSheet {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
 
-        val back = android.widget.Button(context).apply {
+        // A TextView, not a Button: the platform's button background is a filled slab
+        // that reads as the loudest thing on a screen whose whole job is showing colours.
+        // Back is a way out, not the point of the screen.
+        val back = android.widget.TextView(context).apply {
             text = "‹  BACK"
             textSize = 14f
-            setTextColor(Panel.Palette.FG)
+            setTextColor(Panel.Palette.DIM)
             typeface = context.resources.getFont(R.font.departure_mono)
+            setPadding(dp(context, 20), dp(context, 14), dp(context, 20), dp(context, 10))
+            isClickable = true
         }
         root.addView(back, 0, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
