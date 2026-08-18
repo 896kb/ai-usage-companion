@@ -121,14 +121,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical" />
 
-        <Button
-            android:id="@+id/grant_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Grant Shizuku permission"
-            android:textSize="13sp" />
-
         <View
             android:id="@+id/rule_2"
             android:layout_width="match_parent"

@@ -40,7 +40,11 @@ object Setup {
                 why = "The rear display refuses an ordinary app. Shizuku lends this one " +
                     "the privilege to move a window there.",
                 satisfied = shizukuRunning && shizukuGranted,
-                open = null,       // granted in-app; Shizuku itself is a separate install
+                // Granting happens in-app through the bridge, not in a settings page, so
+                // this row carries no intent — MainActivity wires the tap to the request
+                // instead. Left null rather than pointed at Shizuku's own app, which may
+                // not be installed and whose page cannot grant anything on our behalf.
+                open = null,
             ),
             Step(
                 title = "Notifications",

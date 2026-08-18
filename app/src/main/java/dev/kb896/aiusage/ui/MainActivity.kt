@@ -64,7 +64,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var recoveryScroll: View
     private lateinit var recoveryCommand: EditText
     private lateinit var recoveryDisplayAbsent: TextView
-    private lateinit var grantButton: Button
     private lateinit var showButton: Button
     private lateinit var hideButton: Button
 
@@ -112,7 +111,6 @@ class MainActivity : ComponentActivity() {
         recoveryScroll = findViewById(R.id.recovery_scroll)
         recoveryCommand = findViewById(R.id.recovery_command)
         recoveryDisplayAbsent = findViewById(R.id.recovery_display_absent)
-        grantButton = findViewById(R.id.grant_button)
         showButton = findViewById(R.id.show_button)
         hideButton = findViewById(R.id.hide_button)
         bindPreview()
@@ -169,10 +167,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun wireActions() {
-        grantButton.setOnClickListener {
-            graph.bridge.requestPermission(this)
-            refreshStatus()
-        }
         // Renders whatever the repository already holds — no network call. Placing
         // the panel is a display action, not a data action, so it must not spend a
         // request against an endpoint that has already rate-limited one account.
@@ -614,73 +608,87 @@ class MainActivity : ComponentActivity() {
      * user comes back to this screen afterwards — a checklist that needed a restart to
      * notice would be worse than none.
      */
+    /**
+     * Setup as BUTTONS, one per step, not a list of headings with prose under them.
+     *
+     * Each is the action itself: tap it and you land on the settings page that satisfies
+     * it. Once satisfied it ticks, greens, and disables — there is nothing left to press,
+     * and a live button that does nothing is worse than an absent one.
+     *
+     * Rebuilt on every resume, because these are all changed in Settings and the user
+     * comes straight back here afterwards. A checklist needing a restart to notice would
+     * be worse than none.
+     */
     private fun buildSetupRows() {
         val container = findViewById<LinearLayout>(R.id.setup_rows) ?: return
         container.removeAllViews()
         val status = graph.bridge.status()
-        val steps = Setup.steps(this, shizukuGranted = status.granted,
-            shizukuRunning = status.running)
 
-        for (step in steps) {
-            // A step whose state cannot be read shows a bullet, not an empty box: an
-            // unticked box reads as something the user failed to do, and they will keep
-            // trying to tick it.
+        for (step in Setup.steps(this, status.granted, status.running)) {
+            val done = step.satisfied == true
+            // A step whose state cannot be read shows no mark at all rather than an
+            // empty box: an unticked box reads as something the user failed to do, and
+            // they will keep trying to tick it.
             val mark = when (step.satisfied) {
-                true -> "✓"
-                false -> "○"
-                null -> "•"
+                true -> "✓  "
+                false -> ""
+                null -> ""
             }
-            val colour = when (step.satisfied) {
-                true -> Panel.Palette.WORK
-                false -> Panel.Palette.WARN
-                null -> Panel.Palette.DIM
-            }
-            container.addView(TextView(this).apply {
-                text = "$mark  ${step.title}"
+            container.addView(Button(this).apply {
+                text = "$mark${step.title}"
                 textSize = 13f
-                setTextColor(colour)
+                val actionable = step.open != null || step.title == "Shizuku"
+                isEnabled = !done && actionable
+                setTextColor(
+                    when {
+                        done -> Panel.Palette.WORK
+                        step.satisfied == null -> Panel.Palette.DIM
+                        else -> Panel.Palette.FG
+                    }
+                )
                 typeface = resources.getFont(R.font.departure_mono)
-                setPadding(0, dpPx(8), 0, 0)
-            })
-            // The reason is shown only while the step is outstanding. Once satisfied it
-            // is a paragraph explaining something that is already true.
-            if (step.satisfied == false || step.satisfied == null) {
-                container.addView(TextView(this).apply {
-                    text = step.why
-                    textSize = 11f
-                    setTextColor(Panel.Palette.DIM)
-                    typeface = resources.getFont(R.font.departure_mono)
-                    setPadding(dpPx(18), dpPx(2), 0, 0)
-                })
-                step.open?.let { intent ->
-                    container.addView(Button(this).apply {
-                        text = "Open settings"
-                        textSize = 12f
-                        setTextColor(Panel.Palette.FG)
-                        typeface = resources.getFont(R.font.departure_mono)
-                        setOnClickListener {
-                            try {
-                                startActivity(intent())
-                            } catch (_: Exception) {
-                                toast("Could not open that settings page")
-                            }
-                        }
-                    })
+                setOnClickListener {
+                    val intent = step.open?.invoke()
+                    if (intent == null) {
+                        // Shizuku: granted in-app. onResume re-reads the state when the
+                        // system dialog returns, so the row ticks itself.
+                        graph.bridge.requestPermission(this@MainActivity)
+                        return@setOnClickListener
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (_: Exception) {
+                        toast("Could not open that settings page")
+                    }
                 }
-            }
+                // The reason, only while it is outstanding and only where the button
+                // cannot act for you — a step you can tap needs no paragraph.
+                if (!done && !actionable) {
+                    container.post {
+                        container.addView(TextView(this@MainActivity).apply {
+                            text = step.why
+                            textSize = 11f
+                            setTextColor(Panel.Palette.DIM)
+                            typeface = resources.getFont(R.font.departure_mono)
+                            setPadding(dpPx(8), 0, 0, dpPx(4))
+                        }, container.indexOfChild(this@apply) + 1)
+                    }
+                }
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dpPx(4) })
         }
     }
 
     private fun dpPx(value: Int) = (value * resources.displayMetrics.density).toInt()
 
+    /**
+     * Only the recovery text now. The Shizuku state is a row in the setup list, which
+     * ticks and disables itself — a separate button saying the same thing was the third
+     * place on this screen to learn it from.
+     */
     private fun refreshStatus() {
-        val s = graph.bridge.status()
-        val ready = s.running && s.granted
-        grantButton.text = if (ready) "✓  Shizuku permission granted"
-            else "Grant Shizuku permission"
-        grantButton.isEnabled = !ready
-        grantButton.setTextColor(if (ready) Panel.Palette.WORK else Panel.Palette.FG)
-        renderRecovery(s)
+        renderRecovery(graph.bridge.status())
     }
 
     /**

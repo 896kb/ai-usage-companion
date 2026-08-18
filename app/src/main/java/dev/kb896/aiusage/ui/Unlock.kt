@@ -61,6 +61,10 @@ object Unlock {
             onResult(true)
             return
         }
+        // Wrapped, because this call reaches a system service that can refuse for
+        // reasons this app cannot see — a missing permission took it down once, and a
+        // settings screen must not die trying to hide a name.
+        try {
         android.hardware.biometrics.BiometricPrompt.Builder(activity)
             .setTitle("Confirm it's you")
             .setSubtitle(reason)
@@ -85,6 +89,10 @@ object Unlock {
                     }
                 },
             )
+        } catch (e: Exception) {
+            android.util.Log.w("AiUsageUnlock", "credential prompt unavailable", e)
+            onResult(false)
+        }
     }
 
     private fun grant() {
