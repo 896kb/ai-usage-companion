@@ -503,6 +503,7 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawBars(canvas: Canvas) {
         sessionBars.clear()
+        accountBounds.clear()
         val left = CONTENT_LEFT
         val right = CONTENT_RIGHT
 
@@ -575,6 +576,7 @@ class RearDialView(context: Context) : View(context) {
             }
             y += headingAdvance
 
+            val blockTop = y - headingAdvance
             for (w in rows) {
                 // Row labels take the account accent while the data is good, and only
                 // go grey when it cannot be vouched for — same rule as the heading and
@@ -640,6 +642,10 @@ class RearDialView(context: Context) : View(context) {
                 }
                 y += rowPitch
             }
+            // The block, from its heading to the bottom of its last row. Padded a little
+            // so a crop of it does not shave the mascot standing on the first bar.
+            accountBounds[account] = android.graphics.RectF(
+                CONTENT_LEFT, blockTop - MASCOT_HEIGHT, CONTENT_RIGHT, y)
             y += gap
         }
     }
@@ -861,6 +867,17 @@ class RearDialView(context: Context) : View(context) {
     private class SessionBar(val left: Float, val right: Float, val top: Float, val fill: Float)
 
     private val sessionBars = LinkedHashMap<Account, SessionBar>()
+
+    /**
+     * Where each account's block ended up, in panel units, as of the last frame.
+     *
+     * Recorded rather than derived. The row layout is computed at draw time and depends
+     * on the data — how many windows each account reports, whether the extras are shown,
+     * how the leftover space divides — so a crop rectangle worked out anywhere else
+     * would be a copy of that arithmetic, and would drift the first time any of it
+     * changed. The view is the only thing that knows, so the view says.
+     */
+    val accountBounds = LinkedHashMap<Account, android.graphics.RectF>()
 
     /**
      * Short marker shown beside an account whose numbers cannot be vouched for.

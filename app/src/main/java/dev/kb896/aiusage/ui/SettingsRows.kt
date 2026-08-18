@@ -113,6 +113,18 @@ object SettingsRows {
         }, rowParams(dp(context, 2)))
     }
 
+    /** A row that opens something else. The chevron is the whole affordance. */
+    fun navigation(parent: LinearLayout, name: String, onClick: () -> Unit) {
+        val context = parent.context
+        parent.addView(android.widget.Button(context).apply {
+            text = "$name  ›"
+            textSize = 14f
+            setTextColor(Panel.Palette.FG)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            setOnClickListener { onClick() }
+        }, rowParams(dp(context, 8)))
+    }
+
     fun toggle(
         parent: LinearLayout,
         name: String,

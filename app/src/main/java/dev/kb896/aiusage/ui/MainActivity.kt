@@ -402,13 +402,13 @@ class MainActivity : ComponentActivity() {
         // or one account and nothing else. The number is the identity; the name is
         // theirs to write.
         Account.entries.forEachIndexed { index, account ->
-            SettingsRows.textField(
-                container,
-                "ACCOUNT #${index + 1} NAME",
-                config.styleFor(index).label ?: account.label,
-            ) { typed ->
-                write { it.copy(accounts = it.withStyle(index) { s ->
-                    s.copy(label = typed.ifBlank { null }) }) }
+            val name = config.styleFor(index).label ?: account.label
+            SettingsRows.navigation(container, "ACCOUNT #${index + 1}  $name") {
+                AccountSettingsDialog.show(this, index, graph.repository.state.value) { edited ->
+                    graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited))
+                    refreshPreview()
+                    buildSettingsRows()
+                }
             }
         }
 
@@ -429,44 +429,16 @@ class MainActivity : ComponentActivity() {
                 write { it.copy(extrasColor = c) }
             },
         )
-        Account.entries.forEachIndexed { index, account ->
-            val style = config.styleFor(index)
-            val n = index + 1
-            swatches += SettingsRows.Swatch("#$n ACCENT", style.accent ?: account.accent) { c ->
-                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(accent = c) }) }
-            }
-            swatches += SettingsRows.Swatch("#$n MASCOT",
-                style.mascotBody ?: MascotRenderer.BODY_GREEN) { c ->
-                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotBody = c) }) }
-            }
-            swatches += SettingsRows.Swatch("#$n KIT",
-                style.mascotAccent ?: if (index == 1) MascotRenderer.ACCENT_WORK
-                    else MascotRenderer.ACCENT_ORANGE) { c ->
-                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(mascotAccent = c) }) }
-            }
-        }
         SettingsRows.colorGrid(container, swatches)
 
         // Rings. Each picks an account, a window, and what to show about it.
         val accountNames = Account.entries.mapIndexed { i, a ->
             "#${i + 1} ${config.styleFor(i).label ?: a.label}"
         }
-        val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
-        val metricNames = listOf("Time to reset", "Utilisation")
         config.rings.forEachIndexed { index, ring ->
             SettingsRows.choice(container, "RING ${index + 1} ACCOUNT", accountNames,
                 ring.account) { pos ->
                 write { it.copy(rings = it.withRing(index) { r -> r.copy(account = pos) }) }
-            }
-            SettingsRows.choice(container, "RING ${index + 1} WINDOW", windowNames,
-                RingWindow.entries.indexOf(ring.window)) { pos ->
-                write { it.copy(rings = it.withRing(index) { r ->
-                    r.copy(window = RingWindow.entries[pos]) }) }
-            }
-            SettingsRows.choice(container, "RING ${index + 1} SHOWS", metricNames,
-                RingMetric.entries.indexOf(ring.metric)) { pos ->
-                write { it.copy(rings = it.withRing(index) { r ->
-                    r.copy(metric = RingMetric.entries[pos]) }) }
             }
         }
 
