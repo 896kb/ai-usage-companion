@@ -22,6 +22,20 @@
 
         <!-- Status block: Shizuku running / permission / rear display id, one line each. -->
         <TextView
+            android:id="@+id/preview_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ON THE BACK"
+            android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.PanelPreviewView
+            android:id="@+id/panel_preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
             android:id="@+id/status_running"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

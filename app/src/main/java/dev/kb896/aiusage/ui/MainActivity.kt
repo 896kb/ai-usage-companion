@@ -114,6 +114,7 @@ class MainActivity : ComponentActivity() {
         importButton = findViewById(R.id.import_button)
         showButton = findViewById(R.id.show_button)
         hideButton = findViewById(R.id.hide_button)
+        bindPreview()
         bindSettings()
         bindArt()
         bindDiagnostics()
@@ -303,6 +304,28 @@ class MainActivity : ComponentActivity() {
      * from a rendering failure; the hint shows what the default is, so an empty box is
      * self-explanatory rather than broken.
      */
+    /**
+     * Keeps the preview showing what the panel shows.
+     *
+     * Fed from the SAME state and the SAME config that go into the payload, so a setting
+     * that looks right here is right on the back. Anything that reads its own copy of
+     * either would eventually disagree, and a preview that disagrees is worse than none.
+     */
+    private fun bindPreview() {
+        refreshPreview()
+        // Follows polls as well as edits: the preview must show the numbers currently on
+        // the panel, not the ones that were there when this screen opened.
+        lifecycleScope.launch {
+            graph.repository.state.collect { refreshPreview() }
+        }
+    }
+
+    private fun refreshPreview() {
+        val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
+        preview.config = ConfigStore(this).load()
+        preview.state = graph.repository.state.value
+    }
+
     private fun bindSettings() {
         val store = ConfigStore(this)
         val field = findViewById<EditText>(R.id.settings_title)
@@ -315,6 +338,7 @@ class MainActivity : ComponentActivity() {
                 .copy(title = if (typed.isEmpty()) PanelConfig.DEFAULT.title else typed)
             store.save(config)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            refreshPreview()
         }
     }
 
@@ -352,6 +376,7 @@ class MainActivity : ComponentActivity() {
             val config = store.load().copy(art = ArtConfig())
             store.save(config)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            refreshPreview()
             toast("Built-in mark restored")
         }
     }
@@ -421,6 +446,8 @@ class MainActivity : ComponentActivity() {
             val config = store.load().copy(ringLayout = layout)
             store.save(config)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            refreshPreview()
+            refreshPreview()
         }
 
         for (s in sliders) {
