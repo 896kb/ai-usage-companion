@@ -11,8 +11,21 @@ import dev.kb896.aiusage.Panel
  */
 object RampColor {
 
-    fun at(t: Float): Int {
-        val stops = Panel.RAMP_STOPS
+    /**
+     * @param colors the ramp's colours, mild first. Positions are NOT configurable and
+     *   stay as [Panel.RAMP_STOPS] defines them: a user dragging stop positions can
+     *   invert the ramp and make a full bar look emptier than a half-full one, which is
+     *   the one thing a usage bar must never do.
+     *
+     *   A list of the wrong length falls back to the built-in colours rather than
+     *   guessing — a ramp with a missing stop would silently redistribute every other
+     *   one.
+     */
+    fun at(t: Float, colors: List<Int> = emptyList()): Int {
+        val positions = Panel.RAMP_STOPS
+        val stops = if (colors.size == positions.size) {
+            positions.mapIndexed { i, (p, _) -> p to colors[i] }
+        } else positions
         val clamped = when {
             t.isNaN() -> 0f
             t < 0f -> 0f

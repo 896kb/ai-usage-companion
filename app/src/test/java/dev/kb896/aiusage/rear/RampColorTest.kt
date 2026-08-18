@@ -83,4 +83,31 @@ class RampColorTest {
             assertEquals("alpha at t=${i / 100f}", 0xFF, a)
         }
     }
+
+    // ---- configured colours ----------------------------------------------------------
+
+    @Test fun `custom colours are used at the stops`() {
+        val custom = listOf(0xFF000010.toInt(), 0xFF000020.toInt(), 0xFF000030.toInt(),
+            0xFF000040.toInt(), 0xFF000050.toInt())
+        assertEquals(custom.first(), RampColor.at(0f, custom))
+        assertEquals(custom.last(), RampColor.at(1f, custom))
+    }
+
+    /**
+     * A list of the wrong length must not be partially applied: a ramp missing one stop
+     * would silently redistribute every other one, and the result would look deliberate.
+     */
+    @Test fun `a wrong-length list falls back to the built-in ramp`() {
+        val short = listOf(0xFF000010.toInt(), 0xFF000020.toInt())
+        assertEquals(RampColor.at(0.5f), RampColor.at(0.5f, short))
+        assertEquals(RampColor.at(0f), RampColor.at(0f, emptyList()))
+    }
+
+    @Test fun `custom colours still interpolate between stops`() {
+        val custom = listOf(0xFF000000.toInt(), 0xFF0000FF.toInt(), 0xFF0000FF.toInt(),
+            0xFF0000FF.toInt(), 0xFF0000FF.toInt())
+        val mid = RampColor.at(0.2f, custom)          // halfway to the 0.40 stop
+        val blue = mid and 0xFF
+        assert(blue in 100..160) { "expected a half blend, got $blue" }
+    }
 }

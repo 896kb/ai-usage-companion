@@ -11,8 +11,12 @@ import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.DashboardState
+import dev.kb896.aiusage.data.RingSpec
+import dev.kb896.aiusage.data.RingWindow
+import dev.kb896.aiusage.data.RingMetric
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.Health
+import dev.kb896.aiusage.data.UsageWindow
 import dev.kb896.aiusage.data.WindowKind
 
 /**
@@ -165,7 +169,16 @@ class RearDialView(context: Context) : View(context) {
         frameNowMs = SystemClock.uptimeMillis()
         animating = false
 
-        canvas.drawColor(BG_ALPHA shl 24 or (Panel.Palette.BG and 0xFFFFFF))
+        // Opaque, and the colour is the user's.
+        //
+        // This was a fixed 0xB4 alpha so the system's rear wallpaper showed through. The
+        // compromise cost contrast on the bar tracks, and a user who wants a particular
+        // background can now simply choose it. The alpha must stay FULL: at zero the
+        // panel stops working entirely — with nothing occluding it, MIUI's
+        // SubScreenLauncher resumes, takes the display, and leaves RearActivity's window
+        // out of the window list while its task record stays alive, which the respawn
+        // watchdog cannot see. Any colour is fine; transparency is not.
+        canvas.drawColor(config.background or (0xFF shl 24))
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
         // — it was in place for a full build while this line painted Palette.BG at full
@@ -227,8 +240,12 @@ class RearDialView(context: Context) : View(context) {
         // Derived from the config that arrived with the state, not held separately —
         // one payload in, one appearance out, with no second channel that can disagree.
         val geometry = PanelGeometry.of(config.ringLayout)
-        drawRing(canvas, geometry.personal, Account.PERSONAL, breath)
-        drawRing(canvas, geometry.work, Account.WORK, breath)
+        // Each ring reports on whatever it is configured to, which is not necessarily
+        // its own account: pointing both rings at one account's two limits is a
+        // legitimate thing to want, and the ring's colour follows the account it reports
+        // on rather than the slot it occupies.
+        drawRing(canvas, geometry.personal, config.rings.getOrElse(0) { RingSpec(0) }, breath)
+        drawRing(canvas, geometry.work, config.rings.getOrElse(1) { RingSpec(1) }, breath)
 
         canvas.save()
         canvas.translate(dx, dy)
@@ -242,9 +259,15 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** @param breath radial burn-in offset, added to the ring's radius. See onDraw. */
-    private fun drawRing(canvas: Canvas, g: RingGeometry, account: Account, breath: Float = 0f) {
+    private fun drawRing(canvas: Canvas, g: RingGeometry, spec: RingSpec, breath: Float = 0f) {
+        val account = Account.entries.getOrNull(spec.account) ?: return
         val status = state.statuses.firstOrNull { it.account == account }
-        val session = status?.snapshot?.windows?.firstOrNull { it.kind == WindowKind.SESSION }
+        val kind = when (spec.window) {
+            RingWindow.SESSION -> WindowKind.SESSION
+            RingWindow.WEEKLY_ALL -> WindowKind.WEEKLY_ALL
+            RingWindow.WEEKLY_SCOPED -> WindowKind.WEEKLY_SCOPED
+        }
+        val window = status?.snapshot?.windows?.firstOrNull { it.kind == kind }
 
         track.strokeWidth = g.stroke
         val r = g.radius + breath
@@ -253,7 +276,7 @@ class RearDialView(context: Context) : View(context) {
 
         // No data, or data we can't vouch for: dim ring, no arc. Never render
         // a stale or absent reading as if it were live.
-        if (status == null || session == null || status.health == Health.AUTH) return
+        if (status == null || window == null || status.health == Health.AUTH) return
 
         arc.strokeWidth = g.stroke
         // Coloured while the data is good, dimmed once a fetch has actually failed.
@@ -271,8 +294,21 @@ class RearDialView(context: Context) : View(context) {
         // which is good news; ramping it to red would invert the panel's one colour
         // language. This is the same reasoning that used to apply to the 5H bar back
         // when the bar was the thing showing time.
-        val shown = animateTo("ring:${account.name}", sessionElapsed(session.resetsAt)).coerceIn(0f, 1f)
-        arc.color = if (status.health == Health.OK) account.accent else Panel.Palette.DIM
+        // A ring showing UTILISATION is a gauge and takes the ramp, exactly like a bar;
+        // a ring showing TIME is a clock, fills as the window runs out, and must not be
+        // ramped — a full clock means a reset is imminent, which is good news, and
+        // turning it red would invert the panel's one colour language.
+        val target = when (spec.metric) {
+            RingMetric.TIME_TO_RESET -> windowElapsed(window)
+            RingMetric.UTILIZATION -> window.utilization
+        }
+        val shown = animateTo("ring:${account.name}:${spec.window}:${spec.metric}", target)
+            .coerceIn(0f, 1f)
+        arc.color = when {
+            status.health != Health.OK -> Panel.Palette.DIM
+            spec.metric == RingMetric.UTILIZATION -> RampColor.at(shown, config.rampColors)
+            else -> account.accent
+        }
         canvas.drawArc(scratch, -90f, 360f * shown, false, arc)
     }
 
@@ -413,7 +449,7 @@ class RearDialView(context: Context) : View(context) {
                 // The ramp reads the animated value, like the ring, so the colour
                 // travels with the bar rather than snapping ahead of it.
                 barFill.color =
-                    if (status?.health != Health.OK) Panel.Palette.DIM else RampColor.at(fraction)
+                    if (status?.health != Health.OK) Panel.Palette.DIM else RampColor.at(fraction, config.rampColors)
                 canvas.drawRect(
                     barLeft, y,
                     barLeft + (barRight - barLeft) * fraction.coerceIn(0f, 1f),
@@ -587,10 +623,25 @@ class RearDialView(context: Context) : View(context) {
      * correctly as "nothing counting down", where a full one would read as "about to
      * reset".
      */
-    private fun sessionElapsed(resetsAt: Long?): Float {
-        if (resetsAt == null) return 0f
+    /**
+     * How far through its own window we are, 0..1 — a clock, not a gauge.
+     *
+     * The window's LENGTH has to come from its kind, because the API reports only when a
+     * window resets and never how long it ran. Using the 5-hour length for a 7-day
+     * window would peg the ring at full for six and a half days and then sweep it in the
+     * last five hours, which is not wrong by a little.
+     *
+     * A window with no reset time reads as 0 rather than as full: an unused window has
+     * not started, and drawing it complete would claim a reset is imminent.
+     */
+    private fun windowElapsed(window: UsageWindow): Float {
+        val resetsAt = window.resetsAt ?: return 0f
+        val length = when (window.kind) {
+            WindowKind.SESSION -> SESSION_WINDOW_MS
+            WindowKind.WEEKLY_ALL, WindowKind.WEEKLY_SCOPED -> WEEKLY_WINDOW_MS
+        }
         val remaining = resetsAt - System.currentTimeMillis()
-        return ((SESSION_WINDOW_MS - remaining).toFloat() / SESSION_WINDOW_MS).coerceIn(0f, 1f)
+        return ((length - remaining).toFloat() / length).coerceIn(0f, 1f)
     }
 
     /**
@@ -644,7 +695,6 @@ class RearDialView(context: Context) : View(context) {
          * launcher and to keep the near-black bar tracks legible, while the wallpaper
          * still reads through it.
          */
-        private const val BG_ALPHA = 0xB4
 
         /**
          * The canvas side's two vertical rules. Everything on the right of the panel
@@ -729,6 +779,10 @@ class RearDialView(context: Context) : View(context) {
 
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
+
+        /** The 7-day windows' length, for the same reason SESSION_WINDOW_MS exists: the
+         *  API says when a window resets, never how long it ran. */
+        private const val WEEKLY_WINDOW_MS = 7f * 24f * 60f * 60f * 1000f
 
         private const val TITLE_BASELINE = 54f
 /**
