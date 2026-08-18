@@ -52,6 +52,9 @@ object Diagnostics {
             ArtImport.clear(slot.context)
             onReset()
         }
+        // The only way back to the built-in mark, and deliberately debug-only: the mark
+        // is a third party's, shipped for fidelity rather than as a choice on offer, so
+        // "use the ACRNM mark" is not a button to put in front of a user.
         slot.findViewById<android.widget.Button>(R.id.debug_reset_art).setOnClickListener {
             val store = ConfigStore(slot.context)
             ArtImport.clear(slot.context)

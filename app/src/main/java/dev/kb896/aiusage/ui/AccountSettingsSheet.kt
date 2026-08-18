@@ -93,13 +93,13 @@ object AccountSettingsSheet {
 
             // ---- connection ----------------------------------------------------
             //
-            // Both routes, for every account. Which one an account can use is a fact
-            // about that account — a managed one usually cannot do device login, a
-            // personal one can — and it was previously hard-coded per slot.
+            // One control at a time, for the state the account is actually in. Both
+            // routes and a paste field were on screen permanently, including for an
+            // account already connected, where all three were noise around the one thing
+            // a signed-in user might want: to sign out.
             val record = dev.kb896.aiusage.service.Graph.of(context).store.load(account)
-            val status = TokenStatus.describe(record)
             rows.addView(android.widget.TextView(context).apply {
-                text = status
+                text = TokenStatus.describe(record)
                 textSize = 12f
                 setTextColor(
                     if (TokenStatus.healthy(record)) Panel.Palette.WORK else Panel.Palette.CRIT)
@@ -107,46 +107,25 @@ object AccountSettingsSheet {
                 setPadding(0, dp(context, 4), 0, dp(context, 4))
             })
 
-            SettingsRows.navigation(rows, "SIGN IN WITH A BROWSER") {
-                (context as? MainActivity)?.signInFor(account) { failure ->
-                    android.widget.Toast.makeText(context,
-                        failure ?: "Signed in", android.widget.Toast.LENGTH_SHORT).show()
-                    build()
+            if (record != null) {
+                SettingsRows.navigation(rows, "SIGN OUT") {
+                    // Confirmed, because it is not undoable by tapping again: signing back
+                    // in means a browser round trip, or finding the credential JSON a
+                    // second time.
+                    android.app.AlertDialog.Builder(context)
+                        .setMessage("Forget this account's credential?")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Sign out") { _, _ ->
+                            dev.kb896.aiusage.service.Graph.of(context).store.clear(account)
+                            build()
+                        }
+                        .show()
+                }
+            } else {
+                SettingsRows.navigation(rows, "CONNECT THIS ACCOUNT") {
+                    chooseConnection(context, account) { build() }
                 }
             }
-
-            val paste = android.widget.EditText(context).apply {
-                hint = "Paste the credential JSON"
-                textSize = 12f
-                setTextColor(Panel.Palette.FG)
-                setHintTextColor(Panel.Palette.DIM)
-                typeface = context.resources.getFont(R.font.departure_mono)
-                minLines = 2
-            }
-            rows.addView(paste)
-
-            SettingsRows.navigation(rows, "IMPORT A TOKEN") {
-                val failure = (context as? MainActivity)?.importTokenFor(account,
-                    paste.text?.toString().orEmpty())
-                // Cleared whatever the outcome: leaving a credential in the field keeps
-                // it in the view hierarchy, recoverable from a screenshot and restored
-                // across a rotation.
-                paste.setText("")
-                android.widget.Toast.makeText(context,
-                    failure ?: "Token imported", android.widget.Toast.LENGTH_SHORT).show()
-                build()
-            }
-
-            // Shown rather than described. "Paste your credentials" is not an
-            // instruction anyone can follow: this is a specific object out of a keychain
-            // entry whose field names nobody guesses.
-            rows.addView(android.widget.TextView(context).apply {
-                text = TokenStatus.EXAMPLE
-                textSize = 10f
-                setTextColor(Panel.Palette.DIM)
-                typeface = context.resources.getFont(R.font.departure_mono)
-                setPadding(0, dp(context, 6), 0, dp(context, 10))
-            })
 
             SettingsRows.textField(rows, "NAME", style.label ?: account.label) { typed ->
                 write { it.copy(accounts = it.withStyle(index) { s ->
@@ -299,6 +278,77 @@ object AccountSettingsSheet {
                     dismiss()
                 }
             })
+    }
+
+    /**
+     * Ask which route, then take it.
+     *
+     * Asked rather than shown side by side, because it is a one-off decision made once
+     * per account and then never again — and the two routes are not comparable options
+     * so much as answers to "can this account do device login". Keeping both on screen
+     * afterwards, with a paste field between them, made the common case look unfinished.
+     */
+    private fun chooseConnection(context: Context, account: Account, onDone: () -> Unit) {
+        android.app.AlertDialog.Builder(context)
+            .setTitle("Connect this account")
+            .setItems(arrayOf("Sign in with a browser", "Import a token")) { _, which ->
+                if (which == 0) {
+                    (context as? MainActivity)?.signInFor(account) { failure ->
+                        android.widget.Toast.makeText(context,
+                            failure ?: "Signed in", android.widget.Toast.LENGTH_SHORT).show()
+                        onDone()
+                    }
+                } else {
+                    promptForToken(context, account, onDone)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * The paste field, with the shape it expects shown beside it.
+     *
+     * Shown rather than described: "paste your credentials" is not an instruction anyone
+     * can follow, because this is a specific object out of a keychain entry whose field
+     * names nobody guesses.
+     */
+    private fun promptForToken(context: Context, account: Account, onDone: () -> Unit) {
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(context, 20), dp(context, 12), dp(context, 20), 0)
+        }
+        val paste = android.widget.EditText(context).apply {
+            hint = "Paste the credential JSON"
+            textSize = 12f
+            setTextColor(Panel.Palette.FG)
+            setHintTextColor(Panel.Palette.DIM)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            minLines = 3
+        }
+        box.addView(paste)
+        box.addView(android.widget.TextView(context).apply {
+            text = TokenStatus.EXAMPLE
+            textSize = 10f
+            setTextColor(Panel.Palette.DIM)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            setPadding(0, dp(context, 8), 0, 0)
+        })
+
+        android.app.AlertDialog.Builder(context)
+            .setView(box)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Import") { _, _ ->
+                val failure = (context as? MainActivity)
+                    ?.importTokenFor(account, paste.text?.toString().orEmpty())
+                // Cleared whatever happens: a credential left in a field stays in the
+                // view hierarchy, recoverable from a screenshot and restored on rotation.
+                paste.setText("")
+                android.widget.Toast.makeText(context,
+                    failure ?: "Token imported", android.widget.Toast.LENGTH_SHORT).show()
+                onDone()
+            }
+            .show()
     }
 
     /** Matches the panel's own 1.8s easing family, shortened: a screen transition that

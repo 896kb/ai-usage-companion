@@ -65,9 +65,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var recoveryCommand: EditText
     private lateinit var recoveryDisplayAbsent: TextView
     private lateinit var grantButton: Button
-    private lateinit var signInButton: Button
-    private lateinit var pasteField: EditText
-    private lateinit var importButton: Button
     private lateinit var showButton: Button
     private lateinit var hideButton: Button
 
@@ -106,9 +103,6 @@ class MainActivity : ComponentActivity() {
         recoveryCommand = findViewById(R.id.recovery_command)
         recoveryDisplayAbsent = findViewById(R.id.recovery_display_absent)
         grantButton = findViewById(R.id.grant_button)
-        signInButton = findViewById(R.id.sign_in_button)
-        pasteField = findViewById(R.id.paste_field)
-        importButton = findViewById(R.id.import_button)
         showButton = findViewById(R.id.show_button)
         hideButton = findViewById(R.id.hide_button)
         bindPreview()
@@ -146,8 +140,6 @@ class MainActivity : ComponentActivity() {
         recoveryNote.setTextColor(Panel.Palette.FG)
         recoveryCommand.setTextColor(Panel.Palette.FG)
         recoveryDisplayAbsent.setTextColor(Panel.Palette.FG)
-        pasteField.setTextColor(Panel.Palette.FG)
-        pasteField.setHintTextColor(Panel.Palette.DIM)
 
         listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings, R.id.rule_pinned).forEach {
             findViewById<View>(it).setBackgroundColor(Panel.Palette.RULE)
@@ -171,8 +163,6 @@ class MainActivity : ComponentActivity() {
             graph.bridge.requestPermission(this)
             refreshStatus()
         }
-        signInButton.setOnClickListener { signInPersonal() }
-        importButton.setOnClickListener { importPastedToken() }
         // Renders whatever the repository already holds — no network call. Placing
         // the panel is a display action, not a data action, so it must not spend a
         // request against an endpoint that has already rate-limited one account.
@@ -247,66 +237,6 @@ class MainActivity : ComponentActivity() {
                 onDone("Sign-in failed: ${e.message}")
             } catch (e: Exception) {
                 onDone("Sign-in failed")
-            }
-        }
-    }
-
-    private fun importPastedToken() {
-        // Prefer the file the export script writes into our own private storage —
-        // macOS and Android share no clipboard, so "copy on the Mac, paste on the
-        // phone" cannot actually work. The paste field remains as a manual fallback.
-        val staged = java.io.File(filesDir, "work-token.json")
-        val source = if (staged.canRead()) staged.readText() else pasteField.text.toString()
-
-        val record = TokenImport.parse(source)
-        if (record == null) {
-            toast("That doesn't look like a Claude Code credential")
-            return
-        }
-        graph.store.save(Account.WORK, record)
-        // Delete the staged file the moment its contents are encrypted in TokenStore —
-        // app-private is not a reason to leave a live credential lying in plaintext.
-        staged.delete()
-        // Clear immediately — leaving it in the field keeps it in the view hierarchy,
-        // recoverable from a screenshot, and restorable across a config change.
-        pasteField.setText("")
-        toast("Token imported")
-        refreshNow()
-    }
-
-    /**
-     * PKCE login for the personal account (Task 10's flow, wired into the real UI
-     * here for the first time). Runs the loopback listener on Dispatchers.IO —
-     * ServerSocket.accept() blocks — started *before* the browser opens, so the
-     * redirect always has a listener waiting. `code` and `verifier` never appear in
-     * a log or a Toast; only OAuthClient.Failure's own already-scrubbed message does.
-     */
-    private fun signInPersonal() {
-        lifecycleScope.launch {
-            try {
-                val loopback = LoopbackServer()
-                val challenge = PkceChallenge.generate()
-                val redirectUri = loopback.redirectUri()
-                val authorizeUrl = oauthClient.authorizeUrl(challenge, redirectUri)
-
-                val codeDeferred = async(Dispatchers.IO) { loopback.awaitCode(challenge.state) }
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorizeUrl)))
-                val code = codeDeferred.await()
-                if (code == null) {
-                    toast("Sign-in failed or timed out")
-                    return@launch
-                }
-
-                val record = withContext(Dispatchers.IO) {
-                    oauthClient.exchange(code, challenge.verifier, redirectUri, challenge.state)
-                }
-                graph.store.save(Account.PERSONAL, record)
-                toast("Personal sign-in complete")
-                refreshNow()
-            } catch (e: OAuthClient.Failure) {
-                toast("Sign-in failed: ${e.message}")
-            } catch (e: Exception) {
-                toast("Sign-in failed")
             }
         }
     }
@@ -515,15 +445,6 @@ class MainActivity : ComponentActivity() {
 
     private fun bindArt() {
         findViewById<Button>(R.id.art_pick).setOnClickListener { pickArt.launch("image/*") }
-        findViewById<Button>(R.id.art_clear).setOnClickListener {
-            ArtImport.clear(this)
-            val store = ConfigStore(this)
-            val config = store.load().copy(art = ArtConfig())
-            store.save(config)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
-            refreshPreview()
-            toast("Built-in mark restored")
-        }
     }
 
     private fun bindDiagnostics() {

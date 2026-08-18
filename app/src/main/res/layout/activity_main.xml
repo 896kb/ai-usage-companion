@@ -123,34 +123,6 @@
             android:text="Grant Shizuku permission"
             android:textSize="13sp" />
 
-        <Button
-            android:id="@+id/sign_in_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Sign in — personal"
-            android:textSize="13sp" />
-
-        <EditText
-            android:id="@+id/paste_field"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="top|start"
-            android:hint="Paste the work credential here"
-            android:importantForAutofill="no"
-            android:inputType="textMultiLine|textNoSuggestions"
-            android:minLines="3"
-            android:textSize="12sp" />
-
-        <Button
-            android:id="@+id/import_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Import token"
-            android:textSize="13sp" />
-
         <View
             android:id="@+id/rule_2"
             android:layout_width="match_parent"
@@ -226,14 +198,6 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="Choose an image"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/art_clear"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Use the built-in mark"
             android:textSize="13sp" />
 
         <View
