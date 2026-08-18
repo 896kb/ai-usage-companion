@@ -60,10 +60,6 @@ class MainActivity : ComponentActivity() {
     private val oauthClient by lazy { OAuthClient(oauthHttp) }
 
     private val prettyJson = Json { prettyPrint = true }
-
-    private lateinit var statusRunning: TextView
-    private lateinit var statusGranted: TextView
-    private lateinit var statusDisplay: TextView
     private lateinit var recoveryNote: TextView
     private lateinit var recoveryScroll: View
     private lateinit var recoveryCommand: EditText
@@ -105,9 +101,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindViews() {
-        statusRunning = findViewById(R.id.status_running)
-        statusGranted = findViewById(R.id.status_granted)
-        statusDisplay = findViewById(R.id.status_display)
         recoveryNote = findViewById(R.id.recovery_note)
         recoveryScroll = findViewById(R.id.recovery_scroll)
         recoveryCommand = findViewById(R.id.recovery_command)
@@ -627,27 +620,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The grant button IS the status.
+     *
+     * Three lines said "Shizuku running", "Permission granted" and the rear display's
+     * id, above a button asking for the permission two of them described. Once granted
+     * they never change again, and a display id is a number nobody acts on — it belonged
+     * to bringing this up, not to using it. What remains worth knowing is whether the
+     * permission is in place, which the button can say by itself: ticked and disabled
+     * when there is nothing left to do.
+     *
+     * The failure states still speak, through renderRecovery — that is where Shizuku not
+     * running or the display being absent turns into something the user can act on.
+     */
     private fun refreshStatus() {
         val s = graph.bridge.status()
-        setStatusLine(statusRunning, "Shizuku running", s.running)
-        setStatusLine(statusGranted, "Permission granted", s.granted)
-        setStatusLine(
-            statusDisplay, "Rear display", s.rearDisplayId >= 0,
-            if (s.rearDisplayId >= 0) "id=${s.rearDisplayId}" else "not found",
-        )
+        val ready = s.running && s.granted
+        grantButton.text = if (ready) "✓  Shizuku permission granted"
+            else "Grant Shizuku permission"
+        grantButton.isEnabled = !ready
+        grantButton.setTextColor(if (ready) Panel.Palette.WORK else Panel.Palette.FG)
         renderRecovery(s)
-    }
-
-    private fun setStatusLine(
-        view: TextView,
-        label: String,
-        satisfied: Boolean,
-        detail: String = if (satisfied) "yes" else "no",
-    ) {
-        view.text = "$label: $detail"
-        // The satisfied colour is the ramp's own 0%-utilisation stop — the same
-        // green the rear panel itself uses to mean "healthy" — not a new literal.
-        view.setTextColor(if (satisfied) GOOD_COLOR else Panel.Palette.DIM)
     }
 
     /**
