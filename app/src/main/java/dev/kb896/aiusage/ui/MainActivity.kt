@@ -20,6 +20,8 @@ import dev.kb896.aiusage.auth.PkceChallenge
 import dev.kb896.aiusage.auth.TokenImport
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.CallLog
+import androidx.core.widget.doAfterTextChanged
+import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.RingLayout
 import dev.kb896.aiusage.data.DashboardState
@@ -110,6 +112,7 @@ class MainActivity : ComponentActivity() {
         importButton = findViewById(R.id.import_button)
         showButton = findViewById(R.id.show_button)
         hideButton = findViewById(R.id.hide_button)
+        bindSettings()
         bindDiagnostics()
         bindAdvancedToggle()
         bindGeometrySliders()
@@ -124,13 +127,19 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.root_layout).setBackgroundColor(Panel.Palette.BG)
         val mono = resources.getFont(R.font.departure_mono)
 
-        val textViews = listOf<TextView>(
-            statusRunning, statusGranted, statusDisplay,
-            recoveryNote, recoveryCommand, recoveryDisplayAbsent,
-            grantButton, signInButton, pasteField, importButton,
-            showButton, hideButton,
-        )
-        for (v in textViews) v.typeface = mono
+        // Every TextView in the tree, found by walking it rather than by listing them.
+        //
+        // The list this replaced had to be extended by hand for each new control, and
+        // was not — the ring-geometry labels were added later and quietly kept the
+        // system sans, in an app whose whole visual identity is one monospaced face.
+        // A sweep cannot be forgotten.
+        fun applyFont(view: View) {
+            when (view) {
+                is TextView -> view.typeface = mono
+                is ViewGroup -> for (i in 0 until view.childCount) applyFont(view.getChildAt(i))
+            }
+        }
+        applyFont(findViewById(R.id.root_layout))
 
         recoveryNote.setTextColor(Panel.Palette.FG)
         recoveryCommand.setTextColor(Panel.Palette.FG)
@@ -138,9 +147,21 @@ class MainActivity : ComponentActivity() {
         pasteField.setTextColor(Panel.Palette.FG)
         pasteField.setHintTextColor(Panel.Palette.DIM)
 
-        listOf(R.id.rule_1, R.id.rule_2).forEach {
+        listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings).forEach {
             findViewById<View>(it).setBackgroundColor(Panel.Palette.RULE)
         }
+
+        // Settings controls, in the same tones as the rest: a heading is dim, a value
+        // is foreground, a hint is dim so an empty field reads as "unset" rather than
+        // as text someone typed.
+        findViewById<TextView>(R.id.settings_heading).setTextColor(Panel.Palette.DIM)
+        findViewById<TextView>(R.id.settings_title_label).setTextColor(Panel.Palette.DIM)
+        findViewById<EditText>(R.id.settings_title).apply {
+            setTextColor(Panel.Palette.FG)
+            setHintTextColor(Panel.Palette.DIM)
+        }
+        findViewById<TextView>(R.id.geo_heading).setTextColor(Panel.Palette.WORK)
+        findViewById<TextView>(R.id.geo_hint).setTextColor(Panel.Palette.DIM)
     }
 
     private fun wireActions() {
@@ -266,6 +287,34 @@ class MainActivity : ComponentActivity() {
      * with the same signature, so there is no BuildConfig check here and nothing to
      * accidentally leave switched on.
      */
+    /**
+     * Panel settings, written through on every keystroke and pushed immediately.
+     *
+     * No Save button. The panel is a live preview on the back of the phone, and a
+     * two-step commit would mean typing, tapping, then turning the phone over — which is
+     * how you end up setting a value three times because you cannot see it while you
+     * choose it.
+     *
+     * A BLANK field means "use the default", not "an empty masthead". Storing the empty
+     * string would leave the panel with a gap where its title is and no way to tell that
+     * from a rendering failure; the hint shows what the default is, so an empty box is
+     * self-explanatory rather than broken.
+     */
+    private fun bindSettings() {
+        val store = ConfigStore(this)
+        val field = findViewById<EditText>(R.id.settings_title)
+        val stored = store.load().title
+        if (stored != PanelConfig.DEFAULT.title) field.setText(stored)
+
+        field.doAfterTextChanged { text ->
+            val typed = text?.toString().orEmpty().trim()
+            val config = store.load()
+                .copy(title = if (typed.isEmpty()) PanelConfig.DEFAULT.title else typed)
+            store.save(config)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+        }
+    }
+
     private fun bindDiagnostics() {
         Diagnostics.install(findViewById(R.id.debug_slot))
         lifecycleScope.launch {
