@@ -200,6 +200,64 @@ class MainActivity : ComponentActivity() {
      * The paste field is the only import route in this app — no file read, no
      * document picker, no storage permission anywhere in the manifest.
      */
+    /**
+     * Import a pasted credential for ONE account.
+     *
+     * Which account was hard-coded — personal signed in, work imported — because those
+     * were the author's two accounts. Neither is a property of an account: a managed
+     * account cannot do device login and a personal one can, and which is which is the
+     * user's to say.
+     *
+     * @return the failure to show, or null on success
+     */
+    fun importTokenFor(account: Account, pasted: String): String? {
+        // Prefer the file the export script writes into our own private storage — macOS
+        // and Android share no clipboard, so "copy on the Mac, paste on the phone" cannot
+        // work. Pasted text remains the manual route.
+        val staged = java.io.File(filesDir, "work-token.json")
+        val source = if (pasted.isNotBlank()) pasted
+            else if (staged.canRead()) staged.readText() else ""
+        if (source.isBlank()) return "Nothing to import"
+
+        val record = TokenImport.parse(source)
+            ?: return "That doesn't look like a Claude Code credential"
+        graph.store.save(account, record)
+        // Delete the staged file the moment its contents are encrypted in TokenStore —
+        // app-private is not a reason to leave a live credential lying in plaintext.
+        staged.delete()
+        refreshNow()
+        return null
+    }
+
+    /** Browser sign-in for ONE account. [onDone] reports the outcome for display. */
+    fun signInFor(account: Account, onDone: (String?) -> Unit) {
+        lifecycleScope.launch {
+            try {
+                val loopback = LoopbackServer()
+                val challenge = PkceChallenge.generate()
+                val redirectUri = loopback.redirectUri()
+                val authorizeUrl = oauthClient.authorizeUrl(challenge, redirectUri)
+                val codeDeferred = async(Dispatchers.IO) { loopback.awaitCode(challenge.state) }
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorizeUrl)))
+                val code = codeDeferred.await()
+                if (code == null) {
+                    onDone("Sign-in failed or timed out")
+                    return@launch
+                }
+                val record = withContext(Dispatchers.IO) {
+                    oauthClient.exchange(code, challenge.verifier, redirectUri, challenge.state)
+                }
+                graph.store.save(account, record)
+                onDone(null)
+                refreshNow()
+            } catch (e: OAuthClient.Failure) {
+                onDone("Sign-in failed: ${e.message}")
+            } catch (e: Exception) {
+                onDone("Sign-in failed")
+            }
+        }
+    }
+
     private fun importPastedToken() {
         // Prefer the file the export script writes into our own private storage —
         // macOS and Android share no clipboard, so "copy on the Mac, paste on the

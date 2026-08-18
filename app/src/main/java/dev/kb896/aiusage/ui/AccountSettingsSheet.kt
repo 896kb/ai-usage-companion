@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.Account
+import dev.kb896.aiusage.auth.TokenStatus
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.MascotMood
@@ -89,6 +90,63 @@ object AccountSettingsSheet {
                 preview.config = next
                 onChange(next)
             }
+
+            // ---- connection ----------------------------------------------------
+            //
+            // Both routes, for every account. Which one an account can use is a fact
+            // about that account — a managed one usually cannot do device login, a
+            // personal one can — and it was previously hard-coded per slot.
+            val record = dev.kb896.aiusage.service.Graph.of(context).store.load(account)
+            val status = TokenStatus.describe(record)
+            rows.addView(android.widget.TextView(context).apply {
+                text = status
+                textSize = 12f
+                setTextColor(
+                    if (TokenStatus.healthy(record)) Panel.Palette.WORK else Panel.Palette.CRIT)
+                typeface = context.resources.getFont(R.font.departure_mono)
+                setPadding(0, dp(context, 4), 0, dp(context, 4))
+            })
+
+            SettingsRows.navigation(rows, "SIGN IN WITH A BROWSER") {
+                (context as? MainActivity)?.signInFor(account) { failure ->
+                    android.widget.Toast.makeText(context,
+                        failure ?: "Signed in", android.widget.Toast.LENGTH_SHORT).show()
+                    build()
+                }
+            }
+
+            val paste = android.widget.EditText(context).apply {
+                hint = "Paste the credential JSON"
+                textSize = 12f
+                setTextColor(Panel.Palette.FG)
+                setHintTextColor(Panel.Palette.DIM)
+                typeface = context.resources.getFont(R.font.departure_mono)
+                minLines = 2
+            }
+            rows.addView(paste)
+
+            SettingsRows.navigation(rows, "IMPORT A TOKEN") {
+                val failure = (context as? MainActivity)?.importTokenFor(account,
+                    paste.text?.toString().orEmpty())
+                // Cleared whatever the outcome: leaving a credential in the field keeps
+                // it in the view hierarchy, recoverable from a screenshot and restored
+                // across a rotation.
+                paste.setText("")
+                android.widget.Toast.makeText(context,
+                    failure ?: "Token imported", android.widget.Toast.LENGTH_SHORT).show()
+                build()
+            }
+
+            // Shown rather than described. "Paste your credentials" is not an
+            // instruction anyone can follow: this is a specific object out of a keychain
+            // entry whose field names nobody guesses.
+            rows.addView(android.widget.TextView(context).apply {
+                text = TokenStatus.EXAMPLE
+                textSize = 10f
+                setTextColor(Panel.Palette.DIM)
+                typeface = context.resources.getFont(R.font.departure_mono)
+                setPadding(0, dp(context, 6), 0, dp(context, 10))
+            })
 
             SettingsRows.textField(rows, "NAME", style.label ?: account.label) { typed ->
                 write { it.copy(accounts = it.withStyle(index) { s ->
