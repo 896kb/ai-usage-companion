@@ -135,21 +135,31 @@
             android:layout_height="1dp"
             android:layout_marginTop="16dp" />
 
-        <Button
-            android:id="@+id/show_button"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Show on back"
-            android:textSize="13sp" />
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/hide_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Hide"
-            android:textSize="13sp" />
+            <Button
+                android:id="@+id/show_button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:text="Show on back"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/hide_button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:text="Hide"
+                android:textSize="13sp" />
+        </LinearLayout>
 
 
         <View
