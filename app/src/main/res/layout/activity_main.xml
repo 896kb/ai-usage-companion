@@ -180,6 +180,30 @@
             android:maxLines="1"
             android:textSize="14sp" />
 
+        <TextView
+            android:id="@+id/settings_art_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="BOTTOM ARTWORK"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/art_pick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Choose an image"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/art_clear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Use the built-in mark"
+            android:textSize="13sp" />
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"

@@ -22,6 +22,8 @@ import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.CallLog
 import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.data.PanelConfig
+import dev.kb896.aiusage.data.ArtConfig
+import dev.kb896.aiusage.data.ArtImport
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.RingLayout
 import dev.kb896.aiusage.data.DashboardState
@@ -113,6 +115,7 @@ class MainActivity : ComponentActivity() {
         showButton = findViewById(R.id.show_button)
         hideButton = findViewById(R.id.hide_button)
         bindSettings()
+        bindArt()
         bindDiagnostics()
         bindAdvancedToggle()
         bindGeometrySliders()
@@ -312,6 +315,44 @@ class MainActivity : ComponentActivity() {
                 .copy(title = if (typed.isEmpty()) PanelConfig.DEFAULT.title else typed)
             store.save(config)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+        }
+    }
+
+    /**
+     * The picked image is COPIED into app storage, not remembered as a URI.
+     *
+     * A content:// URI is a grant: it does not survive a reboot without persistable
+     * permission, and the app that issued it can revoke it or be uninstalled. The panel
+     * redraws forever and cannot depend on another app still being installed and still
+     * willing.
+     */
+    private val pickArt = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val path = ArtImport.store(this, uri)
+        if (path == null) {
+            toast("Could not read that image")
+            return@registerForActivityResult
+        }
+        val store = ConfigStore(this)
+        // Pan and zoom reset with a new image: they were chosen against the old one and
+        // mean nothing against a picture of different proportions.
+        val config = store.load().copy(art = ArtConfig(imagePath = path))
+        store.save(config)
+        graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+        toast("Artwork set")
+    }
+
+    private fun bindArt() {
+        findViewById<Button>(R.id.art_pick).setOnClickListener { pickArt.launch("image/*") }
+        findViewById<Button>(R.id.art_clear).setOnClickListener {
+            ArtImport.clear(this)
+            val store = ConfigStore(this)
+            val config = store.load().copy(art = ArtConfig())
+            store.save(config)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            toast("Built-in mark restored")
         }
     }
 

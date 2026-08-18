@@ -85,6 +85,12 @@ class RearDialView(context: Context) : View(context) {
         textAlign = Paint.Align.RIGHT; color = Panel.Palette.FG
     }
 
+    /** Filtered, unlike the mascot: a user's photo is not pixel art and nearest-neighbour
+     *  scaling of one looks like a mistake rather than a style. */
+    private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private var artPath: String? = null
+    private var artBitmap: android.graphics.Bitmap? = null
+
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
     private val mascotPaint = Paint()
 
@@ -631,12 +637,80 @@ class RearDialView(context: Context) : View(context) {
     /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit
      *  the drawable. */
     private fun drawMark(canvas: Canvas) {
-        ray.setTint(Panel.Palette.PERSONAL)
-        ray.setBounds(
-            BAR_LEFT.toInt(), (Panel.HEIGHT - MARK_BOTTOM - MARK_H).toInt(),
-            BAR_RIGHT.toInt(), Panel.HEIGHT - MARK_BOTTOM,
+        val region = android.graphics.RectF(
+            BAR_LEFT, Panel.HEIGHT - MARK_BOTTOM - MARK_H,
+            BAR_RIGHT, (Panel.HEIGHT - MARK_BOTTOM).toFloat(),
         )
+        val custom = customArt()
+        if (custom != null) {
+            drawCustomArt(canvas, custom, region)
+            return
+        }
+        ray.setTint(Panel.Palette.PERSONAL)
+        ray.setBounds(region.left.toInt(), region.top.toInt(),
+            region.right.toInt(), region.bottom.toInt())
         ray.draw(canvas)
+    }
+
+    /**
+     * The user's image, loaded once and cached against its path.
+     *
+     * Decoded here rather than pushed through the payload: a bitmap cannot travel in a
+     * broadcast of any size worth having, and this process can read the file directly —
+     * it is in the app's own storage, and :rear is the same app.
+     *
+     * A file that will not decode returns null and the built-in mark is drawn. A panel
+     * that renders nothing at all because an image went missing would look like the
+     * panel had broken.
+     */
+    private fun customArt(): android.graphics.Bitmap? {
+        val path = config.art.imagePath ?: return null
+        if (path != artPath) {
+            artPath = path
+            artBitmap = try {
+                android.graphics.BitmapFactory.decodeFile(path)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return artBitmap
+    }
+
+    /**
+     * Draws [bitmap] inside [region], panned and zoomed, and CLIPPED to it.
+     *
+     * The clip is the point. This region is the only part of the panel with no data in
+     * it, so it is the only part an arbitrary image may occupy — without the clip, a
+     * zoomed image would cover the bars and the rings, and the panel would stop being a
+     * readout.
+     *
+     * Zoom is relative to "fills the region" (aspect preserved, cropping the overflow),
+     * so 1.0 is always sensible whatever the image's proportions. Pan is a fraction of
+     * the slack at the current zoom, so it cannot pull the image off its own region
+     * however far it is dragged.
+     */
+    private fun drawCustomArt(
+        canvas: Canvas,
+        bitmap: android.graphics.Bitmap,
+        region: android.graphics.RectF,
+    ) {
+        val zoom = config.art.zoom.coerceIn(ART_MIN_ZOOM, ART_MAX_ZOOM)
+        val cover = maxOf(region.width() / bitmap.width, region.height() / bitmap.height)
+        val scale = cover * zoom
+        val w = bitmap.width * scale
+        val h = bitmap.height * scale
+
+        // Slack is what is left once the image covers the region; half of it either way.
+        val slackX = (w - region.width()) / 2f
+        val slackY = (h - region.height()) / 2f
+        val left = region.centerX() - w / 2f + slackX * config.art.panX.coerceIn(-1f, 1f)
+        val top = region.centerY() - h / 2f + slackY * config.art.panY.coerceIn(-1f, 1f)
+
+        canvas.save()
+        canvas.clipRect(region)
+        canvas.drawBitmap(bitmap, null,
+            android.graphics.RectF(left, top, left + w, top + h), artPaint)
+        canvas.restore()
     }
 
     /**
@@ -812,6 +886,12 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
+
+        /** Zoom bounds for custom art. Below 1 the image no longer covers its region and
+         *  the background shows through in a band; the upper bound just stops a slider
+         *  reaching a size with no detail left. */
+        private const val ART_MIN_ZOOM = 1f
+        private const val ART_MAX_ZOOM = 4f
 
         /**
          * Mascot size and gait. Raising the frame rate raises the redraw rate of the
