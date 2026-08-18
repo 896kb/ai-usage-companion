@@ -75,13 +75,21 @@ class MascotStripView @JvmOverloads constructor(
         if (cells.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        val rowH = height * TOP_ROW
 
-        val cell = width.toFloat() / cells.size
+        // A grid, not a single row. It was one row divided by the clip count, which was
+        // fine at four and cramped at seven: a clip's width is its height times an aspect
+        // near 1, so dividing the width divides the figures too, and they shrank to
+        // thumbnails in a band with empty air above them. Wrapping keeps each figure the
+        // size it is worth looking at, which is the entire purpose of this view.
+        val columns = minOf(cells.size, COLUMNS)
+        val gridRows = (cells.size + columns - 1) / columns
+        val gridH = height * GRID_SHARE
+        val rowH = gridH / gridRows
+
+        val cell = width.toFloat() / columns
         // Leave room under the figures for the caption, and above for anything a clip
         // throws over its own head — the confetti sits well outside its mascot box.
         val availableH = (rowH - CAPTION_H - HEADROOM).coerceAtLeast(1f)
-        val baseline = rowH - CAPTION_H
 
         // The walk gets the lower row to itself: it needs the whole width to cross, and
         // its own height again in clear air above, because the jump takes it a full
@@ -91,7 +99,7 @@ class MascotStripView @JvmOverloads constructor(
         // same rig — letting it fill the row instead made it nearly twice the size of
         // the others, which reads as a different, larger mascot rather than the same one
         // walking. The row fit is then only a floor-case guard for a short strip.
-        val walkRow = height - rowH
+        val walkRow = height - gridH
         val walkH = minOf(
             minOf(availableH, (cell * CELL_FILL) / WalkRig.ASPECT),
             (walkRow - CAPTION_H) / (1f + WalkRig.HEADROOM),
@@ -107,13 +115,15 @@ class MascotStripView @JvmOverloads constructor(
         canvas.drawText("walk", width / 2f, height - 6f, label)
 
         for ((i, c) in cells.withIndex()) {
+            val col = i % columns
+            val baseline = (i / columns + 1) * rowH - CAPTION_H
             // Height is bounded by the CELL as well as by the view. Sizing on height
             // alone made every figure ~470px wide in a 244px cell on this display, so
             // they overlapped into a single blob — a clip's width is height x aspect,
             // and aspect is close to 1, so a tall strip is also a wide one.
             val h = minOf(availableH, (cell * CELL_FILL) / c.clip.aspect)
             val w = h * c.clip.aspect
-            val x = i * cell + (cell - w) / 2f
+            val x = col * cell + (cell - w) / 2f
             MascotRenderer.draw(
                 canvas, c.clip, now, x, baseline - h, h, body, eye,
                 // The work account's blue is shown on the muscle clip, which is the one
@@ -122,7 +132,7 @@ class MascotStripView @JvmOverloads constructor(
                     else MascotRenderer.ACCENT_ORANGE,
                 dead = c.dead,
             )
-            canvas.drawText(c.caption, i * cell + cell / 2f, rowH - 6f, label)
+            canvas.drawText(c.caption, col * cell + cell / 2f, baseline + CAPTION_H - 6f, label)
         }
     }
 
@@ -132,8 +142,11 @@ class MascotStripView @JvmOverloads constructor(
         const val CAPTION_H = 26f
         const val HEADROOM = 22f
 
-        /** Share of the strip the cell row takes; the walk gets the rest. */
-        const val TOP_ROW = 0.42f
+        /** Share of the strip the clip grid takes; the walk gets the rest. */
+        const val GRID_SHARE = 0.68f
+
+        /** Clips per row before wrapping. */
+        const val COLUMNS = 4
 
         /** Fraction of its cell a figure may occupy, leaving gutters between them. */
         const val CELL_FILL = 0.72f

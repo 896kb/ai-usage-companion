@@ -31,6 +31,26 @@ class MascotMoodTest {
         assertEquals(MascotMood.FLAG, MascotMood.of(0.95f, 0.80f))
     }
 
+    @Test fun `half the window gone, and nothing happening, is a nap`() {
+        assertEquals(MascotMood.SLEEP, MascotMood.of(0.50f, 0.50f))
+        assertEquals(MascotMood.SLEEP, MascotMood.of(0.75f, 0.75f))
+        // Right up to the flag, which still wins.
+        assertEquals(MascotMood.SLEEP, MascotMood.of(0.89f, 0.89f))
+        assertEquals(MascotMood.FLAG, MascotMood.of(0.90f, 0.90f))
+    }
+
+    /** Doing something beats having done something: the nap yields to a live burst. */
+    @Test fun `a burst past the halfway mark lifts rather than sleeps`() {
+        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.70f, 0.68f))
+        val now = 1_000_000L
+        assertEquals(MascotMood.MUSCLE,
+            MascotMood.decide(0.70f, 0.68f, 0L, now).clip)
+        // ...and goes back to sleep once the hold lapses, rather than to the walk.
+        assertEquals(MascotMood.SLEEP,
+            MascotMood.decide(0.70f, 0.70f, now - 1, now).clip)
+    }
+
+    /** Below halfway the idle state is unchanged — this rule only claims the top half. */
     @Test fun `steady use in the middle just stands`() {
         assertEquals(MascotMood.WALK, MascotMood.of(0.400f, 0.395f))
         assertEquals(MascotMood.WALK, MascotMood.of(0.400f, 0.400f))

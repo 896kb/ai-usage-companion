@@ -40,7 +40,7 @@ object MascotFrames {
         Clip("muscle", 1.17094f, 0.9669f, 83L, muscleFrames()),
         Clip("flag", 1.13670f, 0.8394f, 83L, flagFrames()),
         Clip("stand", 1.24419f, 0.7107f, 83L, standFrames()),
-    )
+    ) + MascotPoses.CLIPS   // hand-authored, kept out of this generated file
 
     private fun confettiFrames(): List<List<Rect>> = listOf(
         listOf(

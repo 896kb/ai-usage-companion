@@ -43,6 +43,30 @@ object MascotMood {
      */
     const val DEAD = "dead"
 
+    /**
+     * Half the 5-hour window gone, and nothing happening — the mascot naps.
+     *
+     * Ranked BELOW the burst hold on purpose. Half spent describes where you stand;
+     * a burst describes what you are doing right now, and something happening beats
+     * something not. So the nap is what the middle of the window looks like once you
+     * have stopped working, and the first burst of the next stretch wakes it.
+     */
+    const val SLEEP = "sleep"
+
+    /**
+     * Nobody home. The account has no usable credential — never connected, signed out,
+     * or its refresh token expired — so there is no reading to show at all.
+     *
+     * Distinct from [DEAD], and the difference is worth keeping straight: DEAD is a
+     * fact about usage, the week spent, the numbers real and all bad. GHOST is the
+     * absence of numbers. Rendering a disconnected account as dead would state a limit
+     * had been reached when nothing had been measured.
+     */
+    const val GHOST = "ghost"
+
+    /** Above this, with no burst live, the window is half gone and the mascot sleeps. */
+    const val REST = 0.50f
+
     /** Above this, the window is effectively spent. */
     const val HIGH = 0.90f
 
@@ -139,6 +163,7 @@ object MascotMood {
             utilization <= 0f -> CONFETTI
             utilization >= HIGH -> FLAG
             now < hold -> MUSCLE
+            utilization >= REST -> SLEEP
             else -> WALK
         }
         return Decision(clip, hold)
@@ -175,7 +200,8 @@ object MascotMood {
      *    exactly the moment it matters most, which is why the spec's "and total < 90%"
      *    qualifier exists.
      *  - BURST third — working hard, with room left.
-     *  - WALK otherwise: idling somewhere in the middle.
+     *  - SLEEP fourth: half the window gone and no burst to show for it lately.
+     *  - WALK otherwise: idling in the first half, with plenty left.
      *
      * A null [earlier] cannot produce a burst. With no history the honest reading is
      * "unknown", and inventing one from a single sample would fire the lifting animation
@@ -186,6 +212,7 @@ object MascotMood {
         utilization <= 0f -> CONFETTI
         utilization >= HIGH -> FLAG
         earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE
+        utilization >= REST -> SLEEP
         else -> WALK
     }
 }

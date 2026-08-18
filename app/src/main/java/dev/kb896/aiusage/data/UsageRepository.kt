@@ -109,13 +109,13 @@ class UsageRepository(
         val stored = store.load(account)
             ?: run {
                 Log.i(TAG, "${account.slug}: no stored credential")
-                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), moodStale(null))
+                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), MascotMood.GHOST)
             }
 
         val now = System.currentTimeMillis()
         if (stored.refreshExpired(now)) {
             Log.w(TAG, "${account.slug}: refresh token expired")
-            return AccountStatus(account, Health.AUTH, last, profiles?.tier(account), moodStale(last))
+            return AccountStatus(account, Health.AUTH, last, profiles?.tier(account), MascotMood.GHOST)
         }
 
         val usable = if (stored.accessExpired(now)) {
@@ -124,7 +124,7 @@ class UsageRepository(
             } catch (e: Exception) {
                 Log.w(TAG, "${account.slug}: token refresh failed: ${e.message}")
                 CallLog.record(account, "refresh failed: ${e.message}")
-                return AccountStatus(account, Health.AUTH, last, profiles?.tier(account), moodStale(last))
+                return AccountStatus(account, Health.AUTH, last, profiles?.tier(account), MascotMood.GHOST)
             }
         } else stored
 
@@ -215,6 +215,14 @@ class UsageRepository(
      * its default meant a bar reading 0% with a mascot that was not celebrating —
      * exactly the inconsistency a reader would take as a rendering bug rather than as
      * stale data.
+     */
+    /**
+     * Every AUTH outcome above is the same situation wearing different clothes — never
+     * connected, signed out, refresh token expired, refresh rejected — and all four mean
+     * there is no usable credential. They used to fall back to moodStale, which reads a
+     * mood off the LAST numbers we happened to see: a disconnected account went on
+     * celebrating at 0% or waving the flag at 95% from a reading nobody could refresh.
+     * The ghost says the only true thing available, which is that nobody is answering.
      */
     private fun moodStale(last: UsageSnapshot?): String {
         val session = last?.windows?.firstOrNull { it.kind == WindowKind.SESSION }
