@@ -36,6 +36,28 @@ object Unlock {
 
     fun isUnlocked(): Boolean = SystemClock.elapsedRealtime() < unlockedUntil
 
+    /**
+     * Re-locks when the screen goes off, and tells the caller so it can repaint.
+     *
+     * onPause is not enough on its own. A screen lock while this app is foreground does
+     * not reliably pause the activity on every device — and the screen going dark with
+     * a name still on it, waiting to be revealed again by whoever wakes the phone, is
+     * exactly the case this gate exists for.
+     *
+     * @return a registered receiver the caller must unregister
+     */
+    fun observeScreenOff(context: Context, onLocked: () -> Unit): android.content.BroadcastReceiver {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: android.content.Intent?) {
+                lock()
+                onLocked()
+            }
+        }
+        context.registerReceiver(receiver,
+            android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF))
+        return receiver
+    }
+
     /** Forget the unlock: on leaving the screen, on backgrounding, on screen-off. */
     fun lock() {
         unlockedUntil = 0L

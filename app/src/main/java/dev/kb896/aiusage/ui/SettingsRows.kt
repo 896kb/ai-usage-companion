@@ -123,14 +123,24 @@ object SettingsRows {
 
     /** A row that opens something else. The chevron is the whole affordance. */
     fun navigation(parent: LinearLayout, name: String, onClick: () -> Unit) {
+        navigationButton(parent, name, onClick)
+    }
+
+    /** As [navigation], but hands back the button for callers that must relabel it. */
+    fun navigationButton(
+        parent: LinearLayout,
+        name: String,
+        onClick: () -> Unit,
+    ): android.widget.Button {
         val context = parent.context
-        parent.addView(android.widget.Button(context).apply {
+        return android.widget.Button(context).apply {
             text = "$name  ›"
             textSize = 14f
             setTextColor(Panel.Palette.FG)
             typeface = context.resources.getFont(R.font.departure_mono)
             setOnClickListener { onClick() }
-        }, rowParams(dp(context, 8)))
+            parent.addView(this, rowParams(dp(context, 8)))
+        }
     }
 
     /**
@@ -222,7 +232,33 @@ object SettingsRows {
     ) {
         val context = parent.context
         val spinner = Spinner(context).apply {
-            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, options)
+            // A custom adapter, because a Spinner inflates its rows from a SYSTEM layout
+            // — the closed view and every dropdown item — so neither the palette nor the
+            // font sweep in applyPalette can ever reach them. They came out in the
+            // platform sans on a screen that is otherwise entirely monospaced, which is
+            // exactly the mismatch that made them look pasted in.
+            val mono = context.resources.getFont(R.font.departure_mono)
+            adapter = object : ArrayAdapter<String>(
+                context, android.R.layout.simple_spinner_dropdown_item, options
+            ) {
+                private fun style(view: View, dropdown: Boolean): View {
+                    (view as? TextView)?.apply {
+                        typeface = mono
+                        textSize = 14f
+                        setTextColor(Panel.Palette.FG)
+                        // The open list draws over whatever is behind it, so it needs its
+                        // own background or it renders as text on the panel underneath.
+                        if (dropdown) setBackgroundColor(Panel.Palette.BG)
+                    }
+                    return view
+                }
+
+                override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup) =
+                    style(super.getView(position, convertView, parent), false)
+
+                override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup) =
+                    style(super.getDropDownView(position, convertView, parent), true)
+            }
             setSelection(selected.coerceIn(0, options.size - 1), false)
             var seeded = false
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {

@@ -44,6 +44,9 @@ object AccountSettingsSheet {
      *
      * @param host the activity's root, which this covers and then uncovers
      */
+    /** Receivers registered by the open sheet, unregistered when it closes. */
+    private val sheetReceivers = mutableListOf<android.content.BroadcastReceiver>()
+
     fun show(
         context: Context,
         host: ViewGroup,
@@ -197,9 +200,36 @@ object AccountSettingsSheet {
                 }
             }
 
+            // The rings pointed at THIS account. A ring belongs to whichever account it
+            // reports on, not to the slot it occupies, so this list is a filter rather
+            // than an index — and an account with no ring simply shows no ring settings.
+            val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
+            val metricNames = listOf("Time to reset", "Utilisation")
+            // The ring in this account's position. Ring N belongs to the Nth account in
+            // display order, so the account's place in that order is which ring is its.
+            val position = config.orderedAccounts(Account.entries.size).indexOf(index)
+            config.rings.forEachIndexed { ringIndex, ring ->
+                if (ringIndex != position) return@forEachIndexed
+                SettingsRows.choice(rows, "RING WINDOW", windowNames,
+                    RingWindow.entries.indexOf(ring.window)) { pos ->
+                    write { it.copy(rings = it.withRing(ringIndex) { r ->
+                        r.copy(window = RingWindow.entries[pos]) }) }
+                }
+                SettingsRows.choice(rows, "RING SHOWS", metricNames,
+                    RingMetric.entries.indexOf(ring.metric)) { pos ->
+                    write { it.copy(rings = it.withRing(ringIndex) { r ->
+                        r.copy(metric = RingMetric.entries[pos]) }) }
+                }
+            }
+
             // ---- who this is ----------------------------------------------------
             //
-            // At the BOTTOM, in labelled rows. It was a single dim line squeezed above
+            // LAST, after everything that is used regularly. Recognising an account is
+            // something you do once, when connecting it or when you have forgotten which
+            // is which; the ring settings are what you came here to change. Putting
+            // identity above them made the common task scroll past the rare one.
+            //
+            // In labelled rows. It was a single dim line squeezed above
             // the controls, where the one thing it exists for — recognising which
             // account you are editing — was the hardest thing on the screen to read.
             //
@@ -255,37 +285,41 @@ object AccountSettingsSheet {
                     ).apply { topMargin = dp(context, 4) })
                 }
 
-                if (values.isNotEmpty() && !Unlock.isUnlocked()) {
-                    SettingsRows.navigation(rows, "REVEAL") {
-                        val activity = context as? Activity ?: return@navigation
-                        Unlock.require(activity, "To show this account's details") { ok ->
-                            if (ok) values.forEach { it.text = it.tag as? String }
+                if (values.isNotEmpty()) {
+                    // One control that toggles, not two states of one screen. Hiding must
+                    // be as reachable as revealing: someone who reveals a name in front of
+                    // a colleague needs to put it away without leaving the screen.
+                    fun applyMask(masked: Boolean) {
+                        values.forEach { it.text = if (masked) MASK else it.tag as? String }
+                    }
+                    lateinit var toggle: android.widget.Button
+                    toggle = SettingsRows.navigationButton(rows,
+                        if (Unlock.isUnlocked()) "HIDE" else "REVEAL") {
+                        if (Unlock.isUnlocked()) {
+                            Unlock.lock()
+                            applyMask(true)
+                            toggle.text = "REVEAL  ›"
+                        } else {
+                            val activity = context as? Activity ?: return@navigationButton
+                            Unlock.require(activity, "To show this account's details") { ok ->
+                                if (ok) {
+                                    applyMask(false)
+                                    toggle.text = "HIDE  ›"
+                                }
+                            }
                         }
                     }
+
+                    // The screen going dark with a name on it, waiting to be read by
+                    // whoever wakes the phone, is the case this gate exists for.
+                    val watcher = Unlock.observeScreenOff(context) {
+                        applyMask(true)
+                        toggle.text = "REVEAL  ›"
+                    }
+                    sheetReceivers += watcher
                 }
             }
 
-            // The rings pointed at THIS account. A ring belongs to whichever account it
-            // reports on, not to the slot it occupies, so this list is a filter rather
-            // than an index — and an account with no ring simply shows no ring settings.
-            val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
-            val metricNames = listOf("Time to reset", "Utilisation")
-            // The ring in this account's position. Ring N belongs to the Nth account in
-            // display order, so the account's place in that order is which ring is its.
-            val position = config.orderedAccounts(Account.entries.size).indexOf(index)
-            config.rings.forEachIndexed { ringIndex, ring ->
-                if (ringIndex != position) return@forEachIndexed
-                SettingsRows.choice(rows, "RING WINDOW", windowNames,
-                    RingWindow.entries.indexOf(ring.window)) { pos ->
-                    write { it.copy(rings = it.withRing(ringIndex) { r ->
-                        r.copy(window = RingWindow.entries[pos]) }) }
-                }
-                SettingsRows.choice(rows, "RING SHOWS", metricNames,
-                    RingMetric.entries.indexOf(ring.metric)) { pos ->
-                    write { it.copy(rings = it.withRing(ringIndex) { r ->
-                        r.copy(metric = RingMetric.entries[pos]) }) }
-                }
-            }
         }
         build()
 
@@ -328,6 +362,9 @@ object AccountSettingsSheet {
         // for the rest of the session.
         fun dismiss() {
             Unlock.lock()
+            // Leaking a receiver per sheet open would eventually crash the process.
+            sheetReceivers.forEach { runCatching { context.unregisterReceiver(it) } }
+            sheetReceivers.clear()
             sheet.animate().translationX(sheet.width.toFloat()).setDuration(SLIDE_MS)
                 .setInterpolator(DecelerateInterpolator())
                 .withEndAction { host.removeView(sheet) }
