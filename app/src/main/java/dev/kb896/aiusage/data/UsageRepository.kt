@@ -171,7 +171,9 @@ class UsageRepository(
         val store = profiles ?: return null
         val api = profileApi ?: return null
         val now = System.currentTimeMillis()
-        if (!store.isStale(account, now)) return store.tier(account)
+        // A cache holding a tier but no identity is one written before identity was
+        // read at all. Refetch rather than wait out the week.
+        if (!store.isStale(account, now) && !store.needsIdentity(account)) return store.tier(account)
         // One request for both. The same response carries the tier and the account's
         // identity, and the identity is only ever read by the settings screen — it is
         // deliberately not part of DashboardState, so it cannot reach the outward-facing

@@ -42,6 +42,17 @@ class ProfileStore(private val context: Context) {
      * lifetime. Deliberately NOT part of DashboardState: identity must never travel in
      * the payload, because that payload is what the outward-facing panel draws from.
      */
+    /**
+     * True when the cache holds a tier but no identity.
+     *
+     * That is not a rare edge: it is every install that cached a tier before identity
+     * was extracted, and the cache lasts a week — so without this the settings screen
+     * would show a plan and nothing else for six more days, looking like the fetch had
+     * silently failed.
+     */
+    fun needsIdentity(account: Account): Boolean =
+        tier(account) != null && identity(account).toList().all { it == null }
+
     fun identity(account: Account): Triple<String?, String?, String?> = Triple(
         prefs.getString("name_${account.slug}", null),
         prefs.getString("email_${account.slug}", null),

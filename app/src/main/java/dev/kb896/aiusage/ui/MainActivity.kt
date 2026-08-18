@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         bindViews()
+        applySystemBarInsets()
         applyPalette()
         wireActions()
 
@@ -125,6 +126,26 @@ class MainActivity : ComponentActivity() {
         // field only ever displays a command MainActivity wrote, never accepts
         // typed input.
         recoveryCommand.keyListener = null
+    }
+
+    /**
+     * Keep every screen out from under the system bars.
+     *
+     * Applied ONCE, to the activity's root, rather than per screen. The main screen only
+     * cleared the status bar because it happened to have a 24dp padding; the account
+     * sheet did not and its BACK row landed underneath the clock, unreachable. Any screen
+     * added later would have had to remember, and would not have.
+     *
+     * The values come from the window: a status bar is a different height on a device
+     * with a cutout, and the navigation bar disappears entirely under gesture nav.
+     */
+    private fun applySystemBarInsets() {
+        val root = findViewById<View>(R.id.root_host)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
     }
 
     private fun applyPalette() {
@@ -625,6 +646,19 @@ class MainActivity : ComponentActivity() {
         val status = graph.bridge.status()
 
         for (step in Setup.steps(this, status.granted, status.running)) {
+            // A step nobody can act on for you is TEXT, not a button. Locking the app in
+            // recents is a gesture in the launcher; a button that cannot perform it, and
+            // whose state cannot be read back, is a control in name only.
+            if (step.satisfied == null && step.open == null) {
+                container.addView(TextView(this).apply {
+                    text = step.why
+                    textSize = 11f
+                    setTextColor(Panel.Palette.DIM)
+                    typeface = resources.getFont(R.font.departure_mono)
+                    setPadding(0, dpPx(10), 0, dpPx(2))
+                })
+                continue
+            }
             val done = step.satisfied == true
             // A step whose state cannot be read shows no mark at all rather than an
             // empty box: an unticked box reads as something the user failed to do, and
@@ -659,19 +693,6 @@ class MainActivity : ComponentActivity() {
                         startActivity(intent)
                     } catch (_: Exception) {
                         toast("Could not open that settings page")
-                    }
-                }
-                // The reason, only while it is outstanding and only where the button
-                // cannot act for you — a step you can tap needs no paragraph.
-                if (!done && !actionable) {
-                    container.post {
-                        container.addView(TextView(this@MainActivity).apply {
-                            text = step.why
-                            textSize = 11f
-                            setTextColor(Panel.Palette.DIM)
-                            typeface = resources.getFont(R.font.departure_mono)
-                            setPadding(dpPx(8), 0, 0, dpPx(4))
-                        }, container.indexOfChild(this@apply) + 1)
                     }
                 }
             }, LinearLayout.LayoutParams(

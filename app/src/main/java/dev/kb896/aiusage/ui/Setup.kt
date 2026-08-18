@@ -12,6 +12,9 @@ import dev.kb896.aiusage.Panel
 /**
  * What has to be true before the panel works, and whether it is.
  *
+ * Ordered by what a user does first, with the one step nobody can act on for them last —
+ * it is advice to read once, not a task to work through.
+ *
  * Every step is a real question with a real answer — except one. A step whose state
  * cannot be read is marked [checkable] = false and shown as advice rather than as an
  * unticked box: a checkbox that can never tick reads as a step the user failed to
@@ -72,20 +75,21 @@ object Setup {
                 },
             ),
             Step(
-                title = "Lock the app in recents",
-                why = "Open recents, long-press this app, and lock it. Otherwise " +
-                    "\"close all\" takes the panel down with it.",
-                // Xiaomi does not expose whether an app is locked in recents, so this is
-                // advice with no answer rather than a box that can never be ticked.
-                satisfied = null,
-                open = null,
-            ),
-            Step(
                 title = "Rear display",
                 why = "Found by the system. If this is missing, the phone is not one " +
                     "this app can drive.",
                 satisfied = (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
                     .getDisplay(Panel.DISPLAY_ID) != null,
+                open = null,
+            ),
+            Step(
+                title = "Lock the app in recents",
+                why = "Lock this app in recents — open recents, long-press it, tap the " +
+                    "padlock. Otherwise \"close all\" kills the poll service and takes " +
+                    "the panel down with it.",
+                // Xiaomi does not expose whether an app is locked in recents, so this is
+                // advice with no answer rather than a box that can never be ticked.
+                satisfied = null,
                 open = null,
             ),
         )

@@ -101,39 +101,6 @@ object AccountSettingsSheet {
             // a signed-in user might want: to sign out.
             val record = dev.kb896.aiusage.service.Graph.of(context).store.load(account)
 
-            // Who this is. Enough to tell two accounts apart and no more — a name, the
-            // organisation, the plan. It is read from the profile response the app
-            // already fetches for the plan tag, and it lives only here: identity never
-            // enters the payload, because that is what the outward-facing panel draws.
-            val (holder, email, org) = ProfileStore(context).identity(account)
-            val tier = ProfileStore(context).tier(account)
-            val who = listOfNotNull(holder ?: email, org, tier).joinToString(" · ")
-            if (who.isNotBlank()) {
-                // Hidden until the device credential is confirmed, the way a banking app
-                // hides a balance. The panel never carries identity at all — it faces
-                // outward — and this screen only carries it to tell two accounts apart,
-                // but a phone gets handed across a desk unlocked. The screen being open
-                // is not evidence that the person looking at it is the owner.
-                val line = android.widget.TextView(context).apply {
-                    text = if (Unlock.isUnlocked()) who else "•••  tap to reveal"
-                    textSize = 12f
-                    setTextColor(if (Unlock.isUnlocked()) Panel.Palette.FG else Panel.Palette.DIM)
-                    typeface = context.resources.getFont(R.font.departure_mono)
-                    setPadding(0, dp(context, 2), 0, dp(context, 2))
-                }
-                line.setOnClickListener {
-                    if (Unlock.isUnlocked()) return@setOnClickListener
-                    val activity = context as? Activity ?: return@setOnClickListener
-                    Unlock.require(activity, "To show this account's details") { ok ->
-                        if (ok) {
-                            line.text = who
-                            line.setTextColor(Panel.Palette.FG)
-                        }
-                    }
-                }
-                rows.addView(line)
-            }
-
             rows.addView(android.widget.TextView(context).apply {
                 text = TokenStatus.describe(record)
                 textSize = 12f
@@ -230,6 +197,74 @@ object AccountSettingsSheet {
                 }
             }
 
+            // ---- who this is ----------------------------------------------------
+            //
+            // At the BOTTOM, in labelled rows. It was a single dim line squeezed above
+            // the controls, where the one thing it exists for — recognising which
+            // account you are editing — was the hardest thing on the screen to read.
+            //
+            // Masked until the device credential is confirmed. The panel never carries
+            // identity because it faces outward; this screen carries it because it is in
+            // the user's hand — but a phone gets handed across a desk unlocked, and a
+            // screen being open is not evidence that the person holding it is the owner.
+            val (holder, email, org) = ProfileStore(context).identity(account)
+            val tier = ProfileStore(context).tier(account)
+            val facts = listOf(
+                "NAME" to holder,
+                "EMAIL" to email,
+                "ORGANISATION" to org,
+                "PLAN" to tier,
+            ).filter { it.second != null }
+
+            if (facts.isNotEmpty()) {
+                rows.addView(android.widget.TextView(context).apply {
+                    text = "ACCOUNT"
+                    textSize = 11f
+                    setTextColor(Panel.Palette.DIM)
+                    typeface = context.resources.getFont(R.font.departure_mono)
+                    setPadding(0, dp(context, 18), 0, dp(context, 2))
+                })
+
+                val values = mutableListOf<android.widget.TextView>()
+                for ((label, value) in facts) {
+                    val row = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                    }
+                    row.addView(android.widget.TextView(context).apply {
+                        text = label
+                        textSize = 12f
+                        setTextColor(Panel.Palette.DIM)
+                        typeface = context.resources.getFont(R.font.departure_mono)
+                        layoutParams = LinearLayout.LayoutParams(dp(context, 108),
+                            ViewGroup.LayoutParams.WRAP_CONTENT)
+                    })
+                    val shown = android.widget.TextView(context).apply {
+                        // The plan is a bracket, not an identity — it is on the panel
+                        // already, so masking it here would be theatre.
+                        text = if (label == "PLAN" || Unlock.isUnlocked()) value else MASK
+                        textSize = 12f
+                        setTextColor(Panel.Palette.FG)
+                        typeface = context.resources.getFont(R.font.departure_mono)
+                        tag = value
+                    }
+                    if (label != "PLAN") values += shown
+                    row.addView(shown)
+                    rows.addView(row, LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = dp(context, 4) })
+                }
+
+                if (values.isNotEmpty() && !Unlock.isUnlocked()) {
+                    SettingsRows.navigation(rows, "REVEAL") {
+                        val activity = context as? Activity ?: return@navigation
+                        Unlock.require(activity, "To show this account's details") { ok ->
+                            if (ok) values.forEach { it.text = it.tag as? String }
+                        }
+                    }
+                }
+            }
+
             // The rings pointed at THIS account. A ring belongs to whichever account it
             // reports on, not to the slot it occupies, so this list is a filter rather
             // than an index — and an account with no ring simply shows no ring settings.
@@ -281,17 +316,7 @@ object AccountSettingsSheet {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
             Gravity.TOP))
 
-        // Inset below the status bar. The sheet covers the whole host, including the
-        // strip the system draws the clock and battery into, so its first row — BACK —
-        // landed underneath them. Taken from the window rather than hard-coded: the
-        // status bar is a different height on a device with a cutout, and the main
-        // screen only avoids this by having a 24dp padding that happens to be enough.
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(sheet) { view, insets ->
-            val top = insets.getInsets(
-                androidx.core.view.WindowInsetsCompat.Type.systemBars()).top
-            view.setPadding(0, top, 0, 0)
-            insets
-        }
+        // Insets are handled once for the whole activity — see applySystemBarInsets.
 
         sheet.post {
             sheet.translationX = sheet.width.toFloat()
@@ -389,6 +414,9 @@ object AccountSettingsSheet {
             }
             .show()
     }
+
+    /** Long enough to read as redacted rather than as a value that happens to be short. */
+    private const val MASK = "••••••••"
 
     /** Matches the panel's own 1.8s easing family, shortened: a screen transition that
      *  took as long as a bar's would feel broken. */
