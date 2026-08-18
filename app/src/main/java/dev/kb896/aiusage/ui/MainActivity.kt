@@ -404,7 +404,8 @@ class MainActivity : ComponentActivity() {
         Account.entries.forEachIndexed { index, account ->
             val name = config.styleFor(index).label ?: account.label
             SettingsRows.navigation(container, "ACCOUNT #${index + 1}  $name") {
-                AccountSettingsDialog.show(this, index, graph.repository.state.value) { edited ->
+                AccountSettingsSheet.show(this, findViewById(R.id.root_layout), index,
+                    graph.repository.state.value) { edited ->
                     graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited))
                     refreshPreview()
                     buildSettingsRows()

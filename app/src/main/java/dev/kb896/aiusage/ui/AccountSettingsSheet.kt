@@ -1,8 +1,11 @@
 package dev.kb896.aiusage.ui
 
-import android.app.AlertDialog
 import android.content.Context
+import android.view.Gravity
+import android.view.animation.DecelerateInterpolator
+import android.widget.FrameLayout
 import android.view.ViewGroup
+import dev.kb896.aiusage.R
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import dev.kb896.aiusage.Panel
@@ -26,10 +29,21 @@ import dev.kb896.aiusage.rear.MascotRenderer
  * The preview is pinned at the top and shows this account's ring and rows, cropped out of
  * a real panel, so a colour can be judged where it will actually be seen.
  */
-object AccountSettingsDialog {
+object AccountSettingsSheet {
 
+    /**
+     * Slides in over the settings rather than opening a dialog.
+     *
+     * A dialog floats a second card over a screen that is already a card, and dismisses
+     * by tapping outside — which, on a screen made of colour swatches, is a tap away from
+     * losing your place by accident. Sliding in from the right says "this is a level
+     * down, and back returns you", which is what it is.
+     *
+     * @param host the activity's root, which this covers and then uncovers
+     */
     fun show(
         context: Context,
+        host: ViewGroup,
         index: Int,
         state: DashboardState,
         onChange: (PanelConfig) -> Unit,
@@ -110,11 +124,54 @@ object AccountSettingsDialog {
         }
         build()
 
-        AlertDialog.Builder(context)
-            .setView(root)
-            .setPositiveButton("Done", null)
-            .show()
+        val sheet = FrameLayout(context).apply {
+            setBackgroundColor(Panel.Palette.BG)
+            // Swallows touches, so the settings underneath cannot be tapped through the
+            // sheet while it is open.
+            isClickable = true
+            addView(root, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+
+        val back = android.widget.Button(context).apply {
+            text = "‹  BACK"
+            textSize = 14f
+            setTextColor(Panel.Palette.FG)
+            typeface = context.resources.getFont(R.font.departure_mono)
+        }
+        root.addView(back, 0, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        host.addView(sheet, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            Gravity.TOP))
+
+        sheet.post {
+            sheet.translationX = sheet.width.toFloat()
+            sheet.animate().translationX(0f).setDuration(SLIDE_MS)
+                .setInterpolator(DecelerateInterpolator()).start()
+        }
+
+        fun dismiss() {
+            sheet.animate().translationX(sheet.width.toFloat()).setDuration(SLIDE_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction { host.removeView(sheet) }
+                .start()
+        }
+        back.setOnClickListener { dismiss() }
+        // The system back gesture closes the sheet before it closes the screen.
+        (context as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher
+            ?.addCallback(context, object : androidx.activity.OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    remove()
+                    dismiss()
+                }
+            })
     }
+
+    /** Matches the panel's own 1.8s easing family, shortened: a screen transition that
+     *  took as long as a bar's would feel broken. */
+    private const val SLIDE_MS = 220L
 
     private fun dp(context: Context, value: Int) =
         (value * context.resources.displayMetrics.density).toInt()

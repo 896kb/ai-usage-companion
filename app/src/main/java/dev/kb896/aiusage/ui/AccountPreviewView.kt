@@ -46,9 +46,19 @@ class AccountPreviewView @JvmOverloads constructor(
         clipChildren = true
     }
 
+    /**
+     * Height shown, in panel units.
+     *
+     * Less than the panel's, because a single account is centred in its own space and
+     * the rest is empty — showing all 572 would frame one block in a lot of nothing.
+     * This is a VIEWPORT into the middle of the panel, so the ring and the rows keep the
+     * proportions they have on the real thing.
+     */
+    private val visibleHeight = 300f
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         val width = MeasureSpec.getSize(widthSpec)
-        setMeasuredDimension(width, (width * Panel.HEIGHT / Panel.WIDTH.toFloat()).toInt())
+        setMeasuredDimension(width, (width * visibleHeight / Panel.WIDTH.toFloat()).toInt())
         dial.measure(
             MeasureSpec.makeMeasureSpec(Panel.WIDTH, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(Panel.HEIGHT, MeasureSpec.EXACTLY),
@@ -62,5 +72,8 @@ class AccountPreviewView @JvmOverloads constructor(
         dial.pivotY = 0f
         dial.scaleX = scale
         dial.scaleY = scale
+        // Slide the panel up so its middle — where the single account is centred — sits
+        // in the viewport.
+        dial.translationY = -(Panel.HEIGHT - visibleHeight) / 2f * scale
     }
 }

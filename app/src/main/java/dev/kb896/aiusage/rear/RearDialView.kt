@@ -282,7 +282,18 @@ class RearDialView(context: Context) : View(context) {
         val breath = ringBreath(nowReal)
         // Derived from the config that arrived with the state, not held separately —
         // one payload in, one appearance out, with no second channel that can disagree.
-        val geometry = PanelGeometry.of(config.ringLayout)
+        // In single-account mode the ring is centred on the block's own height rather
+        // than sitting at its panel position. On the panel the two rings are placed to
+        // meet the camera lenses; in a preview there are no lenses, and a ring pinned to
+        // where the top lens would be leaves the rows it belongs to floating beside
+        // nothing.
+        val geometry = PanelGeometry.of(config.ringLayout).let { g ->
+            if (onlyAccount == null) g
+            else PanelGeometry(
+                personal = g.personal.copy(cy = Panel.HEIGHT / 2f),
+                work = g.work.copy(cy = Panel.HEIGHT / 2f),
+            )
+        }
         // Each ring reports on whatever it is configured to, which is not necessarily
         // its own account: pointing both rings at one account's two limits is a
         // legitimate thing to want, and the ring's colour follows the account it reports
@@ -584,8 +595,11 @@ class RearDialView(context: Context) : View(context) {
             else Panel.HEIGHT - MARK_BOTTOM - MARK_H
         // One gap above the first block, one between, one below the last — so the
         // blocks sit evenly rather than hugging the top.
-        val gap = ((regionBottom - regionTop - contentH) / (blocks.size + 1))
-            .coerceAtLeast(0f)
+        // One account centres in the space it has; several share it evenly. Centring is
+        // what puts the block level with the ring beside it — the two are read as one
+        // row, and a block starting at the top with a ring in the middle is not that.
+        val gap = if (onlyAccount != null) ((regionBottom - regionTop - contentH) / 2f).coerceAtLeast(0f)
+            else ((regionBottom - regionTop - contentH) / (blocks.size + 1)).coerceAtLeast(0f)
 
         var y = regionTop + gap
 
@@ -736,6 +750,11 @@ class RearDialView(context: Context) : View(context) {
                     h = h,
                     paint = mascotPaint,
                     rise = ROW_PITCH,
+                    // The idle state is the walk, so this is the mascot almost always on
+                    // screen — it went through WalkRig, which had its colours compiled
+                    // in, and stayed green whatever the account was set to.
+                    bodyColor = colorFor("body:${account.name}",
+                        config.styleFor(account.ordinal).mascotBody ?: WalkRig.BODY_COLOR),
                 )
                 continue
             }

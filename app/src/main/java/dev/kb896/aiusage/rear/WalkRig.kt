@@ -27,6 +27,9 @@ import kotlin.math.sin
  *         hands x2  (translate: the jump's arm swing)
  *         eyes  x2  (translate: the look)
  *
+ * The walk carries no ACCENT-coloured hardware — no headband, no dumbbells, no flag — so
+ * it takes a body colour and nothing else. A kit colour would have nothing to paint.
+ *
  * Timings are the parsed timeline verbatim, in seconds, so they can be checked against it
  * line by line. Values are in the source viewBox's units (107x86) and scaled at draw time.
  */
@@ -69,7 +72,8 @@ object WalkRig {
     /** How far above its resting top the jump takes it, as a multiple of its height. */
     const val HEADROOM = 90f / VB_H
 
-    private const val BODY_COLOR = 0xFFB5BD68.toInt()
+    /** The rig's colours as the source draws them. Defaults only — see [draw]. */
+    const val BODY_COLOR = 0xFFB5BD68.toInt()
     private const val EYE_COLOR = 0xFF1D1F21.toInt()
 
     // --- easings -------------------------------------------------------------------
@@ -283,6 +287,7 @@ object WalkRig {
         span: Float,
         paint: Paint,
         rise: Float = HEADROOM * h,
+        bodyColor: Int = BODY_COLOR,
     ) {
         val phase = nowMs.mod(PERIOD_MS)
         val returning = phase >= DURATION_MS
@@ -321,7 +326,7 @@ object WalkRig {
             canvas.save()
             canvas.rotate(legRot[i].at(t), px, py)
             canvas.scale(1f, legScaleY[i].at(t), px, py)
-            rect(LEG_X[i], LEG_Y, LEG_W, LEG_H, BODY_COLOR)
+            rect(LEG_X[i], LEG_Y, LEG_W, LEG_H, bodyColor)
             canvas.restore()
         }
 
@@ -329,11 +334,11 @@ object WalkRig {
         canvas.translate(bodyX.at(t) * u, bodyY.at(t) * u)
         canvas.rotate(bodyRot.at(t), ox + 53f * u, oy + 65f * u)
 
-        rect(11f, 0f, 85f, 65f, BODY_COLOR)
+        rect(11f, 0f, 85f, 65f, bodyColor)
 
         val hy = handY.at(t)
-        rect(85f, 21f + hy, 22f, 23f, BODY_COLOR)
-        rect(0f, 21f + hy, 22f, 23f, BODY_COLOR)
+        rect(85f, 21f + hy, 22f, 23f, bodyColor)
+        rect(0f, 21f + hy, 22f, 23f, bodyColor)
 
         val ex = eyesX.at(t)
         val ey = eyesY.at(t)
