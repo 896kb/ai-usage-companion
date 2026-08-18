@@ -94,6 +94,14 @@ object Setup {
             ),
         )
 
-    /** Whether every checkable step is satisfied — used to collapse the list once done. */
-    fun allDone(steps: List<Step>): Boolean = steps.all { it.satisfied != false }
+    /**
+     * Whether everything the user can actually DO is done.
+     *
+     * Only the steps with a readable state count. The recents lock cannot be verified at
+     * all, and the rear display is a property of the phone rather than a task — waiting
+     * on either would leave the list permanently expanded on a setup that is, in every
+     * sense the user can act on, finished.
+     */
+    fun allDone(steps: List<Step>): Boolean =
+        steps.filter { it.satisfied != null }.all { it.satisfied == true }
 }

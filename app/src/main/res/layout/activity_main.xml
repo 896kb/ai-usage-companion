@@ -115,6 +115,14 @@
             android:layout_height="1dp"
             android:layout_marginTop="16dp" />
 
+        <TextView
+            android:id="@+id/setup_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ONBOARDING"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <LinearLayout
             android:id="@+id/setup_rows"
             android:layout_width="match_parent"

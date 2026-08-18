@@ -62,8 +62,18 @@ object Diagnostics {
             onReset()
         }
 
+        val heading = slot.findViewById<TextView>(R.id.debug_heading)
+        val body = slot.findViewById<View>(R.id.debug_body)
+        heading.setOnClickListener {
+            val show = body.visibility != View.VISIBLE
+            body.visibility = if (show) View.VISIBLE else View.GONE
+            heading.text = if (show) "DEBUG  ▾" else "DEBUG  ▸"
+        }
+        heading.setTextColor(Panel.Palette.WORK)
+
         val mono = slot.context.resources.getFont(R.font.departure_mono)
-        for (id in intArrayOf(R.id.preview_label, R.id.preview_text, R.id.mascot_heading)) {
+        for (id in intArrayOf(R.id.debug_heading, R.id.preview_label, R.id.preview_text,
+                R.id.mascot_heading)) {
             slot.findViewById<TextView>(id).typeface = mono
         }
     }

@@ -10,6 +10,27 @@
     android:layout_height="wrap_content"
     android:orientation="vertical">
 
+    <!--
+      Collapsed by default. These are tools for whoever is building this, and even in a
+      debug build they are not what the app is for — a reset button and a five-mascot
+      animation harness sitting open above the real settings puts scaffolding in front of
+      the thing being scaffolded.
+    -->
+    <TextView
+        android:id="@+id/debug_heading"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="DEBUG  ▸"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/debug_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
     <Button
         android:id="@+id/debug_reset_all"
         android:layout_width="match_parent"
@@ -70,4 +91,6 @@
             android:layout_marginBottom="24dp" />
 
 
+
+    </LinearLayout>
 </LinearLayout>

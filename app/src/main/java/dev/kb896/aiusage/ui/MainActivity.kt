@@ -642,10 +642,36 @@ class MainActivity : ComponentActivity() {
      */
     private fun buildSetupRows() {
         val container = findViewById<LinearLayout>(R.id.setup_rows) ?: return
+        val heading = findViewById<TextView>(R.id.setup_heading) ?: return
         container.removeAllViews()
         val status = graph.bridge.status()
+        val steps = Setup.steps(this, status.granted, status.running)
 
-        for (step in Setup.steps(this, status.granted, status.running)) {
+        // Once every actionable step is done, this becomes a collapsed accordion. The
+        // list is instructions for getting started; leaving five satisfied rows at the
+        // top of the settings screen forever would push the things a user actually
+        // returns to below a wall of ticks. It stays reachable, because a step can come
+        // undone — a permission revoked, Shizuku not restarted after a reboot.
+        val done = Setup.allDone(steps)
+        heading.visibility = if (done) View.VISIBLE else View.GONE
+        if (done) {
+            // Expanded state is not remembered across launches: the reason to open this
+            // is to fix something, and that is a fresh decision each time.
+            container.visibility = View.GONE
+            heading.text = "ONBOARDING  ▸"
+            heading.setOnClickListener {
+                val show = container.visibility != View.VISIBLE
+                container.visibility = if (show) View.VISIBLE else View.GONE
+                heading.text = if (show) "ONBOARDING  ▾" else "ONBOARDING  ▸"
+            }
+        } else {
+            // Outstanding: shown expanded with no heading, because a collapsed accordion
+            // is a thing to notice and this is a thing to do.
+            container.visibility = View.VISIBLE
+            heading.setOnClickListener(null)
+        }
+
+        for (step in steps) {
             // A step nobody can act on for you is TEXT, not a button. Locking the app in
             // recents is a gesture in the launcher; a button that cannot perform it, and
             // whose state cannot be read back, is a control in name only.
