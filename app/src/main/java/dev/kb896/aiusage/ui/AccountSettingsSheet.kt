@@ -1,5 +1,6 @@
 package dev.kb896.aiusage.ui
 
+import android.app.Activity
 import android.content.Context
 import android.view.Gravity
 import android.view.animation.DecelerateInterpolator
@@ -12,6 +13,7 @@ import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.auth.TokenStatus
 import dev.kb896.aiusage.data.ConfigStore
+import dev.kb896.aiusage.data.ProfileStore
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.PanelConfig
@@ -98,6 +100,40 @@ object AccountSettingsSheet {
             // account already connected, where all three were noise around the one thing
             // a signed-in user might want: to sign out.
             val record = dev.kb896.aiusage.service.Graph.of(context).store.load(account)
+
+            // Who this is. Enough to tell two accounts apart and no more — a name, the
+            // organisation, the plan. It is read from the profile response the app
+            // already fetches for the plan tag, and it lives only here: identity never
+            // enters the payload, because that is what the outward-facing panel draws.
+            val (holder, email, org) = ProfileStore(context).identity(account)
+            val tier = ProfileStore(context).tier(account)
+            val who = listOfNotNull(holder ?: email, org, tier).joinToString(" · ")
+            if (who.isNotBlank()) {
+                // Hidden until the device credential is confirmed, the way a banking app
+                // hides a balance. The panel never carries identity at all — it faces
+                // outward — and this screen only carries it to tell two accounts apart,
+                // but a phone gets handed across a desk unlocked. The screen being open
+                // is not evidence that the person looking at it is the owner.
+                val line = android.widget.TextView(context).apply {
+                    text = if (Unlock.isUnlocked()) who else "•••  tap to reveal"
+                    textSize = 12f
+                    setTextColor(if (Unlock.isUnlocked()) Panel.Palette.FG else Panel.Palette.DIM)
+                    typeface = context.resources.getFont(R.font.departure_mono)
+                    setPadding(0, dp(context, 2), 0, dp(context, 2))
+                }
+                line.setOnClickListener {
+                    if (Unlock.isUnlocked()) return@setOnClickListener
+                    val activity = context as? Activity ?: return@setOnClickListener
+                    Unlock.require(activity, "To show this account's details") { ok ->
+                        if (ok) {
+                            line.text = who
+                            line.setTextColor(Panel.Palette.FG)
+                        }
+                    }
+                }
+                rows.addView(line)
+            }
+
             rows.addView(android.widget.TextView(context).apply {
                 text = TokenStatus.describe(record)
                 textSize = 12f
@@ -263,7 +299,10 @@ object AccountSettingsSheet {
                 .setInterpolator(DecelerateInterpolator()).start()
         }
 
+        // Leaving the screen re-locks. The unlock is for looking at one account now, not
+        // for the rest of the session.
         fun dismiss() {
+            Unlock.lock()
             sheet.animate().translationX(sheet.width.toFloat()).setDuration(SLIDE_MS)
                 .setInterpolator(DecelerateInterpolator())
                 .withEndAction { host.removeView(sheet) }

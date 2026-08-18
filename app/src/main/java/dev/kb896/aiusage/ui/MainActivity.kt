@@ -86,10 +86,20 @@ class MainActivity : ComponentActivity() {
         }
 
         refreshStatus()
+
+        buildSetupRows()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Backgrounding re-locks: the app may be resumed by someone else, and a phone
+        // handed over while a screen is open is exactly the case this guards.
+        Unlock.lock()
     }
 
     override fun onResume() {
         super.onResume()
+        buildSetupRows()
         // Shizuku's permission grant is asynchronous (a system dialog the user
         // returns from) and requestPermission() below has no result callback wired
         // — see ShizukuBridge's history (Task 3) for why that's deliberate, not an
@@ -597,6 +607,72 @@ class MainActivity : ComponentActivity() {
      * The failure states still speak, through renderRecovery — that is where Shizuku not
      * running or the display being absent turns into something the user can act on.
      */
+    /**
+     * The setup checklist: what has to be true, and whether it is.
+     *
+     * Rebuilt on every resume, because most of these are changed in Settings and the
+     * user comes back to this screen afterwards — a checklist that needed a restart to
+     * notice would be worse than none.
+     */
+    private fun buildSetupRows() {
+        val container = findViewById<LinearLayout>(R.id.setup_rows) ?: return
+        container.removeAllViews()
+        val status = graph.bridge.status()
+        val steps = Setup.steps(this, shizukuGranted = status.granted,
+            shizukuRunning = status.running)
+
+        for (step in steps) {
+            // A step whose state cannot be read shows a bullet, not an empty box: an
+            // unticked box reads as something the user failed to do, and they will keep
+            // trying to tick it.
+            val mark = when (step.satisfied) {
+                true -> "✓"
+                false -> "○"
+                null -> "•"
+            }
+            val colour = when (step.satisfied) {
+                true -> Panel.Palette.WORK
+                false -> Panel.Palette.WARN
+                null -> Panel.Palette.DIM
+            }
+            container.addView(TextView(this).apply {
+                text = "$mark  ${step.title}"
+                textSize = 13f
+                setTextColor(colour)
+                typeface = resources.getFont(R.font.departure_mono)
+                setPadding(0, dpPx(8), 0, 0)
+            })
+            // The reason is shown only while the step is outstanding. Once satisfied it
+            // is a paragraph explaining something that is already true.
+            if (step.satisfied == false || step.satisfied == null) {
+                container.addView(TextView(this).apply {
+                    text = step.why
+                    textSize = 11f
+                    setTextColor(Panel.Palette.DIM)
+                    typeface = resources.getFont(R.font.departure_mono)
+                    setPadding(dpPx(18), dpPx(2), 0, 0)
+                })
+                step.open?.let { intent ->
+                    container.addView(Button(this).apply {
+                        text = "Open settings"
+                        textSize = 12f
+                        setTextColor(Panel.Palette.FG)
+                        typeface = resources.getFont(R.font.departure_mono)
+                        setOnClickListener {
+                            try {
+                                startActivity(intent())
+                            } catch (_: Exception) {
+                                toast("Could not open that settings page")
+                            }
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    private fun dpPx(value: Int) = (value * resources.displayMetrics.density).toInt()
+
     private fun refreshStatus() {
         val s = graph.bridge.status()
         val ready = s.running && s.granted

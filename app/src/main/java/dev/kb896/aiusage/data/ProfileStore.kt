@@ -35,6 +35,26 @@ class ProfileStore(private val context: Context) {
     fun isStale(account: Account, now: Long): Boolean =
         now - prefs.getLong(stampKey(account), 0L) > MAX_AGE_MS
 
+    /**
+     * Who the account belongs to, for the settings screen.
+     *
+     * Stored beside the tier because it comes from the same response and has the same
+     * lifetime. Deliberately NOT part of DashboardState: identity must never travel in
+     * the payload, because that payload is what the outward-facing panel draws from.
+     */
+    fun identity(account: Account): Triple<String?, String?, String?> = Triple(
+        prefs.getString("name_${account.slug}", null),
+        prefs.getString("email_${account.slug}", null),
+        prefs.getString("org_${account.slug}", null),
+    )
+
+    fun saveIdentity(account: Account, name: String?, email: String?, org: String?) =
+        prefs.edit()
+            .putString("name_${account.slug}", name)
+            .putString("email_${account.slug}", email)
+            .putString("org_${account.slug}", org)
+            .apply()
+
     fun save(account: Account, tier: String, now: Long) = prefs.edit()
         .putString(key(account), tier)
         .putLong(stampKey(account), now)

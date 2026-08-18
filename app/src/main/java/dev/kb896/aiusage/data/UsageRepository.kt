@@ -172,9 +172,18 @@ class UsageRepository(
         val api = profileApi ?: return null
         val now = System.currentTimeMillis()
         if (!store.isStale(account, now)) return store.tier(account)
-        val fetched = api.tier(accessToken)
+        // One request for both. The same response carries the tier and the account's
+        // identity, and the identity is only ever read by the settings screen — it is
+        // deliberately not part of DashboardState, so it cannot reach the outward-facing
+        // panel by accident.
+        val (fetched, identity) = api.profile(accessToken)
+        if (identity != null) {
+            store.saveIdentity(account, identity.name, identity.email, identity.organization)
+        }
         if (fetched != null) {
             store.save(account, fetched, now)
+            // The tier is a plan bracket and safe to log. The identity is not logged at
+            // all: logcat is readable by anyone with adb.
             Log.i(TAG, "${account.slug}: plan tier $fetched")
         } else {
             // Do not retry on the next poll; see ProfileStore.markAttempted.

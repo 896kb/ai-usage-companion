@@ -115,6 +115,12 @@
             android:layout_height="1dp"
             android:layout_marginTop="16dp" />
 
+        <LinearLayout
+            android:id="@+id/setup_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
         <Button
             android:id="@+id/grant_button"
             android:layout_width="match_parent"
