@@ -880,22 +880,14 @@ class RearDialView(context: Context) : View(context) {
         bitmap: android.graphics.Bitmap,
         region: android.graphics.RectF,
     ) {
-        val zoom = config.art.zoom.coerceIn(ART_MIN_ZOOM, ART_MAX_ZOOM)
-        val cover = maxOf(region.width() / bitmap.width, region.height() / bitmap.height)
-        val scale = cover * zoom
-        val w = bitmap.width * scale
-        val h = bitmap.height * scale
-
-        // Slack is what is left once the image covers the region; half of it either way.
-        val slackX = (w - region.width()) / 2f
-        val slackY = (h - region.height()) / 2f
-        val left = region.centerX() - w / 2f + slackX * config.art.panX.coerceIn(-1f, 1f)
-        val top = region.centerY() - h / 2f + slackY * config.art.panY.coerceIn(-1f, 1f)
-
+        // Shared with the cropper, so what was chosen there is what appears here.
+        val dest = ArtPlacement.destination(
+            region, bitmap.width, bitmap.height,
+            config.art.panX, config.art.panY, config.art.zoom,
+        )
         canvas.save()
         canvas.clipRect(region)
-        canvas.drawBitmap(bitmap, null,
-            android.graphics.RectF(left, top, left + w, top + h), artPaint)
+        canvas.drawBitmap(bitmap, null, dest, artPaint)
         canvas.restore()
     }
 
@@ -1074,12 +1066,6 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
-
-        /** Zoom bounds for custom art. Below 1 the image no longer covers its region and
-         *  the background shows through in a band; the upper bound just stops a slider
-         *  reaching a size with no detail left. */
-        private const val ART_MIN_ZOOM = 1f
-        private const val ART_MAX_ZOOM = 4f
 
         /**
          * Mascot size and gait. Raising the frame rate raises the redraw rate of the

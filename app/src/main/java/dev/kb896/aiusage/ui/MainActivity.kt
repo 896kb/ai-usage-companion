@@ -345,14 +345,10 @@ class MainActivity : ComponentActivity() {
             toast("Could not read that image")
             return@registerForActivityResult
         }
-        val store = ConfigStore(this)
-        // Pan and zoom reset with a new image: they were chosen against the old one and
-        // mean nothing against a picture of different proportions.
-        val config = store.load().copy(art = ArtConfig(imagePath = path))
-        store.save(config)
-        graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
-        refreshPreview()
-        toast("Artwork set")
+        // Straight into the cropper. The art region is about 4:1, so almost nothing from
+        // a camera fits it, and picking the middle of the picture silently is a decision
+        // the user discovers by turning the phone over.
+        cropArtwork(path)
     }
 
     /**
@@ -443,8 +439,55 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    /**
+     * Choose which part of the stored image the panel shows.
+     *
+     * Pan and zoom always start at centre and 1x for a newly picked image — they were
+     * chosen against the previous one and mean nothing against different proportions —
+     * but the same dialog reopens on the stored values when an existing image is being
+     * re-cropped.
+     */
+    private fun cropArtwork(path: String, reuseTransform: Boolean = false) {
+        val bitmap = android.graphics.BitmapFactory.decodeFile(path)
+        if (bitmap == null) {
+            toast("Could not read that image")
+            return
+        }
+        val store = ConfigStore(this)
+        val existing = store.load().art
+        val view = ArtCropView(this).apply {
+            setImage(
+                bitmap,
+                if (reuseTransform) existing.panX else 0f,
+                if (reuseTransform) existing.panY else 0f,
+                if (reuseTransform) existing.zoom else 1f,
+            )
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Drag to move, pinch to zoom")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Use it") { _, _ ->
+                val config = store.load().copy(art = ArtConfig(
+                    imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom))
+                store.save(config)
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+                refreshPreview()
+                toast("Artwork set")
+            }
+            .show()
+    }
+
     private fun bindArt() {
-        findViewById<Button>(R.id.art_pick).setOnClickListener { pickArt.launch("image/*") }
+        val pick = findViewById<Button>(R.id.art_pick)
+        pick.setOnClickListener { pickArt.launch("image/*") }
+        // Long-press re-crops what is already there, without going back through the
+        // picker to choose the same file again.
+        pick.setOnLongClickListener {
+            val path = ConfigStore(this).load().art.imagePath
+            if (path == null) toast("No image chosen yet") else cropArtwork(path, reuseTransform = true)
+            true
+        }
     }
 
     private fun bindDiagnostics() {
