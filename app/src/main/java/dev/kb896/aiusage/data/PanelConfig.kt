@@ -80,6 +80,17 @@ data class AccountStyle(
     val accent: Int? = null,
     val mascotBody: Int? = null,
     val mascotAccent: Int? = null,
+    val showMascot: Boolean = true,
+    /**
+     * Which windows this account shows, in this order. Null means "whatever the panel's
+     * default is" — the same null-means-inherit rule as the colours above, so a later
+     * change to that default reaches anyone who never chose for themselves.
+     *
+     * Per account rather than per panel because the accounts are not alike: a scoped
+     * weekly limit matters on the account that actually uses that model and is noise on
+     * the other.
+     */
+    val barOrder: List<String>? = null,
 )
 
 /**
@@ -124,7 +135,7 @@ data class PanelConfig(
     val rampColors: List<Int> = Panel.RAMP_STOPS.map { it.second },
     val rings: List<RingSpec> = listOf(RingSpec(account = 0), RingSpec(account = 1)),
     val ringLayout: RingLayout = RingLayout(),
-    /** Window kinds top to bottom within each account block, by wire name. */
+    /** Default window order, for accounts that have not chosen their own. */
     val barOrder: List<String> = listOf("session", "weekly_all", "weekly_scoped"),
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
@@ -139,6 +150,19 @@ data class PanelConfig(
 
     /** This account's appearance, or an all-defaults one if it has no entry. */
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
+
+    /**
+     * The windows this account shows, in order.
+     *
+     * NEVER EMPTY. An account with every bar switched off is a heading, a mascot and
+     * nothing to stand on — indistinguishable on the panel from an account whose data
+     * failed to load. The UI stops you turning the last one off; this is the backstop
+     * for a config edited by hand or written by an older build.
+     */
+    fun barsFor(index: Int): List<String> {
+        val chosen = styleFor(index).barOrder ?: barOrder
+        return chosen.ifEmpty { barOrder }
+    }
 
     /**
      * The account list with one entry edited, GROWN if it does not reach that far.

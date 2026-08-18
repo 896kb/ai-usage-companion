@@ -139,4 +139,35 @@ class PanelConfigTest {
         assertEquals(1, edited[0].accent)
         assertEquals("A", edited[0].label)
     }
+
+    // ---- per-account bars ------------------------------------------------------------
+
+    /** Unset means inherit the panel default, so a later change to it still lands. */
+    @Test fun `an account with no choice inherits the default order`() {
+        assertEquals(PanelConfig.DEFAULT.barOrder, PanelConfig.DEFAULT.barsFor(0))
+    }
+
+    @Test fun `an account can choose its own rows`() {
+        val c = PanelConfig.DEFAULT.copy(accounts = listOf(
+            AccountStyle(barOrder = listOf("weekly_all"))))
+        assertEquals(listOf("weekly_all"), c.barsFor(0))
+        assertEquals(PanelConfig.DEFAULT.barOrder, c.barsFor(1))
+    }
+
+    /**
+     * An account with no bars is a heading and a mascot standing on nothing, which on
+     * the panel is indistinguishable from an account whose data failed to load. The UI
+     * refuses to remove the last one; this is the backstop for a config edited by hand.
+     */
+    @Test fun `an empty order falls back rather than showing nothing`() {
+        val c = PanelConfig.DEFAULT.copy(accounts = listOf(AccountStyle(barOrder = emptyList())))
+        assertEquals(PanelConfig.DEFAULT.barOrder, c.barsFor(0))
+    }
+
+    @Test fun `the mascot is on unless switched off`() {
+        assertEquals(true, PanelConfig.DEFAULT.styleFor(0).showMascot)
+        val c = PanelConfig.DEFAULT.copy(accounts = listOf(AccountStyle(showMascot = false)))
+        assertEquals(false, c.styleFor(0).showMascot)
+        assertEquals(true, c.styleFor(1).showMascot)
+    }
 }

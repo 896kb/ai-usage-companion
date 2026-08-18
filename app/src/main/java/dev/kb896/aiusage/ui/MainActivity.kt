@@ -443,17 +443,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val allKinds = listOf("session" to "5-hour", "weekly_all" to "7-day all",
-            "weekly_scoped" to "7-day scoped")
-        allKinds.forEach { (wire, name) ->
-            SettingsRows.toggle(container, "Show the $name bar", wire in config.barOrder) { on ->
-                write { cfg ->
-                    cfg.copy(barOrder = allKinds.map { it.first }
-                        .filter { if (it == wire) on else it in cfg.barOrder })
-                }
-            }
-        }
-
         // The ramp belongs in ADVANCED. It is five colours that already work together,
         // and the common case for touching them is not "I want a different green" but
         // "I am adapting this to a different display" — the same reason the ring geometry

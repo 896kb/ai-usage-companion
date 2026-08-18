@@ -574,7 +574,7 @@ class RearDialView(context: Context) : View(context) {
             // window the config omits is hidden rather than pushed to the bottom. The
             // config is a whitelist, not a preference.
             val windows = status?.snapshot?.windows.orEmpty()
-            val rows = config.barOrder.mapNotNull { wire ->
+            val rows = config.barsFor(account.ordinal).mapNotNull { wire ->
                 windows.firstOrNull { it.kind.wire == wire }
             }
             Triple(account, status, rows)
@@ -685,7 +685,13 @@ class RearDialView(context: Context) : View(context) {
                 // Time-to-reset in its own column, so every window says when it turns
                 // over rather than only the session one.
                 canvas.drawText(remaining(w.resetsAt), TIME_RIGHT, y + barH - 4f, timeTag)
-                if (w.kind == WindowKind.SESSION) {
+                // The mascot stands on the FIRST SHOWN bar, not on the session bar.
+                //
+                // It anchored on WindowKind.SESSION, so hiding the 5-hour row left the
+                // mascot with nothing to stand on and it vanished — the account looked
+                // broken rather than configured. Whichever row is first is the one it
+                // stands on, and there is always at least one (see barsFor).
+                if (account !in sessionBars) {
                     sessionBars[account] = SessionBar(barLeft, barRight, y, fraction)
                 }
                 y += rowPitch
@@ -723,6 +729,7 @@ class RearDialView(context: Context) : View(context) {
         val now = System.currentTimeMillis()
         for ((index, entry) in sessionBars.entries.withIndex()) {
             val account = entry.key
+            if (!config.styleFor(account.ordinal).showMascot) continue
             val bar = entry.value
 
             // The idle state walks its bar instead of standing on it. Handled before the

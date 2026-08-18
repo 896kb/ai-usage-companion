@@ -103,6 +103,38 @@ object AccountSettingsSheet {
                 },
             ))
 
+            SettingsRows.toggle(rows, "Show the mascot", style.showMascot) { on ->
+                write { it.copy(accounts = it.withStyle(index) { s -> s.copy(showMascot = on) }) }
+            }
+
+            // Which rows this account shows. Per account because the accounts are not
+            // alike: a scoped weekly limit matters on the account that uses that model
+            // and is noise on the other.
+            val allKinds = listOf("session" to "5-hour", "weekly_all" to "7-day all",
+                "weekly_scoped" to "7-day scoped")
+            val shown = config.barsFor(index)
+            allKinds.forEach { (wire, name) ->
+                val isOn = wire in shown
+                SettingsRows.toggle(rows, "Show the $name bar", isOn) { on ->
+                    // The last bar cannot be switched off. An account with no bars is a
+                    // heading and a mascot standing on nothing, which on the panel is
+                    // indistinguishable from an account whose data failed to load.
+                    if (!on && shown.size <= 1) {
+                        android.widget.Toast.makeText(context,
+                            "An account needs at least one bar", android.widget.Toast.LENGTH_SHORT)
+                            .show()
+                        build()
+                        return@toggle
+                    }
+                    write { cfg ->
+                        val next = allKinds.map { it.first }
+                            .filter { if (it == wire) on else it in cfg.barsFor(index) }
+                        cfg.copy(accounts = cfg.withStyle(index) { s -> s.copy(barOrder = next) })
+                    }
+                    build()
+                }
+            }
+
             // The rings pointed at THIS account. A ring belongs to whichever account it
             // reports on, not to the slot it occupies, so this list is a filter rather
             // than an index — and an account with no ring simply shows no ring settings.
