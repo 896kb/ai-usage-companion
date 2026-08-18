@@ -19,6 +19,8 @@ import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.RingMetric
 import dev.kb896.aiusage.data.RingWindow
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import dev.kb896.aiusage.rear.MascotRenderer
 
 /**
@@ -47,6 +49,9 @@ object AccountSettingsSheet {
     /** Receivers registered by the open sheet, unregistered when it closes. */
     private val sheetReceivers = mutableListOf<android.content.BroadcastReceiver>()
 
+    /** Collectors running for the open sheet, cancelled when it closes. */
+    private val sheetJobs = mutableListOf<kotlinx.coroutines.Job>()
+
     fun show(
         context: Context,
         host: ViewGroup,
@@ -69,6 +74,24 @@ object AccountSettingsSheet {
         }
         root.addView(preview, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        // The preview follows the polls, exactly as the whole-panel preview on the screen
+        // behind it does. It was handed a DashboardState once, at open, and then showed
+        // it for as long as the sheet stayed up — so a sign-in landed, the panel on the
+        // back filled in, and this preview went on showing the empty bars the account had
+        // before it was connected. Nothing new is fetched for this: it is the same flow
+        // the rest of the app already listens to.
+        //
+        // Only the preview's state. Rebuilding the rows on a poll would throw away the
+        // scroll position and whatever control was mid-edit, and nothing in them depends
+        // on a reading — connecting and disconnecting call build() themselves.
+        (context as? androidx.activity.ComponentActivity)?.let { activity ->
+            sheetJobs += activity.lifecycleScope.launch {
+                dev.kb896.aiusage.service.Graph.of(context).repository.state.collect { fresh ->
+                    preview.state = fresh
+                }
+            }
+        }
 
         val rows = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -391,6 +414,11 @@ object AccountSettingsSheet {
             // Leaking a receiver per sheet open would eventually crash the process.
             sheetReceivers.forEach { runCatching { context.unregisterReceiver(it) } }
             sheetReceivers.clear()
+            // Same for the collector: the activity's scope outlives the sheet, so it
+            // would otherwise keep pushing states into a preview that has been removed —
+            // once per sheet ever opened.
+            sheetJobs.forEach { it.cancel() }
+            sheetJobs.clear()
             sheet.animate().translationX(sheet.width.toFloat()).setDuration(SLIDE_MS)
                 .setInterpolator(DecelerateInterpolator())
                 .withEndAction { host.removeView(sheet) }
@@ -463,6 +491,22 @@ object AccountSettingsSheet {
             setHintTextColor(Panel.Palette.DIM)
             typeface = context.resources.getFont(R.font.departure_mono)
             minLines = 3
+        }
+        // A credential already waiting in our own storage, put there by the export
+        // helper over adb. Saying so is the difference between a dialog that looks like
+        // it needs something and one that is ready — and the alternative was the user
+        // hunting for text to paste that macOS cannot hand them anyway, because the two
+        // clipboards are not shared.
+        val staged = java.io.File(context.filesDir, "work-token.json")
+        if (staged.canRead()) {
+            box.addView(android.widget.TextView(context).apply {
+                text = "A credential is staged on this device. Import takes it — " +
+                    "leave the field empty."
+                textSize = 11f
+                setTextColor(Panel.Palette.WORK)
+                typeface = context.resources.getFont(R.font.departure_mono)
+                setPadding(0, 0, 0, dp(context, 8))
+            })
         }
         box.addView(paste)
         box.addView(android.widget.TextView(context).apply {
