@@ -8,7 +8,8 @@ android {
     namespace = "dev.kb896.aiusage"
     compileSdk = 36
 
-    buildFeatures { aidl = true }
+    // buildConfig: BuildConfig.DEBUG gates the diagnostics section — see MainActivity.
+    buildFeatures { aidl = true; buildConfig = true }
 
     defaultConfig {
         applicationId = "dev.kb896.aiusage"

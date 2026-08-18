@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only diagnostics: a raw dump of the payload broadcast to the panel, and an
+  animation harness showing every mascot state at once. Neither is a feature; both are
+  tools for whoever is building this. This file lives in src/debug, so a release build
+  has no reference to MascotStripView and cannot inflate it.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+<View
+            android:id="@+id/rule_3"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp" />
+
+        <TextView
+            android:id="@+id/preview_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="STATE"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/preview_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="24dp"
+            android:textIsSelectable="true"
+            android:textSize="11sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp" />
+
+        <TextView
+            android:id="@+id/mascot_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="MASCOT STATES"
+            android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.MascotStripView
+            android:id="@+id/mascot_strip"
+            android:layout_width="match_parent"
+            android:layout_height="260dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="24dp" />
+
+
+</LinearLayout>

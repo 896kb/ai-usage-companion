@@ -1,0 +1,57 @@
+package dev.kb896.aiusage.ui
+
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.R
+import dev.kb896.aiusage.data.DashboardState
+import dev.kb896.aiusage.data.PanelConfig
+import dev.kb896.aiusage.data.StatePayload
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+
+/**
+ * Developer diagnostics: the payload the panel receives, and every mascot state animating
+ * at once.
+ *
+ * This is the DEBUG implementation. `src/release` holds a no-op with the same signature,
+ * so a release build contains neither these views nor MascotStripView nor this JSON
+ * dump — they are absent, not hidden. Hiding was tried and is worse: a hidden
+ * MascotStripView is still attached, and it posts a redraw every 40ms for as long as it
+ * is, so a release build would animate five mascots nobody can see, forever.
+ */
+object Diagnostics {
+
+    private val pretty = Json { prettyPrint = true }
+    private var preview: TextView? = null
+
+    /** Inflates the panel into [slot]. Call once, from onCreate. */
+    fun install(slot: ViewGroup) {
+        LayoutInflater.from(slot.context).inflate(R.layout.debug_panel, slot, true)
+        preview = slot.findViewById(R.id.preview_text)
+        // The debug panel styles its own views: MainActivity cannot, because these ids
+        // do not exist in a release build.
+        slot.findViewById<TextView>(R.id.preview_label).setTextColor(Panel.Palette.DIM)
+        preview?.setTextColor(Panel.Palette.FG)
+        slot.findViewById<View>(R.id.rule_3).setBackgroundColor(Panel.Palette.RULE)
+        // Same typeface as everything else. The panel is drawn in Departure Mono and a
+        // diagnostics block in the system sans would read as a different application.
+        val mono = slot.context.resources.getFont(R.font.departure_mono)
+        for (id in intArrayOf(R.id.preview_label, R.id.preview_text, R.id.mascot_heading)) {
+            slot.findViewById<TextView>(id).typeface = mono
+        }
+    }
+
+    /** Renders the payload exactly as the panel receives it, config included. */
+    fun render(state: DashboardState, config: PanelConfig) {
+        val view = preview ?: return
+        val raw = StatePayload.encode(state, config)
+        view.text = try {
+            pretty.encodeToString(JsonElement.serializer(), Json.parseToJsonElement(raw))
+        } catch (_: Exception) {
+            raw
+        }
+    }
+}

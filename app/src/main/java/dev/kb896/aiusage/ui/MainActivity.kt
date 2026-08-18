@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import dev.kb896.aiusage.BuildConfig
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -64,8 +66,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var importButton: Button
     private lateinit var showButton: Button
     private lateinit var hideButton: Button
-    private lateinit var previewLabel: TextView
-    private lateinit var previewText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,7 +82,6 @@ class MainActivity : ComponentActivity() {
         UsagePollService.start(this)
 
         lifecycleScope.launch {
-            graph.repository.state.collect { state -> renderPreview(state) }
         }
 
         refreshStatus()
@@ -111,8 +110,7 @@ class MainActivity : ComponentActivity() {
         importButton = findViewById(R.id.import_button)
         showButton = findViewById(R.id.show_button)
         hideButton = findViewById(R.id.hide_button)
-        previewLabel = findViewById(R.id.preview_label)
-        previewText = findViewById(R.id.preview_text)
+        bindDiagnostics()
         bindAdvancedToggle()
         bindGeometrySliders()
 
@@ -130,7 +128,7 @@ class MainActivity : ComponentActivity() {
             statusRunning, statusGranted, statusDisplay,
             recoveryNote, recoveryCommand, recoveryDisplayAbsent,
             grantButton, signInButton, pasteField, importButton,
-            showButton, hideButton, previewLabel, previewText,
+            showButton, hideButton,
         )
         for (v in textViews) v.typeface = mono
 
@@ -139,10 +137,8 @@ class MainActivity : ComponentActivity() {
         recoveryDisplayAbsent.setTextColor(Panel.Palette.FG)
         pasteField.setTextColor(Panel.Palette.FG)
         pasteField.setHintTextColor(Panel.Palette.DIM)
-        previewLabel.setTextColor(Panel.Palette.DIM)
-        previewText.setTextColor(Panel.Palette.FG)
 
-        listOf(R.id.rule_1, R.id.rule_2, R.id.rule_3).forEach {
+        listOf(R.id.rule_1, R.id.rule_2).forEach {
             findViewById<View>(it).setBackgroundColor(Panel.Palette.RULE)
         }
     }
@@ -265,6 +261,18 @@ class MainActivity : ComponentActivity() {
      * and five sliders that can only make a correct layout wrong do not belong in front
      * of someone who just installed the app.
      */
+    /**
+     * Diagnostics, if this variant has any. The release variant's Diagnostics is a no-op
+     * with the same signature, so there is no BuildConfig check here and nothing to
+     * accidentally leave switched on.
+     */
+    private fun bindDiagnostics() {
+        Diagnostics.install(findViewById(R.id.debug_slot))
+        lifecycleScope.launch {
+            graph.repository.state.collect { Diagnostics.render(it, ConfigStore(this@MainActivity).load()) }
+        }
+    }
+
     private fun bindAdvancedToggle() {
         val heading = findViewById<TextView>(R.id.geo_heading)
         val body = findViewById<View>(R.id.geo_body)
@@ -409,15 +417,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun renderPreview(state: DashboardState) {
-        val raw = StatePayload.encode(state)
-        val pretty = try {
-            prettyJson.encodeToString(JsonElement.serializer(), Json.parseToJsonElement(raw))
-        } catch (_: Exception) {
-            raw
-        }
-        previewText.text = pretty + renderCallLog()
-    }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
