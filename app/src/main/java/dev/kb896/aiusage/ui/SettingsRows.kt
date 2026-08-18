@@ -41,11 +41,11 @@ object SettingsRows {
     ).apply { topMargin = topDp }
 
     /**
-     * A colour, edited as hex, with a live swatch.
+     * A colour: a hex field, and a swatch that opens the picker.
      *
-     * Hex rather than a colour wheel: these are being matched to a palette that is itself
-     * written as hex, and typing the value you already have beats hunting for it in a
-     * gradient. The swatch is what makes that bearable.
+     * Both, because they serve different tasks. "Match this exact palette colour" is
+     * typing; "find a green I like" is dragging. Either one alone makes the other job
+     * tedious.
      *
      * [onChange] fires only for a COMPLETE, valid colour. Reacting to every keystroke
      * would push a half-typed "#1D1" to the panel and repaint it in whatever that
@@ -62,6 +62,9 @@ object SettingsRows {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        // Tapping the swatch opens the picker; the field stays for typing a known value.
+        // Two ways in, because the two tasks are different: "match this exact palette
+        // colour" is typing, "find a green I like" is dragging.
         val swatch = View(context).apply {
             setBackgroundColor(initial)
             layoutParams = LinearLayout.LayoutParams(dp(context, 28), dp(context, 28))
@@ -84,6 +87,16 @@ object SettingsRows {
                 }
             }
         }
+        swatch.setOnClickListener {
+            val from = parseColor(field.text?.toString()) ?: initial
+            ColorPickerDialog.show(context, from) { picked ->
+                // Writing the field is what commits the change: its watcher validates the
+                // value and calls onChange, so the picker has exactly one way to apply a
+                // colour rather than a second path that could drift from it.
+                field.setText(String.format("#%06X", picked and 0xFFFFFF))
+            }
+        }
+
         row.addView(field)
         row.addView(swatch)
         parent.addView(label(context, name), rowParams(dp(context, 10)))
