@@ -88,7 +88,7 @@ class RearDialView(context: Context) : View(context) {
     /** Filtered, unlike the mascot: a user's photo is not pixel art and nearest-neighbour
      *  scaling of one looks like a mistake rather than a style. */
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private var artPath: String? = null
+    private var artKey: String? = null
     private var artBitmap: android.graphics.Bitmap? = null
 
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
@@ -665,12 +665,30 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun customArt(): android.graphics.Bitmap? {
         val path = config.art.imagePath ?: return null
-        if (path != artPath) {
-            artPath = path
-            artBitmap = try {
+
+        // Keyed on the file's IDENTITY, not just its name.
+        //
+        // There is one art slot, so choosing a new image overwrites panel-art.png and
+        // the path never changes. Caching on the path alone therefore pins the first
+        // image forever in any process that lives long enough — which the panel does not
+        // (:rear is destroyed and recreated constantly, re-decoding by accident) but the
+        // app's preview does. The bug was invisible on the back and permanent on the
+        // front, until an app restart.
+        val file = java.io.File(path)
+        val key = "$path:${file.lastModified()}:${file.length()}"
+        if (key != artKey) {
+            artKey = key
+            // Decode FIRST, then release the old one — and only if the new one arrived.
+            // Recycling up front would destroy a working image whenever a decode failed,
+            // and would free a bitmap a draw in flight might still be holding.
+            val decoded = try {
                 android.graphics.BitmapFactory.decodeFile(path)
             } catch (_: Exception) {
                 null
+            }
+            if (decoded != null) {
+                artBitmap?.recycle()
+                artBitmap = decoded
             }
         }
         return artBitmap

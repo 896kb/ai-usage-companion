@@ -365,6 +365,7 @@ class MainActivity : ComponentActivity() {
         val config = store.load().copy(art = ArtConfig(imagePath = path))
         store.save(config)
         graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+        refreshPreview()
         toast("Artwork set")
     }
 
@@ -446,7 +447,6 @@ class MainActivity : ComponentActivity() {
             val config = store.load().copy(ringLayout = layout)
             store.save(config)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
-            refreshPreview()
             refreshPreview()
         }
 
