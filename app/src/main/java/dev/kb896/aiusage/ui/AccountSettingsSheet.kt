@@ -208,6 +208,18 @@ object AccountSettingsSheet {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
             Gravity.TOP))
 
+        // Inset below the status bar. The sheet covers the whole host, including the
+        // strip the system draws the clock and battery into, so its first row — BACK —
+        // landed underneath them. Taken from the window rather than hard-coded: the
+        // status bar is a different height on a device with a cutout, and the main
+        // screen only avoids this by having a 24dp padding that happens to be enough.
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(sheet) { view, insets ->
+            val top = insets.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars()).top
+            view.setPadding(0, top, 0, 0)
+            insets
+        }
+
         sheet.post {
             sheet.translationX = sheet.width.toFloat()
             sheet.animate().translationX(0f).setDuration(SLIDE_MS)
