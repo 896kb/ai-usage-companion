@@ -19,6 +19,13 @@ object MascotRenderer {
     /** Anthropic orange, as baked into MascotFrames for headband, dumbbells and pole. */
     const val ACCENT_ORANGE = 0xFFD97757.toInt()
 
+    /**
+     * The mascot's body colour as MascotFrames bakes it. Recognised by value so a
+     * configured colour can be swapped in at draw time — the frames are generated data
+     * and are not regenerated per user.
+     */
+    const val BODY_GREEN = 0xFFB5BD68.toInt()
+
     /** The second account's accent, swapped in for the first's. */
     const val ACCENT_WORK = 0xFF006EFF.toInt()
 
@@ -111,6 +118,7 @@ object MascotRenderer {
         accent: Int = ACCENT_ORANGE,
         dead: Boolean = false,
         holes: Boolean = false,
+        bodyColor: Int = BODY_GREEN,
     ) {
         val w = h * clip.aspect
         val frame = clip.frames[((nowMs / clip.frameMs) % clip.frames.size).toInt()]
@@ -138,7 +146,11 @@ object MascotRenderer {
             // Eyes are drawn in the background colour, so on a dead mascot they would
             // simply vanish rather than become crosses. Skipped here, stroked below.
             if (dead && r.color == Panel.Palette.BG) continue
-            body.color = if (r.color == ACCENT_ORANGE) accent else r.color
+            body.color = when (r.color) {
+                ACCENT_ORANGE -> accent
+                BODY_GREEN -> bodyColor
+                else -> r.color
+            }
             canvas.drawRect(
                 x + r.x * w, top + r.y * h,
                 x + (r.x + r.w) * w, top + (r.y + r.h) * h,

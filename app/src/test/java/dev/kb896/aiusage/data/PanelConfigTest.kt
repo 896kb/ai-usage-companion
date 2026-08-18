@@ -65,4 +65,44 @@ class PanelConfigTest {
         assertEquals(0, d.rings[0].account)
         assertEquals(1, d.rings[1].account)
     }
+
+    // ---- per-account appearance ------------------------------------------------------
+
+    /**
+     * null means "use the built-in", never "blank". Storing the resolved value at first
+     * write would freeze today's defaults into every config ever saved, and a later
+     * change to a default would reach nobody.
+     */
+    @Test fun `an unset style leaves every field null`() {
+        val d = PanelConfig.DEFAULT.styleFor(0)
+        assertEquals(null, d.label)
+        assertEquals(null, d.accent)
+        assertEquals(null, d.mascotBody)
+        assertEquals(null, d.mascotAccent)
+    }
+
+    /** A short or absent list must behave exactly like an unset entry, not throw. */
+    @Test fun `a missing entry is the same as an unset one`() {
+        val c = PanelConfig.DEFAULT.copy(accounts = emptyList())
+        assertEquals(AccountStyle(), c.styleFor(0))
+        assertEquals(AccountStyle(), c.styleFor(7))
+    }
+
+    @Test fun `styles round trip`() {
+        val c = PanelConfig.DEFAULT.copy(accounts = listOf(
+            AccountStyle(label = "HOME", accent = 0xFF00FF00.toInt()),
+            AccountStyle(mascotBody = 0xFF123456.toInt(), mascotAccent = 0xFF654321.toInt()),
+        ))
+        val back = PanelConfig.decode(PanelConfig.encode(c))
+        assertEquals("HOME", back.styleFor(0).label)
+        assertEquals(0xFF123456.toInt(), back.styleFor(1).mascotBody)
+        assertEquals(null, back.styleFor(0).mascotBody)
+    }
+
+    // ---- bar order -------------------------------------------------------------------
+
+    /** The order is a WHITELIST: a kind left out is hidden, not sorted last. */
+    @Test fun `bar order defaults to all three, in reading order`() {
+        assertEquals(listOf("session", "weekly_all", "weekly_scoped"), PanelConfig.DEFAULT.barOrder)
+    }
 }

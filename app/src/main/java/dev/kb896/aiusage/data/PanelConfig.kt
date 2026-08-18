@@ -63,6 +63,26 @@ data class RingLayout(
 }
 
 /**
+ * One account's appearance. Identity — which credential, which slug — is not here.
+ *
+ * Every field is nullable and null means "use the built-in", NOT "blank". That is what
+ * lets a default change later and reach everyone who never overrode it; storing the
+ * resolved value at first write would freeze today's defaults into every config ever
+ * saved.
+ *
+ * @param accent drives this account's ring, heading, row labels and plan tag together
+ * @param mascotBody the mascot's body colour
+ * @param mascotAccent its hardware — headband, dumbbells, flag pole
+ */
+@Serializable
+data class AccountStyle(
+    val label: String? = null,
+    val accent: Int? = null,
+    val mascotBody: Int? = null,
+    val mascotAccent: Int? = null,
+)
+
+/**
  * Bottom art. [imagePath] null means the built-in mark.
  *
  * Pan and zoom are fractions of the art REGION, not of the panel, so they survive a
@@ -109,7 +129,14 @@ data class PanelConfig(
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     val art: ArtConfig = ArtConfig(),
+    /** Appearance per account, by index. Short lists are fine — a missing entry is
+     *  the same as an entry of all-nulls: use the built-ins. */
+    val accounts: List<AccountStyle> = listOf(AccountStyle(), AccountStyle()),
 ) {
+
+    /** This account's appearance, or an all-defaults one if it has no entry. */
+    fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
+
     companion object {
         val DEFAULT = PanelConfig()
 

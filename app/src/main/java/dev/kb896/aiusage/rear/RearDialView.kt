@@ -107,6 +107,11 @@ class RearDialView(context: Context) : View(context) {
      * to — two identical green "MAX 5X" tags on a panel whose whole colour language is
      * "this hue means this account".
      */
+    /** Clock and battery. Dim: context, not a reading. */
+    private val extras = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 18f; typeface = label.typeface; color = Panel.Palette.DIM
+    }
+
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
         textAlign = Paint.Align.RIGHT
@@ -250,6 +255,7 @@ class RearDialView(context: Context) : View(context) {
         canvas.save()
         canvas.translate(dx, dy)
         drawCanvasSide(canvas)
+        drawExtras(canvas)
         canvas.restore()
 
         // Next frame only while something is still moving. When everything has settled
@@ -257,6 +263,14 @@ class RearDialView(context: Context) : View(context) {
         // always-on panel must not hold a 60fps loop for a display that is not changing.
         if (animating) postInvalidateOnAnimation()
     }
+
+    /** This account's configured accent, falling back to its built-in. */
+    private fun accentOf(account: Account): Int =
+        config.styleFor(account.ordinal).accent ?: account.accent
+
+    /** Its configured label, falling back to its built-in. */
+    private fun labelOf(account: Account): String =
+        config.styleFor(account.ordinal).label?.takeIf { it.isNotBlank() } ?: account.label
 
     /** @param breath radial burn-in offset, added to the ring's radius. See onDraw. */
     private fun drawRing(canvas: Canvas, g: RingGeometry, spec: RingSpec, breath: Float = 0f) {
@@ -307,7 +321,7 @@ class RearDialView(context: Context) : View(context) {
         arc.color = when {
             status.health != Health.OK -> Panel.Palette.DIM
             spec.metric == RingMetric.UTILIZATION -> RampColor.at(shown, config.rampColors)
-            else -> account.accent
+            else -> accentOf(account)
         }
         canvas.drawArc(scratch, -90f, 360f * shown, false, arc)
     }
@@ -334,6 +348,49 @@ class RearDialView(context: Context) : View(context) {
      * The mark is tinted to the same green from the same constant, not a second literal:
      * title and logo drifting apart is exactly what a copied hex value causes.
      */
+    /**
+     * Clock and battery, on the masthead line, flanking the title.
+     *
+     * Placed there because it is the only band on the panel with slack in it: the bar
+     * rows are packed to fit and the ring column is the lens area. Both are optional and
+     * neither shifts anything when off.
+     *
+     * Dim rather than accent-coloured. They are context, not readings — the panel is
+     * about usage, and a bright clock would compete with the numbers it sits above.
+     */
+    private fun drawExtras(canvas: Canvas) {
+        if (config.showClock) {
+            val now = java.util.Calendar.getInstance()
+            val text = String.format(
+                "%02d:%02d",
+                now.get(java.util.Calendar.HOUR_OF_DAY),
+                now.get(java.util.Calendar.MINUTE),
+            )
+            extras.textAlign = Paint.Align.LEFT
+            canvas.drawText(text, CONTENT_LEFT, TITLE_BASELINE, extras)
+        }
+        if (config.showBattery) {
+            // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
+            // registering a receiver: this view is destroyed and recreated constantly,
+            // and a receiver would have to be unregistered on a lifecycle this view does
+            // not own. A sticky read is a snapshot with nothing to leak.
+            val level = batteryPercent()
+            if (level >= 0) {
+                extras.textAlign = Paint.Align.RIGHT
+                canvas.drawText("$level%", CONTENT_RIGHT, TITLE_BASELINE, extras)
+            }
+        }
+    }
+
+    private fun batteryPercent(): Int {
+        val intent = context.registerReceiver(
+            null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        ) ?: return -1
+        val level = intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+        return if (level < 0 || scale <= 0) -1 else level * 100 / scale
+    }
+
     private fun drawTitle(canvas: Canvas) {
         // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
         // maker's mark follows, so the masthead and the artwork share one axis instead
@@ -372,7 +429,16 @@ class RearDialView(context: Context) : View(context) {
             // the personal account only, so the work account's window was invisible.
             // The two accounts' 5h windows start independently, on each account's first
             // use, so one countdown can never stand for both.
-            val rows = status?.snapshot?.windows.orEmpty()
+            // Rows in the configured order, and ONLY the configured ones.
+            //
+            // Ordered by looking each configured kind up rather than by sorting the
+            // response: a window the API stops sending simply does not appear, and a
+            // window the config omits is hidden rather than pushed to the bottom. The
+            // config is a whitelist, not a preference.
+            val windows = status?.snapshot?.windows.orEmpty()
+            val rows = config.barOrder.mapNotNull { wire ->
+                windows.firstOrNull { it.kind.wire == wire }
+            }
             Triple(account, status, rows)
         }
         val contentH = blocks.fold(0f) { acc, (_, _, rows) ->
@@ -390,18 +456,18 @@ class RearDialView(context: Context) : View(context) {
         var y = regionTop + gap
 
         for ((account, status, rows) in blocks) {
-            heading.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
-            canvas.drawText(account.label, left, y, heading)
+            heading.color = if (status?.health == Health.OK) accentOf(account) else Panel.Palette.DIM
+            canvas.drawText(labelOf(account), left, y, heading)
             // Plan bracket, right-aligned to the value column. Static information, so
             // it is never ramp- or health-coloured: it says what you are entitled to,
             // not how much of it is left. Only the tier is shown — the profile response
             // also carries a name, an email and an org, none of which belong on a
             // panel that faces outward from the back of the phone.
             status?.planTier?.let {
-                planTag.color = if (status.health == Health.OK) account.accent else Panel.Palette.DIM
+                planTag.color = if (status.health == Health.OK) accentOf(account) else Panel.Palette.DIM
                 canvas.drawText(it, right, y, planTag)
             }
-            val tagX = left + heading.measureText(account.label) + 14f
+            val tagX = left + heading.measureText(labelOf(account)) + 14f
             // Kept alongside the dimming: grey alone says "something is wrong" without
             // saying what, which is what made an all-grey panel read as broken rather
             // than informative. The tag names the actual failure.
@@ -416,7 +482,7 @@ class RearDialView(context: Context) : View(context) {
                 // go grey when it cannot be vouched for — same rule as the heading and
                 // the bar. Previously they were permanently DIM, which read as
                 // "disabled" even on a healthy account.
-                label.color = if (status?.health == Health.OK) account.accent else Panel.Palette.DIM
+                label.color = if (status?.health == Health.OK) accentOf(account) else Panel.Palette.DIM
                 canvas.drawText(w.label, left, y + barH - 4f, label)
                 val barLeft = BAR_LEFT
                 val barRight = BAR_RIGHT
@@ -553,8 +619,9 @@ class RearDialView(context: Context) : View(context) {
             // at 83ms.
             MascotRenderer.draw(
                 canvas, clip, now, x, top, h, mascotPaint, deadEye,
-                accent = if (account == Account.WORK) MascotRenderer.ACCENT_WORK
-                    else MascotRenderer.ACCENT_ORANGE,
+                accent = mascotAccentOf(account),
+                bodyColor = config.styleFor(account.ordinal).mascotBody
+                    ?: MascotRenderer.BODY_GREEN,
                 dead = accountMascot(account) == MascotMood.DEAD,
             )
         }
@@ -587,6 +654,11 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun accentFor(account: Account, color: Int): Int =
         if (account == Account.WORK && color == ACCENT_ORANGE) ACCENT_WORK else color
+
+    /** The mascot's hardware colour: configured, else the account's built-in. */
+    private fun mascotAccentOf(account: Account): Int =
+        config.styleFor(account.ordinal).mascotAccent
+            ?: if (account == Account.WORK) MascotRenderer.ACCENT_WORK else MascotRenderer.ACCENT_ORANGE
 
     private fun accountMascot(account: Account): String =
         state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.WALK
