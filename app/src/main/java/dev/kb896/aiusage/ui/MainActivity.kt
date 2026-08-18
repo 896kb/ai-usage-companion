@@ -472,7 +472,16 @@ class MainActivity : ComponentActivity() {
         Button(this).apply {
             text = "Reset every setting to its default"
             textSize = 14f
-            setTextColor(Panel.Palette.CRIT)
+            // The one filled button in the app. Everything else is text on the panel's
+            // own ground, so a solid red block cannot be mistaken for one of them — which
+            // matters for the only control here that destroys something. Red text alone
+            // said the same thing far too quietly, in a list where a dim label and a
+            // bright one are both just labels.
+            setTextColor(android.graphics.Color.WHITE)
+            background = getDrawable(R.drawable.button_danger)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(
+                R.drawable.ic_reset, 0, 0, 0)
+            compoundDrawablePadding = (10 * resources.displayMetrics.density).toInt()
             typeface = resources.getFont(R.font.departure_mono)
             setOnClickListener { confirmResetEverything() }
             advanced.addView(this, LinearLayout.LayoutParams(

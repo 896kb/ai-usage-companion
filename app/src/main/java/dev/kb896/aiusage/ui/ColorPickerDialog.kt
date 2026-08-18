@@ -7,21 +7,22 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.SeekBar
 import android.widget.TextView
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 
 /**
- * Pick a colour by hue, saturation and value, or from the palette the panel is drawn in.
+ * Pick a colour off a square, a hue strip, the panel's own palette, or by typing it.
  *
- * HSV rather than RGB sliders. Dragging R, G and B to reach "the same green but darker"
- * means moving three numbers in concert and is close to impossible by feel; in HSV it is
- * one slider. The hex field beside the swatch stays, because typing a value you already
- * have still beats hunting for it.
+ * It was three sliders — hue, saturation, brightness — which is honest about the model
+ * and miserable in use: no bar shows what the other two are doing, so "the same green but
+ * warmer" is found by dragging, glancing at a swatch elsewhere, dragging back, repeating.
+ * The square shows every colour one hue can make at once, and the answer is wherever your
+ * finger lands. See [ColorField].
  *
- * The presets are the panel's own palette and ramp. Most choices here are "make this
- * match that", and the set of things worth matching is small and already named.
+ * The hex field stays, because typing a value you already have still beats hunting for
+ * it, and so do the presets: most choices here are "make this match that", and the set of
+ * things worth matching is small and already named.
  */
 object ColorPickerDialog {
 
@@ -61,37 +62,60 @@ object ColorPickerDialog {
             setTextColor(Panel.Palette.FG)
             typeface = context.resources.getFont(R.font.departure_mono)
         }
-        root.addView(preview)
-        root.addView(field, params(context, 8))
-
         fun current() = Color.HSVToColor(hsv) or (0xFF shl 24)
 
-        var syncing = false
-        fun refresh() {
-            preview.setBackgroundColor(current())
-            syncing = true
-            field.setText(hex(current()))
-            syncing = false
+        val square = ColorField.SatVal(context).apply {
+            hue = hsv[0]
+            place(hsv[1], hsv[2])
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 170)
+            ).apply { topMargin = dp(context, 10) }
         }
-        // Typing drives the sliders, dragging drives the field, and the guard stops the
+        val hueBar = ColorField.Hue(context).apply {
+            hue = hsv[0]
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 26)
+            ).apply { topMargin = dp(context, 8) }
+        }
+
+        root.addView(preview)
+        root.addView(square)
+        root.addView(hueBar)
+        root.addView(field, params(context, 8))
+
+        var syncing = false
+        // Whatever moved is the source of truth; everything else is caught up to it.
+        // [from] is left out of that, because writing back to the control under the
+        // finger is how a drag ends up fighting itself.
+        fun refresh(from: View? = null) {
+            preview.setBackgroundColor(current())
+            if (from !== square) { square.hue = hsv[0]; square.place(hsv[1], hsv[2]) }
+            else square.hue = hsv[0]
+            if (from !== hueBar) hueBar.hue = hsv[0]
+            if (from !== field) {
+                syncing = true
+                field.setText(hex(current()))
+                syncing = false
+            }
+        }
+        // Typing drives the square, dragging drives the field, and the guard stops the
         // two chasing each other — without it, setText from a drag re-parses and re-seeds
-        // the very sliders being dragged.
+        // the very control being dragged.
         field.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(e: android.text.Editable?) {
                 if (syncing) return
                 val parsed = parse(e?.toString()) ?: return
                 Color.colorToHSV(parsed, hsv)
-                preview.setBackgroundColor(parsed)
+                refresh(from = field)
             }
             override fun beforeTextChanged(c: CharSequence?, a: Int, b: Int, d: Int) = Unit
             override fun onTextChanged(c: CharSequence?, a: Int, b: Int, d: Int) = Unit
         })
 
-        // Hue is 0..360, the other two 0..100 — the slider works in whole numbers, and a
-        // degree of hue or a percent of saturation is finer than the eye resolves here.
-        slider(context, root, "HUE", 360, (hsv[0]).toInt()) { hsv[0] = it.toFloat(); refresh() }
-        slider(context, root, "SATURATION", 100, (hsv[1] * 100).toInt()) { hsv[1] = it / 100f; refresh() }
-        slider(context, root, "BRIGHTNESS", 100, (hsv[2] * 100).toInt()) { hsv[2] = it / 100f; refresh() }
+        square.onPick = { sat, value -> hsv[1] = sat; hsv[2] = value; refresh(from = square) }
+        // The square is repainted for the new hue as the strip moves, so the colour under
+        // the cursor is always the one the swatch is showing.
+        hueBar.onPick = { h -> hsv[0] = h; refresh(from = hueBar) }
 
         root.addView(text(context, "FROM THE PALETTE", Panel.Palette.DIM, 11f), params(context, 14))
         val presets = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -105,6 +129,7 @@ object ColorPickerDialog {
                     Color.colorToHSV(colour, hsv)
                     refresh()
                 }
+
             })
         }
         root.addView(presets, params(context, 4))
@@ -115,33 +140,6 @@ object ColorPickerDialog {
             // not reached them, and taking the sliders would silently discard it.
             .setPositiveButton("Use it") { _, _ -> onPick(parse(field.text?.toString()) ?: current()) }
             .setNegativeButton("Cancel", null))
-    }
-
-    private fun slider(
-        context: Context,
-        parent: LinearLayout,
-        name: String,
-        max: Int,
-        value: Int,
-        onChange: (Int) -> Unit,
-    ) {
-        parent.addView(text(context, name, Panel.Palette.DIM, 11f), params(context, 12))
-        parent.addView(SeekBar(context).apply {
-            // The same square thumb and palette track as the ring sliders. A round
-            // platform thumb here would be the one control that came from somewhere else.
-            progressDrawable = context.getDrawable(R.drawable.seek_track)
-            thumb = context.getDrawable(R.drawable.seek_thumb)
-            thumbOffset = 0
-            this.max = max
-            progress = value.coerceIn(0, max)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
-                    if (fromUser) onChange(p)
-                }
-                override fun onStartTrackingTouch(b: SeekBar) = Unit
-                override fun onStopTrackingTouch(b: SeekBar) = Unit
-            })
-        }, params(context, 2))
     }
 
     private fun text(context: Context, value: String, colour: Int, size: Float) =

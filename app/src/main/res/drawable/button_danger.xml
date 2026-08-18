@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The reset button's background. Square, like everything else here, and the only filled
+  button in the app — which is the point: every other control is text on the panel's own
+  dark ground, so a solid red block is unmistakably not one of them.
+
+  Palette.CRIT #BD2C40, repeated because a drawable cannot read a Kotlin object. The
+  pressed state is the same red darkened, rather than a ripple, since a circular ripple
+  on a square button is the same mismatch the seek bar's thumb had.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#8A2030" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#BD2C40" />
+        </shape>
+    </item>
+</selector>
