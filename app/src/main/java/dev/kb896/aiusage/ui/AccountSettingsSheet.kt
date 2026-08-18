@@ -293,21 +293,42 @@ object AccountSettingsSheet {
                         values.forEach { it.text = if (masked) MASK else it.tag as? String }
                     }
                     lateinit var toggle: android.widget.Button
+
+                    // The timer is posted to the view, so it dies with the view. A
+                    // Handler kept elsewhere would outlive a closed sheet and remask a
+                    // screen that no longer exists.
+                    val hideNow = Runnable {
+                        Unlock.lock()
+                        applyMask(true)
+                        toggle.text = "REVEAL  ›"
+                    }
+
                     toggle = SettingsRows.navigationButton(rows,
                         if (Unlock.isUnlocked()) "HIDE" else "REVEAL") {
                         if (Unlock.isUnlocked()) {
-                            Unlock.lock()
-                            applyMask(true)
-                            toggle.text = "REVEAL  ›"
+                            rows.removeCallbacks(hideNow)
+                            hideNow.run()
                         } else {
                             val activity = context as? Activity ?: return@navigationButton
                             Unlock.require(activity, "To show this account's details") { ok ->
                                 if (ok) {
                                     applyMask(false)
                                     toggle.text = "HIDE  ›"
+                                    // Auto-hide, for the case none of the other triggers
+                                    // catch: no lock, no hide, no navigation — a phone
+                                    // simply put down with the details on screen.
+                                    rows.removeCallbacks(hideNow)
+                                    rows.postDelayed(hideNow, Unlock.WINDOW_MS)
                                 }
                             }
                         }
+                    }
+
+                    // Already unlocked when the sheet was rebuilt — a colour edit
+                    // rebuilds these rows — so the countdown continues from what is left
+                    // of the window rather than starting again.
+                    if (Unlock.isUnlocked()) {
+                        rows.postDelayed(hideNow, Unlock.remainingMs())
                     }
 
                     // The screen going dark with a name on it, waiting to be read by

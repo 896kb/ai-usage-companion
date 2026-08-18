@@ -24,13 +24,18 @@ import android.os.SystemClock
 object Unlock {
 
     /**
-     * How long an unlock lasts.
+     * How long an unlock lasts, at most.
      *
-     * Cleared on background and on screen-off too — see [lock]. This is the ceiling for
-     * the case where neither happens: the phone stays awake on the settings screen while
-     * someone else picks it up.
+     * Thirty seconds, at the user's direction. It is long enough to read a name and an
+     * organisation and short enough that a phone put down mid-screen does not sit there
+     * displaying them — which is the whole failure this gate addresses, and the one case
+     * the other triggers miss: no lock, no hide, no navigation, just a phone left face-up
+     * on a desk.
+     *
+     * The other triggers — backgrounding, screen-off, leaving the account — all still
+     * fire earlier when they happen. This is the ceiling when none of them does.
      */
-    private const val WINDOW_MS = 2 * 60 * 1000L
+    const val WINDOW_MS = 30 * 1000L
 
     private var unlockedUntil = 0L
 
@@ -57,6 +62,14 @@ object Unlock {
             android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF))
         return receiver
     }
+
+    /**
+     * What is left of the window, for a caller re-arming its own timer.
+     *
+     * Rebuilding the rows must not extend the unlock: an edit that happens to rebuild
+     * them every keystroke would otherwise hold the details open indefinitely.
+     */
+    fun remainingMs(): Long = (unlockedUntil - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
 
     /** Forget the unlock: on leaving the screen, on backgrounding, on screen-off. */
     fun lock() {
