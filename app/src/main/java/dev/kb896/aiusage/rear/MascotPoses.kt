@@ -172,6 +172,16 @@ internal object MascotPoses {
      */
     private const val SEAM = 2f
 
+    /**
+     * How far the hem is drawn in from each side of the body.
+     *
+     * At the body's full width the hem was a straight-sided box with a wavy floor — the
+     * outline went down, turned a hard right angle, and rippled. Bringing it in gives the
+     * silhouette a shoulder on each side, so the shape TAPERS into its tail instead of
+     * ending in one, which is most of what separates a ghost from a rectangle.
+     */
+    private const val GHOST_HEM_INSET = 9f
+
     private fun ghostFrames(): List<List<MascotFrames.Rect>> =
         List(GHOST_FRAMES) { i -> ghostFrame(i.toFloat() / GHOST_FRAMES) }
 
@@ -196,7 +206,8 @@ internal object MascotPoses {
         // a turn behind the last, so the wave TRAVELS sideways along the bottom. Move
         // them together and it is only a second bob; make them too wide and the edge
         // steps rather than ripples.
-        val lobe = GHOST_BODY_W / GHOST_LOBES
+        val hemW = GHOST_BODY_W - 2f * GHOST_HEM_INSET
+        val lobe = hemW / GHOST_LOBES
         for (i in 0 until GHOST_LOBES) {
             val wave = sin(2.0 * PI * phase + i * 2.0 * PI / GHOST_LOBES).toFloat()
             // Started slightly INSIDE the body rather than flush against its bottom
@@ -206,7 +217,7 @@ internal object MascotPoses {
             // other, and a hairline of background shows between them. It read as the
             // hem being a separate object floating under the ghost, which is exactly
             // what it must not look like.
-            add(GHOST_L + i * lobe, top + GHOST_BODY_H - SEAM, lobe,
+            add(GHOST_L + GHOST_HEM_INSET + i * lobe, top + GHOST_BODY_H - SEAM, lobe,
                 SEAM + GHOST_HEM * (0.25f + 0.75f * (wave + 1f) / 2f), BODY)
         }
         return out
