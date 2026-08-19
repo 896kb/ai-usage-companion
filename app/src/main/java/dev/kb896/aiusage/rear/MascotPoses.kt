@@ -77,16 +77,16 @@ internal object MascotPoses {
         // the body pumps rather than breathes.
         val breath = 2f * sin(2.0 * PI * phase).toFloat()
         val top = 72f - breath
-        val floor = 120f
+        val floor = 128f
 
         fun add(x: Float, y: Float, w: Float, h: Float, c: Int) =
             out.add(MascotFrames.Rect(x / SLEEP_W, y / SLEEP_H, w / SLEEP_W, h / SLEEP_H, c))
 
-        // Two legs, not four, and short. Folded under a sleeping animal is what they
-        // should look like; four evenly spaced stubs under a wide body read as teeth.
-        // Drawn before the body so it overlaps them rather than sitting on them.
-        add(SLEEP_L + 8f, floor, LEG_W, 128f - floor, BODY)
-        add(SLEEP_L + 30f, floor, LEG_W, 128f - floor, BODY)
+        // No legs at all. They went from four stubs to two and were still wrong: a
+        // sleeping animal's legs are underneath it, which from the side means not
+        // visible. Anything drawn below the body reads as standing on them however
+        // short they are, and the body meeting the ground is the pose.
+        //
         // Curled: narrower than standing, not merely shorter. Squashing the body at its
         // full standing width produced a slab with eyes — an animal lying down draws its
         // sides IN, and without that the pose read as the standing mascot pushed down
@@ -163,6 +163,15 @@ internal object MascotPoses {
     private const val GHOST_BOB = 3f
     private const val GHOST_HEM = 26f
 
+    /**
+     * How far the hem is tucked up behind the body, to kill the seam between them.
+     *
+     * Two units of a hundred, which is under a pixel wherever this is drawn — enough to
+     * guarantee the rectangles overlap after rounding, small enough that the hem's own
+     * shape is unchanged.
+     */
+    private const val SEAM = 2f
+
     private fun ghostFrames(): List<List<MascotFrames.Rect>> =
         List(GHOST_FRAMES) { i -> ghostFrame(i.toFloat() / GHOST_FRAMES) }
 
@@ -175,9 +184,11 @@ internal object MascotPoses {
             out.add(MascotFrames.Rect(x / GHOST_W, y / GHOST_H, w / GHOST_W, h / GHOST_H, c))
 
         add(GHOST_L, top, GHOST_BODY_W, GHOST_BODY_H, BODY)
-        // Nubs raised above where they stand, which is the whole "boo" of it.
-        add(GHOST_L - 16f, top + 8f, 16f, 24f, BODY)
-        add(GHOST_L + GHOST_BODY_W, top + 8f, 16f, 24f, BODY)
+        // No nubs. Raising them read as "boo" in the abstract and as the standing
+        // mascot with a frilly hem on the panel — arms are the most solid, most
+        // physical thing the character has, and a ghost that still has them is just the
+        // animal wearing a sheet. The silhouette does the work instead: a smooth body
+        // that ends in a hem, with nothing sticking out of it.
         add(GHOST_L + 12f, top + 16f, EYE_W, 13f, EYE)
         add(GHOST_L + 52f, top + 16f, EYE_W, 13f, EYE)
 
@@ -188,8 +199,15 @@ internal object MascotPoses {
         val lobe = GHOST_BODY_W / GHOST_LOBES
         for (i in 0 until GHOST_LOBES) {
             val wave = sin(2.0 * PI * phase + i * 2.0 * PI / GHOST_LOBES).toFloat()
-            add(GHOST_L + i * lobe, top + GHOST_BODY_H, lobe,
-                GHOST_HEM * (0.25f + 0.75f * (wave + 1f) / 2f), BODY)
+            // Started slightly INSIDE the body rather than flush against its bottom
+            // edge. Flush, the two rectangles share an edge at a fractional coordinate,
+            // and once that is scaled to the panel the shared edge lands mid-pixel:
+            // the rasteriser rounds the body's bottom one way and the hem's top the
+            // other, and a hairline of background shows between them. It read as the
+            // hem being a separate object floating under the ghost, which is exactly
+            // what it must not look like.
+            add(GHOST_L + i * lobe, top + GHOST_BODY_H - SEAM, lobe,
+                SEAM + GHOST_HEM * (0.25f + 0.75f * (wave + 1f) / 2f), BODY)
         }
         return out
     }

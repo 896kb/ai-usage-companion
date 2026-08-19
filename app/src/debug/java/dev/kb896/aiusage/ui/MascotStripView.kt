@@ -121,7 +121,14 @@ class MascotStripView @JvmOverloads constructor(
             // alone made every figure ~470px wide in a 244px cell on this display, so
             // they overlapped into a single blob — a clip's width is height x aspect,
             // and aspect is close to 1, so a tall strip is also a wide one.
-            val h = minOf(availableH, (cell * CELL_FILL) / c.clip.aspect)
+            //
+            // Scaled by the clip's own factor, the way the panel and the settings
+            // preview both do it. Without it every BOX is drawn the same height, so a
+            // clip carrying scenery renders its character small — which is the exact
+            // thing `scale` exists to correct. The sleeping pose reserves the top third
+            // of its box for the Zs and came out visibly smaller than the rest, in the
+            // one view whose whole job is showing what the panel will draw.
+            val h = minOf(availableH * c.clip.scale, (cell * CELL_FILL) / c.clip.aspect)
             val w = h * c.clip.aspect
             val x = col * cell + (cell - w) / 2f
             MascotRenderer.draw(
