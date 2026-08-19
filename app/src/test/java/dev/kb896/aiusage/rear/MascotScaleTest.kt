@@ -58,18 +58,64 @@ class MascotScaleTest {
         }
     }
 
+    /** An eye is one pixel. Null when a clip has none this can pick out. */
+    private fun eyePixel(clip: MascotFrames.Clip) =
+        clip.frames.flatten().firstOrNull { MascotFrames.isEye(it.color) }?.w
+
     /**
-     * Every rig really is on the 11-unit grid the derivation assumes. If a future clip
-     * is drawn at some other pixel size, its box height stops meaning what this file
-     * thinks it means, and everything above would keep passing while looking wrong.
+     * The commonest body rectangle is one pixel — a second ruler, for clips whose eyes
+     * cannot be identified.
+     *
+     * Commonest among BODY-COLOURED rects specifically. Over all colours it finds the
+     * confetti's 8-unit scraps and the flag's 5-unit checkers instead, which is how this
+     * looked like a dead end at first.
+     */
+    private fun bodyPixel(clip: MascotFrames.Clip) = clip.frames.flatten()
+        .filter { it.color == MascotRenderer.BODY_GREEN }
+        .groupingBy { it.w }.eachCount()
+        .maxByOrNull { it.value }?.key
+
+    /**
+     * Every clip really is on the 11-unit grid the derivation assumes, measured against
+     * something in its own artwork rather than against the number it declares.
+     *
+     * Two rulers, because neither covers everything and between them they cover all of
+     * it. The flag's eyes are pure black — the same colour as its checkered cloth — so
+     * nothing can pick them out, and it is verified by its body pixel. The sleeping and
+     * ghost poses were written by hand and their bodies are not on the pixel grid at all
+     * (the ghost has no body-green rect whatsoever), so they are verified by their eyes.
+     * The other three satisfy both.
+     *
+     * If a future clip is drawn at some other pixel size, its declared box height stops
+     * meaning what the derivation thinks it means — and every other test here would keep
+     * passing while the mascot rendered at the wrong size.
      */
     @Test fun `every clip is drawn on the same grid`() {
         for (clip in MascotFrames.CLIPS) {
-            val eye = clip.frames.flatten().firstOrNull { MascotFrames.isEye(it.color) }
-                ?: continue
-            val boxWidth = MascotFrames.UNIT / eye.w
-            assertEquals("${clip.name}: eye is not one 11-unit pixel wide",
-                boxWidth / clip.aspect, clip.boxHeight, 0.5f)
+            val boxWidth = clip.boxHeight * clip.aspect
+            val rulers = listOfNotNull(
+                eyePixel(clip)?.let { "eye" to it * boxWidth },
+                bodyPixel(clip)?.let { "body" to it * boxWidth },
+            )
+            val agreeing = rulers.filter { kotlin.math.abs(it.second - MascotFrames.UNIT) < 0.3f }
+            assertTrue(
+                "${clip.name}: nothing in its artwork measures one ${MascotFrames.UNIT}-unit " +
+                    "pixel against a box of ${clip.boxHeight} — rulers read $rulers",
+                agreeing.isNotEmpty(),
+            )
         }
+    }
+
+    /**
+     * The walk borrows the standing clip's scale, so it has to be the standing box.
+     *
+     * WalkRig is procedural and carries no Clip of its own — it is the same rig, drawn
+     * from a timeline instead of from frames. Sharing the box is what makes borrowing
+     * the scale correct rather than a coincidence that happens to look right.
+     */
+    @Test fun `the walk rig shares the standing clip's box`() {
+        val stand = MascotFrames.CLIPS.first { it.name == "stand" }
+        assertEquals("the walk is not drawn in the standing clip's box",
+            stand.aspect, WalkRig.ASPECT, 1e-3f)
     }
 }

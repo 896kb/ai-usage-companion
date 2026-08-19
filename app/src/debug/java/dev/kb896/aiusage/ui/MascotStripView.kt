@@ -85,11 +85,24 @@ class MascotStripView @JvmOverloads constructor(
         val gridRows = (cells.size + columns - 1) / columns
         val gridH = height * GRID_SHARE
         val rowH = gridH / gridRows
-
         val cell = width.toFloat() / columns
         // Leave room under the figures for the caption, and above for anything a clip
         // throws over its own head — the confetti sits well outside its mascot box.
         val availableH = (rowH - CAPTION_H - HEADROOM).coerceAtLeast(1f)
+
+        // ONE nominal height for every cell, chosen so the widest clip still fits its
+        // own cell. Clamping each clip to its cell separately is what a per-cell
+        // minOf() does, and it silently undoes the sizing: the clips are deliberately
+        // proportional to each other, and a clamp that bites on one and not the next
+        // makes two mascots different sizes in the one view whose job is comparing them.
+        val standScale = MascotFrames.CLIPS.firstOrNull { it.name == "stand" }?.scale ?: 1f
+        val fitCells = cells.minOf { (cell * CELL_FILL) / (it.clip.aspect * it.clip.scale) }
+        // The walk row constrains the shared nominal too, rather than the walk alone:
+        // if it cannot fit at the common size, everything shrinks together and the
+        // comparison survives.
+        val fitWalk = (height - gridH - CAPTION_H) / ((1f + WalkRig.HEADROOM) * standScale)
+        val nominal = minOf(availableH, fitCells, fitWalk)
+
 
         // The walk gets the lower row to itself: it needs the whole width to cross, and
         // its own height again in clear air above, because the jump takes it a full
@@ -100,10 +113,11 @@ class MascotStripView @JvmOverloads constructor(
         // the others, which reads as a different, larger mascot rather than the same one
         // walking. The row fit is then only a floor-case guard for a short strip.
         val walkRow = height - gridH
-        val walkH = minOf(
-            minOf(availableH, (cell * CELL_FILL) / WalkRig.ASPECT),
-            (walkRow - CAPTION_H) / (1f + WalkRig.HEADROOM),
-        ).coerceAtLeast(1f)
+        // The walk IS the stand rig, so it is sized off the SAME nominal height times
+        // the SAME scale as the stand cell above it. It used to be fitted to its row
+        // independently, which had nothing to do with the other mascots' sizes — so the
+        // one state shown largest in this view was the one whose size meant nothing.
+        val walkH = (nominal * standScale).coerceAtLeast(1f)
         WalkRig.draw(
             canvas, now,
             left = 0f,
@@ -113,14 +127,6 @@ class MascotStripView @JvmOverloads constructor(
             paint = body,
         )
         canvas.drawText("walk", width / 2f, height - 6f, label)
-
-        // ONE nominal height for every cell, chosen so the widest clip still fits its
-        // own cell. Clamping each clip to its cell separately is what a per-cell
-        // minOf() does, and it silently undoes the sizing: the clips are deliberately
-        // proportional to each other, and a clamp that bites on one and not the next
-        // makes two mascots different sizes in the one view whose job is comparing them.
-        val fit = cells.minOf { (cell * CELL_FILL) / (it.clip.aspect * it.clip.scale) }
-        val nominal = minOf(availableH, fit)
 
         for ((i, c) in cells.withIndex()) {
             val col = i % columns

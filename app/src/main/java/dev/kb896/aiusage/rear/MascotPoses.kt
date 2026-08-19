@@ -63,7 +63,7 @@ internal object MascotPoses {
     // to go; the panel bottom-aligns a mascot on its bar, so the empty space sits above
     // the head where it belongs.
 
-    private const val SLEEP_W = 107f
+    private const val SLEEP_W = 124f
     private const val SLEEP_H = 130f
     private const val SLEEP_FRAMES = 10
 
@@ -73,16 +73,24 @@ internal object MascotPoses {
     private fun sleepFrames(): List<List<MascotFrames.Rect>> =
         List(SLEEP_FRAMES) { i -> sleepFrame(i.toFloat() / SLEEP_FRAMES) }
 
-    /** Curled width, narrower than the standing body — see [sleepFrame]. */
-    private const val SLEEP_L = 16f
-    private const val SLEEP_BODY_W = 75f
+    /**
+     * Lying width. WIDER than standing, not narrower.
+     *
+     * It was 75 against the standing body's 85, on the reasoning that a curled animal
+     * draws its sides in — true of the outline, wrong about the mass. At 75 by 56 the
+     * pose carried three quarters of the standing body's area, and next to the others it
+     * simply read as a smaller animal rather than the same one lying down. An animal on
+     * its side is longer than it is tall; this is the axis that should grow.
+     */
+    private const val SLEEP_L = 14f
+    private const val SLEEP_BODY_W = 95f
 
     private fun sleepFrame(phase: Float): List<MascotFrames.Rect> {
         val out = mutableListOf<MascotFrames.Rect>()
         // One breath per cycle, and small: two pixels of a 120-pixel box. Any more and
         // the body pumps rather than breathes.
         val breath = 2f * sin(2.0 * PI * phase).toFloat()
-        val top = 72f - breath
+        val top = 66f - breath
         val floor = 128f
 
         fun add(x: Float, y: Float, w: Float, h: Float, c: Int) =
@@ -104,8 +112,8 @@ internal object MascotPoses {
         add(SLEEP_L + SLEEP_BODY_W, top + 24f, 13f, 15f, BODY)
         // Eyes shut: the same eyes, five pixels tall instead of thirteen. Not omitted —
         // a face with no eyes at all reads as the back of the animal's head.
-        add(SLEEP_L + 12f, top + 17f, EYE_W, 5f, EYE)
-        add(SLEEP_L + 52f, top + 17f, EYE_W, 5f, EYE)
+        add(SLEEP_L + 22f, top + 19f, EYE_W, 5f, EYE)
+        add(SLEEP_L + 62f, top + 19f, EYE_W, 5f, EYE)
 
         // Two Zs on one path, half a cycle apart, each rising and shrinking as it
         // goes. Staggering rather than emitting one at a time keeps something in the air
@@ -120,7 +128,7 @@ internal object MascotPoses {
             val p = (phase + k / 2f) % 1f
             val cell = 4.5f - 2.6f * p
             if (cell < 1.5f) continue
-            zed(out, 62f + 26f * p, 50f - 48f * p, cell)
+            zed(out, 80f + 24f * p, 44f - 42f * p, cell)
         }
         return out
     }
