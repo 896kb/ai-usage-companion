@@ -38,6 +38,14 @@ internal object MascotPoses {
     private const val NUB_W = 22f
     private const val EYE_W = 11f
     private const val EYE_H = 11f
+
+    /**
+     * Distance between the eye CENTRES on the standing face, and therefore on every
+     * face. It is the same animal in every pose, so this does not get to vary — the
+     * sleeping pose had it at 40 against 54 while its body was the widest of the lot,
+     * and a narrow face on a broad body does not read as lying down, it reads as fat.
+     */
+    private const val EYE_GAP = 54f
     private val EYE_X = floatArrayOf(21f, 75f)
 
     // `const`, not `val`, and that is load-bearing. An object's properties initialise in
@@ -63,7 +71,7 @@ internal object MascotPoses {
     // to go; the panel bottom-aligns a mascot on its bar, so the empty space sits above
     // the head where it belongs.
 
-    private const val SLEEP_W = 124f
+    private const val SLEEP_W = 128f
     private const val SLEEP_H = 130f
     private const val SLEEP_FRAMES = 10
 
@@ -74,7 +82,13 @@ internal object MascotPoses {
         List(SLEEP_FRAMES) { i -> sleepFrame(i.toFloat() / SLEEP_FRAMES) }
 
     /**
-     * Lying width. WIDER than standing, not narrower.
+     * Lying width and height. Wider than standing AND markedly flatter.
+     *
+     * Width alone was not enough: at 95 by 62 the body was 1.53 wide-to-tall against
+     * the standing 1.31, which is barely flatter and just reads as a heavier animal.
+     * 100 by 52 is 1.92 — unmistakably something lying on its side rather than one
+     * standing that has been fed.
+     *
      *
      * It was 75 against the standing body's 85, on the reasoning that a curled animal
      * draws its sides in — true of the outline, wrong about the mass. At 75 by 56 the
@@ -83,15 +97,16 @@ internal object MascotPoses {
      * its side is longer than it is tall; this is the axis that should grow.
      */
     private const val SLEEP_L = 14f
-    private const val SLEEP_BODY_W = 95f
+    private const val SLEEP_BODY_W = 100f
+    private const val SLEEP_BODY_H = 52f
 
     private fun sleepFrame(phase: Float): List<MascotFrames.Rect> {
         val out = mutableListOf<MascotFrames.Rect>()
         // One breath per cycle, and small: two pixels of a 120-pixel box. Any more and
         // the body pumps rather than breathes.
         val breath = 2f * sin(2.0 * PI * phase).toFloat()
-        val top = 66f - breath
         val floor = 128f
+        val top = floor - SLEEP_BODY_H - breath
 
         fun add(x: Float, y: Float, w: Float, h: Float, c: Int) =
             out.add(MascotFrames.Rect(x / SLEEP_W, y / SLEEP_H, w / SLEEP_W, h / SLEEP_H, c))
@@ -112,8 +127,11 @@ internal object MascotPoses {
         add(SLEEP_L + SLEEP_BODY_W, top + 24f, 13f, 15f, BODY)
         // Eyes shut: the same eyes, five pixels tall instead of thirteen. Not omitted —
         // a face with no eyes at all reads as the back of the animal's head.
-        add(SLEEP_L + 22f, top + 19f, EYE_W, 5f, EYE)
-        add(SLEEP_L + 62f, top + 19f, EYE_W, 5f, EYE)
+        // Centred on the body, [EYE_GAP] apart — the standing face's own spacing, so
+        // the head stays the same head however the body underneath it is arranged.
+        val faceMid = SLEEP_L + SLEEP_BODY_W / 2f
+        add(faceMid - EYE_GAP / 2f - EYE_W / 2f, top + 19f, EYE_W, 5f, EYE)
+        add(faceMid + EYE_GAP / 2f - EYE_W / 2f, top + 19f, EYE_W, 5f, EYE)
 
         // Two Zs on one path, half a cycle apart, each rising and shrinking as it
         // goes. Staggering rather than emitting one at a time keeps something in the air
@@ -128,7 +146,7 @@ internal object MascotPoses {
             val p = (phase + k / 2f) % 1f
             val cell = 4.5f - 2.6f * p
             if (cell < 1.5f) continue
-            zed(out, 80f + 24f * p, 44f - 42f * p, cell)
+            zed(out, 86f + 24f * p, 56f - 52f * p, cell)
         }
         return out
     }
@@ -164,7 +182,7 @@ internal object MascotPoses {
     // Wider than the other poses' 107. The arms swing out with the body, and at full
     // sway they need 21 units of clearance each side where the standing box has 16 —
     // the box has to hold the widest excursion, not the resting pose.
-    private const val GHOST_W = 120f
+    private const val GHOST_W = 128f
     // Holds the body and the tail below it, with a little slack.
     private const val GHOST_H = 117f
     private const val GHOST_FRAMES = 10
@@ -173,8 +191,11 @@ internal object MascotPoses {
     private const val GHOST_TOP = 12f
 
     /** Narrower than the standing body: at full width a legless figure is a blob. */
-    private const val GHOST_L = 22f
-    private const val GHOST_BODY_W = 75f
+    private const val GHOST_L = 21f
+    // The standing body's own width. It was 75, which forced the eyes 40 units apart
+    // where every other face has them 54 — the same pinch the sleeping pose had, and it
+    // narrows a face that should be this animal's face whatever shape it is wearing.
+    private const val GHOST_BODY_W = 85f
     /**
      * Head plus torso. The extra eye-height sits below the face, not around it — the
      * body was as short as the tail and the whole figure read as a head on a wisp, with
@@ -283,8 +304,9 @@ internal object MascotPoses {
         // float expression for one's bottom and the next one's top — which tiles without
         // a gap under a non-antialiased fill, and the mascot paint has never been
         // antialiased.
-        add(GHOST_L + sway + 12f, top + 16f, EYE_W, EYE_H, MascotRenderer.GHOST_EYE)
-        add(GHOST_L + sway + 52f, top + 16f, EYE_W, EYE_H, MascotRenderer.GHOST_EYE)
+        val faceMid = GHOST_L + sway + GHOST_BODY_W / 2f
+        add(faceMid - EYE_GAP / 2f - EYE_W / 2f, top + 16f, EYE_W, EYE_H, MascotRenderer.GHOST_EYE)
+        add(faceMid + EYE_GAP / 2f - EYE_W / 2f, top + 16f, EYE_W, EYE_H, MascotRenderer.GHOST_EYE)
 
         // The tail, sliced across and narrowing as it falls away.
         //

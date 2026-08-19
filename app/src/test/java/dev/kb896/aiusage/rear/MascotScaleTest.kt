@@ -107,6 +107,35 @@ class MascotScaleTest {
     }
 
     /**
+     * It is one animal, so it has one face.
+     *
+     * The eyes may change shape — the sleeping pose shuts them to a slit, the flag
+     * squints — but the distance between them is a fact about the character and does not
+     * get to vary with the pose. Both hand-authored poses had it wrong in the same
+     * direction, 40 units against everyone else's 54, and both times the symptom was not
+     * "the eyes look close together" but "the mascot looks fat": a narrow face on a broad
+     * body reads as bulk, and the eye is the last place anyone looks for the cause.
+     */
+    @Test fun `every face has the same eye spacing`() {
+        val gaps = mutableMapOf<String, Float>()
+        for (clip in MascotFrames.CLIPS) {
+            val frame = clip.frames.firstOrNull { f ->
+                f.count { MascotFrames.isEye(it.color) } == 2
+            } ?: continue
+            val boxWidth = clip.boxHeight * clip.aspect
+            val centres = frame.filter { MascotFrames.isEye(it.color) }
+                .map { (it.x + it.w / 2f) * boxWidth }.sorted()
+            gaps[clip.name] = centres[1] - centres[0]
+        }
+        assertTrue("no clip exposed a pair of eyes", gaps.size >= 5)
+        val first = gaps.values.first()
+        for ((name, gap) in gaps) {
+            assertEquals("$name puts its eyes a different distance apart: $gaps",
+                first, gap, 0.5f)
+        }
+    }
+
+    /**
      * The walk borrows the standing clip's scale, so it has to be the standing box.
      *
      * WalkRig is procedural and carries no Clip of its own — it is the same rig, drawn
