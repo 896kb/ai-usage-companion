@@ -6,9 +6,33 @@ import org.junit.Test
 
 class MascotMoodTest {
 
-    @Test fun `an untouched window celebrates`() {
-        assertEquals(MascotMood.CONFETTI, MascotMood.of(0f, null))
-        assertEquals(MascotMood.CONFETTI, MascotMood.of(0f, 0f))
+    /**
+     * Confetti is for a window that has not STARTED, which is not the same as one
+     * reading zero. A 5-hour window begins at first use; until then the API sends no
+     * reset time for it. A window that has started and rounds to 0% is a clock already
+     * ticking, and celebrating a fresh start there celebrates one that has quietly
+     * already begun.
+     */
+    @Test fun `a window that has not started celebrates`() {
+        assertEquals(MascotMood.CONFETTI,
+            MascotMood.of(0f, null, sessionStarted = false))
+    }
+
+    @Test fun `a started window at zero does not celebrate`() {
+        assertEquals(MascotMood.WALK, MascotMood.of(0f, null, sessionStarted = true))
+        assertEquals(MascotMood.WALK, MascotMood.of(0f, 0f, sessionStarted = true))
+    }
+
+    /** A spent week is still a spent week, started or not. */
+    @Test fun `a spent week outranks a window that never started`() {
+        assertEquals(MascotMood.DEAD,
+            MascotMood.of(0f, null, weeklySpent = true, sessionStarted = false))
+    }
+
+    /** The default is "started": a caller that cannot tell gets the ordinary rules. */
+    @Test fun `zero alone no longer celebrates`() {
+        assertEquals(MascotMood.WALK, MascotMood.of(0f, null))
+        assertEquals(MascotMood.WALK, MascotMood.of(0f, 0f))
     }
 
     /** NEARLY spent. Fully spent is the nap — see below. */
@@ -150,10 +174,25 @@ class MascotMoodTest {
         assertEquals(MascotMood.FLAG, d.clip)
     }
 
-    @Test fun `a reset to zero mid-hold celebrates`() {
+    /**
+     * A rollover mid-hold celebrates — but because the window is GONE, not because it
+     * reads zero. When a 5-hour window rolls over and nothing has been used since, the
+     * API stops sending a reset time for it, and that is the fresh start worth marking.
+     * The lifting hold, which describes what you were doing to the window that just
+     * expired, does not survive it.
+     */
+    @Test fun `a rollover mid-hold celebrates`() {
+        val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
+        val d = MascotMood.decide(
+            0f, 0.20f, start.holdUntil, T + 60_000L, sessionStarted = false)
+        assertEquals(MascotMood.CONFETTI, d.clip)
+    }
+
+    /** Whereas a window still running at zero keeps lifting: the hold is about you. */
+    @Test fun `a running window at zero keeps the hold`() {
         val start = MascotMood.decide(0.20f, 0.10f, 0L, T)
         val d = MascotMood.decide(0f, 0.20f, start.holdUntil, T + 60_000L)
-        assertEquals(MascotMood.CONFETTI, d.clip)
+        assertEquals(MascotMood.MUSCLE, d.clip)
     }
 
     // ---- the week spent -------------------------------------------------------------

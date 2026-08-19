@@ -60,7 +60,13 @@ refills in a few hours. The week does not.
 
 ![confetti](assets/states/confetti.png)
 
-**The window is at 0%.** Nothing spent, everything ahead of you.
+**The 5-hour window has not started.** Nothing spent, everything ahead of you.
+
+Keyed on the window not running rather than on it reading 0%, and those are different
+things. A 5-hour window begins at first use, so until you use something there is no
+window at all. One that has started and rounds to 0% is a clock already ticking with a
+few minutes gone — throwing confetti at it celebrates a fresh start that has quietly
+already begun.
 
 ### Dead — the week is gone
 
@@ -78,7 +84,9 @@ with nothing left to spend it on.
 ![ghost](assets/states/ghost.png)
 
 **The account has no usable credential** — never connected, signed out, or its refresh
-token has expired. It drifts sideways with its hem trailing behind it.
+token has expired. No legs: it drifts sideways and tapers into a tail that snakes below
+it, each slice swinging wider and later than the one above, so the tip is still arriving
+where the head has already been.
 
 Not the same as dead, and keeping them apart matters. Dead is a fact about usage: the
 week is spent, the numbers are real and all bad. The ghost is the *absence* of numbers —

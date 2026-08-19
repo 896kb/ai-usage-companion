@@ -17,37 +17,53 @@ class MascotPosesTest {
     private val ghost = MascotPoses.CLIPS.first { it.name == "ghost" }
     private val sleep = MascotPoses.CLIPS.first { it.name == "sleep" }
 
-    /** The body is the first rectangle each ghost frame emits; the hem follows it. */
-    private fun body(frame: List<MascotFrames.Rect>) = frame.first()
+    /** The body is the first rectangle each ghost frame emits; the tail follows it. */
+    private fun tail(frame: List<MascotFrames.Rect>) =
+        frame.drop(1).filter { it.color == MascotRenderer.BODY_GREEN }
 
-    @Test fun `the hem never swings outside the body`() {
+    /**
+     * Every slice overlaps the one above it.
+     *
+     * Not a stylistic check. Adjacent rectangles that merely share an edge share it at a
+     * fractional coordinate, and once scaled to the panel that edge lands mid-pixel: the
+     * rasteriser rounds one side up and the other down, and a hairline of background
+     * shows straight through the figure. It read as the tail being a separate object
+     * floating under the ghost, which is the one thing it must not look like.
+     */
+    @Test fun `the ghost's tail is continuous`() {
         for ((i, frame) in ghost.frames.withIndex()) {
-            val b = body(frame)
-            for (r in frame.drop(1)) {
-                if (r.color != MascotRenderer.BODY_GREEN) continue
-                assertTrue("frame $i: hem left ${r.x} outside body ${b.x}", r.x >= b.x - 1e-4f)
+            var above = frame.first()
+            for (r in tail(frame)) {
                 assertTrue(
-                    "frame $i: hem right ${r.x + r.w} outside body ${b.x + b.w}",
-                    r.x + r.w <= b.x + b.w + 1e-4f,
+                    "frame $i: slice starts at ${r.y}, the one above ends at ${above.y + above.h}",
+                    r.y < above.y + above.h,
                 )
+                assertTrue("frame $i: slice does not reach the one above horizontally",
+                    r.x < above.x + above.w && r.x + r.w > above.x)
+                above = r
+            }
+        }
+    }
+
+    /** It narrows the whole way down. A tail that widens again is not a tail. */
+    @Test fun `the ghost's tail only ever narrows`() {
+        for ((i, frame) in ghost.frames.withIndex()) {
+            var previous = frame.first().w
+            for (r in tail(frame)) {
+                assertTrue("frame $i: ${r.w} is wider than the ${previous} above it",
+                    r.w <= previous + 1e-4f)
+                previous = r.w
             }
         }
     }
 
     /**
-     * And it must overlap, not merely touch. Sharing an edge at a fractional coordinate
-     * puts the seam mid-pixel once scaled, and the rasteriser rounds the two sides apart
-     * — a hairline of background that reads as the hem floating free of the ghost.
+     * And it actually moves. The taper alone would pass every check above while sitting
+     * perfectly still — this is what fails if the wave is ever wired to a constant.
      */
-    @Test fun `the hem overlaps the body rather than abutting it`() {
-        for ((i, frame) in ghost.frames.withIndex()) {
-            val b = body(frame)
-            for (r in frame.drop(1)) {
-                if (r.color != MascotRenderer.BODY_GREEN) continue
-                assertTrue("frame $i: hem starts at ${r.y}, body ends at ${b.y + b.h}",
-                    r.y < b.y + b.h)
-            }
-        }
+    @Test fun `the ghost's tip travels across the frames`() {
+        val tips = ghost.frames.map { tail(it).last().let { r -> r.x + r.w / 2f } }
+        assertTrue("the tail tip never moves", tips.max() - tips.min() > 0.05f)
     }
 
     /** Nothing may leave the clip's own box, or it is cropped on the panel. */

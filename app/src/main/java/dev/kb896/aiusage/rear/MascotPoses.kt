@@ -142,67 +142,67 @@ internal object MascotPoses {
 
     // ---------------------------------------------------------------- ghost ----
     //
-    // No legs, a hem that ripples, and the whole figure drifting sideways. Disconnected rather
-    // than dead: DEAD is the mascot on its side with crossed eyes and it means the
-    // week is gone, which is a fact about usage. This one means there is nobody home —
-    // the account is not answering, and the panel has no reading to show at all.
+    // A rounded body drifting sideways, tapering into a tail that snakes below it.
+    // Disconnected rather than dead: DEAD is the mascot on its side with crossed eyes
+    // and it means the week is gone, which is a fact about usage. This one means there
+    // is nobody home — the account is not answering, and there is no reading at all.
 
     private const val GHOST_W = 107f
-    private const val GHOST_H = 100f
+    private const val GHOST_H = 106f
     private const val GHOST_FRAMES = 10
-    private const val GHOST_LOBES = 6
 
     /** Rest position of the body's top edge. Fixed — the drift is sideways. */
-    private const val GHOST_TOP = 14f
+    private const val GHOST_TOP = 12f
 
-    /** Narrower than the standing body, for the same reason the sleeping one is: at full
-     *  width a legless figure with a frilly bottom is a blob, not a ghost. */
+    /** Narrower than the standing body: at full width a legless figure is a blob. */
     private const val GHOST_L = 16f
     private const val GHOST_BODY_W = 75f
-    private const val GHOST_BODY_H = 58f
+    private const val GHOST_BODY_H = 44f
+
     /**
      * How far the figure drifts to each side.
      *
-     * Sideways, not up and down. Bobbing is what a balloon does, and on a figure whose
-     * hem already ripples it read as the whole thing being jostled. Drifting across is
-     * what makes it a spirit — nothing is holding it in place.
+     * Sideways, not up and down. Bobbing is what a balloon does; drifting across is what
+     * makes it a spirit — nothing is holding it in place.
      */
     private const val GHOST_SWAY = 7f
 
     /**
-     * How much further the hem travels than the body, and how far behind.
+     * The tail: how many slices it is cut into, and how much of the width is gone by the
+     * bottom.
      *
-     * The tail is the loosest part and should arrive last. Moving the whole silhouette
-     * as one rigid shape is a slide; letting the hem overshoot and lag turns the same
-     * motion into something being carried by it.
-     *
-     * The two are bounded together: at the widest their paths diverge, the hem must
-     * still sit inside the body's sides or it steps out past them and the figure comes
-     * apart. Overshoot and lag both push that divergence up, and [GHOST_HEM_INSET] is
-     * what it has to stay under — see the test.
+     * A spirit TAPERS, and that is the whole shape. Two earlier attempts made the bottom
+     * a fringe instead — lobes whose heights rose and fell, then teeth that scrolled
+     * sideways — and both failed the same way: a row of separate things hanging off a
+     * straight edge is never a tail, however it moves. One is a squid and the other a
+     * comb. What makes a tail is the width running out as it descends, so the eye
+     * follows a single shape down to a wisp.
      */
-    private const val GHOST_HEM_SWAY = 1.7f
-    private const val GHOST_HEM_LAG = 0.10f
-    private const val GHOST_HEM = 26f
+    private const val GHOST_TAIL = 46f
+    private const val GHOST_TAIL_SLICES = 9
+    private const val GHOST_TAIL_TAPER = 0.80f
 
     /**
-     * How far the hem is tucked up behind the body, to kill the seam between them.
+     * How far the tail snakes, and how much each slice lags the one above it.
      *
-     * Two units of a hundred, which is under a pixel wherever this is drawn — enough to
-     * guarantee the rectangles overlap after rounding, small enough that the hem's own
-     * shape is unchanged.
+     * A wave travelling DOWN the tail, not the whole thing leaning. Lower slices swing
+     * wider — the amplitude scales with depth — and later, because the lag accumulates.
+     * That is what makes the tip trail behind the head rather than the figure tipping
+     * like a bell.
+     */
+    private const val GHOST_TAIL_WAVE = 14f
+    private const val GHOST_TAIL_LAG = 0.22f
+
+    /**
+     * How far each piece is tucked up behind the one above, to kill the seam between
+     * them.
+     *
+     * Two units of a hundred, under a pixel wherever this is drawn — enough that the
+     * rectangles still overlap after rounding, small enough to change no shape. Without
+     * it, adjacent rectangles sharing an edge at a fractional coordinate round apart
+     * once scaled and show a hairline of background straight through the figure.
      */
     private const val SEAM = 2f
-
-    /**
-     * How far the hem is drawn in from each side of the body.
-     *
-     * At the body's full width the hem was a straight-sided box with a wavy floor — the
-     * outline went down, turned a hard right angle, and rippled. Bringing it in gives the
-     * silhouette a shoulder on each side, so the shape TAPERS into its tail instead of
-     * ending in one, which is most of what separates a ghost from a rectangle.
-     */
-    private const val GHOST_HEM_INSET = 9f
 
     private fun ghostFrames(): List<List<MascotFrames.Rect>> =
         List(GHOST_FRAMES) { i -> ghostFrame(i.toFloat() / GHOST_FRAMES) }
@@ -210,39 +210,33 @@ internal object MascotPoses {
     private fun ghostFrame(phase: Float): List<MascotFrames.Rect> {
         val out = mutableListOf<MascotFrames.Rect>()
         val sway = GHOST_SWAY * sin(2.0 * PI * phase).toFloat()
-        val hemSway = GHOST_HEM_SWAY * GHOST_SWAY *
-            sin(2.0 * PI * (phase - GHOST_HEM_LAG)).toFloat()
         val top = GHOST_TOP
 
         fun add(x: Float, y: Float, w: Float, h: Float, c: Int) =
             out.add(MascotFrames.Rect(x / GHOST_W, y / GHOST_H, w / GHOST_W, h / GHOST_H, c))
 
         add(GHOST_L + sway, top, GHOST_BODY_W, GHOST_BODY_H, BODY)
-        // No nubs. Raising them read as "boo" in the abstract and as the standing
-        // mascot with a frilly hem on the panel — arms are the most solid, most
-        // physical thing the character has, and a ghost that still has them is just the
-        // animal wearing a sheet. The silhouette does the work instead: a smooth body
-        // that ends in a hem, with nothing sticking out of it.
+        // No nubs. Raising them read as "boo" in the abstract and as the standing mascot
+        // in fancy dress on the panel — arms are the most solid, most physical thing the
+        // character has, and a ghost that still has them is the animal wearing a sheet.
         add(GHOST_L + sway + 12f, top + 16f, EYE_W, 13f, EYE)
         add(GHOST_L + sway + 52f, top + 16f, EYE_W, 13f, EYE)
 
-        // The hem. Six narrow lobes rather than four wide ones, each a fixed fraction of
-        // a turn behind the last, so the wave TRAVELS sideways along the bottom. Move
-        // them together and it is only a second bob; make them too wide and the edge
-        // steps rather than ripples.
-        val hemW = GHOST_BODY_W - 2f * GHOST_HEM_INSET
-        val lobe = hemW / GHOST_LOBES
-        for (i in 0 until GHOST_LOBES) {
-            val wave = sin(2.0 * PI * phase + i * 2.0 * PI / GHOST_LOBES).toFloat()
-            // Started slightly INSIDE the body rather than flush against its bottom
-            // edge. Flush, the two rectangles share an edge at a fractional coordinate,
-            // and once that is scaled to the panel the shared edge lands mid-pixel:
-            // the rasteriser rounds the body's bottom one way and the hem's top the
-            // other, and a hairline of background shows between them. It read as the
-            // hem being a separate object floating under the ghost, which is exactly
-            // what it must not look like.
-            add(GHOST_L + hemSway + GHOST_HEM_INSET + i * lobe, top + GHOST_BODY_H - SEAM, lobe,
-                SEAM + GHOST_HEM * (0.25f + 0.75f * (wave + 1f) / 2f), BODY)
+        // The tail, sliced across and narrowing as it falls away.
+        //
+        // Each slice is centred on its own point rather than on the body's, and that
+        // point swings further and later the lower it sits. The body only sways; the
+        // tail is what makes the whole thing read as drifting rather than sliding,
+        // because the tip is still arriving where the head has already been.
+        val centre = GHOST_L + sway + GHOST_BODY_W / 2f
+        val sliceH = GHOST_TAIL / GHOST_TAIL_SLICES
+        for (i in 0 until GHOST_TAIL_SLICES) {
+            val t = (i + 1f) / GHOST_TAIL_SLICES
+            val w = GHOST_BODY_W * (1f - GHOST_TAIL_TAPER * t)
+            val swing = GHOST_TAIL_WAVE * t *
+                sin(2.0 * PI * (phase - GHOST_TAIL_LAG * t)).toFloat()
+            add(centre + swing - w / 2f, top + GHOST_BODY_H + i * sliceH - SEAM,
+                w, sliceH + SEAM, BODY)
         }
         return out
     }
@@ -259,5 +253,5 @@ internal object MascotPoses {
 
     private fun sleepScale() = STAND_SCALE * SLEEP_H / (SLEEP_H - SLEEP_CHAR_TOP)
 
-    private fun ghostScale() = STAND_SCALE * GHOST_H / (GHOST_BODY_H + GHOST_HEM)
+    private fun ghostScale() = STAND_SCALE * GHOST_H / (GHOST_BODY_H + GHOST_TAIL)
 }

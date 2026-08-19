@@ -27,6 +27,19 @@ object MascotMood {
     const val STAND = "stand"
     const val MUSCLE = "muscle"
     const val FLAG = "flag"
+    /**
+     * Nothing started yet — the whole window is ahead of you.
+     *
+     * Keyed on the session window having no reset time, NOT on it reading 0%. A 5-hour
+     * window begins at first use, so until you use something there is no window and the
+     * API sends `resets_at: null`; once one is running it carries a real timestamp.
+     *
+     * Those are two different situations and 0% conflated them. A window that has
+     * started and rounds to 0% is a clock already ticking with a few minutes gone —
+     * throwing confetti at it celebrates a fresh start that has, quietly, already
+     * begun. Waiting for the reset time to disappear means the celebration marks the
+     * thing worth marking: a clean slate, with the full five hours still to spend.
+     */
     const val CONFETTI = "confetti"
 
     /**
@@ -154,6 +167,7 @@ object MascotMood {
         holdUntil: Long,
         now: Long,
         weeklySpent: Boolean = false,
+        sessionStarted: Boolean = true,
     ): Decision {
         val burst = earlier != null && utilization - earlier >= BURST - EPSILON
         val hold = if (burst) now + HOLD_MS else holdUntil
@@ -161,7 +175,7 @@ object MascotMood {
             // Outranks everything, including a live burst hold and a session at 0.
             // If the week is gone, what the 5-hour window says is beside the point.
             weeklySpent -> DEAD
-            utilization <= 0f -> CONFETTI
+            !sessionStarted -> CONFETTI
             utilization >= SPENT -> SLEEP
             utilization >= HIGH -> FLAG
             now < hold -> MUSCLE
@@ -189,13 +203,16 @@ object MascotMood {
      * @param utilization current 5h usage, 0..1
      * @param earlier the same account's usage as of at least [WINDOW_MS] ago, or null
      *   when no sample that old exists yet
+     * @param sessionStarted whether the 5-hour window is running at all — the session
+     *   window carrying a reset time. Defaults true: a caller that cannot tell should
+     *   get the ordinary rules rather than a celebration it did not ask for.
      *
      * Order matters and is not arbitrary:
      *
      *  - DEAD first: a spent WEEK outranks whatever the 5-hour window happens to say,
      *    including a fresh one reading 0.
-     *  - ZERO second. An untouched window with allowance behind it is unambiguous: at 0
-     *    there is no burn to measure and nothing to warn about.
+     *  - NOT STARTED second. A window that has not begun is unambiguous: there is no
+     *    burn to measure and nothing to warn about.
      *  - SPENT next: the 5-hour window is gone, so the mascot sleeps until it rolls
      *    over. Above the flag, because past 99% the warning has nothing left to warn
      *    about.
@@ -210,9 +227,14 @@ object MascotMood {
      * "unknown", and inventing one from a single sample would fire the lifting animation
      * on the first poll after every restart.
      */
-    fun of(utilization: Float, earlier: Float?, weeklySpent: Boolean = false): String = when {
+    fun of(
+        utilization: Float,
+        earlier: Float?,
+        weeklySpent: Boolean = false,
+        sessionStarted: Boolean = true,
+    ): String = when {
         weeklySpent -> DEAD
-        utilization <= 0f -> CONFETTI
+        !sessionStarted -> CONFETTI
         utilization >= SPENT -> SLEEP
         utilization >= HIGH -> FLAG
         earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE
