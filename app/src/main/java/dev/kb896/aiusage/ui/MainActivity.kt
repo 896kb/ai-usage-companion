@@ -445,6 +445,9 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(container, "Camera button on the panel", config.showCamera) { on ->
             write { it.copy(showCamera = on) }
         }
+        SettingsRows.toggle(container, "Close button on the panel", config.showClose) { on ->
+            write { it.copy(showClose = on) }
+        }
 
         // Colours as one grid, so they can be judged against each other — which is how
         // they are actually chosen — rather than down a column one at a time.
@@ -454,6 +457,9 @@ class MainActivity : ComponentActivity() {
             },
             SettingsRows.Swatch("CLOCK & BATT", config.extrasColor) { c ->
                 write { it.copy(extrasColor = c) }
+            },
+            SettingsRows.Swatch("CLOSE", config.closeColor) { c ->
+                write { it.copy(closeColor = c) }
             },
         )
         SettingsRows.colorGrid(container, swatches)

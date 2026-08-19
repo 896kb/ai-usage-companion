@@ -170,6 +170,17 @@ data class PanelConfig(
      * touched is a surprise unless it was asked for.
      */
     val showCamera: Boolean = true,
+
+    /**
+     * A close button on the left, which ripples the readout away and leaves the mascot
+     * walking the bottom of the panel.
+     *
+     * Not a dismissal — the panel stays alive, drawing almost nothing. Killing it would
+     * mean the app could not bring it back on its own, which is the failure this whole
+     * project is built around avoiding.
+     */
+    val showClose: Boolean = false,
+    val closeColor: Int = Panel.Palette.WORK,
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are

@@ -110,6 +110,9 @@ class RearDialView(context: Context) : View(context) {
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
     private val mascotPaint = Paint()
 
+    /** The close button's ring and cross. Anti-aliased: it is the one curve here. */
+    private val closePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     /**
      * The X over a dead mascot's eye. Anti-aliased, unlike the body — these are the one
      * diagonal on an otherwise strictly axis-aligned figure, and unsmoothed diagonals at
@@ -303,6 +306,25 @@ class RearDialView(context: Context) : View(context) {
         // slot in someone else's.
         // Ring N belongs to the Nth account in display order, so reordering the accounts
         // carries the rings with them.
+        // The readout — rings, bars, mascots, extras — is drawn inside one clip so the
+        // ripple takes all of it together. Clipping each piece would let them vanish at
+        // slightly different moments, which reads as the panel breaking rather than
+        // closing.
+        val sweep = ripple(nowReal)
+        val readoutVisible = !ambient || sweep != null
+        canvas.save()
+        if (sweep != null) {
+            // Hiding: keep what the circle has NOT reached yet, so the readout is eaten
+            // outward from the button. Showing: keep what it HAS reached. Same circle,
+            // opposite sense, which is what makes the two directions feel like one
+            // gesture rather than two animations.
+            val reach = rippleReach()
+            val path = android.graphics.Path().apply {
+                addCircle(CLOSE_CX, CLOSE_CY, reach * sweep, android.graphics.Path.Direction.CW)
+            }
+            if (ambient) canvas.clipOutPath(path) else canvas.clipPath(path)
+        }
+
         val order = orderedAccounts()
         val positions = listOf(geometry.personal, geometry.work)
         order.forEachIndexed { position, accountIndex ->
@@ -327,6 +349,17 @@ class RearDialView(context: Context) : View(context) {
         if (onlyAccount == null && config.showCamera) drawCamera(canvas, dx, dy)
         else cameraButton = null
         canvas.restore()
+        canvas.restore()   // the readout clip
+
+        // Outside the clip, both of them: the button is what the ripple emanates FROM
+        // and the mascot is what is left behind, so neither may be eaten by it.
+        if (onlyAccount == null && config.showClose) {
+            drawClose(canvas, sweep, readoutVisible)
+            if (ambient) drawAmbientWalk(canvas, nowReal, sweep)
+        } else {
+            closeButton = null
+            ambient = false
+        }
 
         // Next frame only while something is still moving. When everything has settled
         // this stops entirely and the view falls back to the 15s idle tick — an
@@ -463,6 +496,46 @@ class RearDialView(context: Context) : View(context) {
      * above the first account heading is empty.
      */
     /**
+     * Ambient mode: the readout rippled away, leaving the mascot walking the bottom.
+     *
+     * The panel is still drawing, still polling, still alive. This is the difference
+     * between quiet and gone, and it matters here more than most places: an app that
+     * dismisses its own panel cannot put it back — placement needs Shizuku and a task
+     * that still exists.
+     */
+    private var ambient = false
+
+    /**
+     * When the current ripple started, or 0 when nothing is animating.
+     *
+     * Wall clock rather than a frame counter: this view is destroyed and recreated
+     * constantly by the placement machinery, and a ripple measured in frames would
+     * restart from nothing every respawn.
+     */
+    private var rippleStart = 0L
+
+    /** Where the close button is, in the view's own coordinates. Null when hidden. */
+    var closeButton: android.graphics.RectF? = null
+        private set
+
+    /**
+     * Where the ripple is, 0 at the button and 1 covering the panel, or null when the
+     * panel is simply drawn as it is.
+     *
+     * Returns null in both settled states — fully shown and fully ambient — so the
+     * drawing code only pays for the clip while something is actually moving.
+     */
+    private fun ripple(nowMs: Long): Float? {
+        if (rippleStart == 0L) return null
+        val t = (nowMs - rippleStart).toFloat() / RIPPLE_MS
+        if (t >= 1f) { rippleStart = 0L; return null }
+        animating = true
+        // Eased with the same curve as everything else that moves on this panel, so a
+        // ripple and a bar settling read as one machine rather than two.
+        return Tween.easeInOut(t.coerceIn(0f, 1f))
+    }
+
+    /**
      * Where the camera button is, in the view's own coordinates, or null when it is not
      * shown. See [drawCamera] for why the drift is subtracted out of it.
      */
@@ -472,18 +545,41 @@ class RearDialView(context: Context) : View(context) {
     /** Set by RearActivity. Nothing on the front screen listens. */
     var onCameraTap: (() -> Unit)? = null
 
+    private fun near(r: android.graphics.RectF?, x: Float, y: Float): Boolean {
+        val b = r ?: return false
+        return x >= b.left - CAMERA_SLOP && x <= b.right + CAMERA_SLOP &&
+            y >= b.top - CAMERA_SLOP && y <= b.bottom + CAMERA_SLOP
+    }
+
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
-        val button = cameraButton ?: return false
-        val hit = event.x >= button.left - CAMERA_SLOP && event.x <= button.right + CAMERA_SLOP &&
-            event.y >= button.top - CAMERA_SLOP && event.y <= button.bottom + CAMERA_SLOP
+        // A ripple in flight owns the screen. Without this a second tap mid-sweep
+        // reverses the direction from wherever it had got to, and the panel half-appears
+        // and half-leaves at once.
+        if (rippleStart != 0L) return true
+
+        val onCamera = !ambient && near(cameraButton, event.x, event.y)
+        // In ambient mode the whole panel is the way back, not just the button. The
+        // mascot is walking and the button is a 16-unit disc on the back of a phone
+        // being held — asking someone to hit either is asking them to look at it, which
+        // is the one thing this surface cannot be used for.
+        val onClose = if (ambient) true else near(closeButton, event.x, event.y)
+        val hit = onCamera || (config.showClose && onClose)
+
         return when (event.actionMasked) {
-            // Claim the gesture on the way down if it started on the button, so a slight
+            // Claim the gesture on the way down if it started on a target, so a slight
             // drag still counts — a finger on the back of a phone is not steady, and
             // without claiming it there is no ACTION_UP to act on.
             android.view.MotionEvent.ACTION_DOWN -> hit
             android.view.MotionEvent.ACTION_UP -> {
-                if (hit) onCameraTap?.invoke()
+                when {
+                    onCamera -> onCameraTap?.invoke()
+                    hit -> {
+                        ambient = !ambient
+                        rippleStart = android.os.SystemClock.elapsedRealtime()
+                        invalidate()
+                    }
+                }
                 hit
             }
             else -> false
@@ -505,8 +601,14 @@ class RearDialView(context: Context) : View(context) {
     private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
         val h = CAMERA_H
         val w = h * PanelIcons.CAMERA.aspect
-        val right = CONTENT_RIGHT
-        val bottom = Panel.HEIGHT - MARK_BOTTOM.toFloat()
+        // Vertically centred on the bottom artwork, and inset from the right edge by the
+        // same margin the artwork keeps from the bottom. It was bottom-aligned against
+        // CONTENT_RIGHT, which lined it up with the text column above rather than with
+        // the thing actually beside it — the mark and the camera share a row, so they
+        // should share a centre line and a margin.
+        val right = Panel.WIDTH - MARK_BOTTOM.toFloat()
+        val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
+        val bottom = centreY + h / 2f
         extras.color = colorFor("extras", config.extrasColor)
         // Positioned by its own left edge rather than by a square cell: drawIcon centres
         // within a cell of side h, which is right for the clock and battery sitting in a
@@ -525,6 +627,87 @@ class RearDialView(context: Context) : View(context) {
         cameraButton = android.graphics.RectF(
             right - w - dx, bottom - h - dy, right - dx, bottom - dy,
         )
+    }
+
+    /**
+     * How far the ripple must travel to clear the panel: the distance from the button to
+     * the farthest corner. Anything shorter leaves a wedge of readout behind.
+     */
+    private fun rippleReach(): Float =
+        kotlin.math.hypot(Panel.WIDTH - CLOSE_CX, CLOSE_CY.toDouble().toFloat()).let {
+            maxOf(it, kotlin.math.hypot(Panel.WIDTH - CLOSE_CX, Panel.HEIGHT - CLOSE_CY))
+        }
+
+    /**
+     * The close button: a ring with an X in it, which becomes the mascot's home.
+     *
+     * Drawn outside the ripple's clip because it is the thing the ripple comes out of —
+     * a button that erases itself on the way past looks like it fell through the floor.
+     *
+     * The X fades as the panel leaves and the mascot fades in over it, which is as close
+     * to "transforms into" as two different shapes get without tweening one into the
+     * other. A real morph between a cross and a quadruped would land somewhere neither
+     * shape survives.
+     */
+    private fun drawClose(canvas: Canvas, sweep: Float?, readoutVisible: Boolean) {
+        closeButton = android.graphics.RectF(
+            CLOSE_CX - CLOSE_R, CLOSE_CY - CLOSE_R, CLOSE_CX + CLOSE_R, CLOSE_CY + CLOSE_R,
+        )
+        // 1 while the readout is up, 0 once the mascot has it. During a ripple it is
+        // whichever direction is being travelled.
+        val presence = when {
+            sweep == null -> if (ambient) 0f else 1f
+            ambient -> 1f - sweep
+            else -> sweep
+        }
+        if (presence <= 0.01f) return
+
+        val colour = colorFor("close", config.closeColor)
+        val alpha = (255 * presence).toInt()
+        closePaint.color = colour
+        closePaint.alpha = alpha
+        closePaint.style = Paint.Style.STROKE
+        closePaint.strokeWidth = CLOSE_STROKE
+        canvas.drawCircle(CLOSE_CX, CLOSE_CY, CLOSE_R, closePaint)
+
+        // The X, inset so it sits inside the ring rather than touching it.
+        val a = CLOSE_R * 0.44f
+        closePaint.strokeCap = Paint.Cap.SQUARE
+        canvas.drawLine(CLOSE_CX - a, CLOSE_CY - a, CLOSE_CX + a, CLOSE_CY + a, closePaint)
+        canvas.drawLine(CLOSE_CX + a, CLOSE_CY - a, CLOSE_CX - a, CLOSE_CY + a, closePaint)
+    }
+
+    /**
+     * The mascot, walking the full width of the panel, with nothing else on it.
+     *
+     * WalkRig rather than a clip, for the same reason the idle state uses it: it is the
+     * only mascot that travels, and travelling is the entire point of leaving it here.
+     * It spans the whole panel because there is no bar to stay on any more.
+     */
+    private fun drawAmbientWalk(canvas: Canvas, nowMs: Long, sweep: Float?) {
+        // Fades in as the readout leaves and out as it returns — the opposite of the
+        // button, so the two cross over halfway through the ripple.
+        val presence = when {
+            sweep == null -> 1f
+            ambient -> sweep
+            else -> 1f - sweep
+        }
+        if (presence <= 0.01f) return
+
+        val stand = MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
+        val h = MASCOT_HEIGHT * (stand?.scale ?: 1f)
+        val w = h * WalkRig.ASPECT
+        mascotPaint.alpha = (255 * presence).toInt()
+        WalkRig.draw(
+            canvas, nowMs,
+            left = CLOSE_CX + CLOSE_R + AMBIENT_GAP,
+            top = Panel.HEIGHT - MARK_BOTTOM - h,
+            h = h,
+            span = Panel.WIDTH - MARK_BOTTOM - (CLOSE_CX + CLOSE_R + AMBIENT_GAP) - w,
+            paint = mascotPaint,
+            bodyColor = colorFor("close", config.closeColor),
+        )
+        mascotPaint.alpha = 255
     }
 
     private fun drawExtras(canvas: Canvas) {
@@ -1207,6 +1390,33 @@ class RearDialView(context: Context) : View(context) {
         private const val WEEKLY_WINDOW_MS = 7f * 24f * 60f * 60f * 1000f
 
         /** Icon height for the clock and battery, matched to the extras' text size. */
+        /**
+         * How long the ripple takes to cross the panel.
+         *
+         * Slower than a bar settling. A bar easing is news arriving and should be
+         * glanceable; this is the whole readout leaving, and at 1.8s it looked like a
+         * glitch rather than a decision.
+         */
+        private const val RIPPLE_MS = 2400f
+
+        /** Close button radius, and its centre, in panel units. */
+        private const val CLOSE_R = 16f
+        private const val CLOSE_STROKE = 3f
+
+        /** Clear air between the button and where the mascot starts its walk. */
+        private const val AMBIENT_GAP = 12f
+
+        /**
+         * Sits clear of the lower ring, which owns most of the left column.
+         *
+         * The ring reaches 140.5 units from (150, 420) at the default geometry, so a
+         * 16-unit button at x=43 has to sit below y≈536 to miss it. That is why this is
+         * not aligned with the artwork the way the camera on the right is — there is no
+         * room on this side to put it there.
+         */
+        private const val CLOSE_CX = 43f
+        private const val CLOSE_CY = 538f
+
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
 
