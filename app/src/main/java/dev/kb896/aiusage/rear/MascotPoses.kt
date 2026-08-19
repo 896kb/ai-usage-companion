@@ -157,8 +157,8 @@ internal object MascotPoses {
     // sway they need 21 units of clearance each side where the standing box has 16 —
     // the box has to hold the widest excursion, not the resting pose.
     private const val GHOST_W = 120f
-    // Holds the taller body and the tail below it, with a little slack.
-    private const val GHOST_H = 128f
+    // Holds the body and the tail below it, with a little slack.
+    private const val GHOST_H = 117f
     private const val GHOST_FRAMES = 10
 
     /** Rest position of the body's top edge. Fixed — the drift is sideways. */
@@ -168,11 +168,13 @@ internal object MascotPoses {
     private const val GHOST_L = 22f
     private const val GHOST_BODY_W = 75f
     /**
-     * Head plus torso. The extra two eye-heights are below the face, not around it —
-     * the body was as short as the tail and the whole figure read as a head on a wisp,
-     * with no room between the eyes and the point where it starts dissolving.
+     * Head plus torso. The extra eye-height sits below the face, not around it — the
+     * body was as short as the tail and the whole figure read as a head on a wisp, with
+     * no room between the eyes and the point where it starts dissolving. Two was too
+     * much and made a slab; one leaves the tail as the longer half, which is what keeps
+     * the eye travelling downwards.
      */
-    private const val GHOST_BODY_H = 44f + 2f * EYE_H
+    private const val GHOST_BODY_H = 44f + EYE_H
 
     /**
      * How far the figure drifts to each side.

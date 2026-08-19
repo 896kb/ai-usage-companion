@@ -60,7 +60,9 @@ refills in a few hours. The week does not.
 
 ![confetti](assets/states/confetti.png)
 
-**The 5-hour window has not started.** Nothing spent, everything ahead of you.
+**The 5-hour window has not started.** Nothing spent, everything ahead of you. Only a
+spent week outranks it — including a lifting pose still held from before the rollover,
+which described what you were doing to a window that no longer exists.
 
 Keyed on the window not running rather than on it reading 0%, and those are different
 things. A 5-hour window begins at first use, so until you use something there is no
@@ -74,10 +76,10 @@ already begun.
 
 **The 7-day window is spent** (99% or above). The mascot lies on its side with X-ed eyes.
 
-Keyed on the *weekly* limit specifically, because that is the one you cannot wait out. A
-5-hour window refills every five hours, so the moment one rolls over you have a session
-at 0% and a week at 100% — and without this rule the mascot throws confetti at an account
-with nothing left to spend it on.
+Keyed on the *weekly* limit specifically, because that is the one you cannot wait out,
+and it outranks everything below. A 5-hour window refills every five hours, so the moment
+one rolls over you have a brand new session and a week still at 100% — and without this
+rule the mascot throws confetti at an account with nothing left to spend it on.
 
 ### Ghost — nobody home
 
@@ -97,6 +99,24 @@ week is spent, the numbers are real and all bad. The ghost is the *absence* of n
 nobody is answering, and there is nothing to report. Before it existed, a signed-out
 account went on celebrating at 0% or waving the flag at 95%, replaying whatever reading
 was last seen before it lost access.
+
+### Which one wins
+
+Several can be true at once, so they are ranked. The first line that applies is the one
+you see:
+
+| | when | why it sits here |
+|---|---|---|
+| **Dead** | the 7-day window is at 99% | the limit you cannot wait out — nothing below it matters |
+| **Confetti** | the 5-hour window has not started | unambiguous: there is no burn to measure |
+| **Sleeping** | the 5-hour window is at 99% | past this a warning has nothing left to warn about |
+| **Flag** | the 5-hour window is past 90% | shown even while you are still burning through it |
+| **Lifting** | 1% went in the last ten minutes | what you are doing, once nothing above is true |
+| **Walking** | anything else | idling somewhere in the middle |
+
+The three at the top describe **where you stand** and the two below them describe **what
+you are doing**, which is the whole reason for the order: a warning you need is worth
+more than an activity you can already feel.
 
 ## The rings and the bars
 
