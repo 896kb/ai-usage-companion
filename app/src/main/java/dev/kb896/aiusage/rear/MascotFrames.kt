@@ -1,5 +1,7 @@
 package dev.kb896.aiusage.rear
 
+import dev.kb896.aiusage.Panel
+
 /**
  * Claude mascot animations as flat rectangle data.
  *
@@ -24,22 +26,74 @@ object MascotFrames {
     class Rect(val x: Float, val y: Float, val w: Float, val h: Float, val color: Int)
 
     /**
-     * @param scale drawn size relative to the row's nominal height. A clip whose
-     * bounding box is dominated by scenery renders its MASCOT smaller than the others
-     * at the same box height — the flag's cloth is taller than the character — so the
-     * box is enlarged to bring the figures back to a common size.
+     * One source unit, in the space every rig was drawn in.
+     *
+     * All of them — traced and hand-authored — sit on a grid whose pixel is 11 units:
+     * the eye is one pixel, and measuring it in confetti, muscle, stand, sleep and ghost
+     * gives 11.0 every time. The flag's body pixel is 11 too. That shared unit is the
+     * only reason clips can be sized against each other at all.
      */
-    class Clip(val name: String, val aspect: Float, val scale: Float, val frameMs: Long, val frames: List<List<Rect>>)
+    const val UNIT = 11f
+
+    /**
+     * The box height, in source units, that renders at 1.0.
+     *
+     * Arbitrary — it is the confetti rig's box, which the original tracer happened to
+     * normalise on. Nothing depends on the number itself, only on every clip using the
+     * same one.
+     */
+    const val REFERENCE_BOX = 121f
+
+    /**
+     * @param boxHeight the clip's own box height in SOURCE UNITS — a fact about the
+     *   artwork, measurable off the frames, not a number anyone tunes.
+     *
+     * [scale] is derived from it, and that is the point. It used to be passed in, and
+     * six hand-set values drifted: the tracer computed most of them from this exact
+     * relation without saying so, the flag's was 1.6% off it, and the two poses written
+     * by hand later were 43% too big and 15% too small — because "make the character the
+     * same size as the others" was a rule living in a comment rather than in the code.
+     *
+     * A clip whose box is dominated by scenery renders its MASCOT smaller at the same
+     * drawn height — the flag's cloth is taller than the character, the sleeping pose
+     * reserves a third of its box for the Zs — so the box is scaled to bring the figures
+     * back to a common size. Dividing by a fixed reference does exactly that, because
+     * every box is measured in the same unit.
+     */
+    class Clip(
+        val name: String,
+        val aspect: Float,
+        val boxHeight: Float,
+        val frameMs: Long,
+        val frames: List<List<Rect>>,
+    ) {
+        val scale: Float get() = boxHeight / REFERENCE_BOX
+    }
+
+    /**
+     * Whether a rectangle is an eye rather than a body part.
+     *
+     * Lives here, not in MascotRenderer, so the pure frame data can be reasoned about
+     * without loading anything that touches Android — the tests measure these clips on
+     * a bare JVM.
+     */
+    fun isEye(color: Int) = color == Panel.Palette.BG || color == GHOST_EYE
+
+    /** The ghost's white eye. Declared here beside [isEye], which has to know it. */
+    const val GHOST_EYE = 0xFFF2F2F2.toInt()
 
     // confetti: 8 frames, 154 rects, mascot box 129x121
     // muscle: 36 frames, 718 rects, mascot box 137x117
     // flag: 7 frames, 475 rects, mascot box 113.659x99.99
     // stand: 1 frames, 9 rects, mascot box 107x86
+    // Box heights in source units, from the measurements in the comment above: they are
+    // what the tracer recorded, and each one checks out against the eye in its own
+    // frames. The flag's was the one number that did not follow from them.
     val CLIPS: List<Clip> = listOf(
-        Clip("confetti", 1.06612f, 1.0f, 125L, confettiFrames()),
-        Clip("muscle", 1.17094f, 0.9669f, 83L, muscleFrames()),
-        Clip("flag", 1.13670f, 0.8394f, 83L, flagFrames()),
-        Clip("stand", 1.24419f, 0.7107f, 83L, standFrames()),
+        Clip("confetti", 1.06612f, 121f, 125L, confettiFrames()),
+        Clip("muscle", 1.17094f, 117f, 83L, muscleFrames()),
+        Clip("flag", 1.13670f, 99.99f, 83L, flagFrames()),
+        Clip("stand", 1.24419f, 86f, 83L, standFrames()),
     ) + MascotPoses.CLIPS   // hand-authored, kept out of this generated file
 
     private fun confettiFrames(): List<List<Rect>> = listOf(

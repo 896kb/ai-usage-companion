@@ -42,7 +42,7 @@ object MascotRenderer {
     // Mid grey, not light. White eyes on a pale body are invisible — the first attempt
     // had both near 0xC8 and the face simply was not there.
     const val GHOST_BODY = 0xCC9EA3A0.toInt()
-    const val GHOST_EYE = 0xFFF2F2F2.toInt()
+    const val GHOST_EYE = MascotFrames.GHOST_EYE
 
     /**
      * Whether a rectangle is an eye rather than a body part.
@@ -53,7 +53,7 @@ object MascotRenderer {
      * still punch through in a bitmap, though, or HyperOS's flat white tint fills them
      * back in and the face disappears exactly as it did once before.
      */
-    fun isEye(color: Int) = color == Panel.Palette.BG || color == GHOST_EYE
+    fun isEye(color: Int) = MascotFrames.isEye(color)
 
     /**
      * Cells per side of a dead mascot's X. Odd, so the two diagonals meet in a single

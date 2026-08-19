@@ -114,6 +114,14 @@ class MascotStripView @JvmOverloads constructor(
         )
         canvas.drawText("walk", width / 2f, height - 6f, label)
 
+        // ONE nominal height for every cell, chosen so the widest clip still fits its
+        // own cell. Clamping each clip to its cell separately is what a per-cell
+        // minOf() does, and it silently undoes the sizing: the clips are deliberately
+        // proportional to each other, and a clamp that bites on one and not the next
+        // makes two mascots different sizes in the one view whose job is comparing them.
+        val fit = cells.minOf { (cell * CELL_FILL) / (it.clip.aspect * it.clip.scale) }
+        val nominal = minOf(availableH, fit)
+
         for ((i, c) in cells.withIndex()) {
             val col = i % columns
             val baseline = (i / columns + 1) * rowH - CAPTION_H
@@ -128,7 +136,7 @@ class MascotStripView @JvmOverloads constructor(
             // thing `scale` exists to correct. The sleeping pose reserves the top third
             // of its box for the Zs and came out visibly smaller than the rest, in the
             // one view whose whole job is showing what the panel will draw.
-            val h = minOf(availableH * c.clip.scale, (cell * CELL_FILL) / c.clip.aspect)
+            val h = nominal * c.clip.scale
             val w = h * c.clip.aspect
             val x = col * cell + (cell - w) / 2f
             MascotRenderer.draw(

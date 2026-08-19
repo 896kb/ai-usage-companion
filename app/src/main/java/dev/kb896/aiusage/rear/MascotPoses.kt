@@ -52,8 +52,8 @@ internal object MascotPoses {
     val CLIPS: List<MascotFrames.Clip> = listOf(
         // Slow. A sleeping figure that breathes at the pace the others move at is not
         // asleep, it is panting — this runs one breath per 2.2 seconds.
-        MascotFrames.Clip("sleep", SLEEP_W / SLEEP_H, sleepScale(), 220L, sleepFrames()),
-        MascotFrames.Clip("ghost", GHOST_W / GHOST_H, ghostScale(), 125L, ghostFrames()),
+        MascotFrames.Clip("sleep", SLEEP_W / SLEEP_H, SLEEP_H, 220L, sleepFrames()),
+        MascotFrames.Clip("ghost", GHOST_W / GHOST_H, GHOST_H, 125L, ghostFrames()),
     )
 
     // ---------------------------------------------------------------- sleep ----
@@ -300,17 +300,4 @@ internal object MascotPoses {
         return out
     }
 
-    // ---------------------------------------------------------------- sizing ---
-    //
-    // `scale` exists so every clip's CHARACTER comes out the same size whatever its box
-    // contains. The generated clips carry values a tool worked out; these two derive
-    // theirs from the same relation, which is stand's scale times how much bigger this
-    // box is than the character inside it.
-
-    /** stand: a 107x86 box that is character edge to edge, drawn at this fraction. */
-    private const val STAND_SCALE = 0.7107f
-
-    private fun sleepScale() = STAND_SCALE * SLEEP_H / (SLEEP_H - SLEEP_CHAR_TOP)
-
-    private fun ghostScale() = STAND_SCALE * GHOST_H / (GHOST_BODY_H + GHOST_TAIL)
 }

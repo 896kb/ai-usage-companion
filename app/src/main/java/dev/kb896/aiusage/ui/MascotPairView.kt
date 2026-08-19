@@ -102,12 +102,18 @@ class MascotPairView @JvmOverloads constructor(
         val now = System.currentTimeMillis()
         val cell = width.toFloat() / clips.size
 
-        val base = figureHeight()
+        // One nominal height for both, reduced only as far as the wider of the two
+        // needs. Clamping each to its own cell would let one shrink and not the other,
+        // which is the opposite of what these previews are for — the flag and the
+        // dumbbells are shown side by side precisely so the colours can be compared on
+        // the same figure at the same size.
+        val fit = clips.minOf { (cell * CELL_FILL) / (it.aspect * it.scale) }
+        val base = minOf(figureHeight(), fit)
         for ((i, clip) in clips.withIndex()) {
             // Each clip's own scale, exactly as the panel applies it — the flag's box is
             // dominated by the cloth, so at a shared height its character comes out
             // smaller than the others'.
-            val h = minOf(base * clip.scale, (cell * CELL_FILL) / clip.aspect)
+            val h = base * clip.scale
             val w = h * clip.aspect
             MascotRenderer.draw(
                 canvas, clip, now,
