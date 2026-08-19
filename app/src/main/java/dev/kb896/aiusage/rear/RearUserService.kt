@@ -124,6 +124,29 @@ class RearUserService : IRearService.Stub {
      * task: this runs every watchdog tick, and a check that acts on uncertainty would
      * shove a correctly-placed panel around the display topology every 20 seconds.
      */
+    /**
+     * Launch the system camera onto the rear display.
+     *
+     * The component and flags are MIUI's own, read off a live trace of opening the rear
+     * camera by hand: com.xiaomi.subscreencenter starts com.android.camera/.Camera with
+     * these five flags and no extras, and the camera app then brings up its own
+     * companion UI on the front by itself. Nothing here has to arrange that half.
+     *
+     * Launching straight at the rear display works for the camera where it does not for
+     * this app's own panel — which needs the start-then-move dance above — because the
+     * restriction is on the caller, not the display. From shell uid it is simply allowed.
+     *
+     * The panel is not dismissed first: the camera stacks on top of it, and closing the
+     * camera reveals it again. That is measured behaviour, not an assumption.
+     */
+    override fun openCamera(displayId: Int): Boolean {
+        if (displayId < 0) return false
+        val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
+        val ok = !out.contains("Error", ignoreCase = true)
+        if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
+        return ok
+    }
+
     override fun ensureOnRear(displayId: Int): Boolean {
         if (displayId < 0) return false
         if (compositingOnRear() != false) { strandStrikes = 0; return false }
@@ -360,6 +383,12 @@ class RearUserService : IRearService.Stub {
         const val MAX_STRAND_STRIKES = 3
 
         const val TAG = "AiUsageRear"
+
+        /** MIUI's camera, and the exact flags its own sub-screen launcher uses. */
+        private const val CAMERA_COMPONENT = "com.android.camera/.Camera"
+
+        /** NEW_TASK | SINGLE_TOP | EXCLUDE_FROM_RECENTS | RESET_TASK_IF_NEEDED | CLEAR_TASK */
+        private const val CAMERA_FLAGS = "0x30a08000"
         const val PKG = "dev.kb896.aiusage"
         const val ACTIVITY = ".rear.RearActivity"
         const val ACTION_STATE = "dev.kb896.aiusage.STATE"

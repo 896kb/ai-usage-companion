@@ -124,6 +124,10 @@ class UsagePollService : Service() {
             // us and we go through Shizuku. Handled on the same path as the screen
             // broadcasts: ensureOnRear() first, which is the whole remedy when it works.
             addAction(RearActivity.ACTION_STRANDED)
+            // The panel's camera button, pressed on the back of the phone. Same reason
+            // it comes here: the Shizuku binding lives in this process and the panel's
+            // does not.
+            addAction(RearActivity.ACTION_OPEN_CAMERA)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
         // Place the panel NOW, before either loop's first delay.
         //
@@ -204,7 +208,17 @@ class UsagePollService : Service() {
      * covered for up to 20 seconds. Makes no network call.
      */
     private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = safeSupervise()
+        override fun onReceive(context: Context?, intent: Intent?) {
+            // The camera is not a placement problem, so it does not go through the
+            // supervisor: that path exists to get the panel back where it belongs, and
+            // running it here would have a camera tap second-guessing the panel's
+            // position at the exact moment something else is about to cover it.
+            if (intent?.action == RearActivity.ACTION_OPEN_CAMERA) {
+                Graph.of(this@UsagePollService).bridge.openCamera()
+                return
+            }
+            safeSupervise()
+        }
     }
 
     /**

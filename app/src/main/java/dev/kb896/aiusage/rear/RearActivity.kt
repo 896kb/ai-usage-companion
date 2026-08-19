@@ -28,6 +28,16 @@ class RearActivity : Activity() {
          *  this process cannot, the move needs shell privileges. */
         const val ACTION_STRANDED = "dev.kb896.aiusage.STRANDED"
         const val ACTION_FINISH = "dev.kb896.aiusage.FINISH"
+
+        /**
+         * The panel's camera button was pressed.
+         *
+         * Sent from `:rear` to the main process, which is where the Shizuku binding
+         * lives — this process has none of its own and should not grow one. An ordinary
+         * broadcast is enough: same package, same uid, no privilege crosses here. The
+         * privileged part happens on the other side.
+         */
+        const val ACTION_OPEN_CAMERA = "dev.kb896.aiusage.OPEN_CAMERA"
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -98,6 +108,13 @@ class RearActivity : Activity() {
 
         calibrationView = CalibrationView(this)
         dial = RearDialView(this)
+        // Fire-and-forget across the process boundary. This process cannot open the
+        // camera itself — the Shizuku binding is in the main one — and it deliberately
+        // learns nothing about whether the launch worked: there is no screen here to
+        // report a failure on, and the camera either appears or it does not.
+        dial.onCameraTap = {
+            sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
+        }
         setContentView(dial)
 
         // No-op until we are actually on the rear panel — see hideBars().

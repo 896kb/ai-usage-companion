@@ -162,6 +162,14 @@ data class PanelConfig(
     val ringLayout: RingLayout = RingLayout(),
     /** Default window order, for accounts that have not chosen their own. */
     val barOrder: List<String> = listOf("session", "weekly_all", "weekly_scoped"),
+    /**
+     * A camera button in the bottom-right, which puts the system camera on this display.
+     *
+     * Off by default. It is the only control on a surface that is otherwise a readout —
+     * everything else here is something to look at, and a panel that reacts to being
+     * touched is a surprise unless it was asked for.
+     */
+    val showCamera: Boolean = true,
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are

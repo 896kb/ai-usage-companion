@@ -180,6 +180,20 @@ class ShizukuBridge(private val context: Context) {
      * exists and uses this bridge, that crash-recovery behaviour is real, not
      * merely documented.
      */
+    /**
+     * Ask the privileged service to put the system camera on the rear display.
+     *
+     * Silent on failure by design. This is triggered by a tap on the back of a phone
+     * nobody is looking at a screen for — there is nowhere to show an error, and the
+     * camera not appearing IS the message.
+     */
+    fun openCamera() {
+        val display = rearDisplayId()
+        if (display < 0) return
+        runCatching { service?.openCamera(display) }
+            .onFailure { Log.w(TAG, "camera launch failed: ${it.message}") }
+    }
+
     fun isCalibrating(): Boolean = calibrating
 
     private companion object { const val TAG = "AiUsageBridge" }

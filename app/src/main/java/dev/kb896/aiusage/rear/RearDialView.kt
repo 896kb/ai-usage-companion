@@ -321,6 +321,11 @@ class RearDialView(context: Context) : View(context) {
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
         if (onlyAccount == null) drawExtras(canvas)
+        // Same rule as the extras: it acts on the panel rather than on an account, so a
+        // single-account preview leaves it out — and a preview is scaled, which would
+        // put the touch target in the wrong place even if it were wanted there.
+        if (onlyAccount == null && config.showCamera) drawCamera(canvas, dx, dy)
+        else cameraButton = null
         canvas.restore()
 
         // Next frame only while something is still moving. When everything has settled
@@ -457,6 +462,64 @@ class RearDialView(context: Context) : View(context) {
      * plainly a separate block of context, and the second line costs nothing: the band
      * above the first account heading is empty.
      */
+    /**
+     * Where the camera button is, in the view's own coordinates, or null when it is not
+     * shown. See [drawCamera] for why the drift is subtracted out of it.
+     */
+    var cameraButton: android.graphics.RectF? = null
+        private set
+
+    /** Set by RearActivity. Nothing on the front screen listens. */
+    var onCameraTap: (() -> Unit)? = null
+
+    @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        val button = cameraButton ?: return false
+        val hit = event.x >= button.left - CAMERA_SLOP && event.x <= button.right + CAMERA_SLOP &&
+            event.y >= button.top - CAMERA_SLOP && event.y <= button.bottom + CAMERA_SLOP
+        return when (event.actionMasked) {
+            // Claim the gesture on the way down if it started on the button, so a slight
+            // drag still counts — a finger on the back of a phone is not steady, and
+            // without claiming it there is no ACTION_UP to act on.
+            android.view.MotionEvent.ACTION_DOWN -> hit
+            android.view.MotionEvent.ACTION_UP -> {
+                if (hit) onCameraTap?.invoke()
+                hit
+            }
+            else -> false
+        }
+    }
+
+    /**
+     * A camera, in the corner the artwork does not reach.
+     *
+     * Bottom-right specifically: the mark region ends at BAR_RIGHT and the lens column
+     * owns the left, so this is the one part of the panel with nothing in it. It is also
+     * the furthest point from the rings, which matters because it is the only thing here
+     * that can be pressed by accident.
+     *
+     * The glyph is traced from the same Terminess Nerd Font as the clock and the
+     * battery, by the same generator. It was hand-drawn from rectangles first, and sat
+     * beside two traced icons looking exactly like what it was.
+     */
+    private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
+        val h = CAMERA_H
+        val w = h * PanelIcons.CAMERA_ASPECT
+        val right = CONTENT_RIGHT
+        val bottom = Panel.HEIGHT - MARK_BOTTOM.toFloat()
+        extras.color = colorFor("extras", config.extrasColor)
+        drawIcon(canvas, PanelIcons.CAMERA, right - w, bottom - h, h)
+
+        // Recorded WITHOUT the burn-in drift the canvas is currently translated by.
+        // Touches arrive in the view's own coordinates, which the drift never moves — it
+        // shifts what is painted, not where the window is. Storing the drifted rect would
+        // walk the target a few pixels away from the glyph on a ten-minute cycle, which
+        // is the kind of bug that gets blamed on the finger.
+        cameraButton = android.graphics.RectF(
+            right - w - dx, bottom - h - dy, right - dx, bottom - dy,
+        )
+    }
+
     private fun drawExtras(canvas: Canvas) {
         extras.color = colorFor("extras", config.extrasColor)
         var baseline = TITLE_BASELINE
@@ -1131,6 +1194,18 @@ class RearDialView(context: Context) : View(context) {
         private const val WEEKLY_WINDOW_MS = 7f * 24f * 60f * 60f * 1000f
 
         /** Icon height for the clock and battery, matched to the extras' text size. */
+        /** Camera button height in panel units; its width follows the glyph's aspect. */
+        private const val CAMERA_H = 30f
+
+        /**
+         * How far outside the drawn glyph a touch still counts.
+         *
+         * Generous, and it has to be: 30 panel units on a 904-unit panel is a few
+         * millimetres of glass on the back of a phone being held rather than looked at.
+         * The target is what the finger needs; the glyph is only what says it is there.
+         */
+        private const val CAMERA_SLOP = 26f
+
         private const val EXTRA_ICON_H = 20f
 
         /** Line pitch when both extras are shown. */

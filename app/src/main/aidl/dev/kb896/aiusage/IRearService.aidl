@@ -43,4 +43,14 @@ interface IRearService {
      * correction without logging every quiet check.
      */
     boolean ensureOnRear(int displayId) = 6;
+
+    /**
+     * Put the system camera on [displayId].
+     *
+     * A NAMED action rather than a general "run this component", deliberately. This
+     * interface runs at shell uid, so anything it will launch for the asking is a
+     * privilege the app hands to whatever can reach it. One camera is a feature; an
+     * arbitrary component is a lever.
+     */
+    boolean openCamera(int displayId) = 7;
 }

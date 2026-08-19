@@ -439,6 +439,12 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(container, "Show the battery", config.showBattery) { on ->
             write { it.copy(showBattery = on) }
         }
+        // The only control the panel has. Off by default — everything else on that
+        // surface is something to look at, and a readout that reacts to being touched is
+        // a surprise unless it was asked for.
+        SettingsRows.toggle(container, "Camera button on the panel", config.showCamera) { on ->
+            write { it.copy(showCamera = on) }
+        }
 
         // Colours as one grid, so they can be judged against each other — which is how
         // they are actually chosen — rather than down a column one at a time.
