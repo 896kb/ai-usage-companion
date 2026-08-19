@@ -504,11 +504,18 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
         val h = CAMERA_H
-        val w = h * PanelIcons.CAMERA_ASPECT
+        val w = h * PanelIcons.CAMERA.aspect
         val right = CONTENT_RIGHT
         val bottom = Panel.HEIGHT - MARK_BOTTOM.toFloat()
         extras.color = colorFor("extras", config.extrasColor)
-        drawIcon(canvas, PanelIcons.CAMERA, right - w, bottom - h, h)
+        // Positioned by its own left edge rather than by a square cell: drawIcon centres
+        // within a cell of side h, which is right for the clock and battery sitting in a
+        // column and wrong for something pinned to the panel's right margin.
+        // drawIcon centres its glyph in a square cell of side h, which is right for the
+        // clock and battery stacked in a column and wrong for something pinned to the
+        // panel's right margin. Undo the centring so the glyph's own right edge lands on
+        // CONTENT_RIGHT, where every other right-aligned thing on the panel ends.
+        drawIcon(canvas, PanelIcons.CAMERA, right - w - (h - w) / 2f, bottom - h, h)
 
         // Recorded WITHOUT the burn-in drift the canvas is currently translated by.
         // Touches arrive in the view's own coordinates, which the drift never moves — it
@@ -561,7 +568,7 @@ class RearDialView(context: Context) : View(context) {
                     drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
                     // The fill follows the GLYPH inside the cell, not the cell itself,
                     // or it would spill into the padding the square adds either side.
-                    val glyphW = EXTRA_ICON_H * PanelIcons.BATTERY_ASPECT
+                    val glyphW = EXTRA_ICON_H * PanelIcons.BATTERY.aspect
                     val glyphX = iconX + (EXTRA_ICON_H - glyphW) / 2f
                     val inset = EXTRA_ICON_H * 0.16f
                     val top = iconY + inset
@@ -583,12 +590,18 @@ class RearDialView(context: Context) : View(context) {
      * lining up. A square cell gives every icon the same footprint whatever its shape,
      * and the readings beside them share one right edge.
      */
-    private fun drawIcon(canvas: Canvas, icon: List<PanelIcons.Rect>, x: Float, y: Float, h: Float) {
-        val aspect = if (icon === PanelIcons.CLOCK) PanelIcons.CLOCK_ASPECT
-            else PanelIcons.BATTERY_ASPECT
-        val w = h * aspect
+    /**
+     * An icon at [h] tall, centred in a square cell of that height at [x], [y].
+     *
+     * The aspect comes from the icon itself. It used to be picked by an if-chain here —
+     * CLOCK's aspect for the clock, BATTERY's for everything else — so the first icon
+     * added after that was written came out battery-shaped: tall and narrow, on a
+     * camera. The pair now travels together and cannot be mismatched. See PanelIcons.Icon.
+     */
+    private fun drawIcon(canvas: Canvas, icon: PanelIcons.Icon, x: Float, y: Float, h: Float) {
+        val w = h * icon.aspect
         val left = x + (h - w) / 2f          // centred in the cell, not left-aligned in it
-        for (r in icon) {
+        for (r in icon.rects) {
             canvas.drawRect(
                 left + r.x * w, y + r.y * h,
                 left + (r.x + r.w) * w, y + (r.y + r.h) * h,
