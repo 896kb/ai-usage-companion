@@ -169,7 +169,7 @@ drift from what the back of the phone is doing.
 | | |
 |---|---|
 | **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. |
-| **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour separately; the clock and battery; and the ramp stops from mild to spent. |
+| **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour separately; the clock and battery; and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
 | **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. |
 | **Account order** | Reorder the accounts and the rings follow them: ring one belongs to whichever account is first, so there is nothing to keep in step by hand. |
 | **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
@@ -363,6 +363,18 @@ The display is always-on with no idle timeout, which is close to worst-case burn
 geometry for OLED. The whole composition drifts by ±4px on a ten-minute cycle, and the
 rings — which must stay concentric with the lenses — instead breathe their radius by
 ±3px. That is load-bearing, not decoration.
+
+Every mascot is a list of rectangles rather than an image, and every one of them is drawn
+on the same grid: one artwork pixel is 11 units, and an eye is exactly one pixel. That
+shared unit is the only reason the poses can be sized against each other — each clip
+declares the height of its own box in those units and its drawn scale follows from it, so
+"the same size as the others" is arithmetic rather than a number someone tuned by eye.
+Two of them had drifted 43% and 15% off before this was written down where the build
+could check it.
+
+It also means a clip can reserve space for whatever it throws outside the character —
+confetti, a flag, the Zs above a sleeping head — without the character shrinking to make
+room.
 
 ## Attribution
 
