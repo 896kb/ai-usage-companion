@@ -37,11 +37,17 @@ internal object MascotPoses {
     private val LEG_X = floatArrayOf(11f, 32f, 64f, 85f)
     private const val NUB_W = 22f
     private const val EYE_W = 11f
+    private const val EYE_H = 11f
     private val EYE_X = floatArrayOf(21f, 75f)
 
-    private val BODY = MascotRenderer.BODY_GREEN
-    private val EYE = dev.kb896.aiusage.Panel.Palette.BG
-    private val ACCENT = MascotRenderer.ACCENT_ORANGE
+    // `const`, not `val`, and that is load-bearing. An object's properties initialise in
+    // declaration order, and CLIPS below is built during that pass — a plain `val`
+    // declared after it reads as 0 while the frames are being generated. The ghost's eye
+    // colour was exactly that: every eye came out fully transparent, a face-less figure
+    // that no compiler warning and no crash would have mentioned.
+    private const val BODY = MascotRenderer.BODY_GREEN
+    private const val EYE = dev.kb896.aiusage.Panel.Palette.BG
+    private const val ACCENT = MascotRenderer.ACCENT_ORANGE
 
     val CLIPS: List<MascotFrames.Clip> = listOf(
         // Slow. A sleeping figure that breathes at the pace the others move at is not
@@ -147,7 +153,10 @@ internal object MascotPoses {
     // and it means the week is gone, which is a fact about usage. This one means there
     // is nobody home — the account is not answering, and there is no reading at all.
 
-    private const val GHOST_W = 107f
+    // Wider than the other poses' 107. The arms swing out with the body, and at full
+    // sway they need 21 units of clearance each side where the standing box has 16 —
+    // the box has to hold the widest excursion, not the resting pose.
+    private const val GHOST_W = 120f
     private const val GHOST_H = 106f
     private const val GHOST_FRAMES = 10
 
@@ -155,7 +164,7 @@ internal object MascotPoses {
     private const val GHOST_TOP = 12f
 
     /** Narrower than the standing body: at full width a legless figure is a blob. */
-    private const val GHOST_L = 16f
+    private const val GHOST_L = 22f
     private const val GHOST_BODY_W = 75f
     private const val GHOST_BODY_H = 44f
 
@@ -178,9 +187,16 @@ internal object MascotPoses {
      * comb. What makes a tail is the width running out as it descends, so the eye
      * follows a single shape down to a wisp.
      */
-    private const val GHOST_TAIL = 46f
-    private const val GHOST_TAIL_SLICES = 9
+    // Four, and each exactly as tall as the standing mascot's eye. Nine made a striped
+    // funnel: at that thickness the slices stop being blocks and become a gradient,
+    // which is the one thing this artwork is not. The rest of the mascot is built from a
+    // handful of big rectangles, and pinning the slice height to a feature that already
+    // exists on the character is what keeps the tail on the same grid as the face.
+    private const val GHOST_TAIL_SLICES = 4
     private const val GHOST_TAIL_TAPER = 0.80f
+
+    /** Declared AFTER the slice count it multiplies: a const cannot read one below it. */
+    private const val GHOST_TAIL = GHOST_TAIL_SLICES * EYE_H
 
     /**
      * How far the tail snakes, and how much each slice lags the one above it.
@@ -204,6 +220,25 @@ internal object MascotPoses {
      */
     private const val SEAM = 2f
 
+    /** Arm block: where it sits on the body, and how big. */
+    private const val GHOST_ARM_W = 14f
+    private const val GHOST_ARM_TOP = 12f
+    private const val GHOST_ARM_H = 20f
+
+    /**
+     * The ghost's grey at depth [t] down the tail, 0 at the body and 1 at the tip.
+     *
+     * Only the alpha changes; the colour underneath is constant, so the tail reads as
+     * the same substance thinning rather than as a gradient painted onto it.
+     */
+    private fun ghost(t: Float): Int {
+        val a = ((MascotRenderer.GHOST_BODY ushr 24) * (1f - GHOST_FADE * t)).toInt()
+        return (a shl 24) or (MascotRenderer.GHOST_BODY and 0x00FFFFFF)
+    }
+
+    /** How much of the body's opacity the tip has lost. */
+    private const val GHOST_FADE = 0.66f
+
     private fun ghostFrames(): List<List<MascotFrames.Rect>> =
         List(GHOST_FRAMES) { i -> ghostFrame(i.toFloat() / GHOST_FRAMES) }
 
@@ -215,12 +250,25 @@ internal object MascotPoses {
         fun add(x: Float, y: Float, w: Float, h: Float, c: Int) =
             out.add(MascotFrames.Rect(x / GHOST_W, y / GHOST_H, w / GHOST_W, h / GHOST_H, c))
 
-        add(GHOST_L + sway, top, GHOST_BODY_W, GHOST_BODY_H, BODY)
-        // No nubs. Raising them read as "boo" in the abstract and as the standing mascot
-        // in fancy dress on the panel — arms are the most solid, most physical thing the
-        // character has, and a ghost that still has them is the animal wearing a sheet.
-        add(GHOST_L + sway + 12f, top + 16f, EYE_W, 13f, EYE)
-        add(GHOST_L + sway + 52f, top + 16f, EYE_W, 13f, EYE)
+        // Arms, back after a spell without them. They were dropped because on a
+        // GREEN body they made the standing mascot in fancy dress — the account's own
+        // colour with a wavy bottom. In grey, translucent, over a tail that dissipates,
+        // they stop being the animal's limbs and become the thing a spirit reaches with.
+        // The colour did the work the silhouette could not.
+        add(GHOST_L + sway, top, GHOST_BODY_W, GHOST_BODY_H, ghost(0f))
+        add(GHOST_L + sway - GHOST_ARM_W, top + GHOST_ARM_TOP, GHOST_ARM_W, GHOST_ARM_H, ghost(0f))
+        add(GHOST_L + sway + GHOST_BODY_W, top + GHOST_ARM_TOP, GHOST_ARM_W, GHOST_ARM_H, ghost(0f))
+        // Nothing here overlaps anything else, and that is a reversal worth naming.
+        // Every other pose tucks its pieces a hair behind their neighbours, because two
+        // opaque rectangles sharing a fractional edge can round apart and show a
+        // hairline of background. Translucent pieces cannot do that: an overlap
+        // composites twice and the shared band comes out brighter than either side, so
+        // the fix for a seam becomes a seam. These share exact edges instead — the same
+        // float expression for one's bottom and the next one's top — which tiles without
+        // a gap under a non-antialiased fill, and the mascot paint has never been
+        // antialiased.
+        add(GHOST_L + sway + 12f, top + 16f, EYE_W, EYE_H, MascotRenderer.GHOST_EYE)
+        add(GHOST_L + sway + 52f, top + 16f, EYE_W, EYE_H, MascotRenderer.GHOST_EYE)
 
         // The tail, sliced across and narrowing as it falls away.
         //
@@ -235,8 +283,11 @@ internal object MascotPoses {
             val w = GHOST_BODY_W * (1f - GHOST_TAIL_TAPER * t)
             val swing = GHOST_TAIL_WAVE * t *
                 sin(2.0 * PI * (phase - GHOST_TAIL_LAG * t)).toFloat()
-            add(centre + swing - w / 2f, top + GHOST_BODY_H + i * sliceH - SEAM,
-                w, sliceH + SEAM, BODY)
+            // Fading as it goes. A spirit does not end, it stops being there, and the
+            // translucency is what lets that be drawn at all — a solid body can only
+            // taper to a point, which is a shape, whereas this runs out.
+            add(centre + swing - w / 2f, top + GHOST_BODY_H + i * sliceH,
+                w, sliceH, ghost(t))
         }
         return out
     }

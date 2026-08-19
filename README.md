@@ -84,9 +84,13 @@ with nothing left to spend it on.
 ![ghost](assets/states/ghost.png)
 
 **The account has no usable credential** — never connected, signed out, or its refresh
-token has expired. No legs: it drifts sideways and tapers into a tail that snakes below
-it, each slice swinging wider and later than the one above, so the tip is still arriving
-where the head has already been.
+token has expired. Grey and translucent, with white eyes: no legs, and a tail of four
+blocks that tapers, fades out, and snakes as it falls, each one swinging wider and later
+than the block above so the tip is still arriving where the head has already been.
+
+It is the one pose that does not wear the account's colour. Every other mascot is
+reporting on that account; this one is reporting that there is nothing to report, and
+the palette saying "this is yours" about data that does not exist would be a small lie.
 
 Not the same as dead, and keeping them apart matters. Dead is a fact about usage: the
 week is spent, the numbers are real and all bad. The ghost is the *absence* of numbers —

@@ -30,6 +30,32 @@ object MascotRenderer {
     const val ACCENT_WORK = 0xFF006EFF.toInt()
 
     /**
+     * The ghost's own colours, fixed rather than following the account.
+     *
+     * Every other pose wears the account's mascot colour, because it is reporting on
+     * that account. The ghost is reporting that there is nothing to report — no reading,
+     * no window, nobody answering — so dressing it in the account's colour would be the
+     * one case where the palette says "this is yours" about data that does not exist.
+     *
+     * Translucent, which no other pose is: the panel's own background shows through it.
+     */
+    // Mid grey, not light. White eyes on a pale body are invisible — the first attempt
+    // had both near 0xC8 and the face simply was not there.
+    const val GHOST_BODY = 0xCC9EA3A0.toInt()
+    const val GHOST_EYE = 0xFFF2F2F2.toInt()
+
+    /**
+     * Whether a rectangle is an eye rather than a body part.
+     *
+     * Eyes were recognised by being background-coloured, which was true while every
+     * mascot's eyes were holes cut in a bright body. The ghost's are WHITE — it is a
+     * dim grey figure, and dark eyes on it read as gaps rather than as a face. They must
+     * still punch through in a bitmap, though, or HyperOS's flat white tint fills them
+     * back in and the face disappears exactly as it did once before.
+     */
+    fun isEye(color: Int) = color == Panel.Palette.BG || color == GHOST_EYE
+
+    /**
      * Cells per side of a dead mascot's X. Odd, so the two diagonals meet in a single
      * centre cell rather than making a fat middle.
      *
@@ -145,7 +171,7 @@ object MascotRenderer {
         for (r in frame) {
             // Eyes are drawn in the background colour, so on a dead mascot they would
             // simply vanish rather than become crosses. Skipped here, stroked below.
-            if (dead && r.color == Panel.Palette.BG) continue
+            if (dead && isEye(r.color)) continue
             body.color = when (r.color) {
                 ACCENT_ORANGE -> accent
                 BODY_GREEN -> bodyColor
@@ -154,7 +180,7 @@ object MascotRenderer {
             canvas.drawRect(
                 x + r.x * w, top + r.y * h,
                 x + (r.x + r.w) * w, top + (r.y + r.h) * h,
-                if (punch != null && r.color == Panel.Palette.BG) punch else body,
+                if (punch != null && isEye(r.color)) punch else body,
             )
         }
 
@@ -174,7 +200,7 @@ object MascotRenderer {
             eye.color = Panel.Palette.BG
             val cross = punch ?: eye
             for (r in frame) {
-                if (r.color != Panel.Palette.BG) continue
+                if (!isEye(r.color)) continue
                 val l = x + r.x * w
                 val t = top + r.y * h
                 val cw = (r.w * w) / EYE_GRID
