@@ -11,7 +11,12 @@ class PoseDumpTest {
     @Test fun dump() {
         val out = System.getenv("POSE_DUMP") ?: return
         val sb = StringBuilder()
-        for (clip in MascotPoses.CLIPS) {
+        // EVERY clip, not just the authored ones. The stills generator used to parse
+        // MascotFrames.kt with a regex, which worked only while every clip was a literal
+        // table — the hand-authored poses are computed, and it silently could not see
+        // them. Dumping through the same list the panel draws from is the only source
+        // that cannot drift.
+        for (clip in MascotFrames.CLIPS) {
             sb.append("clip\t${clip.name}\t${clip.aspect}\t${clip.scale}\t${clip.frames.size}\n")
             for ((i, frame) in clip.frames.withIndex())
                 for (r in frame)

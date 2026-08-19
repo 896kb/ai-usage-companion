@@ -43,6 +43,19 @@ poll.
 **The 5-hour window is past 90%.** This outranks the lifting pose deliberately: checking
 "are you working" first would hide the warning at exactly the moment it matters most.
 
+### Sleeping — the window is spent
+
+![sleeping](assets/states/sleep.png)
+
+**The 5-hour window is at 99% or above.** Nothing left to do until it rolls over, so the
+mascot sleeps it off. This outranks the flag, which is the warning that this was coming:
+past 99% there is nothing left to spend carefully, and the warning has no job. It
+outranks the lifting pose too — a burst cannot be happening against a window with nothing
+in it.
+
+Distinct from the dead pose below, and the difference is the whole point: this window
+refills in a few hours. The week does not.
+
 ### Confetti — a fresh start
 
 ![confetti](assets/states/confetti.png)
@@ -60,13 +73,30 @@ Keyed on the *weekly* limit specifically, because that is the one you cannot wai
 at 0% and a week at 100% — and without this rule the mascot throws confetti at an account
 with nothing left to spend it on.
 
+### Ghost — nobody home
+
+![ghost](assets/states/ghost.png)
+
+**The account has no usable credential** — never connected, signed out, or its refresh
+token has expired. It drifts sideways with its hem trailing behind it.
+
+Not the same as dead, and keeping them apart matters. Dead is a fact about usage: the
+week is spent, the numbers are real and all bad. The ghost is the *absence* of numbers —
+nobody is answering, and there is nothing to report. Before it existed, a signed-out
+account went on celebrating at 0% or waving the flag at 95%, replaying whatever reading
+was last seen before it lost access.
+
 ## The rings and the bars
 
-**The rings are clocks, not gauges.** Each one shows the time remaining until that
-account's 5-hour window resets, drawn concentric with the phone's actual camera lenses.
-They fill as the window runs down, so a full ring means a reset is imminent — good news.
-That is also why they are accent-coloured rather than ramped: a green-to-red ramp would
-say the opposite of what a full ring means.
+**The rings are clocks, not gauges** by default. Each one shows the time remaining until
+that account's 5-hour window resets, drawn concentric with the phone's actual camera
+lenses. They fill as the window runs down, so a full ring means a reset is imminent —
+good news. That is also why they are accent-coloured rather than ramped: a green-to-red
+ramp would say the opposite of what a full ring means.
+
+A ring can be pointed at a different window, switched to show **utilisation** instead —
+in which case it *is* a gauge, and takes the ramp like a bar — or set to show **nothing**,
+which empties it and fades it away. A bare lens surround is a legitimate look.
 
 **The bars are utilisation**, one row per window:
 
@@ -99,17 +129,44 @@ Separate warnings fire at half of a limit, then at 90% and every 2% after that.
 
 ## Customisation
 
-**Not yet — this is the next piece of work.** Everything below is currently compiled in,
-and all of it is designed to become editable:
+Almost everything on the panel is editable, and the settings screen shows a **live
+preview of the real panel** pinned at the top — not a mock-up of one. It is an actual
+instance of the same view at the same 904x572, scaled down, so it animates and it cannot
+drift from what the back of the phone is doing.
 
 | | |
 |---|---|
-| **Titles** | The masthead — `CLAUDE USAGE` today — and both account names. All three are free text; the masthead is a label, not a brand mark. |
-| **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour; and the ramp stops from mild to spent. |
-| **Layout** | The order of the bar rows, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing at all. |
-| **Bottom artwork** | Replace the built-in mark with your own image, positioned and zoomed within its region. |
-| **Extras** | A clock and a battery readout on the panel. |
-| **Accounts** | One or two, rather than exactly two. Each with its own name, colour, and choice of browser sign-in or pasted token. |
+| **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. |
+| **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour separately; the clock and battery; and the ramp stops from mild to spent. |
+| **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. |
+| **Account order** | Reorder the accounts and the rings follow them: ring one belongs to whichever account is first, so there is nothing to keep in step by hand. |
+| **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
+| **Extras** | A clock and a battery readout, stacked in the corner with pixel-traced glyphs. |
+| **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
+
+Each account gets **its own settings screen**, reached from a row on the main one and
+sliding in over it, with a preview showing just that account's ring and rows. Two
+accounts already made a single screen a long scroll, and the panel is meant to grow past
+two.
+
+Colours are chosen on a **saturation/brightness square with a hue strip**, or typed as
+hex, or taken from the panel's own palette. Every colour change eases in over 1.8s
+exactly as the bars do, in the preview and on the panel, so a setting being dragged looks
+like the panel responding rather than flickering.
+
+### Who an account belongs to
+
+Each account's settings can show the holder's name, email, organisation and plan — enough
+to tell two accounts apart when you have forgotten which is which. It is **masked until
+you unlock it** with your fingerprint or device PIN, the way a banking app does it, and it
+re-hides when the screen locks, when you leave the screen, or after 30 seconds. A phone
+handed to someone else should not show whose accounts these are.
+
+### Starting over
+
+**ADVANCED → Reset every setting to its default** puts everything back. It asks first,
+and the confirm button stays shut for five seconds — the one action in the app with
+nothing behind it and no undo. Your connected accounts stay signed in.
 
 ## Future plans
 
@@ -118,7 +175,8 @@ and all of it is designed to become editable:
 - **iOS widget.**
 - **macOS widget.**
 - **More than two accounts**, scrolled vertically on the panel rather than stacked — which
-  is why colours are named per account rather than "primary" and "secondary".
+  is why colours are named per account rather than "primary" and "secondary". The panel
+  overflows at four today: 516px of content into 396px of room.
 - **Mascot states that enter and leave**, rather than looping whole. The lifting mascot
   should put its headband on once, lift for as long as you are working, and take it off
   when you stop — instead of restarting the whole performance every three seconds. And
@@ -225,13 +283,22 @@ phone, understanding all of the above.
 4. **Allow notifications.** Without them you lose both the limit warnings and the ongoing
    notification that carries the HyperIsland readout — and nothing on screen will tell you
    why.
+
+   Steps 4 to 6 are also listed at the top of the app's own settings, each as a button
+   that takes you to the right system screen and ticks itself once done. Once all of them
+   are satisfied the list collapses into an **ONBOARDING** accordion and gets out of the
+   way — it is instructions for getting started, and a wall of ticks should not sit above
+   the settings you come back to. It reopens if a permission is later revoked, or if
+   Shizuku is not restarted after a reboot.
 5. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
    HyperOS is aggressive here: with restrictions on it stops the poll service, and the
    panel freezes on its last reading — showing stale numbers as though they were current.
 6. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
    "close all" clears it, which kills the poll service and takes the panel down with it.
    A suggestion rather than a requirement, but it is the difference between the panel
-   surviving your day and dying to a reflex.
+   surviving your day and dying to a reflex. This is the one step the app cannot check
+   for you — HyperOS does not expose whether an app is locked — so it is shown as advice
+   rather than as a box that could never tick.
 7. **Background the app, then tap its notification** to put the panel on the back.
 
 Step 7 is the awkward one and it is known — see [Future plans](#future-plans).

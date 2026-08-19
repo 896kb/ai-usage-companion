@@ -11,9 +11,10 @@ class MascotMoodTest {
         assertEquals(MascotMood.CONFETTI, MascotMood.of(0f, 0f))
     }
 
+    /** NEARLY spent. Fully spent is the nap — see below. */
     @Test fun `a nearly spent window flies the flag`() {
         assertEquals(MascotMood.FLAG, MascotMood.of(0.90f, 0.10f))
-        assertEquals(MascotMood.FLAG, MascotMood.of(1.0f, null))
+        assertEquals(MascotMood.FLAG, MascotMood.of(0.98f, null))
     }
 
     @Test fun `burning through it with room left lifts`() {
@@ -31,26 +32,30 @@ class MascotMoodTest {
         assertEquals(MascotMood.FLAG, MascotMood.of(0.95f, 0.80f))
     }
 
-    @Test fun `half the window gone, and nothing happening, is a nap`() {
-        assertEquals(MascotMood.SLEEP, MascotMood.of(0.50f, 0.50f))
-        assertEquals(MascotMood.SLEEP, MascotMood.of(0.75f, 0.75f))
-        // Right up to the flag, which still wins.
-        assertEquals(MascotMood.SLEEP, MascotMood.of(0.89f, 0.89f))
+    @Test fun `a spent five-hour window sleeps it off`() {
+        assertEquals(MascotMood.SLEEP, MascotMood.of(0.99f, 0.99f))
+        assertEquals(MascotMood.SLEEP, MascotMood.of(1.00f, 1.00f))
+        // The flag keeps the band below it: a warning, right up to the point where
+        // there is nothing left to warn about.
         assertEquals(MascotMood.FLAG, MascotMood.of(0.90f, 0.90f))
+        assertEquals(MascotMood.FLAG, MascotMood.of(0.98f, 0.98f))
     }
 
-    /** Doing something beats having done something: the nap yields to a live burst. */
-    @Test fun `a burst past the halfway mark lifts rather than sleeps`() {
-        assertEquals(MascotMood.MUSCLE, MascotMood.of(0.70f, 0.68f))
+    /** A burst cannot be happening against a window with nothing left in it. */
+    @Test fun `a spent window sleeps through a live burst`() {
+        assertEquals(MascotMood.SLEEP, MascotMood.of(0.99f, 0.97f))
         val now = 1_000_000L
-        assertEquals(MascotMood.MUSCLE,
-            MascotMood.decide(0.70f, 0.68f, 0L, now).clip)
-        // ...and goes back to sleep once the hold lapses, rather than to the walk.
-        assertEquals(MascotMood.SLEEP,
-            MascotMood.decide(0.70f, 0.70f, now - 1, now).clip)
+        assertEquals(MascotMood.SLEEP, MascotMood.decide(0.99f, 0.97f, now + 1000, now).clip)
     }
 
-    /** Below halfway the idle state is unchanged — this rule only claims the top half. */
+    /**
+     * A spent WEEK still outranks a spent five hours. Both are exhausted, but only one
+     * of them refills this afternoon, and the pose has to say which.
+     */
+    @Test fun `a spent week outranks a spent session`() {
+        assertEquals(MascotMood.DEAD, MascotMood.of(0.99f, 0.99f, weeklySpent = true))
+    }
+
     @Test fun `steady use in the middle just stands`() {
         assertEquals(MascotMood.WALK, MascotMood.of(0.400f, 0.395f))
         assertEquals(MascotMood.WALK, MascotMood.of(0.400f, 0.400f))

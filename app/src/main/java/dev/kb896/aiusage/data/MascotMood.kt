@@ -44,12 +44,16 @@ object MascotMood {
     const val DEAD = "dead"
 
     /**
-     * Half the 5-hour window gone, and nothing happening — the mascot naps.
+     * The 5-hour window is gone. Nothing left to do until it rolls over, so the mascot
+     * sleeps it off.
      *
-     * Ranked BELOW the burst hold on purpose. Half spent describes where you stand;
-     * a burst describes what you are doing right now, and something happening beats
-     * something not. So the nap is what the middle of the window looks like once you
-     * have stopped working, and the first burst of the next stretch wakes it.
+     * Ranked ABOVE the flag, which is the warning that this was coming. Past [SPENT]
+     * the warning has no purpose — there is nothing left to spend carefully — and above
+     * the burst hold too, because a burst cannot be happening against a window with
+     * nothing in it.
+     *
+     * Distinct from [DEAD]: this window refills in a few hours, and the pose says so.
+     * The week does not, which is why that one is a body on its side.
      */
     const val SLEEP = "sleep"
 
@@ -63,9 +67,6 @@ object MascotMood {
      * had been reached when nothing had been measured.
      */
     const val GHOST = "ghost"
-
-    /** Above this, with no burst live, the window is half gone and the mascot sleeps. */
-    const val REST = 0.50f
 
     /** Above this, the window is effectively spent. */
     const val HIGH = 0.90f
@@ -161,9 +162,9 @@ object MascotMood {
             // If the week is gone, what the 5-hour window says is beside the point.
             weeklySpent -> DEAD
             utilization <= 0f -> CONFETTI
+            utilization >= SPENT -> SLEEP
             utilization >= HIGH -> FLAG
             now < hold -> MUSCLE
-            utilization >= REST -> SLEEP
             else -> WALK
         }
         return Decision(clip, hold)
@@ -195,13 +196,15 @@ object MascotMood {
      *    including a fresh one reading 0.
      *  - ZERO second. An untouched window with allowance behind it is unambiguous: at 0
      *    there is no burn to measure and nothing to warn about.
-     *  - HIGH second, so a near-exhausted window shows the flag even while the user is
-     *    still burning through it. Checking the burst first would hide the warning at
+     *  - SPENT next: the 5-hour window is gone, so the mascot sleeps until it rolls
+     *    over. Above the flag, because past 99% the warning has nothing left to warn
+     *    about.
+     *  - HIGH after that, so a near-exhausted window shows the flag even while the user
+     *    is still burning through it. Checking the burst first would hide the warning at
      *    exactly the moment it matters most, which is why the spec's "and total < 90%"
      *    qualifier exists.
-     *  - BURST third — working hard, with room left.
-     *  - SLEEP fourth: half the window gone and no burst to show for it lately.
-     *  - WALK otherwise: idling in the first half, with plenty left.
+     *  - BURST next — working hard, with room left.
+     *  - WALK otherwise: idling somewhere in the middle.
      *
      * A null [earlier] cannot produce a burst. With no history the honest reading is
      * "unknown", and inventing one from a single sample would fire the lifting animation
@@ -210,9 +213,9 @@ object MascotMood {
     fun of(utilization: Float, earlier: Float?, weeklySpent: Boolean = false): String = when {
         weeklySpent -> DEAD
         utilization <= 0f -> CONFETTI
+        utilization >= SPENT -> SLEEP
         utilization >= HIGH -> FLAG
         earlier != null && utilization - earlier >= BURST - EPSILON -> MUSCLE
-        utilization >= REST -> SLEEP
         else -> WALK
     }
 }

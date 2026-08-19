@@ -142,7 +142,7 @@ internal object MascotPoses {
 
     // ---------------------------------------------------------------- ghost ----
     //
-    // No legs, a hem that ripples, and the whole figure bobbing. Disconnected rather
+    // No legs, a hem that ripples, and the whole figure drifting sideways. Disconnected rather
     // than dead: DEAD is the mascot on its side with crossed eyes and it means the
     // week is gone, which is a fact about usage. This one means there is nobody home —
     // the account is not answering, and the panel has no reading to show at all.
@@ -152,15 +152,37 @@ internal object MascotPoses {
     private const val GHOST_FRAMES = 10
     private const val GHOST_LOBES = 6
 
-    /** Rest position of the body's top edge; the bob is measured from here. */
-    private const val GHOST_TOP = 8f
+    /** Rest position of the body's top edge. Fixed — the drift is sideways. */
+    private const val GHOST_TOP = 14f
 
     /** Narrower than the standing body, for the same reason the sleeping one is: at full
      *  width a legless figure with a frilly bottom is a blob, not a ghost. */
     private const val GHOST_L = 16f
     private const val GHOST_BODY_W = 75f
     private const val GHOST_BODY_H = 58f
-    private const val GHOST_BOB = 3f
+    /**
+     * How far the figure drifts to each side.
+     *
+     * Sideways, not up and down. Bobbing is what a balloon does, and on a figure whose
+     * hem already ripples it read as the whole thing being jostled. Drifting across is
+     * what makes it a spirit — nothing is holding it in place.
+     */
+    private const val GHOST_SWAY = 7f
+
+    /**
+     * How much further the hem travels than the body, and how far behind.
+     *
+     * The tail is the loosest part and should arrive last. Moving the whole silhouette
+     * as one rigid shape is a slide; letting the hem overshoot and lag turns the same
+     * motion into something being carried by it.
+     *
+     * The two are bounded together: at the widest their paths diverge, the hem must
+     * still sit inside the body's sides or it steps out past them and the figure comes
+     * apart. Overshoot and lag both push that divergence up, and [GHOST_HEM_INSET] is
+     * what it has to stay under — see the test.
+     */
+    private const val GHOST_HEM_SWAY = 1.7f
+    private const val GHOST_HEM_LAG = 0.10f
     private const val GHOST_HEM = 26f
 
     /**
@@ -187,20 +209,22 @@ internal object MascotPoses {
 
     private fun ghostFrame(phase: Float): List<MascotFrames.Rect> {
         val out = mutableListOf<MascotFrames.Rect>()
-        val bob = GHOST_BOB * sin(2.0 * PI * phase).toFloat()
-        val top = GHOST_TOP + bob
+        val sway = GHOST_SWAY * sin(2.0 * PI * phase).toFloat()
+        val hemSway = GHOST_HEM_SWAY * GHOST_SWAY *
+            sin(2.0 * PI * (phase - GHOST_HEM_LAG)).toFloat()
+        val top = GHOST_TOP
 
         fun add(x: Float, y: Float, w: Float, h: Float, c: Int) =
             out.add(MascotFrames.Rect(x / GHOST_W, y / GHOST_H, w / GHOST_W, h / GHOST_H, c))
 
-        add(GHOST_L, top, GHOST_BODY_W, GHOST_BODY_H, BODY)
+        add(GHOST_L + sway, top, GHOST_BODY_W, GHOST_BODY_H, BODY)
         // No nubs. Raising them read as "boo" in the abstract and as the standing
         // mascot with a frilly hem on the panel — arms are the most solid, most
         // physical thing the character has, and a ghost that still has them is just the
         // animal wearing a sheet. The silhouette does the work instead: a smooth body
         // that ends in a hem, with nothing sticking out of it.
-        add(GHOST_L + 12f, top + 16f, EYE_W, 13f, EYE)
-        add(GHOST_L + 52f, top + 16f, EYE_W, 13f, EYE)
+        add(GHOST_L + sway + 12f, top + 16f, EYE_W, 13f, EYE)
+        add(GHOST_L + sway + 52f, top + 16f, EYE_W, 13f, EYE)
 
         // The hem. Six narrow lobes rather than four wide ones, each a fixed fraction of
         // a turn behind the last, so the wave TRAVELS sideways along the bottom. Move
@@ -217,7 +241,7 @@ internal object MascotPoses {
             // other, and a hairline of background shows between them. It read as the
             // hem being a separate object floating under the ghost, which is exactly
             // what it must not look like.
-            add(GHOST_L + GHOST_HEM_INSET + i * lobe, top + GHOST_BODY_H - SEAM, lobe,
+            add(GHOST_L + hemSway + GHOST_HEM_INSET + i * lobe, top + GHOST_BODY_H - SEAM, lobe,
                 SEAM + GHOST_HEM * (0.25f + 0.75f * (wave + 1f) / 2f), BODY)
         }
         return out
@@ -235,6 +259,5 @@ internal object MascotPoses {
 
     private fun sleepScale() = STAND_SCALE * SLEEP_H / (SLEEP_H - SLEEP_CHAR_TOP)
 
-    private fun ghostScale() =
-        STAND_SCALE * GHOST_H / (GHOST_BODY_H + GHOST_HEM + GHOST_BOB)
+    private fun ghostScale() = STAND_SCALE * GHOST_H / (GHOST_BODY_H + GHOST_HEM)
 }
