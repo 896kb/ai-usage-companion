@@ -3164,7 +3164,14 @@ class RearDialView(context: Context) : View(context) {
                 addArc(scratch, centreDeg + span / 2f, -span)
             }
         }
+        // Thickened with a stroke over the fill. Restored immediately: `extras` is shared
+        // with the clock, the battery, the media row and the transport glyphs, and a
+        // paint left in FILL_AND_STROKE would quietly embolden all of them.
+        extras.style = Paint.Style.FILL_AND_STROKE
+        extras.strokeWidth = MediaPage.LABEL_WEIGHT
         canvas.drawTextOnPath(text, path, 0f, 0f, extras)
+        extras.style = Paint.Style.FILL
+        extras.strokeWidth = 0f
     }
 
     /** Two discs, blended. */

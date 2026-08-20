@@ -397,6 +397,12 @@ while and it was the same fact a third way, since the arc already shows what is 
 shape. There are no clocks along the bottom of the page either; they were the same two
 numbers again, five hundred units from the dial they belong to.
 
+The curved labels are **thickened** with a stroke over the fill rather than a bold weight,
+because there is no bold weight — Departure Mono ships one face. They are the thinnest type
+on the panel, bent, anti-aliased and sitting over camera glass at the very edge of the
+display, which is the least favourable place type can be; they are the only text here that
+gets it.
+
 Every label sits **outside** its ring, and that is a constraint rather than a preference:
 a ring is drawn concentric with a camera lens, and the lens fills the hole. There is no
 display inside a ring — anything put there renders perfectly into the framebuffer and onto

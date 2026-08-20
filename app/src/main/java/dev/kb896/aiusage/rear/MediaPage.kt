@@ -178,6 +178,17 @@ object MediaPage {
     const val LABEL_SIZE = 15f
 
     /**
+     * How much the curved labels are thickened.
+     *
+     * A stroke over the fill rather than a bold weight, because there is no bold weight:
+     * Departure Mono ships one face, and Paint's synthetic bold does the same thing with
+     * less control. These labels are 15 units, bent, anti-aliased and sitting over the
+     * camera glass at the edge of the panel — the thinnest type on the display in the
+     * least favourable place for it, which is why they alone get this.
+     */
+    const val LABEL_WEIGHT = 1.3f
+
+    /**
      * The label radius for a ring of this size.
      *
      * Text stands perpendicular to its path, so which way up it is decides how much room
