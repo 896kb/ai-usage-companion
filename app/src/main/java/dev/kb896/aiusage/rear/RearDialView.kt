@@ -711,9 +711,13 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun drawExtras(canvas: Canvas) {
-        extras.color = colorFor("extras", config.extrasColor)
         var baseline = TITLE_BASELINE
         if (config.showClock) {
+            // Each extra takes its own colour, eased separately. They shared one until
+            // the panel had three of them, at which point "the extras colour" stopped
+            // describing anything — a clock and a battery are different readings and
+            // there is no reason they should agree.
+            extras.color = colorFor("clock", config.clockTint)
             val now = java.util.Calendar.getInstance()
             val text = String.format(
                 "%02d:%02d",
@@ -729,7 +733,26 @@ class RearDialView(context: Context) : View(context) {
             canvas.drawText(text, CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
             baseline += EXTRA_LINE_H
         }
+        if (config.showDate) {
+            val now = java.util.Calendar.getInstance()
+            // Day of the week, then the day of the month. Not the month name: on a panel
+            // read at a glance, "which day is it" is the question, and the month is the
+            // one part of a date nobody needs reminding of.
+            val text = String.format(
+                "%s %02d",
+                DAYS[now.get(java.util.Calendar.DAY_OF_WEEK) - 1],
+                now.get(java.util.Calendar.DAY_OF_MONTH),
+            )
+            extras.color = colorFor("date", config.dateTint)
+            extras.textAlign = Paint.Align.RIGHT
+            // No icon. The clock and the battery each have one because a bare number is
+            // ambiguous; "TUE 20" is not, and inventing a calendar glyph to keep the
+            // column tidy would be decoration standing in for meaning.
+            canvas.drawText(text, CONTENT_RIGHT, baseline, extras)
+            baseline += EXTRA_LINE_H
+        }
         if (config.showBattery) {
+            extras.color = colorFor("battery", config.batteryTint)
             // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
             // registering a receiver: this view is destroyed and recreated constantly,
             // and a receiver would have to be unregistered on a lifecycle this view does
@@ -815,6 +838,7 @@ class RearDialView(context: Context) : View(context) {
         // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
         // maker's mark follows, so the masthead and the artwork share one axis instead
         // of each being centred on something different.
+        title.color = colorFor("title", config.titleColor)
         canvas.drawText(config.title, (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
     }
 
@@ -1436,6 +1460,9 @@ class RearDialView(context: Context) : View(context) {
         private const val EXTRA_ICON_H = 20f
 
         /** Line pitch when both extras are shown. */
+        /** Short weekday names, Sunday first — Calendar.DAY_OF_WEEK is 1-based there. */
+        private val DAYS = arrayOf("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
+
         private const val EXTRA_LINE_H = 26f
 
         /** Breathing room above and below a single-account preview, replacing the

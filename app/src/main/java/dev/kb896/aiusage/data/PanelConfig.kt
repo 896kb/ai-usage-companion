@@ -181,6 +181,27 @@ data class PanelConfig(
      */
     val showClose: Boolean = false,
     val closeColor: Int = Panel.Palette.WORK,
+    /**
+     * The masthead's colour. Separate from the accounts' accents because it names the
+     * panel rather than any account on it.
+     */
+    val titleColor: Int = Panel.Palette.WORK,
+
+    /**
+     * Per-extra colours, each falling back to [extrasColor] when unset.
+     *
+     * Nullable overrides rather than three plain colours, so a config saved before these
+     * existed keeps whatever [extrasColor] it was given instead of silently reverting to
+     * the default green. The fallback is resolved at read time — see [clockTint] and its
+     * neighbours.
+     */
+    val clockColor: Int? = null,
+    val batteryColor: Int? = null,
+    val dateColor: Int? = null,
+
+    /** The date, under the clock. Off by default, like the other two. */
+    val showDate: Boolean = false,
+
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are
@@ -193,6 +214,11 @@ data class PanelConfig(
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */
+    /** [clockColor] or the shared extras colour. Same for the two below. */
+    val clockTint: Int get() = clockColor ?: extrasColor
+    val batteryTint: Int get() = batteryColor ?: extrasColor
+    val dateTint: Int get() = dateColor ?: extrasColor
+
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
 
     /**

@@ -342,6 +342,26 @@ class MainActivity : ComponentActivity() {
         val stored = store.load().title
         if (stored != PanelConfig.DEFAULT.title) field.setText(stored)
 
+        // Capped at what the masthead can actually draw, measured off the real font —
+        // see TitleLimits. The label says the number, because a field that stops
+        // accepting characters without saying why reads as broken.
+        val max = TitleLimits.masthead(this)
+        field.filters = TitleLimits.filter(max)
+        findViewById<TextView>(R.id.settings_title_label).text = "TITLE  (max $max)"
+
+        val swatch = findViewById<View>(R.id.settings_title_color)
+        fun paintSwatch() = swatch.setBackgroundColor(store.load().titleColor)
+        paintSwatch()
+        swatch.setOnClickListener {
+            ColorPickerDialog.show(this, store.load().titleColor) { picked ->
+                val config = store.load().copy(titleColor = picked)
+                store.save(config)
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+                paintSwatch()
+                refreshPreview()
+            }
+        }
+
         field.doAfterTextChanged { text ->
             val typed = text?.toString().orEmpty().trim()
             val config = store.load()
@@ -432,12 +452,23 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        SettingsRows.toggle(container, "Show the clock", config.showClock) { on ->
-            write { it.copy(showClock = on) }
-        }
-        SettingsRows.toggle(container, "Show the battery", config.showBattery) { on ->
-            write { it.copy(showBattery = on) }
-        }
+        // "Time" rather than "Show the clock": the switch already says what it does, and
+        // the word "show" in a row that is visibly a show/hide control is filler.
+        SettingsRows.toggleWithColor(
+            container, "Time", config.showClock, config.clockTint,
+            onChange = { on -> write { it.copy(showClock = on) } },
+            onPick = { c -> write { it.copy(clockColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            container, "Date", config.showDate, config.dateTint,
+            onChange = { on -> write { it.copy(showDate = on) } },
+            onPick = { c -> write { it.copy(dateColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            container, "Battery", config.showBattery, config.batteryTint,
+            onChange = { on -> write { it.copy(showBattery = on) } },
+            onPick = { c -> write { it.copy(batteryColor = c) } },
+        )
         // The only control the panel has. Off by default — everything else on that
         // surface is something to look at, and a readout that reacts to being touched is
         // a surprise unless it was asked for.

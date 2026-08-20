@@ -102,10 +102,12 @@ object SettingsRows {
      * what it means — for a name it means "use the built-in", which is not this
      * component's business to know.
      */
+    /** @param maxChars 0 for no cap — see TitleLimits for where the real ones come from */
     fun textField(
         parent: LinearLayout,
         name: String,
         initial: String,
+        maxChars: Int = 0,
         onChange: (String) -> Unit,
     ) {
         val context = parent.context
@@ -114,11 +116,91 @@ object SettingsRows {
             setText(initial)
             textSize = 14f
             maxLines = 1
+            if (maxChars > 0) filters = TitleLimits.filter(maxChars)
             setTextColor(Panel.Palette.FG)
             setHintTextColor(Panel.Palette.DIM)
             typeface = context.resources.getFont(R.font.departure_mono)
             doAfterTextChanged { onChange(it?.toString().orEmpty().trim()) }
         }, rowParams(dp(context, 2)))
+    }
+
+    /**
+     * A colour chip that opens the picker, sized to sit at the end of a row.
+     *
+     * Inline rather than in the colour grid below. A setting and the colour it applies
+     * to belong on one line — the grid is for colours that are chosen against each other
+     * (the ramp, the accents), and a lone swatch labelled TIME sitting three sections
+     * away from the TIME toggle is a puzzle rather than a control.
+     */
+    private fun swatch(context: Context, colour: Int, onPick: (Int) -> Unit) =
+        View(context).apply {
+            setBackgroundColor(colour)
+            layoutParams = LinearLayout.LayoutParams(dp(context, 44), dp(context, 26))
+                .apply { marginStart = dp(context, 12) }
+            setOnClickListener { ColorPickerDialog.show(context, colour, onPick) }
+        }
+
+    /**
+     * A toggle with its own colour beside it.
+     *
+     * @param colour null for a toggle that governs no colour of its own
+     */
+    fun toggleWithColor(
+        parent: LinearLayout,
+        name: String,
+        initial: Boolean,
+        colour: Int,
+        onChange: (Boolean) -> Unit,
+        onPick: (Int) -> Unit,
+    ) {
+        val context = parent.context
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        // The switch takes the space the swatch does not, so every row's chip lines up
+        // on one right edge however long its label is.
+        val holder = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        toggle(holder, name, initial, onChange)
+        row.addView(holder, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(swatch(context, colour, onPick))
+        parent.addView(row, rowParams(dp(context, 8)))
+    }
+
+    /**
+     * A text field with a colour beside it, and a hard cap on its length.
+     *
+     * The cap is what stops a title running off the panel. Enforced here, while typing,
+     * rather than by truncating at draw time: a title silently cut short on a screen you
+     * are not looking at is indistinguishable from a rendering fault.
+     */
+    fun textFieldWithColor(
+        parent: LinearLayout,
+        name: String,
+        initial: String,
+        maxChars: Int,
+        colour: Int,
+        onChange: (String) -> Unit,
+        onPick: (Int) -> Unit,
+    ) {
+        val context = parent.context
+        parent.addView(label(context, "$name  (max $maxChars)"), rowParams(dp(context, 10)))
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(android.widget.EditText(context).apply {
+            setText(initial)
+            textSize = 14f
+            maxLines = 1
+            filters = TitleLimits.filter(maxChars)
+            setTextColor(Panel.Palette.FG)
+            setHintTextColor(Panel.Palette.DIM)
+            typeface = context.resources.getFont(R.font.departure_mono)
+            doAfterTextChanged { onChange(it?.toString().orEmpty().trim()) }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(swatch(context, colour, onPick))
+        parent.addView(row, rowParams(dp(context, 2)))
     }
 
     /** A row that opens something else. The chevron is the whole affordance. */

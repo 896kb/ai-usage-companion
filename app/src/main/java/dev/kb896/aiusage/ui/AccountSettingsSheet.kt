@@ -159,7 +159,11 @@ object AccountSettingsSheet {
                 }
             }
 
-            SettingsRows.textField(rows, "NAME", style.label ?: account.label) { typed ->
+            // Capped at what the heading can draw beside its plan tag — see TitleLimits.
+            val nameMax = TitleLimits.accountName(context)
+            SettingsRows.textField(
+                rows, "NAME  (max $nameMax)", style.label ?: account.label, nameMax,
+            ) { typed ->
                 write { it.copy(accounts = it.withStyle(index) { s ->
                     s.copy(label = typed.ifBlank { null }) }) }
             }
