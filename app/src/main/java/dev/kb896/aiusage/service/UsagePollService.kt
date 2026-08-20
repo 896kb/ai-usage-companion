@@ -87,7 +87,16 @@ class UsagePollService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIFICATION_ID, notification())
+        // The type must be passed here as well as declared in the manifest — they are
+        // two separate assertions and the framework checks both. specialUse rather than
+        // dataSync: see the manifest for why the six-hour cap on dataSync would take the
+        // panel down every afternoon.
+        androidx.core.app.ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification(),
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
         val app = Graph.of(this)
         app.repository.onFetchCompleted = {
             val current = app.repository.state.value
@@ -444,6 +453,25 @@ class UsagePollService : Service() {
             // must keep alive anyway costs nothing; a second permanent one would.
             .let { IslandNotification.decorate(it, Graph.of(this).repository.state.value) }
         return builder.build()
+    }
+
+    /**
+     * The app was swiped out of recents.
+     *
+     * A foreground service is supposed to survive this, and on stock Android it does.
+     * HyperOS is more aggressive: "close all" takes the process, and with it the panel —
+     * which is why the setup advice says to lock the app in recents. Asking for the
+     * service back immediately is the one thing this side can do about it, and it costs
+     * nothing when the system was going to keep us anyway.
+     *
+     * Not a substitute for the autostart permission. If MIUI has decided to kill the
+     * process, this call goes with it; what it recovers is the milder case where the
+     * TASK is removed but the process survives.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "task removed — asking for the service back")
+        start(this)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

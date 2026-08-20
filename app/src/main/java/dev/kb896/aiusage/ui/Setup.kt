@@ -75,6 +75,24 @@ object Setup {
                 },
             ),
             Step(
+                title = "Autostart",
+                why = "HyperOS will not let this app start itself otherwise — not after a " +
+                    "reboot, and not after it has killed the process. This is the setting " +
+                    "that makes the panel come back on its own instead of waiting for you " +
+                    "to open the app.",
+                // Not readable. MIUI keeps autostart in its own security centre and
+                // exposes no permission, setting or dumpsys field for it — checked. So
+                // this is advice with a button, not a box that could ever tick, and it
+                // is shown as such rather than as a step the user keeps failing.
+                satisfied = null,
+                open = {
+                    Intent().setClassName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                    )
+                },
+            ),
+            Step(
                 title = "Rear display",
                 why = "Found by the system. If this is missing, the phone is not one " +
                     "this app can drive.",

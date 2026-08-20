@@ -3,6 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Confirming the device credential before showing an account's name and
          organisation. Not a hardware requirement: a phone with no lock screen skips the
@@ -51,7 +52,26 @@
         <service
             android:name=".service.UsagePollService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <!--
+              specialUse, NOT dataSync, and this is the difference between a panel that
+              lasts and one that dies every afternoon.
+
+              Since Android 15 a dataSync foreground service is capped at SIX HOURS in
+              any 24, after which the system stops it. This app targets 36. That cap
+              describes a sync job perfectly and describes this service not at all: it
+              is not moving data on a schedule, it is holding a second display alive for
+              as long as the phone is on. When it is stopped the panel goes with it, and
+              nothing on the device says why.
+
+              specialUse is the category for exactly this — a foreground service whose
+              purpose none of the standard types fit — and it carries no time limit. It
+              costs a declared reason, below, which is the honest trade.
+            -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Continuously drives an always-on secondary display panel and polls usage limits for it" />
+        </service>
 
         <!-- Restarts UsagePollService after a device reboot — see BootReceiver's
              KDoc for why this alone does not mean the panel reappears immediately

@@ -325,15 +325,24 @@ phone, understanding all of the above.
 5. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
    HyperOS is aggressive here: with restrictions on it stops the poll service, and the
    panel freezes on its last reading — showing stale numbers as though they were current.
-6. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
+6. **Allow autostart.** HyperOS will not let the app start itself otherwise — not
+   after a reboot, and not after the system has killed it. This is the single setting
+   that decides whether the panel comes back on its own or waits for you to open the
+   app, and it is the same one every persistent app on this phone needs. The onboarding
+   list has a button for it; it lives in Security → Permissions → Autostart.
+
+   Its state is not readable by any app — MIUI exposes no permission, setting or dumpsys
+   field for it — so this step is shown as advice with a button rather than as something
+   that can tick itself.
+7. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
    "close all" clears it, which kills the poll service and takes the panel down with it.
    A suggestion rather than a requirement, but it is the difference between the panel
    surviving your day and dying to a reflex. This is the one step the app cannot check
    for you — HyperOS does not expose whether an app is locked — so it is shown as advice
    rather than as a box that could never tick.
-7. **Background the app, then tap its notification** to put the panel on the back.
+8. **Background the app, then tap its notification** to put the panel on the back.
 
-Step 7 is the awkward one and it is known — see [Future plans](#future-plans).
+Step 8 is the awkward one and it is known — see [Future plans](#future-plans).
 
 **The app must stay running in the background.** The panel is drawn by this app; nothing
 renders it on your behalf. If the app is killed, the back goes dark until you open it
