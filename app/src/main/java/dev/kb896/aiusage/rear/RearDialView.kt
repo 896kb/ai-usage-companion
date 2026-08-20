@@ -1125,8 +1125,85 @@ class RearDialView(context: Context) : View(context) {
         val top = -total + total * slide
         val turn = wheelTurn(nowMs)
         val r = cornerRadius() / CORNER_DIVISOR
+        val m = miniSlide(nowMs)
 
-        // ---- the headline card ------------------------------------------------
+        val miniTop = top + NOTICE_H
+        // The step must CLEAR the curve it steps around. MINI_INSET_LEFT is 34 and the
+        // radius here is about 32 — correct on this display and one bad panel away from
+        // wrong, since the radius is read from the hardware and the inset is a constant.
+        // Taking the larger of the two makes the relationship hold wherever it runs
+        // instead of holding by two units of luck.
+        val miniLeft = NOTICE_LEFT + maxOf(MINI_INSET_LEFT, r + MINI_CORNER_CLEARANCE)
+
+        // ---- the mini card, drawn FIRST so it sits UNDER the headline ----------
+        //
+        // Stuck to the card above with no gap, running to the same right edge, but
+        // stepped IN on the left — so the two make one shape with a shoulder rather than
+        // two cards floating separately. It carries the same single rounded corner the
+        // card above would have had, which is now the bottom of the whole assembly.
+        //
+        // It is TUCKED UP behind the headline by a full corner radius, and its contents
+        // are padded down by the same amount, so nothing visible moves. The card is
+        // taller than the band it shows in and the extra is hidden.
+        //
+        // That is the fix for a junction that read as clipped. The headline's bottom-left
+        // corner is rounded and the mini's top-left was square, sitting exactly on the
+        // headline's bottom edge — two cards of similar width met at a seam where one
+        // curved away and the other did not, and the eye took the mini for the headline
+        // cut off rather than for a second card. With the square corners hidden behind an
+        // opaque card there is no seam to read: the mini simply continues out from under.
+        //
+        // Order matters and is the whole mechanism. Drawn after the headline, the tuck
+        // would cover the card it is meant to hide behind.
+        if (m > 0.001f) {
+            // Slid up behind the headline and clipped to the band it has emerged into, so
+            // it comes out from under the card above rather than growing in place — the
+            // difference between something arriving and something inflating.
+            val cardTop = miniTop - r - (1f - m) * CASCADE_H
+            val miniBottom = cardTop + r + CASCADE_H
+            val mini = android.graphics.Path().apply {
+                addRoundRect(
+                    miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom,
+                    floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
+                    android.graphics.Path.Direction.CW,
+                )
+            }
+            canvas.save()
+            canvas.clipRect(miniLeft, cardTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
+            canvas.clipPath(mini)
+            noticePaint.style = Paint.Style.FILL
+            noticePaint.color =
+                colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
+            noticePaint.alpha = 255
+            canvas.drawRect(
+                miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom, noticePaint)
+
+            // Padded down by the tuck, which is what keeps the text where it was. Its own
+            // wheel turns with the card above it, so a replacement moves both.
+            val rowTop = cardTop + r
+            leaving?.takeIf { it.hasMore }
+                ?.let { drawMiniRow(canvas, it, rowTop + turn * CASCADE_H, CASCADE_H) }
+            notice?.takeIf { it.hasMore }
+                ?.let { drawMiniRow(canvas, it, rowTop - (1f - turn) * CASCADE_H, CASCADE_H) }
+            canvas.restore()
+
+            // Its outline OMITS THE TOP EDGE, and starts at the visible top rather than
+            // the tucked one: the card above draws a line along its own bottom, and a
+            // second one a pixel below it read as a doubled border rather than as two
+            // sections meeting.
+            canvas.save()
+            canvas.clipRect(miniLeft, rowTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
+            val edge = android.graphics.Path().apply {
+                moveTo(miniLeft, rowTop)
+                lineTo(miniLeft, miniBottom - r)
+                quadTo(miniLeft, miniBottom, miniLeft + r, miniBottom)
+                lineTo(Panel.WIDTH.toFloat(), miniBottom)
+            }
+            outline(canvas, edge, slide)
+            canvas.restore()
+        }
+
+        // ---- the headline card, OVER it ---------------------------------------
         //
         // Rounded at the BOTTOM-LEFT only. That is the one corner of it sitting in open
         // panel — its top and right edges run off the screen, where the display's own
@@ -1134,19 +1211,17 @@ class RearDialView(context: Context) : View(context) {
         // makes it read as part of the screen rather than a rectangle laid on it: the
         // display's 97 is a corner on a 572-tall screen and a quarter-circle on a
         // 143-tall card.
-        // The bottom-left curve stays, ALWAYS, and it was a mistake to fade it.
         //
-        // The reasoning was that a card attached below puts this corner in the middle of
-        // a stepped shape, where a curve is a notch. That would be true if the mini card
-        // covered this edge — but it is stepped in by MINI_INSET_LEFT, so the corner
-        // remains an exposed outside corner of the assembly and wants rounding exactly
-        // as much as it did alone. The curve fits inside the step with room to spare.
-        val m = miniSlide(nowMs)
-        val cardBl = r
+        // The bottom-left curve stays, ALWAYS, and it was a mistake to fade it. The
+        // reasoning was that a card attached below puts this corner in the middle of a
+        // stepped shape, where a curve is a notch. That would be true if the mini card
+        // covered this edge — but it is stepped in by MINI_INSET_LEFT, which clears the
+        // curve, so the corner remains an exposed outside corner of the assembly and
+        // wants rounding exactly as much as it did alone.
         val card = android.graphics.Path().apply {
             addRoundRect(
                 NOTICE_LEFT, top, Panel.WIDTH.toFloat(), top + NOTICE_H,
-                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, cardBl, cardBl),
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
                 android.graphics.Path.Direction.CW,
             )
         }
@@ -1164,58 +1239,6 @@ class RearDialView(context: Context) : View(context) {
         notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * NOTICE_H) }
         canvas.restore()
         outline(canvas, card, slide)
-
-        // ---- the mini card, attached under it ---------------------------------
-        //
-        // Stuck to the card above with no gap, running to the same right edge, but
-        // stepped IN on the left — so the two make one shape with a shoulder rather than
-        // two cards floating separately. It carries the same single rounded corner the
-        // card above would have had, which is now the bottom of the whole assembly.
-        if (m <= 0.001f) return
-        val miniTop = top + NOTICE_H
-        val miniLeft = NOTICE_LEFT + MINI_INSET_LEFT
-        // Drawn at full height but SLID UP behind the headline card, and clipped to the
-        // band it has emerged into. So it comes out from under the card above rather
-        // than growing in place — the difference between something arriving and
-        // something inflating.
-        val cardTop = miniTop - (1f - m) * CASCADE_H
-        val miniBottom = cardTop + CASCADE_H
-        val mini = android.graphics.Path().apply {
-            addRoundRect(
-                miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom,
-                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
-                android.graphics.Path.Direction.CW,
-            )
-        }
-        canvas.save()
-        canvas.clipRect(miniLeft, miniTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
-        canvas.clipPath(mini)
-        noticePaint.style = Paint.Style.FILL
-        noticePaint.color = colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
-        noticePaint.alpha = 255
-        canvas.drawRect(
-            miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom, noticePaint)
-
-        // Its own wheel, turning with the card above it, so a replacement moves both.
-        leaving?.takeIf { it.hasMore }
-            ?.let { drawMiniRow(canvas, it, cardTop + turn * CASCADE_H, CASCADE_H) }
-        notice?.takeIf { it.hasMore }
-            ?.let { drawMiniRow(canvas, it, cardTop - (1f - turn) * CASCADE_H, CASCADE_H) }
-        canvas.restore()
-
-        // Its outline OMITS THE TOP EDGE. The card above already draws a line along its
-        // own bottom, and a second one a pixel below it read as a doubled border rather
-        // than as two sections meeting.
-        canvas.save()
-        canvas.clipRect(miniLeft, miniTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
-        val edge = android.graphics.Path().apply {
-            moveTo(miniLeft, cardTop)
-            lineTo(miniLeft, miniBottom - r)
-            quadTo(miniLeft, miniBottom, miniLeft + r, miniBottom)
-            lineTo(Panel.WIDTH.toFloat(), miniBottom)
-        }
-        outline(canvas, edge, slide)
-        canvas.restore()
     }
 
     /**
@@ -1810,6 +1833,62 @@ class RearDialView(context: Context) : View(context) {
      * space left of the bar column was doing nothing once the close button moved, and it
      * is exactly where a cover wants to be.
      */
+    /**
+     * A line of the media row, scrolled when it does not fit.
+     *
+     * NOT ellipsised, which is what this replaced. An ellipsis is right for a
+     * notification — that strip is up for five seconds and the first few words are the
+     * whole point — but a track plays for minutes, and a title cut at thirteen
+     * characters is a title you never get to read. There is time here to show the rest,
+     * so the rest is shown.
+     *
+     * A ticker rather than a ping-pong: the text runs left and a second copy follows a
+     * gap behind it, so the line never rewinds and is never empty. It dwells at the
+     * start of each lap, because a line that begins moving the instant it appears is one
+     * you have to wait a full lap to read from the beginning.
+     *
+     * Phase comes from the frame clock alone — no stored offset, nothing to reset when
+     * the track changes or `:rear` is recreated, and two lines of different lengths
+     * drift apart by themselves instead of marching in step.
+     *
+     * The continuous redraw costs nothing extra in practice: the mascots hold the frame
+     * clock open whenever there are bars to draw. It stops being true only if every
+     * mascot is switched off, which is why this sets the flag itself rather than
+     * assuming someone else has.
+     */
+    private fun marquee(
+        canvas: Canvas,
+        text: String,
+        x: Float,
+        baseline: Float,
+        width: Float,
+        band: android.graphics.RectF,
+    ) {
+        val w = extras.measureText(text)
+        if (w <= width) {
+            canvas.drawText(text, x, baseline, extras)
+            return
+        }
+        animating = true
+        val span = w + MARQUEE_GAP
+        val cycle = (MARQUEE_DWELL_MS + span / MARQUEE_SPEED * 1000f).toLong()
+        val t = (frameNowMs % cycle).toFloat()
+        val offset =
+            if (t < MARQUEE_DWELL_MS) 0f
+            else (t - MARQUEE_DWELL_MS) / 1000f * MARQUEE_SPEED
+
+        canvas.save()
+        // Clipped to the text column, so a long title runs out of sight rather than
+        // through the buttons. Full band height: the clip is about width, and trimming
+        // it vertically would only risk shaving a descender.
+        canvas.clipRect(x, band.top, x + width, band.bottom)
+        canvas.drawText(text, x - offset, baseline, extras)
+        // The chaser. Only ever one — MARQUEE_GAP is wider than any column this is given,
+        // so a third copy cannot be on screen while the first still is.
+        canvas.drawText(text, x - offset + span, baseline, extras)
+        canvas.restore()
+    }
+
     private fun mediaRegion(mark: android.graphics.RectF) = android.graphics.RectF(
         CONTENT_EDGE, mark.top, mark.right, mark.bottom,
     )
@@ -1891,16 +1970,14 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = MediaLayout.TEXT_SIZE
         extras.color = tint
-        canvas.drawText(
-            noticeClip(m.title, extras, row.textWidth), textLeft, baseline, extras)
+        marquee(canvas, m.title, textLeft, baseline, row.textWidth, band)
         if (hasArtist) {
             baseline += MediaLayout.LINE
             // Dimmed against the title rather than given a colour of its own. Which of
             // the two lines is the track is the only thing this row has to say at a
             // glance, and a second hue would make that a question about the palette.
             extras.color = (tint and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
-            canvas.drawText(
-                noticeClip(m.artist, extras, row.textWidth), textLeft, baseline, extras)
+            marquee(canvas, m.artist, textLeft, baseline, row.textWidth, band)
         }
         extras.textSize = 18f
 
@@ -2373,6 +2450,24 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val MEDIA_MS = 200f
 
+        /**
+         * The scrolling media line: how fast, how far apart the two copies run, and how
+         * long it holds still at the start of each lap.
+         *
+         * Slow on purpose. This is read at arm's length, over someone's shoulder, on a
+         * panel nobody is staring at — 40 units a second is about two characters, which
+         * is a reading pace rather than a ticker's.
+         *
+         * The gap must exceed the widest column this can be given (243 units, the band
+         * with no cover in it), or the chasing copy arrives before the first has left
+         * and the line reads as doubled.
+         */
+        private const val MARQUEE_SPEED = 40f
+        private const val MARQUEE_GAP = MediaLayout.MARQUEE_GAP
+        private const val MARQUEE_DWELL_MS = 1_800f
+
+        /** How far the mini card's step must stay clear of the headline's curve. */
+        private const val MINI_CORNER_CLEARANCE = 4f
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f

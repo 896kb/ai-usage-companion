@@ -14,21 +14,29 @@ package dev.kb896.aiusage.rear
  */
 object MediaLayout {
 
-    /** The transport glyphs: how tall they are, and how far apart. */
-    const val GLYPH_H = 24f
+    /**
+     * The transport glyphs: how tall they are, and how far apart.
+     *
+     * 38, up from 24. At 24 they were about 20 units wide — roughly 1.2mm on a 400dpi
+     * panel — which is a label, not a button you press without looking. The band is 70
+     * tall, so there is room; what this costs is track title, and MediaLayoutTest holds
+     * the floor on how much of that is left.
+     */
+    const val GLYPH_H = 38f
 
     /**
      * Between glyphs — and therefore how wide each one's touch band is.
      *
-     * The glyphs are ~20 units wide, so the gap is most of the target. Widened from 20
-     * after the first build: the three sat close enough that the bands had to be
-     * generous to be hittable, and generous bands on 35-unit centres overlapped. This is
-     * the honest fix — space them so each one can own its column outright.
+     * Widened from 20 after the first build: the three sat close enough that the bands
+     * had to be generous to be hittable, and generous bands on 35-unit centres
+     * overlapped. This is the honest fix — space them so each one can own its column
+     * outright. Trimmed back to 22 when the glyphs themselves grew, since the glyph is
+     * now most of the target rather than the gap.
      *
      * Every unit spent here comes out of the track title, which is why it is not wider
      * still. MediaLayoutTest holds the floor on what the text has left.
      */
-    const val GLYPH_GAP = 24f
+    const val GLYPH_GAP = 22f
 
     /**
      * Between the text column and the first glyph.
@@ -48,6 +56,16 @@ object MediaLayout {
 
     /** The artist line, against the title's full-strength tint. */
     const val ARTIST_ALPHA = 0x99
+
+    /**
+     * How far apart the two copies of a scrolling line run.
+     *
+     * Must exceed the widest text column this row can hand it, or the chasing copy
+     * enters before the first has left and the line reads as doubled. Kept here, beside
+     * the numbers that decide that column, so the invariant is testable — see
+     * MediaLayoutTest.
+     */
+    const val MARQUEE_GAP = 340f
 
     /** The left edge of each glyph, the top they share, and what the text has left. */
     class Row(

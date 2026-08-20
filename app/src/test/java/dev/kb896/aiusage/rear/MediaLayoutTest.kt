@@ -129,6 +129,23 @@ class MediaLayoutTest {
         assertEquals(centres.sorted(), centres)
     }
 
+    /**
+     * The scrolling title runs two copies of itself a fixed distance apart. If that gap
+     * is narrower than the column, the second copy arrives while the first is still on
+     * screen and the line reads as the same words twice.
+     */
+    @Test fun `the marquee gap clears the widest column`() {
+        assertTrue("gap ${MediaLayout.MARQUEE_GAP} vs column ${row.textWidth}",
+            MediaLayout.MARQUEE_GAP > row.textWidth)
+    }
+
+    @Test fun `the buttons are big enough to press`() {
+        // The narrowest of the three, in units. At 400dpi a unit is about 1/16 mm, so
+        // this is the number that decides whether this is usable without looking.
+        val narrowest = MediaLayout.GLYPH_H * PanelIcons.PAUSE.aspect
+        assertTrue("narrowest glyph is $narrowest units", narrowest >= 28f)
+    }
+
     @Test fun `the row fits the slot's height`() {
         val block = MediaLayout.LINE * 2f
         assertTrue("text is taller than the slot", block <= 70f)

@@ -206,7 +206,8 @@ duration.
 ## Media controls
 
 When something is playing, the bottom band becomes a player: cover, track, artist and
-three buttons. When it stops, the artwork comes back. One thing in that space at a time —
+three buttons — the buttons sized to be pressed on the back of a phone rather than read.
+When it stops, the artwork comes back. One thing in that space at a time —
 it is 70 units tall, and two things sharing it would be two things too small to read.
 
 The swap is a wheel, the same one the notification strip turns on: the artwork drops out
@@ -224,6 +225,17 @@ It is still **its own toggle**, off by default. Two reasons, and the second is t
 one: this takes over a region you may have put your own picture in, and quietly covering
 someone's artwork the first time they play a song is a picture going missing, not a
 feature arriving. Agreeing to mirror notifications is not agreeing to that.
+
+### Long titles scroll
+
+A track title that does not fit the column is not cut short — it scrolls, and a second
+copy follows a gap behind it so the line never rewinds and is never blank. It holds still
+for a moment and the start of each lap, because a line that starts moving the instant it
+appears is one you have to wait a full lap to read from the beginning.
+
+This is the opposite of what the notification strip does, deliberately. That strip is up
+for five seconds and the first few words are the whole point, so it ellipsises. A track
+plays for minutes; there is time to show the rest, so the rest is shown.
 
 ### What crosses to the panel
 
@@ -277,6 +289,14 @@ The summary is dropped and the group is shown instead: the newest message as the
 headline, and the next one in a smaller card attached underneath, stepped in on the left.
 That card follows the headline in and leaves ahead of it, so it reads as a consequence of
 the first rather than one object changing size.
+
+The second card is **taller than the band it shows in** and sits *behind* the headline,
+tucked up by a full corner radius with its contents padded down by the same amount — so
+nothing visible moves, and its square top corners are hidden. Without that, two cards of
+similar width met at a seam where the headline's bottom-left corner curved away and the
+card below did not, and the eye read the lower one as the upper one clipped rather than
+as a second card. The step on the left is derived from the corner radius rather than
+fixed, so it clears the curve on any display instead of clearing it by two units of luck.
 
 A notification from a **different** app has no sibling, so the second card collapses as
 part of the same turn.
