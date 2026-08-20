@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.rear
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -130,13 +131,18 @@ class MediaLayoutTest {
     }
 
     /**
-     * The scrolling title runs two copies of itself a fixed distance apart. If that gap
-     * is narrower than the column, the second copy arrives while the first is still on
-     * screen and the line reads as the same words twice.
+     * The scrolling line runs two copies of itself a fixed distance apart, and that gap
+     * must be NARROWER than the column — otherwise there is a stretch of every lap with
+     * neither copy on screen and the title appears to vanish. Seen on the device at a gap
+     * of 340 against a 155-unit column: four and a half seconds of blank line.
+     *
+     * Checked against the TIGHTER column, the one with a cover in it, because that is the
+     * one that fails first.
      */
-    @Test fun `the marquee gap clears the widest column`() {
-        assertTrue("gap ${MediaLayout.MARQUEE_GAP} vs column ${row.textWidth}",
-            MediaLayout.MARQUEE_GAP > row.textWidth)
+    @Test fun `the marquee never leaves the line empty`() {
+        val covered = MediaLayout.of(coveredLeft, right, centreY)
+        assertTrue("gap ${MediaLayout.MARQUEE_GAP} vs column ${covered.textWidth}",
+            MediaLayout.MARQUEE_GAP < covered.textWidth)
     }
 
     @Test fun `the buttons are big enough to press`() {
@@ -150,5 +156,56 @@ class MediaLayoutTest {
         val block = MediaLayout.LINE * 2f
         assertTrue("text is taller than the slot", block <= 70f)
         assertTrue("glyphs are taller than the slot", MediaLayout.GLYPH_H <= 70f)
+    }
+
+    // ---- the progress bar's timeline --------------------------------------
+
+    @Test fun `a playing track carries its position forward`() {
+        // 30s in, reported at clock 1000, asked at clock 6000: five seconds later.
+        val at = MediaLayout.elapsed(
+            positionMs = 30_000L, positionAtMs = 1_000L, speed = 1f,
+            playing = true, durationMs = 240_000L, nowMs = 6_000L,
+        )
+        assertEquals(35_000L, at)
+    }
+
+    @Test fun `a paused track does not`() {
+        val at = MediaLayout.elapsed(
+            positionMs = 30_000L, positionAtMs = 1_000L, speed = 1f,
+            playing = false, durationMs = 240_000L, nowMs = 600_000L,
+        )
+        assertEquals("a paused track moved", 30_000L, at)
+    }
+
+    @Test fun `playback speed is respected`() {
+        val at = MediaLayout.elapsed(
+            positionMs = 0L, positionAtMs = 0L, speed = 1.5f,
+            playing = true, durationMs = 240_000L, nowMs = 10_000L,
+        )
+        assertEquals(15_000L, at)
+    }
+
+    /**
+     * A track that ends while nobody reports it. The player goes quiet at the end of a
+     * track and the panel keeps carrying the count forward, so without a ceiling the bar
+     * would run past the end of its own groove.
+     */
+    @Test fun `carrying forward stops at the end of the track`() {
+        val at = MediaLayout.elapsed(
+            positionMs = 230_000L, positionAtMs = 0L, speed = 1f,
+            playing = true, durationMs = 240_000L, nowMs = 999_000L,
+        )
+        assertEquals(240_000L, at)
+        assertEquals(1f, MediaLayout.progress(at, 240_000L)!!, 0.001f)
+    }
+
+    @Test fun `no duration means no bar`() {
+        assertNull("a live stream got a progress bar", MediaLayout.progress(5_000L, 0L))
+        assertNull(MediaLayout.progress(5_000L, -1L))
+    }
+
+    @Test fun `progress is a fraction of the track`() {
+        assertEquals(0.5f, MediaLayout.progress(60_000L, 120_000L)!!, 0.001f)
+        assertEquals(0f, MediaLayout.progress(0L, 120_000L)!!, 0.001f)
     }
 }

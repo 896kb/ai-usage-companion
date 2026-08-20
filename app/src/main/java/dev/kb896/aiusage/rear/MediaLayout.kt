@@ -60,12 +60,34 @@ object MediaLayout {
     /**
      * How far apart the two copies of a scrolling line run.
      *
-     * Must exceed the widest text column this row can hand it, or the chasing copy
-     * enters before the first has left and the line reads as doubled. Kept here, beside
-     * the numbers that decide that column, so the invariant is testable — see
-     * MediaLayoutTest.
+     * Must be NARROWER than the column, and the first attempt had that backwards. The
+     * reasoning was that a gap wider than the column keeps the copies from ever being on
+     * screen together — which is true, and is the bug: it also guarantees a stretch with
+     * NEITHER of them on screen. At 340 against a 155-unit column that was four and a
+     * half seconds of blank line every lap, and it looked like the title had gone away.
+     *
+     * Both copies visible at once is not a fault, it is what a ticker is. What must never
+     * happen is the line going empty, and a gap under the column width is exactly the
+     * condition that prevents it. Six characters is enough to read as a separation.
      */
-    const val MARQUEE_GAP = 340f
+    const val MARQUEE_GAP = 68f
+
+    /**
+     * The progress bar under the row: how thick, and how far below the band it sits.
+     *
+     * Thin on purpose. It is the one thing here that is neither read nor pressed — a
+     * glance tells you roughly where in the track you are, and anything thicker would
+     * read as a fourth usage bar, which are actual readings.
+     *
+     * Underneath rather than above. Above put it directly beneath the last usage bar,
+     * where a thin horizontal line in the same column is exactly what those are; below,
+     * it sits in the panel's bottom margin with nothing to be confused with.
+     */
+    const val PROGRESS_H = 4f
+    const val PROGRESS_GAP = 8f
+
+    /** What the row needs BELOW the content band for its progress bar. */
+    const val PROGRESS_TOTAL = PROGRESS_H + PROGRESS_GAP
 
     /** The left edge of each glyph, the top they share, and what the text has left. */
     class Row(
@@ -113,6 +135,50 @@ object MediaLayout {
             glyphTop = centreY - GLYPH_H / 2f,
             textWidth = prev - TEXT_GAP - left,
         )
+    }
+
+    /**
+     * How far through a track we are NOW, carried forward from the last report.
+     *
+     * The player speaks only when something changes; the panel draws on the frame clock.
+     * Without this the bar would sit still for a whole track and then jump when the next
+     * one started. Both processes read the same system elapsed-time clock, so this is
+     * exact rather than an estimate.
+     *
+     * Only while PLAYING. A paused track's position does not advance, and carrying one
+     * forward would walk the marker along a track that is not moving — which is worse
+     * than not moving it, because it looks like it is working.
+     *
+     * Speed is respected because it is free to: a podcast at 1.5x reaches the end in two
+     * thirds of the time, and a bar that ignored that would run visibly behind by the
+     * end of an episode.
+     */
+    fun elapsed(
+        positionMs: Long,
+        positionAtMs: Long,
+        speed: Float,
+        playing: Boolean,
+        durationMs: Long,
+        nowMs: Long,
+    ): Long {
+        if (!playing) return positionMs.coerceAtLeast(0L)
+        val carried = positionMs + ((nowMs - positionAtMs) * speed).toLong()
+        val ceiling = if (durationMs > 0L) durationMs else Long.MAX_VALUE
+        return carried.coerceIn(0L, ceiling)
+    }
+
+    /**
+     * That position as a fraction of the track, or null when there is no track to be a
+     * fraction of.
+     *
+     * Null rather than zero, and the caller draws nothing for it. A live stream or a
+     * player that does not report a duration would otherwise get an empty bar above
+     * every one of them — a reading that is never true, rather than one that happens to
+     * be at the start.
+     */
+    fun progress(elapsedMs: Long, durationMs: Long): Float? {
+        if (durationMs <= 0L) return null
+        return (elapsedMs.toFloat() / durationMs).coerceIn(0f, 1f)
     }
 
     /**

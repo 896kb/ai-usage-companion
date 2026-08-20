@@ -510,6 +510,14 @@ class MainActivity : ComponentActivity() {
             onChange = { on -> write { it.copy(showMedia = on) } },
             onPick = { c -> write { it.copy(mediaColor = c) } },
         )
+        if (config.showMedia) {
+            SettingsRows.choice(
+                container, "  ↳ cover", listOf("SQUARE", "VINYL"),
+                config.mediaArt.ordinal,
+            ) { i ->
+                write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
+            }
+        }
         if (config.showMedia && !NotificationManagerCompat.getEnabledListenerPackages(this)
                 .contains(packageName)
         ) {

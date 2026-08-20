@@ -65,6 +65,24 @@ class RearActivity : Activity() {
         const val EXTRA_MEDIA_ART = "mediaArt"
 
         /**
+         * Where the track is, and how to keep counting without being told again.
+         *
+         * A position alone would be stale the moment it arrived — the panel redraws on
+         * the frame clock and the player only speaks when something changes, so a bar
+         * driven by reports would sit still for a whole track and then jump. What
+         * crosses instead is a position, the clock reading it was taken at, and the
+         * playback speed. Both processes read the same system elapsed-time clock, so the
+         * panel can carry the count forward itself and stay exact.
+         *
+         * Duration is 0 or negative for anything that has no end — a live stream, a
+         * radio session — and the bar is simply not drawn for those.
+         */
+        const val EXTRA_MEDIA_DURATION = "mediaDuration"
+        const val EXTRA_MEDIA_POSITION = "mediaPosition"
+        const val EXTRA_MEDIA_POSITION_AT = "mediaPositionAt"
+        const val EXTRA_MEDIA_SPEED = "mediaSpeed"
+
+        /**
          * A transport button was pressed on the panel.
          *
          * Travels the other way for the same reason ACTION_OPEN_CAMERA does: the thing
@@ -133,6 +151,10 @@ class RearActivity : Activity() {
                     intent.getStringExtra(EXTRA_MEDIA_ARTIST).orEmpty(),
                     intent.getBooleanExtra(EXTRA_MEDIA_PLAYING, false),
                     intent.getStringExtra(EXTRA_MEDIA_ART).orEmpty(),
+                    intent.getLongExtra(EXTRA_MEDIA_DURATION, 0L),
+                    intent.getLongExtra(EXTRA_MEDIA_POSITION, 0L),
+                    intent.getLongExtra(EXTRA_MEDIA_POSITION_AT, 0L),
+                    intent.getFloatExtra(EXTRA_MEDIA_SPEED, 1f),
                 )
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
                 // leave the current mode untouched. Re-evaluating unconditionally with

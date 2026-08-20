@@ -14,6 +14,7 @@ import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.RingSpec
 import dev.kb896.aiusage.data.RingWindow
 import dev.kb896.aiusage.data.RingMetric
+import dev.kb896.aiusage.data.MediaArt
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.Health
 import dev.kb896.aiusage.data.UsageWindow
@@ -941,7 +942,17 @@ class RearDialView(context: Context) : View(context) {
         val playing: Boolean,
         /** Where the cover was written, or empty. See MediaWatcher.writeArt. */
         val artPath: String = "",
-    )
+        /** The timeline. 0 duration means there is none — see [elapsed]. */
+        val durationMs: Long = 0L,
+        val positionMs: Long = 0L,
+        val positionAtMs: Long = 0L,
+        val speed: Float = 1f,
+    ) {
+        /** See MediaLayout.elapsed, which is where the arithmetic lives. */
+        fun elapsed(nowMs: Long): Long = MediaLayout.elapsed(
+            positionMs, positionAtMs, speed, playing, durationMs, nowMs,
+        )
+    }
 
     private var media: Media? = null
 
@@ -968,10 +979,19 @@ class RearDialView(context: Context) : View(context) {
         artist: String,
         playing: Boolean,
         artPath: String = "",
+        durationMs: Long = 0L,
+        positionMs: Long = 0L,
+        positionAtMs: Long = 0L,
+        speed: Float = 1f,
     ) {
         val now = SystemClock.uptimeMillis()
         val next =
-            if (active && config.showMedia) Media(title, artist, playing, artPath) else null
+            if (active && config.showMedia) {
+                Media(title, artist, playing, artPath,
+                    durationMs, positionMs, positionAtMs, speed)
+            } else {
+                null
+            }
 
         // The ROW's drum turns only when the slot changes hands. A track advancing while
         // the controls are already up is new text in a row that is already there, and
@@ -983,19 +1003,49 @@ class RearDialView(context: Context) : View(context) {
             mediaAt = now
         }
 
-        // The GLYPH's drum turns on the transport state alone. Retargeted from wherever
-        // it currently is, so tapping pause and play in quick succession reverses mid-
-        // travel instead of snapping — the same rule the ambient ripple follows.
-        val target = if (next?.playing == true) 1f else 0f
-        if (target != playTo) {
-            playFrom = playSwap(now)
-            playTo = target
-            playAt = now
+        // The GLYPH's state is only REPORTED here, not acted on — see PlayGate, which
+        // holds a verdict back until the player has stopped changing its mind.
+        val reported = next?.playing == true
+        if (next != null && !wasShown) {
+            // Arriving: adopt it outright and open the glyph on it, no tween and no wait.
+            playGate.snap(reported)
+            playFrom = if (reported) 1f else 0f
+            playTo = playFrom
+            playAt = 0L
+        } else {
+            playGate.report(reported, now)
         }
 
         media = next
         invalidate()
     }
+
+    /**
+     * Commit the transport state once it has held still, and only then move the glyph.
+     *
+     * Skipping a track is not one event. The player reports the old track stopping, then
+     * a moment with nothing playing while the next one loads, then playing again — so a
+     * glyph driven by every report flicked from pause to play and back on every press of
+     * next or previous. Half a second of quiet is the difference between that and someone
+     * actually pausing.
+     *
+     * The cost is honest and small: a real pause takes half a second to show. The button
+     * has already been pressed by then, and a button that twitches under the finger is
+     * worse than one that answers deliberately.
+     */
+    private fun settlePlaying(nowMs: Long) {
+        // Keep the frame clock open while a verdict is pending, or it would arrive
+        // whenever something else next happened to redraw rather than on time.
+        if (playGate.waiting()) animating = true
+        if (!playGate.commit(nowMs)) return
+        // Retargeted from wherever the glyph is, so a change arriving mid-travel reverses
+        // instead of snapping — the same rule the ambient ripple follows.
+        playFrom = playSwap(nowMs)
+        playTo = if (playGate.shown) 1f else 0f
+        playAt = nowMs
+    }
+
+    private val playGate = PlayGate(MEDIA_SETTLE_MS)
 
     /** 0 while the artwork holds the slot, 1 while the controls do. */
     private fun mediaSwap(nowMs: Long): Float = slide(mediaFrom, mediaTo, mediaAt, nowMs)
@@ -1807,12 +1857,15 @@ class RearDialView(context: Context) : View(context) {
         // 70-unit strip is a smudge.
         canvas.save()
         // Clipped to the WIDER band, or the cover would be cut off at the mark's edge
-        // as it slides.
-        canvas.clipRect(mediaRegion(region))
+        // as it slides — and to the strip above it, which the progress bar lives in.
+        canvas.clipRect(mediaClip(region))
         val h = region.height()
         if (swap < 0.999f) {
             canvas.save()
-            canvas.translate(0f, swap * h)
+            // The artwork leaves through the BOTTOM of the clip, which now extends below
+            // the band for the progress bar — travelling only the band's height would
+            // leave a sliver of it standing in that strip for the whole crossing.
+            canvas.translate(0f, swap * mediaClip(region).height())
             drawArt(canvas, region)
             canvas.restore()
         }
@@ -1833,6 +1886,136 @@ class RearDialView(context: Context) : View(context) {
      * space left of the bar column was doing nothing once the close button moved, and it
      * is exactly where a cover wants to be.
      */
+    /**
+     * The cover, as a square or as a record.
+     *
+     * The vinyl is not decoration that happens to move. It turns while the track plays
+     * and stops dead when it does not, which makes it a second reading of the transport
+     * state — visible from further away than a 30-unit glyph, on a panel that is mostly
+     * looked at from across a room.
+     */
+    private fun drawCover(
+        canvas: Canvas,
+        cover: android.graphics.Bitmap,
+        square: android.graphics.RectF,
+        m: Media,
+        tint: Int,
+    ) {
+        // Cropped to fill, never letterboxed: covers are square already, and the odd one
+        // that is not should lose its edges rather than sit in a box. Same placement the
+        // panel's custom artwork uses, at neutral pan and zoom — there is nothing to crop
+        // by hand here.
+        val dest = ArtPlacement.destination(square, cover.width, cover.height, 0f, 0f, 1f)
+
+        if (config.mediaArt == MediaArt.SQUARE) {
+            canvas.save()
+            canvas.clipRect(square)
+            canvas.drawBitmap(cover, null, dest, artPaint)
+            canvas.restore()
+            return
+        }
+
+        val cx = square.centerX()
+        val cy = square.centerY()
+        val radius = square.height() / 2f
+
+        canvas.save()
+        // Clip FIRST, rotate second. The circle is inscribed in the square, so a square
+        // bitmap turned about their shared centre covers the circle at every angle —
+        // there is no corner that can swing into view.
+        canvas.clipPath(
+            android.graphics.Path().apply {
+                addCircle(cx, cy, radius, android.graphics.Path.Direction.CW)
+            },
+        )
+        canvas.rotate(vinylAngle(m), cx, cy)
+        canvas.drawBitmap(cover, null, dest, artPaint)
+        canvas.restore()
+
+        // A groove and a spindle, in the panel's own background rather than in black, so
+        // the record reads as material removed from the disc rather than as two dark
+        // rings painted on a picture.
+        val hole = colorFor("bg", config.background or (0xFF shl 24))
+        closePaint.style = Paint.Style.STROKE
+        closePaint.strokeWidth = VINYL_GROOVE
+        closePaint.color = (hole and 0x00FFFFFF) or (VINYL_GROOVE_ALPHA shl 24)
+        canvas.drawCircle(cx, cy, radius * VINYL_GROOVE_AT, closePaint)
+
+        // The label edge, then the spindle hole itself. Tinted rather than background:
+        // it is the one part of a record that is not the sleeve art.
+        closePaint.strokeWidth = VINYL_GROOVE
+        closePaint.color = (tint and 0x00FFFFFF) or (VINYL_LABEL_ALPHA shl 24)
+        canvas.drawCircle(cx, cy, radius * VINYL_LABEL_AT, closePaint)
+
+        closePaint.style = Paint.Style.FILL
+        closePaint.color = hole
+        canvas.drawCircle(cx, cy, radius * VINYL_SPINDLE, closePaint)
+    }
+
+    /**
+     * Where the record has turned to, in degrees.
+     *
+     * Accumulated rather than computed from the clock, because it has to STOP when the
+     * music does and pick up from where it stopped. A rotation derived from wall time
+     * would keep turning through a pause behind the scenes and jump on resume, which is
+     * the one thing this is meant to communicate.
+     */
+    private fun vinylAngle(m: Media): Float {
+        val now = frameNowMs
+        val since = if (vinylAt == 0L) 0L else now - vinylAt
+        vinylAt = now
+        if (m.playing) {
+            animating = true
+            vinylTurn = (vinylTurn + since * VINYL_DEG_PER_MS) % 360f
+        }
+        return vinylTurn
+    }
+
+    private var vinylTurn = 0f
+    private var vinylAt = 0L
+
+    /**
+     * How far through the track we are, as a hairline under the row.
+     *
+     * Drawn only when there IS a timeline. A live stream, a radio session or a player
+     * that simply does not report one gives a duration of zero, and an empty bar sitting
+     * above every one of those would be a reading that is never true rather than a
+     * reading that happens to be at the start.
+     *
+     * Position is carried forward from the last report rather than waiting to be told
+     * again — see Media.elapsed. That is what makes this move at all: the player speaks
+     * only when something changes.
+     */
+    private fun drawMediaProgress(
+        canvas: Canvas,
+        m: Media,
+        band: android.graphics.RectF,
+        tint: Int,
+    ) {
+        val fraction = MediaLayout.progress(
+            m.elapsed(SystemClock.elapsedRealtime()), m.durationMs,
+        ) ?: return
+        val top = band.bottom + MediaLayout.PROGRESS_GAP
+        val bottom = top + MediaLayout.PROGRESS_H
+
+        // The track it runs in, at the same dim the artist line uses — the two are the
+        // same class of thing, context rather than reading, and giving the bar a ground
+        // of its own would make it a third colour on a row that has two.
+        noticePaint.style = Paint.Style.FILL
+        noticePaint.color = (tint and 0x00FFFFFF) or (MEDIA_TRACK_ALPHA shl 24)
+        canvas.drawRect(band.left, top, band.right, bottom, noticePaint)
+
+        noticePaint.color = tint
+        noticePaint.alpha = 255
+        canvas.drawRect(
+            band.left, top, band.left + (band.right - band.left) * fraction, bottom,
+            noticePaint,
+        )
+        // While something is playing this has to keep redrawing, or it advances only when
+        // the player next happens to say something.
+        if (m.playing) animating = true
+    }
+
     /**
      * A line of the media row, scrolled when it does not fit.
      *
@@ -1894,6 +2077,17 @@ class RearDialView(context: Context) : View(context) {
     )
 
     /**
+     * What the media row is clipped to: its content band plus the strip above it.
+     *
+     * Separate from [mediaRegion] rather than folded into it. The band's HEIGHT is what
+     * makes the cover square and centres the two lines of text, so growing it to make
+     * room for the progress bar would have quietly stretched both.
+     */
+    private fun mediaClip(mark: android.graphics.RectF) = android.graphics.RectF(
+        CONTENT_EDGE, mark.top, mark.right, mark.bottom + MediaLayout.PROGRESS_TOTAL,
+    )
+
+    /**
      * Track and artist on the left, three transport glyphs on the right.
      *
      * No album art. It would have to be pushed across the process boundary as a bitmap
@@ -1913,8 +2107,11 @@ class RearDialView(context: Context) : View(context) {
         dy: Float,
     ) {
         val m = media ?: return
+        settlePlaying(frameNowMs)
         val tint = colorFor("media", config.mediaTint)
         val band = mediaRegion(region)
+
+        drawMediaProgress(canvas, m, band, tint)
 
         // The cover first, because where it ends is where the text begins.
         //
@@ -1926,18 +2123,7 @@ class RearDialView(context: Context) : View(context) {
         if (cover != null) {
             val square = android.graphics.RectF(
                 band.left, band.top, band.left + band.height(), band.bottom)
-            // Cropped to fill, never letterboxed: covers are square already, and the odd
-            // one that is not should lose its edges rather than sit in a box. Same
-            // placement the panel's custom artwork uses, at neutral pan and zoom — there
-            // is nothing to crop by hand here.
-            canvas.save()
-            canvas.clipRect(square)
-            canvas.drawBitmap(
-                cover, null,
-                ArtPlacement.destination(square, cover.width, cover.height, 0f, 0f, 1f),
-                artPaint,
-            )
-            canvas.restore()
+            drawCover(canvas, cover, square, m, tint)
             textLeft = square.right + MediaLayout.COVER_GAP
         }
 
@@ -2462,6 +2648,33 @@ class RearDialView(context: Context) : View(context) {
          * with no cover in it), or the chasing copy arrives before the first has left
          * and the line reads as doubled.
          */
+        /**
+         * How long the transport state must hold before the glyph believes it.
+         *
+         * See settlePlaying. Long enough to cover a player's load gap on a skip, short
+         * enough that a deliberate pause still feels answered.
+         */
+        private const val MEDIA_SETTLE_MS = 500L
+
+        /**
+         * The vinyl: how fast it turns, and where its groove, label and spindle sit as
+         * fractions of the radius.
+         *
+         * 100 degrees a second — a little over 16rpm, well under a record's 33. A real
+         * speed on a 70-unit disc is a blur rather than a record, and this is meant to be
+         * read from across a room as "it is playing" rather than measured.
+         */
+        private const val VINYL_DEG_PER_MS = 0.1f
+        private const val VINYL_GROOVE = 1.5f
+        private const val VINYL_GROOVE_AT = 0.80f
+        private const val VINYL_GROOVE_ALPHA = 0x80
+        private const val VINYL_LABEL_AT = 0.34f
+        private const val VINYL_LABEL_ALPHA = 0xAA
+        private const val VINYL_SPINDLE = 0.10f
+
+        /** The unfilled part of the progress bar, against the row's tint. */
+        private const val MEDIA_TRACK_ALPHA = 0x33
+
         private const val MARQUEE_SPEED = 40f
         private const val MARQUEE_GAP = MediaLayout.MARQUEE_GAP
         private const val MARQUEE_DWELL_MS = 1_800f

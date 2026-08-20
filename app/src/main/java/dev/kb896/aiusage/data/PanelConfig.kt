@@ -9,6 +9,16 @@ import kotlinx.serialization.json.Json
 enum class RingWindow { SESSION, WEEKLY_ALL, WEEKLY_SCOPED }
 
 /**
+ * How the media row draws the cover.
+ *
+ * [SQUARE] is the cover as the player supplied it. [VINYL] cuts it to a disc and turns
+ * it while the track plays — a record rather than a thumbnail, and it stops dead when
+ * the music does, which makes it a second readout of the transport state rather than
+ * decoration that happens to move.
+ */
+enum class MediaArt { SQUARE, VINYL }
+
+/**
  * What about that window the ring shows.
  *
  * [NONE] is a real choice, not an absence of one. The rings are drawn concentric with
@@ -249,6 +259,7 @@ data class PanelConfig(
      */
     val showMedia: Boolean = false,
     val mediaColor: Int? = null,
+    val mediaArt: MediaArt = MediaArt.SQUARE,
 
     val showClock: Boolean = false,
     val showBattery: Boolean = false,

@@ -226,11 +226,55 @@ one: this takes over a region you may have put your own picture in, and quietly 
 someone's artwork the first time they play a song is a picture going missing, not a
 feature arriving. Agreeing to mirror notifications is not agreeing to that.
 
+### The cover
+
+Two styles, chosen in settings.
+
+**Square** is the cover as the player supplied it, cropped to fill rather than
+letterboxed.
+
+**Vinyl** cuts it to a disc with a groove, a label edge and a spindle hole, and turns it
+while the track plays. It stops dead when the music does, which is the point: it is a
+second reading of the transport state, legible from further away than a 30-unit glyph on
+a panel that is mostly seen from across a room. It turns at about 16rpm rather than 33 —
+a real speed on a 70-unit disc is a blur, and this is meant to be read as "it is playing"
+rather than measured.
+
+The rotation is accumulated rather than derived from the clock, so a pause stops it where
+it is instead of letting it turn on invisibly and jump on resume.
+
+### A progress bar under the row
+
+A hairline under the row showing how far through the track you are. Underneath rather
+than above: above put it directly below the last usage bar, where a thin horizontal line
+in the same column is exactly what those are.
+
+The position is **carried forward** rather than waited for. Players report a position only
+when something changes, so a bar driven by reports would sit still for a whole track and
+then jump; what crosses instead is a position, the clock reading it was taken at, and the
+playback speed, and the panel counts on from there. Both processes read the same system
+elapsed-time clock, so this is exact rather than an estimate. It respects playback speed,
+and it stops when paused.
+
+Anything with no duration — a live stream, a radio session — gets no bar at all, rather
+than an empty one that is never true.
+
+### The buttons wait before believing the player
+
+Press next and the player reports three states in a few hundred milliseconds: the old
+track stopping, a gap while the new one loads, then playing. Acting on each one made the
+play/pause glyph flick to play and back on every skip.
+
+So a report is not a verdict. A state has to hold still for half a second before the glyph
+believes it, and one that reverts inside that window never counts at all. The cost is
+honest: a real pause takes half a second to show. The button has already been pressed by
+then, and one that answers deliberately beats one that twitches under the finger.
+
 ### Long titles scroll
 
 A track title that does not fit the column is not cut short — it scrolls, and a second
 copy follows a gap behind it so the line never rewinds and is never blank. It holds still
-for a moment and the start of each lap, because a line that starts moving the instant it
+for a moment at the start of each lap, because a line that starts moving the instant it
 appears is one you have to wait a full lap to read from the beginning.
 
 This is the opposite of what the notification strip does, deliberately. That strip is up

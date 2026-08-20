@@ -123,7 +123,8 @@ class MediaWatcher(private val context: Context) {
         val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
         val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
-        val state = c?.playbackState?.state
+        val playback = c?.playbackState
+        val state = playback?.state
         // A session with no title is a session with nothing to say — a browser tab that
         // has loaded a video element, a game that opened an audio focus. Showing an
         // empty row for those would replace the artwork with a blank.
@@ -149,6 +150,19 @@ class MediaWatcher(private val context: Context) {
                     .putExtra(RearActivity.EXTRA_MEDIA_TITLE, title.orEmpty())
                     .putExtra(RearActivity.EXTRA_MEDIA_ARTIST, artist.orEmpty())
                     .putExtra(RearActivity.EXTRA_MEDIA_ART, path.orEmpty())
+                    .putExtra(
+                        RearActivity.EXTRA_MEDIA_DURATION,
+                        metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION)
+                            ?: 0L,
+                    )
+                    .putExtra(RearActivity.EXTRA_MEDIA_POSITION, playback?.position ?: 0L)
+                    // The clock that reading was taken against, so the panel can carry it
+                    // forward. elapsedRealtime, which both processes share.
+                    .putExtra(
+                        RearActivity.EXTRA_MEDIA_POSITION_AT,
+                        playback?.lastPositionUpdateTime ?: 0L,
+                    )
+                    .putExtra(RearActivity.EXTRA_MEDIA_SPEED, playback?.playbackSpeed ?: 1f)
                     .putExtra(
                         RearActivity.EXTRA_MEDIA_PLAYING,
                         state == PlaybackState.STATE_PLAYING,
