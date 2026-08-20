@@ -1770,12 +1770,7 @@ class RearDialView(context: Context) : View(context) {
         val m = miniSlide(nowMs)
 
         val miniTop = top + NOTICE_H
-        // The step must CLEAR the curve it steps around. MINI_INSET_LEFT is 34 and the
-        // radius here is about 32 — correct on this display and one bad panel away from
-        // wrong, since the radius is read from the hardware and the inset is a constant.
-        // Taking the larger of the two makes the relationship hold wherever it runs
-        // instead of holding by two units of luck.
-        val miniLeft = NOTICE_LEFT + maxOf(MINI_INSET_LEFT, r + MINI_CORNER_CLEARANCE)
+        val miniLeft = miniCardLeft()
 
         // ---- the mini card, drawn FIRST so it sits UNDER the headline ----------
         //
@@ -1914,8 +1909,28 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** The mini card's contents: the next notification in the group, no icon. */
+    /**
+     * Where the cascaded card's left edge is.
+     *
+     * The step must CLEAR the curve it steps around. MINI_INSET_LEFT is 34 and the radius
+     * here is about 32 — correct on this display and one bad panel away from wrong, since
+     * the radius is read from the hardware and the inset is a constant. Taking the larger
+     * of the two makes the relationship hold wherever it runs rather than by two units of
+     * luck.
+     *
+     * A function because TWO things need it, and only one of them knew: the card was
+     * drawn from this and its text was positioned from the bare constant, so the text's
+     * padding was silently whatever was left over. That is how the second card ended up
+     * with fifteen units of margin against the headline's twenty-six, tight enough to
+     * read as clipped.
+     */
+    private fun miniCardLeft(): Float =
+        NOTICE_LEFT + maxOf(MINI_INSET_LEFT, cornerRadius() / CORNER_DIVISOR + MINI_CORNER_CLEARANCE)
+
     private fun drawMiniRow(canvas: Canvas, item: Notice, y: Float, h: Float) {
-        val left = NOTICE_LEFT + MINI_INSET_LEFT + CASCADE_PAD
+        // Padded from the CARD, not from the panel, and by the same amount the headline
+        // uses — so the two cards' text lines up against their own edges the same way.
+        val left = miniCardLeft() + NOTICE_PAD
         val width = Panel.WIDTH - left - NOTICE_PAD
         val mid = y + h / 2f
 
@@ -3958,7 +3973,6 @@ class RearDialView(context: Context) : View(context) {
          * rather than as a rendering seam.
          */
         private const val MINI_INSET_LEFT = 34f
-        private const val CASCADE_PAD = 18f
         private const val CASCADE_TEXT = 15f
 
         /** The app icon: how far its right edge sits from the panel edge, and its size. */

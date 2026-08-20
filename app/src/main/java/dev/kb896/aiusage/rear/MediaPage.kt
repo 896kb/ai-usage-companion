@@ -140,12 +140,13 @@ object MediaPage {
      * hole in the middle — there is no display inside a ring. Everything put there was
      * rendered perfectly into the framebuffer and painted onto a camera.
      *
-     * The clearance is small because the room is: the two rings are 276 apart with a
-     * radius of 128 and a stroke of 25 each, which leaves about twenty units of panel
-     * between them. Labels reach into that gap and out toward the main display; the
-     * angles they are placed at are chosen so they land where there is space.
+     * The clearance is small because the room is, and because these read as belonging to
+     * the arc they label: the two rings are 276 apart with a radius of 128 and a stroke
+     * of 25 each, which leaves about twenty units of panel between them. Labels reach
+     * into that gap and out toward the main display, and the angles they sit at are
+     * chosen so they land where there is space.
      */
-    const val LABEL_CLEAR = 12f
+    const val LABEL_CLEAR = 5f
     const val LABEL_SIZE = 15f
 
     /**
