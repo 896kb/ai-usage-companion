@@ -203,6 +203,15 @@ data class PanelConfig(
     /** The date, under the clock. Off by default, like the other two. */
     val showDate: Boolean = false,
 
+    /**
+     * Whether the panel paints its own background.
+     *
+     * Off does NOT mean transparent. It means as see-through as this surface may safely
+     * be — see RearDialView.SEE_THROUGH_ALPHA, which explains at length why zero takes
+     * the panel away from us permanently.
+     */
+    val showBackground: Boolean = true,
+
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are

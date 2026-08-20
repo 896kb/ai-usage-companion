@@ -2,6 +2,7 @@ package dev.kb896.aiusage.rear
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -278,6 +279,29 @@ object WalkRig {
      *   clipping it, so the jump stays a jump and only gets less air — a clamp would
      *   read as the mascot hitting a ceiling.
      */
+    /**
+     * Where the figure is right now, for the same arguments [draw] would be given.
+     *
+     * Duplicating the placement maths rather than having draw report it: draw is called
+     * on the drawing pass and this is needed on the touch pass, which happens between
+     * frames. The two must agree, which is why the mirror case is reproduced here in
+     * full rather than approximated — on the return leg the figure is reflected about
+     * the middle of the travel region, and a hit box that ignored that would be correct
+     * for half of every cycle and wrong for the other half.
+     */
+    fun boundsAt(nowMs: Long, left: Float, top: Float, h: Float, span: Float): RectF {
+        val phase = nowMs.mod(PERIOD_MS)
+        val returning = phase >= DURATION_MS
+        val t = (if (returning) phase - DURATION_MS else phase) / 1000f
+        val u = h / VB_H
+        val w = VB_W * u
+        val ox = left + rootXFraction.at(t) * span
+        val oy = top + rootY.at(t) * u
+        if (!returning) return RectF(ox, oy, ox + w, oy + h)
+        val mirror = left + (span + w) / 2f
+        return RectF(2f * mirror - (ox + w), oy, 2f * mirror - ox, oy + h)
+    }
+
     fun draw(
         canvas: Canvas,
         nowMs: Long,

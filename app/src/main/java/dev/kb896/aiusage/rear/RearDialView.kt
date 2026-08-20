@@ -225,7 +225,7 @@ class RearDialView(context: Context) : View(context) {
         val hidden = ambient && sweep == null
         val front = sweep?.let { t ->
             android.graphics.Path().apply {
-                addCircle(CLOSE_CX, CLOSE_CY, rippleReach() * t, android.graphics.Path.Direction.CW)
+                addCircle(rippleCx, rippleCy, rippleReach() * t, android.graphics.Path.Direction.CW)
             }
         }
         canvas.save()
@@ -247,7 +247,19 @@ class RearDialView(context: Context) : View(context) {
         // watchdog cannot see. Any colour is fine; transparency is not.
         //
         // AMBIENT is the one exception, and it is a deliberate risk: see AMBIENT_ALPHA.
-        if (!hidden) canvas.drawColor(colorFor("bg", config.background or (0xFF shl 24)))
+        if (!hidden) {
+            // Hue and opacity ease SEPARATELY, and they have to: ColorTween runs through
+            // RampColor.lerp, which forces alpha to 0xFF so a ramp stop or an accent can
+            // never be saved half-invisible. Alpha therefore gets a Tween of its own —
+            // the same curve, the same duration, so switching the background off reads
+            // as one movement rather than a colour easing while a transparency snaps.
+            val alpha = animateTo(
+                "bg:alpha",
+                if (config.showBackground) 255f else SEE_THROUGH_ALPHA.toFloat(),
+            )
+            val hue = colorFor("bg", config.background or (0xFF shl 24))
+            canvas.drawColor((hue and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24))
+        }
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
         // — it was in place for a full build while this line painted Palette.BG at full
@@ -376,7 +388,7 @@ class RearDialView(context: Context) : View(context) {
                 }
                 // The ambient background belongs to this side too, or the swept region
                 // is briefly fully transparent and then snaps to its alpha at the end.
-                canvas.drawColor((config.background and 0x00FFFFFF) or (AMBIENT_ALPHA shl 24))
+                canvas.drawColor((config.background and 0x00FFFFFF) or (SEE_THROUGH_ALPHA shl 24))
                 drawAmbientWalk(canvas, nowReal)
                 canvas.restore()
             }
@@ -390,6 +402,20 @@ class RearDialView(context: Context) : View(context) {
         // this stops entirely and the view falls back to the 15s idle tick — an
         // always-on panel must not hold a 60fps loop for a display that is not changing.
         if (animating) postInvalidateOnAnimation()
+    }
+
+    /**
+     * The mascot colour of whichever account is shown first.
+     *
+     * Ordered, not index zero: the accounts can be rearranged, and "first" here has to
+     * mean the same thing it means everywhere else on this panel.
+     */
+    private fun firstMascotColor(): Int {
+        val index = config.orderedAccounts(Account.entries.size).firstOrNull() ?: 0
+        return colorFor(
+            "ambient:body",
+            config.styleFor(index).mascotBody ?: MascotRenderer.BODY_GREEN,
+        )
     }
 
     /** This account's configured accent, falling back to its built-in. */
@@ -539,6 +565,17 @@ class RearDialView(context: Context) : View(context) {
      */
     private var rippleStart = 0L
 
+    /**
+     * Where the current ripple radiates from — the point that was touched.
+     *
+     * Not a fixed origin. Closing, the finger is on the close button and the two are the
+     * same thing; opening, it is on the mascot, which is somewhere else entirely and
+     * moving. A ripple that always came out of the button would, on the way back, appear
+     * to originate from a spot nobody had touched.
+     */
+    private var rippleCx = CLOSE_CX
+    private var rippleCy = CLOSE_CY
+
     /** Where the close button is, in the view's own coordinates. Null when hidden. */
     var closeButton: android.graphics.RectF? = null
         private set
@@ -588,7 +625,13 @@ class RearDialView(context: Context) : View(context) {
         // mascot is walking and the button is a 16-unit disc on the back of a phone
         // being held — asking someone to hit either is asking them to look at it, which
         // is the one thing this surface cannot be used for.
-        val onClose = if (ambient) true else near(closeButton, event.x, event.y)
+        // In ambient, ONLY the mascot brings the panel back. Tapping anywhere was
+        // forgiving but it made the whole rear display inert to everything else, and the
+        // mascot is a deliberate target: it is the one thing drawn there, and it is
+        // where the button turned into.
+        val onClose =
+            if (ambient) near(mascotButton, event.x, event.y)
+            else near(closeButton, event.x, event.y)
         val hit = onCamera || (config.showClose && onClose)
 
         return when (event.actionMasked) {
@@ -601,6 +644,9 @@ class RearDialView(context: Context) : View(context) {
                     onCamera -> onCameraTap?.invoke()
                     hit -> {
                         ambient = !ambient
+                        // From the finger, whichever direction we are going.
+                        rippleCx = event.x
+                        rippleCy = event.y
                         rippleStart = android.os.SystemClock.elapsedRealtime()
                         invalidate()
                     }
@@ -662,10 +708,18 @@ class RearDialView(context: Context) : View(context) {
      * How far the ripple must travel to clear the panel: the distance from the button to
      * the farthest corner. Anything shorter leaves a wedge of readout behind.
      */
-    private fun rippleReach(): Float =
-        kotlin.math.hypot(Panel.WIDTH - CLOSE_CX, CLOSE_CY.toDouble().toFloat()).let {
-            maxOf(it, kotlin.math.hypot(Panel.WIDTH - CLOSE_CX, Panel.HEIGHT - CLOSE_CY))
+    private fun rippleReach(): Float {
+        // The farthest CORNER from wherever it started. Anything shorter leaves a wedge
+        // of the old state standing in the corner opposite the touch, and which corner
+        // that is now depends on where the finger landed.
+        var far = 0f
+        for (x in floatArrayOf(0f, Panel.WIDTH.toFloat())) {
+            for (y in floatArrayOf(0f, Panel.HEIGHT.toFloat())) {
+                far = maxOf(far, kotlin.math.hypot(x - rippleCx, y - rippleCy))
+            }
         }
+        return far
+    }
 
     /**
      * The close button: a ring with an X in it, which becomes the mascot's home.
@@ -722,6 +776,10 @@ class RearDialView(context: Context) : View(context) {
      * only mascot that travels, and travelling is the entire point of leaving it here.
      * It spans the whole panel because there is no bar to stay on any more.
      */
+    /** Where the walking mascot is, for the tap that brings the panel back. */
+    var mascotButton: android.graphics.RectF? = null
+        private set
+
     private fun drawAmbientWalk(canvas: Canvas, nowMs: Long) {
         // The walk is a continuous animation, so it has to ask for the next frame the
         // way every other moving thing here does. Without this the panel stopped
@@ -733,14 +791,21 @@ class RearDialView(context: Context) : View(context) {
         val stand = MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
         val h = MASCOT_HEIGHT * (stand?.scale ?: 1f)
         val w = h * WalkRig.ASPECT
+        val left = CLOSE_CX + CLOSE_R + AMBIENT_GAP
+        val top = Panel.HEIGHT - MARK_BOTTOM - h
+        val span = Panel.WIDTH - MARK_BOTTOM - left - w
+        mascotButton = WalkRig.boundsAt(nowMs, left, top, h, span)
         WalkRig.draw(
             canvas, nowMs,
-            left = CLOSE_CX + CLOSE_R + AMBIENT_GAP,
-            top = Panel.HEIGHT - MARK_BOTTOM - h,
+            left = left,
+            top = top,
             h = h,
-            span = Panel.WIDTH - MARK_BOTTOM - (CLOSE_CX + CLOSE_R + AMBIENT_GAP) - w,
+            span = span,
             paint = mascotPaint,
-            bodyColor = colorFor("close", config.closeColor),
+            // The FIRST account's mascot colour, not the close button's. This is the
+            // same animal that walks the top bar when the panel is up — it should not
+            // change species on its way behind the readout.
+            bodyColor = firstMascotColor(),
         )
     }
 
@@ -1461,7 +1526,8 @@ class RearDialView(context: Context) : View(context) {
         private const val RIPPLE_MS = 2400f
 
         /**
-         * How opaque the panel stays in ambient mode.
+         * How opaque the panel stays when it is meant to be see-through — ambient mode,
+         * and the background switched off.
          *
          * NOT zero, and this is the one number in this file that must never become it.
          * At zero the panel stops working entirely: with nothing occluding it, MIUI's
@@ -1474,9 +1540,9 @@ class RearDialView(context: Context) : View(context) {
          * be a surface. The panel ran at 0xB4 for a whole build, so the mechanism
          * tolerates partial alpha; how far down it tolerates is not established, and
          * this is the value to raise first if the panel ever vanishes into MIUI's
-         * launcher after a close.
+         * launcher after a close, or after the background is switched off.
          */
-        private const val AMBIENT_ALPHA = 0x60
+        private const val SEE_THROUGH_ALPHA = 0x60
 
         private const val CLOSE_STROKE = 3f
 

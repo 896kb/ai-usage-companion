@@ -476,6 +476,11 @@ class MainActivity : ComponentActivity() {
         // than described. "Camera button on the panel" was a sentence where the others
         // were labels, which made two controls of the same kind look like two kinds.
         SettingsRows.toggleWithColor(
+            container, "Background", config.showBackground, config.background,
+            onChange = { on -> write { it.copy(showBackground = on) } },
+            onPick = { c -> write { it.copy(background = c) } },
+        )
+        SettingsRows.toggleWithColor(
             container, "Camera", config.showCamera, config.cameraTint,
             onChange = { on -> write { it.copy(showCamera = on) } },
             onPick = { c -> write { it.copy(cameraColor = c) } },
@@ -486,18 +491,10 @@ class MainActivity : ComponentActivity() {
             onPick = { c -> write { it.copy(closeColor = c) } },
         )
 
-        // Colours as one grid, so they can be judged against each other — which is how
-        // they are actually chosen — rather than down a column one at a time.
-        val swatches = mutableListOf(
-            SettingsRows.Swatch("BACKGROUND", config.background) { c ->
-                write { it.copy(background = c) }
-            },
-            SettingsRows.Swatch("CLOCK & BATT", config.extrasColor) { c ->
-                write { it.copy(extrasColor = c) }
-            },
-
-        )
-        SettingsRows.colorGrid(container, swatches)
+        // No colour grid here any more. Every panel colour now sits on the row of the
+        // thing it paints — a grid made sense while they were a set chosen against each
+        // other, and once each one had an owner it was just a second place to look.
+        // The ramp keeps its grid in ADVANCED, where the five ARE chosen as a set.
 
         // Rings. Each picks an account, a window, and what to show about it.
         // The ramp belongs in ADVANCED. It is five colours that already work together,
