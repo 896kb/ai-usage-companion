@@ -31,8 +31,34 @@ class RearDialView(context: Context) : View(context) {
         set(value) { field = value; invalidate() }
 
     /** Everything the user can change. Arrives in the same payload as [state]. */
+    /**
+     * Whether this view answers touches at all.
+     *
+     * False for the preview on the front screen, and that is a bug fix rather than a
+     * tidy-up: the preview is a live RearDialView sitting inside the settings page's
+     * scroll view, so every drag past it was handed to the pager. Scrolling the app
+     * silently scrolled the preview onto the media page, which then showed a record
+     * player where the panel was supposed to be previewed.
+     *
+     * A preview is a picture of the panel. Nothing on it is meant to be operated, and the
+     * buttons it draws point at hardware this process does not have.
+     */
+    var interactive: Boolean = true
+
     var config: PanelConfig = PanelConfig.DEFAULT
-        set(value) { field = value; invalidate() }
+        set(value) {
+            field = value
+            // Switching the feature OFF has to act now, not at the next thing the player
+            // says. The row and the record are only ever created by a broadcast, so
+            // without this they sat there — correctly drawn, from a config that no longer
+            // wanted them — until the next track change, which on a paused player is
+            // never. Turning it back ON is the other half, and lives on the front screen:
+            // MainActivity asks the watcher to re-publish (see MEDIA_SYNC).
+            if (!value.showMedia && media != null) {
+                showMedia(active = false, title = "", artist = "", playing = false)
+            }
+            invalidate()
+        }
 
     /**
      * Draw only this account, filling the panel with it. Null draws all of them.
@@ -353,6 +379,27 @@ class RearDialView(context: Context) : View(context) {
         // same offset and is drawn first.
         val push = noticeHeight(nowReal) * noticeSlide(nowReal)
 
+        // Paging. The media page exists only under the vinyl style and only while
+        // something is playing — see MediaPage for why a square cover gets no second
+        // page. A preview is never paged: it is a picture of the panel on a phone screen,
+        // and a scroll position it cannot be given is a scroll position that would just
+        // be wrong.
+        settlePresence(frameNowMs)
+        val wantsMediaPage = onlyAccount == null && mediaPageAvailable()
+        if (wantsMediaPage) {
+            pager.pages = 2
+        } else if (pager.pages > 1) {
+            // The media page can vanish while you are standing on it — the music stops,
+            // and the page it was about goes with it. Walk back rather than cutting: the
+            // panel drops a page only once it has actually returned to the first one, so
+            // what you see is the readout arriving, not the panel blinking.
+            pager.settleTo(0, frameNowMs)
+            if (pager.restingAt(0)) pager.pages = 1
+        }
+        val paged = if (onlyAccount == null) pager.advance(frameNowMs) else 0f
+        val paging = (paged / Panel.HEIGHT).coerceIn(0f, 1f)
+        if (pager.animating()) animating = true
+
         // The rings do NOT translate, and that is a deliberate exception to the
         // paragraph above rather than an oversight.
         //
@@ -402,14 +449,33 @@ class RearDialView(context: Context) : View(context) {
         // the largest burn-in target this panel has ever had.
         if (!hidden) {
             canvas.save()
+            // NOT paged. The record is the one thing that does not scroll away — it
+            // travels between the two pages instead, shrinking and moving to the middle
+            // as the readout leaves over the top of it. That is the whole gesture: the
+            // panel turns into a record player rather than showing a second screen.
             canvas.translate(dx, dy + push)
-            drawVinyl(canvas)
+            drawVinyl(canvas, paging)
             canvas.restore()
         }
 
         val order = orderedAccounts()
         val positions = listOf(geometry.personal, geometry.work)
-        if (!hidden) order.forEachIndexed { position, accountIndex ->
+        // The rings FADE between pages rather than sliding, and they are the only thing
+        // that does. Everything else on the readout is laid out against the panel and can
+        // leave over the top of it; the rings are drawn concentric with the phone's
+        // actual camera lenses, so a ring in motion is a circle visibly not on the lens
+        // it traces. Fading keeps them on the glass until they are gone.
+        //
+        // A layer, so the whole ring — track, arc and label — dims as one object. Fading
+        // each paint separately lets the track outlive the arc by a frame, which reads as
+        // the ring breaking rather than leaving.
+        val ringFade = ((1f - paging) * 255f).toInt().coerceIn(0, 255)
+        val ringLayer = paging > 0.001f && ringFade > 0
+        if (ringLayer) {
+            canvas.saveLayerAlpha(
+                0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), ringFade)
+        }
+        if (!hidden && ringFade > 0) order.forEachIndexed { position, accountIndex ->
             val account = Account.entries.getOrNull(accountIndex) ?: return@forEachIndexed
             if (onlyAccount != null && account != onlyAccount) return@forEachIndexed
             // A previewed account takes the first ring position whatever its place in
@@ -418,6 +484,7 @@ class RearDialView(context: Context) : View(context) {
             val geo = positions.getOrNull(at) ?: return@forEachIndexed
             drawRing(canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath)
         }
+        if (ringLayer) canvas.restore()
 
         // The strip pushes the readout down and the RINGS DO NOT MOVE. They are drawn
         // concentric with the phone's actual lenses, so shifting them would put two
@@ -426,19 +493,41 @@ class RearDialView(context: Context) : View(context) {
         // which is the trade: a notification is asking for attention, and for five
         // seconds it gets it.
         canvas.save()
-        canvas.translate(dx, dy + push)
-        if (!hidden) drawCanvasSide(canvas, dx, dy + push)
+        canvas.translate(dx, dy + push - paged)
+        if (!hidden) drawCanvasSide(canvas, dx, dy + push - paged)
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
         if (onlyAccount == null && !hidden) drawExtras(canvas)
         // Same rule as the extras: it acts on the panel rather than on an account, so a
         // single-account preview leaves it out — and a preview is scaled, which would
         // put the touch target in the wrong place even if it were wanted there.
-        if (onlyAccount == null && config.showCamera && !hidden) drawCamera(canvas, dx, dy + push)
-        else cameraButton = null
-        if (onlyAccount == null && config.showClose && !hidden) drawClose(canvas, dx, dy + push)
-        else closeButton = null
+        if (onlyAccount == null && config.showCamera && !hidden) {
+            drawCamera(canvas, dx, dy + push - paged)
+        } else {
+            cameraButton = null
+        }
+        if (onlyAccount == null && config.showClose && !hidden) {
+            drawClose(canvas, dx, dy + push - paged)
+        } else {
+            closeButton = null
+        }
         canvas.restore()
+
+        // The media page: everything on the second page except the record, which was
+        // drawn behind the readout and has been travelling here the whole time.
+        //
+        // OUTSIDE the paged translate, which is the whole point and was wrong first
+        // time: this page does not scroll, it assembles in place as the readout leaves
+        // over the top of it. Nested inside, every part of it was drawn a full panel
+        // height above the screen and the page came up as a bare record on black.
+        if (!hidden && onlyAccount == null && paging > 0.001f) {
+            canvas.save()
+            canvas.translate(dx, dy + push)
+            drawMediaPage(canvas, paging, dx, dy + push)
+            canvas.restore()
+        } else if (paging <= 0.001f) {
+            volumeBar = null
+        }
         canvas.restore()   // the readout clip
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
@@ -724,6 +813,9 @@ class RearDialView(context: Context) : View(context) {
     /** Set by RearActivity, which forwards the press to the main process. */
     var onMediaTap: ((String) -> Unit)? = null
 
+    /** Set while a touch belongs to the volume column rather than to the pager. */
+    private var draggingVolume = false
+
     private fun near(r: android.graphics.RectF?, x: Float, y: Float): Boolean {
         val b = r ?: return false
         return x >= b.left - CAMERA_SLOP && x <= b.right + CAMERA_SLOP &&
@@ -732,6 +824,7 @@ class RearDialView(context: Context) : View(context) {
 
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (!interactive) return false
         val onCamera = !ambient && near(cameraButton, event.x, event.y)
         // In ambient mode the whole panel is the way back, not just the button. The
         // mascot is walking and the button is a 16-unit disc on the back of a phone
@@ -749,18 +842,69 @@ class RearDialView(context: Context) : View(context) {
         // live in. Nothing here needs a showMedia check: the strip is null unless the
         // row was actually drawn.
         val onMedia = if (ambient) null else mediaAt(event.x, event.y)
-        val hit = onCamera || onMedia != null || (config.showClose && onClose)
+        val onMute = !ambient && near(muteButton, event.x, event.y)
+        // Checked AFTER the cap, so the button under the column wins the overlap their
+        // slop regions share. A press meant for mute that set the volume to zero instead
+        // would look identical and be impossible to undo by the same gesture.
+        val onVolume = !ambient && !onMute && near(volumeBar, event.x, event.y)
+        val hit = onCamera || onMedia != null || onVolume || onMute ||
+            (config.showClose && onClose)
 
         return when (event.actionMasked) {
             // Claim the gesture on the way down if it started on a target, so a slight
             // drag still counts — a finger on the back of a phone is not steady, and
             // without claiming it there is no ACTION_UP to act on.
-            android.view.MotionEvent.ACTION_DOWN -> hit
+            //
+            // And claim it when there is anywhere to page to, whether or not it landed on
+            // anything: a drag has to be watched from the start to be recognised at all.
+            android.view.MotionEvent.ACTION_DOWN -> {
+                draggingVolume = onVolume
+                if (onVolume) setVolumeAt(event.y)
+                // The volume column owns its own gesture. Sharing it with the pager
+                // would make every volume adjustment a fight between a bar that wants
+                // the finger's Y and a page that wants the same number.
+                if (!onVolume) pager.onDown(event.y, android.os.SystemClock.uptimeMillis())
+                hit || pager.enabled()
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                if (draggingVolume) {
+                    setVolumeAt(event.y)
+                    true
+                } else if (pager.enabled() &&
+                    pager.onMove(event.y, android.os.SystemClock.uptimeMillis())
+                ) {
+                    invalidate()
+                    true
+                } else {
+                    hit
+                }
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                draggingVolume = false
+                pager.onUp(android.os.SystemClock.uptimeMillis())
+                invalidate()
+                false
+            }
             android.view.MotionEvent.ACTION_UP -> {
+                if (draggingVolume) {
+                    setVolumeAt(event.y)
+                    draggingVolume = false
+                    return true
+                }
+                // A drag is not a tap, and must not also fire whatever it started on.
+                // Without this, letting go of a page swipe that happened to begin over
+                // the close button closed the panel.
+                if (pager.dragging) {
+                    pager.onUp(android.os.SystemClock.uptimeMillis())
+                    invalidate()
+                    return true
+                }
+                pager.onUp(android.os.SystemClock.uptimeMillis())
                 when {
                     onCamera -> onCameraTap?.invoke()
                     // Before the close branch: a transport press is a press on the
                     // readout, not a request to sweep it away.
+                    onMute -> toggleMute()
                     onMedia != null -> onMediaTap?.invoke(onMedia)
                     hit -> {
                         val now = android.os.SystemClock.elapsedRealtime()
@@ -1007,13 +1151,30 @@ class RearDialView(context: Context) : View(context) {
                 null
             }
 
-        // The ROW's drum turns only when the slot changes hands. A track advancing while
-        // the controls are already up is new text in a row that is already there, and
-        // sliding the whole slot for it would say the artwork had come and gone.
+        // PRESENCE IS DEBOUNCED TOO, on the same rule as the play/pause glyph.
+        //
+        // Pressing next does not hand over one track for another. The player drops the
+        // session for a moment while it loads — active goes false, then true again a few
+        // hundred milliseconds later — so a row driven by every report tore itself down
+        // and rebuilt on every skip: the record slid off the bottom and climbed back, the
+        // artwork flashed in between, and on the media page the whole page went away and
+        // returned. The gap is not news, and only holding the play state still was
+        // treating half the problem.
+        //
+        // A gap that does NOT come back inside the window is a real stop, and then the
+        // record leaves properly.
+        presenceGate.report(next != null, now)
+        if (next != null && media == null && !presenceGate.shown) {
+            // Arriving from nothing: no reason to wait, there is nothing on screen yet.
+            presenceGate.snap(true)
+        }
         val wasShown = media != null
-        if (next != null != wasShown) {
+        // Only the ARRIVAL is acted on here. A departure waits for settlePresence, or a
+        // skip would start the record sliding off before the next track had a chance to
+        // arrive — which is the flicker this is all here to prevent.
+        if (next != null && !wasShown) {
             mediaFrom = mediaSwap(now)
-            mediaTo = if (next != null) 1f else 0f
+            mediaTo = 1f
             mediaAt = now
         }
 
@@ -1030,9 +1191,41 @@ class RearDialView(context: Context) : View(context) {
             playGate.report(reported, now)
         }
 
+        // Held so the record can leave. Cleared only once the slide has finished, in
+        // mediaSwap — a departing track that were dropped here would take the disc with
+        // it before it had moved.
+        if (next == null) {
+            if (media != null) departing = media
+        } else {
+            departing = null
+        }
         media = next
         invalidate()
     }
+
+    /**
+     * Commit a presence change once it has held.
+     *
+     * Called every frame, next to settlePlaying, and does the same job for "is there
+     * anything playing" that that does for "is it running". A skip trips this and it
+     * never reports it; a real stop trips it and half a second later the row goes.
+     */
+    private fun settlePresence(nowMs: Long) {
+        if (presenceGate.waiting()) animating = true
+        if (!presenceGate.commit(nowMs)) return
+        if (!presenceGate.shown && media == null) {
+            // Confirmed gone. Start the record on its way out; departing already holds
+            // the track it needs to draw while it leaves.
+            mediaFrom = mediaSwap(nowMs)
+            mediaTo = 0f
+            mediaAt = nowMs
+        }
+    }
+
+    private val presenceGate = PlayGate(MEDIA_SETTLE_MS)
+
+    /** The track that just stopped, kept until the record has slid off. */
+    private var departing: Media? = null
 
     /**
      * Commit the transport state once it has held still, and only then move the glyph.
@@ -1061,8 +1254,124 @@ class RearDialView(context: Context) : View(context) {
 
     private val playGate = PlayGate(MEDIA_SETTLE_MS)
 
+    /**
+     * Vertical paging. One page today plus the media page; built for more.
+     *
+     * The span is the whole panel, so a page IS a screenful. That is the unit the eye
+     * expects from a surface with no scrollbar and no visible edges to judge against.
+     */
+    private val pager = PanelPager(Panel.HEIGHT.toFloat(), PAGE_SETTLE_MS)
+
+    /** The volume column's touch target, or null when the media page is not up. */
+    private var volumeBar: android.graphics.RectF? = null
+
+    /**
+     * The music stream's volume, 0..1.
+     *
+     * Read and written HERE rather than sent to the main process the way transport
+     * commands are. Those have to travel because a MediaController belongs to the process
+     * that obtained it under notification access; volume is an ordinary system service
+     * any app may call, so a round trip would buy nothing and cost the delay between
+     * moving a finger and seeing the bar follow it.
+     */
+    private val audio by lazy {
+        context.getSystemService(android.media.AudioManager::class.java)
+    }
+
+    private fun volumeLevel(): Float {
+        val a = audio ?: return 0f
+        val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+        if (max <= 0) return 0f
+        return a.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat() / max
+    }
+
+    /**
+     * Set the volume from a point on the column.
+     *
+     * Rounded to the stream's own steps rather than kept as a fraction, because that is
+     * all the system can store — a bar drawn from a finer number than the device holds
+     * would drift away from the volume it claims to show.
+     */
+    private fun setVolumeAt(y: Float) {
+        val a = audio ?: return
+        val bar = volumeBar ?: return
+        val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+        if (max <= 0) return
+        val f = ((bar.bottom - y) / (bar.bottom - bar.top)).coerceIn(0f, 1f)
+        applyVolume(Math.round(f * max).coerceIn(0, max))
+    }
+
+    /**
+     * Set the stream, and tick once per step actually crossed.
+     *
+     * The haptic is on the STEP, not on the movement, and that is what makes it useful
+     * rather than noise: dragging the column feels like counting notches, so the volume
+     * can be set without looking at a screen that is facing away from you. A buzz per
+     * frame would be a rattle.
+     */
+    private fun applyVolume(step: Int) {
+        val a = audio ?: return
+        val current = a.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+        if (step == current) return
+        // No system UI flag: this panel is the UI, and the phone's own volume popup
+        // appearing on the FRONT screen because someone touched the back is the exact
+        // surprise this app exists to avoid.
+        runCatching {
+            a.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, step, 0)
+        }
+        // IGNORE_VIEW_SETTING, because this view is on a display the user cannot see and
+        // has never had the chance to enable feedback on. The gesture is deliberate and
+        // the tick is the only confirmation it has.
+        performHapticFeedback(
+            android.view.HapticFeedbackConstants.CLOCK_TICK,
+            android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING,
+        )
+        invalidate()
+    }
+
+    /**
+     * Mute, using the system's own mute rather than a volume of zero.
+     *
+     * These are genuinely different states on Android, as they are on a Mac: a muted
+     * stream remembers the level it was at and comes back to it, where a stream turned
+     * down to zero has simply lost that number. The first version here zeroed the volume
+     * and kept the old value in a field of its own — which reimplemented the platform's
+     * behaviour, worse, and threw it away whenever the panel's process was recycled.
+     *
+     * ADJUST_TOGGLE_MUTE also means the phone agrees with the panel: mute set anywhere
+     * else shows here, and mute set here shows everywhere else.
+     */
+    private fun toggleMute() {
+        val a = audio ?: return
+        runCatching {
+            a.adjustStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC,
+                android.media.AudioManager.ADJUST_TOGGLE_MUTE,
+                0,
+            )
+        }
+        performHapticFeedback(
+            android.view.HapticFeedbackConstants.CLOCK_TICK,
+            android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING,
+        )
+        invalidate()
+    }
+
+    private fun muted(): Boolean =
+        audio?.isStreamMute(android.media.AudioManager.STREAM_MUSIC) == true
+
+    /** The mute cap's target, or null when the media page is not up. */
+    private var muteButton: android.graphics.RectF? = null
+
     /** 0 while the artwork holds the slot, 1 while the controls do. */
-    private fun mediaSwap(nowMs: Long): Float = slide(mediaFrom, mediaTo, mediaAt, nowMs)
+    private fun mediaSwap(nowMs: Long): Float {
+        val v = slide(mediaFrom, mediaTo, mediaAt, nowMs)
+        // Once the slot is fully back with the artwork there is nothing left to animate
+        // out, so the departing track can go. Released here rather than on a timer
+        // because this is the value that decides when the movement is over.
+        if (v <= 0.001f && departing != null) departing = null
+        return v
+    }
 
     /** 0 on the play glyph, 1 on the pause glyph. */
     private fun playSwap(nowMs: Long): Float = slide(playFrom, playTo, playAt, nowMs)
@@ -1916,28 +2225,39 @@ class RearDialView(context: Context) : View(context) {
      * than in absolute greys. The background is the user's to choose, and a record mixed
      * from black would vanish on a dark panel and sit like a hole in a light one.
      */
-    private fun drawVinyl(canvas: Canvas) {
+    private fun drawVinyl(canvas: Canvas, paging: Float) {
         if (config.mediaArt != MediaArt.VINYL) return
-        val m = media ?: return
+        // The track that is playing, or the one that just stopped. A record cannot leave
+        // if it is deleted the instant the music ends — drawVinyl used to return here and
+        // the disc simply blinked out, which is the one exit a physical object never
+        // makes.
+        val m = media ?: departing ?: return
         // Fades with the row it belongs to. It does not slide: the row is a strip
         // changing hands and this is an object the panel is a window onto, and sliding
         // something the size of the screen would be the most violent thing on it.
         val swap = mediaSwap(frameNowMs)
         if (swap <= 0.001f) return
 
-        val disc = MediaLayout.vinyl(
-            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), Panel.CUTOUT_RIGHT.toFloat(),
+        // Slides out of the bottom rather than fading. It arrived as an object and it
+        // leaves as one: down and off the panel, the way a record comes off a deck. The
+        // slide runs from wherever it happens to be, so leaving from the media page
+        // travels further than leaving from the readout — which is correct, it is
+        // further up.
+        val base = discAt(paging)
+        val disc = MediaLayout.Disc(
+            base.cx, base.cy + (1f - swap) * (Panel.HEIGHT + base.radius), base.radius,
         )
-        val ink = colorFor("media", config.mediaTint)
-        fun shade(alpha: Int) = (ink and 0x00FFFFFF) or
-            ((alpha * swap).toInt().coerceIn(0, 255) shl 24)
+        val ink = colorFor("vinyl", config.vinylTint)
+        // Full strength throughout: the slide is what says it is leaving, and a record
+        // that faded as it slid would read as two things happening to one object.
+        fun shade(alpha: Int) = (ink and 0x00FFFFFF) or (alpha shl 24)
 
         // BLACK, not a tint wash. The first attempt built the disc out of the row's own
         // colour at low alpha and it came out as a pale blue circle with rings on it —
         // a radar sweep. A record is black; what you actually see of one is the light
         // its grooves catch, which is what everything below this line is.
         vinylPaint.style = Paint.Style.FILL
-        vinylPaint.color = (0x000000 or ((VINYL_BODY_ALPHA * swap).toInt() shl 24))
+        vinylPaint.color = (0x000000 or (VINYL_BODY_ALPHA shl 24))
         canvas.drawCircle(disc.cx, disc.cy, disc.radius, vinylPaint)
 
         vinylPaint.style = Paint.Style.STROKE
@@ -1996,7 +2316,7 @@ class RearDialView(context: Context) : View(context) {
             // Held back from full strength. The transport buttons are drawn over this and
             // a busy cover at full opacity is the one thing on the panel that can make
             // them hard to find.
-            artPaint.alpha = (VINYL_COVER_ALPHA * swap).toInt().coerceIn(0, 255)
+            artPaint.alpha = VINYL_COVER_ALPHA
             canvas.drawBitmap(
                 cover, null,
                 ArtPlacement.destination(face, cover.width, cover.height, 0f, 0f, 1f),
@@ -2027,6 +2347,221 @@ class RearDialView(context: Context) : View(context) {
     /** The record's body, grooves and label. Anti-aliased — it is the one thing on this
      *  panel that is genuinely round rather than pixel art. */
     private val vinylPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /**
+     * The media page's furniture: type, transport, timeline and volume.
+     *
+     * Everything here fades in with [paging] rather than sliding. The record is already
+     * carrying the movement — it shrinks and travels while the readout leaves over the
+     * top of it — and a second set of things flying in from the edge at the same time
+     * would be two animations competing to explain one gesture.
+     *
+     * Positioned absolutely rather than relative to the page's scroll, because this
+     * canvas is not translated by the page offset: the page does not slide in, it
+     * assembles in place as the readout clears.
+     */
+    private fun drawMediaPage(canvas: Canvas, paging: Float, dx: Float, dy: Float) {
+        val m = media ?: return
+        val tint = colorFor("media", config.mediaTint)
+        val alpha = { a: Int -> (a * paging).toInt().coerceIn(0, 255) }
+        fun shade(base: Int, a: Int) = (base and 0x00FFFFFF) or (alpha(a) shl 24)
+
+        val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
+
+        // ---- title and artist, centred under the disc -------------------------
+        extras.textAlign = Paint.Align.CENTER
+        extras.textSize = MediaPage.TITLE_SIZE
+        extras.color = shade(tint, 0xFF)
+        canvas.drawText(
+            noticeClip(m.title, extras, PAGE_TEXT_WIDTH), cx,
+            MediaPage.TITLE_BASELINE, extras,
+        )
+        if (m.artist.isNotBlank()) {
+            extras.textSize = MediaPage.ARTIST_SIZE
+            extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
+            canvas.drawText(
+                noticeClip(m.artist, extras, PAGE_TEXT_WIDTH), cx,
+                MediaPage.ARTIST_BASELINE, extras,
+            )
+        }
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = 18f
+
+        // ---- the transport row, centred ---------------------------------------
+        //
+        // Its own geometry rather than MediaLayout's, which lays out from the right
+        // against a strip. Here the three are a group centred under a record, which is a
+        // different arrangement of the same three things.
+        val gh = MediaPage.TRANSPORT_H
+        val widths = listOf(
+            gh * PanelIcons.PREV.aspect,
+            gh * PanelIcons.PAUSE.aspect,
+            gh * PanelIcons.NEXT.aspect,
+        )
+        val total = widths.sum() + MediaPage.TRANSPORT_GAP * 2f
+        var x = cx - total / 2f
+        val top = MediaPage.TRANSPORT_CY - gh / 2f
+        val centres = mutableListOf<Float>()
+
+        extras.color = shade(tint, 0xFF)
+        drawIcon(canvas, PanelIcons.PREV, x, top, gh)
+        centres += x + widths[0] / 2f
+        x += widths[0] + MediaPage.TRANSPORT_GAP
+
+        // The play/pause drum again, one size up. Same clip-and-slide as the row's.
+        val turn = playSwap(frameNowMs)
+        canvas.save()
+        canvas.clipRect(x, top - gh, x + gh, top + gh * 2f)
+        if (turn < 0.999f) drawIcon(canvas, PanelIcons.PLAY, x, top + turn * gh, gh)
+        if (turn > 0.001f) drawIcon(canvas, PanelIcons.PAUSE, x, top - (1f - turn) * gh, gh)
+        canvas.restore()
+        centres += x + widths[1] / 2f
+        x += widths[1] + MediaPage.TRANSPORT_GAP
+
+        drawIcon(canvas, PanelIcons.NEXT, x, top, gh)
+        centres += x + widths[2] / 2f
+
+        // ---- the timeline, with a clock at each end ---------------------------
+        //
+        // Elapsed on the LEFT of the bar and total on the right. That is where every
+        // player puts them, and the alternative — both on one side — makes the reader
+        // work out which number is which every time they glance at it.
+        val elapsed = m.elapsed(SystemClock.elapsedRealtime())
+        extras.textSize = MediaPage.CLOCK_SIZE
+        val clockChars = MediaPage.clockWidth(maxOf(m.durationMs, elapsed))
+        val clockW = extras.measureText("M") * clockChars
+        val barLeft = MediaPage.barLeft(Panel.CUTOUT_RIGHT.toFloat(), clockW)
+        val barRight = MediaPage.barRight(Panel.WIDTH.toFloat(), clockW)
+        val barTop = MediaPage.BAR_CY - MediaPage.BAR_H / 2f
+
+        extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
+        val baseline = MediaPage.BAR_CY + MediaPage.CLOCK_SIZE / 2f - 2f
+        canvas.drawText(MediaPage.clock(elapsed), Panel.CUTOUT_RIGHT + MediaPage.MARGIN,
+            baseline, extras)
+        extras.textAlign = Paint.Align.RIGHT
+        canvas.drawText(
+            MediaPage.clock(m.durationMs), Panel.WIDTH - MediaPage.MARGIN, baseline, extras)
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = 18f
+
+        val fraction = MediaLayout.progress(elapsed, m.durationMs)
+        noticePaint.style = Paint.Style.FILL
+        noticePaint.color = shade(tint, MEDIA_TRACK_ALPHA)
+        canvas.drawRect(
+            barLeft, barTop, barRight, barTop + MediaPage.BAR_H, noticePaint)
+        if (fraction != null) {
+            noticePaint.color = shade(tint, 0xFF)
+            canvas.drawRect(
+                barLeft, barTop, barLeft + (barRight - barLeft) * fraction,
+                barTop + MediaPage.BAR_H, noticePaint,
+            )
+        }
+
+        // ---- the volume column, standing beside the record --------------------
+        val vLeft = MediaPage.volumeLeft(cx)
+        val vTop = MediaPage.VOLUME_TOP
+        val vBottom = MediaPage.VOLUME_BOTTOM
+        // Drawn EMPTY while muted, whatever level is being held underneath. The bar
+        // reports what you can hear, and the remembered level is the icon's business.
+        val level = if (muted()) 0f else volumeLevel()
+        noticePaint.color = shade(tint, MEDIA_TRACK_ALPHA)
+        canvas.drawRect(vLeft, vTop, vLeft + MediaPage.VOLUME_W, vBottom, noticePaint)
+        // Fills from the BOTTOM, because that is which way up a volume control is.
+        noticePaint.color = shade(tint, 0xFF)
+        canvas.drawRect(
+            vLeft, vBottom - (vBottom - vTop) * level,
+            vLeft + MediaPage.VOLUME_W, vBottom, noticePaint,
+        )
+
+        // The cap: a speaker that gains waves as the level rises, and mutes when pressed.
+        //
+        // Three glyphs rather than one, for the reason a desktop volume control does the
+        // same — the icon is legible from further away than the bar it summarises, so on
+        // a panel read across a room it is the part that actually reports the level. It
+        // is also the mute button, which is why it is the one part of this column with a
+        // target of its own.
+        // Four states, and MUTED is its own — not the same thing as turned all the way
+        // down. A muted stream is holding a level it will come back to; a stream at zero
+        // has none. Showing the same speaker for both would hide the difference at
+        // exactly the moment it matters, which is when you are wondering why there is no
+        // sound.
+        val isMuted = muted()
+        val icon = when {
+            isMuted -> PanelIcons.VOLUME_MUTE
+            level <= 0f -> PanelIcons.VOLUME_OFF
+            level <= MediaPage.VOLUME_LOUD -> PanelIcons.VOLUME_LOW
+            else -> PanelIcons.VOLUME_HIGH
+        }
+        val ih = MediaPage.VOLUME_ICON_H
+        val iconTop = vBottom + MediaPage.VOLUME_ICON_GAP
+        // Centred on the column, by the glyph's own width — these three are 11, 16 and 22
+        // units wide, so a shared cell would visibly shift the speaker as it changed.
+        val iconLeft = vLeft + MediaPage.VOLUME_W / 2f - ih * icon.aspect / 2f
+        extras.color = shade(tint, if (isMuted || level <= 0f) MediaLayout.ARTIST_ALPHA else 0xFF)
+        drawIcon(canvas, icon, iconLeft - (ih - ih * icon.aspect) / 2f, iconTop, ih)
+
+        // Targets, and only once the page has arrived — the same rule the row follows.
+        // A button that can be pressed while it is still fading in is a button in a place
+        // it does not yet occupy.
+        if (paging >= 0.999f) {
+            mediaStrip = android.graphics.RectF(
+                centres.first() - MediaPage.TRANSPORT_GAP - dx, top - dy,
+                centres.last() + MediaPage.TRANSPORT_GAP - dx, top + gh - dy,
+            )
+            mediaCentres = centres.map { it - dx }
+            // Generous on both axes: a thin column on the back of a phone is not a target
+            // otherwise, and there is nothing else out here to hit by mistake.
+            volumeBar = android.graphics.RectF(
+                vLeft - VOLUME_SLOP - dx, vTop - dy,
+                vLeft + MediaPage.VOLUME_W + VOLUME_SLOP - dx, vBottom - dy,
+            )
+            muteButton = android.graphics.RectF(
+                vLeft - VOLUME_SLOP - dx, iconTop - VOLUME_SLOP / 2f - dy,
+                vLeft + MediaPage.VOLUME_W + VOLUME_SLOP - dx,
+                iconTop + ih + VOLUME_SLOP / 2f - dy,
+            )
+        } else {
+            volumeBar = null
+            muteButton = null
+        }
+        if (m.playing) animating = true
+    }
+
+    /**
+     * Where the record is, between its two pages.
+     *
+     * One disc, two destinations, interpolated. It is not two records cross-fading, and
+     * that is the point of the gesture: the object stays put under your finger while the
+     * readout slides off over the top of it, then settles into the middle of a page that
+     * is about the music. Cross-fading would make it a slide transition between screens,
+     * which is a different and much cheaper effect.
+     */
+    private fun discAt(paging: Float): MediaLayout.Disc {
+        val readout = MediaLayout.vinyl(
+            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), Panel.CUTOUT_RIGHT.toFloat(),
+        )
+        if (paging <= 0.001f) return readout
+        val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
+        return MediaLayout.Disc(
+            cx = readout.cx + (cx - readout.cx) * paging,
+            cy = readout.cy + (MediaPage.DISC_CY - readout.cy) * paging,
+            radius = readout.radius + (MediaPage.DISC_RADIUS - readout.radius) * paging,
+        )
+    }
+
+    /**
+     * Whether there is a second page to scroll to.
+     *
+     * Both conditions matter. Under a square cover there is no object to carry across
+     * the transition, so the page would be a second copy of the row with more numbers on
+     * it; and with nothing playing there is nothing for it to be a page about — a panel
+     * that scrolls to a blank record player is a panel that appears to have broken.
+     */
+    private fun mediaPageAvailable(): Boolean =
+        config.showMedia && config.mediaArt == MediaArt.VINYL &&
+            // The GATE, not `media`, so a skip does not take the page away and bring it
+            // back underneath someone who is standing on it.
+            (media != null || presenceGate.shown)
 
     /**
      * Where the record has turned to, in degrees.
@@ -2182,7 +2717,7 @@ class RearDialView(context: Context) : View(context) {
         dx: Float,
         dy: Float,
     ) {
-        val m = media ?: return
+        val m = media ?: departing ?: return
         settlePlaying(frameNowMs)
         val tint = colorFor("media", config.mediaTint)
         val band = mediaRegion(region)
@@ -2772,6 +3307,26 @@ class RearDialView(context: Context) : View(context) {
          * enough that a deliberate pause still feels answered.
          */
         private const val MEDIA_SETTLE_MS = 500L
+
+        /**
+         * How long a full page takes to settle after a release.
+         *
+         * Longer than any other movement on this panel, and it should be: everything
+         * else here is a strip or a glyph, and this is the entire surface travelling its
+         * own height. PanelPager shortens it in proportion to the distance actually
+         * left, so a release near the edge still lands at once.
+         */
+        private const val PAGE_SETTLE_MS = 340f
+
+        /** How far outside the volume column a touch still counts. It is 10 units wide
+         *  and this is the back of a phone. */
+        private const val VOLUME_SLOP = 30f
+
+        /** What a title on the media page may occupy before it is cut. Centred, so the
+         *  binding limit is twice the distance to the nearer edge. */
+        private val PAGE_TEXT_WIDTH =
+            2f * (MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat()) -
+                Panel.CUTOUT_RIGHT - MediaPage.MARGIN)
 
         /**
          * The vinyl: how fast it turns, and where its groove, label and spindle sit as

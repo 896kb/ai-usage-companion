@@ -145,6 +145,18 @@ Both animate with a 1.8s ease-in-out rather than snapping to new values, so a ch
 catches your eye without you watching for it — and never overshoots, because a bar that
 punched past 100% and settled back would be reporting a number the data never held.
 
+## The preview shows what the panel shows
+
+The preview on the front screen is the same view class as the panel, drawing the same
+config — but it lives in a different process, and notifications and media reach the panel
+by broadcast. It was never told, so it showed the readout and none of the things you were
+there to configure. It now listens to the same broadcasts and asks the watcher what is
+playing when it opens.
+
+It is also inert: nothing on it can be pressed or dragged. It sits inside a scrolling
+settings page, so before that every drag past it was handed to the panel's pager, and
+scrolling the app quietly scrolled the preview onto the media page.
+
 ## On the front screen too
 
 An ongoing notification carries both accounts, and on HyperOS it drives the
@@ -240,7 +252,9 @@ Two styles, chosen in settings.
 **Square** is the cover as the player supplied it, cropped to fill rather than
 letterboxed.
 
-**Vinyl** is a record the height of the panel, sitting behind the readout — centred on
+**Vinyl** has a colour of its own — grooves, rim and label edge, separate from the row's
+type, because making the grooves visible and making the title legible are not the same
+decision. It is a record the height of the panel, sitting behind the readout — centred on
 the half of the panel that is actually a display, and dropped far enough that a third of
 it runs off the bottom edge. A record on a deck rather than a circle placed on a screen.
 There is no thumbnail in the row under this style: the record *is* the artwork, and a
@@ -277,16 +291,64 @@ and it stops when paused.
 Anything with no duration — a live stream, a radio session — gets no bar at all, rather
 than an empty one that is never true.
 
+### Swipe up: the record player
+
+Under the vinyl style, with something playing, the panel has a **second page**. Swipe up
+from the readout and the record moves to the middle and shrinks while the readout leaves
+over the top of it; swipe down to come back. It snaps: drag freely, let go, and it lands
+on a page.
+
+The record is the only thing that does not scroll. It travels between the two positions
+instead — one object, two destinations, interpolated — so the panel turns into a record
+player rather than sliding to a different screen. The **rings** are the other exception,
+and they fade rather than move: they are drawn concentric with the phone's actual camera
+lenses, and a ring in motion is a circle visibly not on the lens it traces.
+
+The page carries what the row cannot fit: the track and artist at full size, bigger
+transport buttons, a progress bar with the elapsed time at its left and the total at its
+right, and a volume column beside the record.
+
+The snapping is deliberately forgiving — a short flick counts on its own, and anything
+past a third of the way commits. This is a 904x572 panel on the back of a phone being
+held in one hand, with no scrollbar and no edges to judge against; the alternative is a
+surface that refuses to move and gives no reason.
+
+It is built as a **page count**, not a two-state toggle, because the reason it exists is
+that this panel will eventually hold more accounts than fit on it. Adding a third page is
+a number.
+
+### The volume column
+
+Drag it to set the volume, with a **haptic tick per step** — so it can be set without
+looking at a screen that is facing away from you. The tick is on the step, not on the
+movement; a buzz per frame would be a rattle.
+
+Under it is a speaker that gains waves as the level rises, and it is also the mute
+button. Four states, because **muted is not the same as turned all the way down**: a muted
+stream is holding a level it will come back to, where a stream at zero has lost that
+number. This uses Android's own mute rather than zeroing the volume and remembering the
+old value in a field, so the phone and the panel agree — mute set anywhere else shows
+here, and mute set here shows everywhere else.
+
 ### The buttons wait before believing the player
 
 Press next and the player reports three states in a few hundred milliseconds: the old
 track stopping, a gap while the new one loads, then playing. Acting on each one made the
 play/pause glyph flick to play and back on every skip.
 
-So a report is not a verdict. A state has to hold still for half a second before the glyph
-believes it, and one that reverts inside that window never counts at all. The cost is
-honest: a real pause takes half a second to show. The button has already been pressed by
-then, and one that answers deliberately beats one that twitches under the finger.
+So a report is not a verdict. A state has to hold still for half a second before it
+counts, and one that reverts inside that window never counts at all. The cost is honest: a
+real pause takes half a second to show. The button has already been pressed by then, and
+one that answers deliberately beats one that twitches under the finger.
+
+The same rule guards **whether anything is playing at all**, and it has to. A skip does
+not hand one track to the next: the player drops the session while it loads, so a row
+driven by every report tore itself down and rebuilt on every press of next — the record
+slid off the bottom and climbed back, and on the media page the whole page went away and
+returned. A gap that comes back inside the window is never reported. One that does not is
+a real stop, and then the record leaves properly: it slides down and off the panel, and if
+you were standing on the media page, the panel walks itself back to the readout rather
+than cutting.
 
 ### Long titles scroll
 

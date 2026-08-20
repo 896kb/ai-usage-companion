@@ -137,9 +137,7 @@ class MediaWatcher(private val context: Context) {
         // and re-encoding one is tens of milliseconds. Once per track that would not
         // matter to this service, which has no UI, except that MainActivity shares the
         // process and its panel preview is on this thread too.
-        val art = metadata?.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)
-            ?: metadata?.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
-            ?: metadata?.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+        val art = if (active) cover(metadata) else null
         val key = if (active) "${'$'}title\u0000${'$'}artist" else null
 
         val send = { path: String? ->
@@ -170,19 +168,62 @@ class MediaWatcher(private val context: Context) {
             )
         }
 
-        // Nothing new to write: the same track, or no cover at all. Answer immediately
-        // with whatever is already on disk — a pause must not wait on file I/O to move
-        // the glyph, and re-encoding an identical cover on every state change would be
-        // the panel's one piece of real work done for nothing several times a minute.
-        if (key == null || art == null || key == artKey) {
-            send(if (key != null && artFile().exists()) artFile().path else null)
+        // Same track: answer immediately with what is already on disk. A pause must not
+        // wait on file I/O to move the glyph, and re-encoding an identical cover on every
+        // state change would be the panel's one piece of real work done for nothing
+        // several times a minute.
+        if (key != null && key == artKey) {
+            send(if (artFile().exists()) artFile().path else null)
             return
         }
+
+        // A DIFFERENT track with no cover shows NO cover. This is the bug that made the
+        // label stop changing: the old branch fell back to whatever was already on disk
+        // whenever the new track had no art, so one track without a cover pinned the
+        // previous track's sleeve on the record for the rest of the session. Keeping a
+        // picture that belongs to something else is worse than showing none.
         artKey = key
+        if (key == null || art == null) {
+            send(null)
+            return
+        }
         io.execute {
             val path = runCatching { writeArt(art) }.getOrNull()
             send(path)
         }
+    }
+
+    /**
+     * The cover, from whichever of the six places a player might have put it.
+     *
+     * Bitmaps first, then URIs. Plenty of players — Tidal among them — carry no bitmap at
+     * all and hand out a content:// URI instead, which is cheaper for them and meant the
+     * art here was simply absent. Reading only the bitmap keys is the difference between
+     * a cover that changes with the track and one that never appears.
+     *
+     * Network URIs are not fetched. A player that points at https:// is asking this app
+     * to make a request on its behalf, on a metadata callback, for a picture 140 pixels
+     * wide — the blank label is the better answer.
+     */
+    private fun cover(metadata: android.media.MediaMetadata?): android.graphics.Bitmap? {
+        val m = metadata ?: return null
+        val bitmap = m.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: m.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
+            ?: m.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+        if (bitmap != null) return bitmap
+
+        for (key in ART_URI_KEYS) {
+            val uri = m.getString(key)?.takeIf { it.isNotBlank() } ?: continue
+            val parsed = runCatching { android.net.Uri.parse(uri) }.getOrNull() ?: continue
+            if (parsed.scheme !in LOCAL_SCHEMES) continue
+            val loaded = runCatching {
+                context.contentResolver.openInputStream(parsed).use {
+                    android.graphics.BitmapFactory.decodeStream(it)
+                }
+            }.getOrNull()
+            if (loaded != null) return loaded
+        }
+        return null
     }
 
     /**
@@ -231,5 +272,15 @@ class MediaWatcher(private val context: Context) {
          * half-pixel, and it keeps the file to a few kilobytes.
          */
         const val ART_PX = 140
+
+        /** Where a player may name its cover instead of handing one over. */
+        val ART_URI_KEYS = listOf(
+            android.media.MediaMetadata.METADATA_KEY_ALBUM_ART_URI,
+            android.media.MediaMetadata.METADATA_KEY_ART_URI,
+            android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
+        )
+
+        /** Schemes this will open. Deliberately not http — see cover(). */
+        val LOCAL_SCHEMES = setOf("content", "file", "android.resource")
     }
 }

@@ -32,6 +32,9 @@ import dev.kb896.aiusage.data.RingLayout
 import dev.kb896.aiusage.data.DashboardState
 import android.widget.SeekBar
 import dev.kb896.aiusage.data.StatePayload
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
+import dev.kb896.aiusage.rear.RearActivity
 import dev.kb896.aiusage.rear.ShizukuBridge
 import dev.kb896.aiusage.service.Graph
 import androidx.core.app.NotificationManagerCompat
@@ -329,6 +332,63 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             graph.repository.state.collect { refreshPreview() }
         }
+        // ...and the things that reach the panel by broadcast rather than by state.
+        //
+        // The preview draws with the same class as the panel, so it could always have
+        // shown these — it simply was never told. Notifications and media go straight to
+        // `:rear`, and this process, which is the one with a screen a human looks at,
+        // heard none of it. The result was a settings page for two features whose effect
+        // was invisible until you turned the phone over.
+        ContextCompat.registerReceiver(
+            this, previewRelay,
+            IntentFilter().apply {
+                addAction(RearActivity.ACTION_NOTIFICATION)
+                addAction(RearActivity.ACTION_MEDIA)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        // Ask what is playing, the same way the panel does on start — this screen can be
+        // opened long after the last thing the player said.
+        sendBroadcast(
+            Intent(RearActivity.ACTION_MEDIA_COMMAND)
+                .setPackage(packageName)
+                .putExtra(RearActivity.EXTRA_MEDIA_COMMAND, RearActivity.MEDIA_SYNC),
+        )
+    }
+
+    /** Feeds the preview the same broadcasts the panel gets. */
+    private val previewRelay = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
+            when (intent?.action) {
+                RearActivity.ACTION_NOTIFICATION -> preview.showNotification(
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_APP).orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_PKG).orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_TITLE).orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_TEXT).orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_MORE_TITLE)
+                        .orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_MORE_TEXT)
+                        .orEmpty(),
+                )
+                RearActivity.ACTION_MEDIA -> preview.showMedia(
+                    intent.getBooleanExtra(RearActivity.EXTRA_MEDIA_ACTIVE, false),
+                    intent.getStringExtra(RearActivity.EXTRA_MEDIA_TITLE).orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_MEDIA_ARTIST).orEmpty(),
+                    intent.getBooleanExtra(RearActivity.EXTRA_MEDIA_PLAYING, false),
+                    intent.getStringExtra(RearActivity.EXTRA_MEDIA_ART).orEmpty(),
+                    intent.getLongExtra(RearActivity.EXTRA_MEDIA_DURATION, 0L),
+                    intent.getLongExtra(RearActivity.EXTRA_MEDIA_POSITION, 0L),
+                    intent.getLongExtra(RearActivity.EXTRA_MEDIA_POSITION_AT, 0L),
+                    intent.getFloatExtra(RearActivity.EXTRA_MEDIA_SPEED, 1f),
+                )
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(previewRelay) }
+        super.onDestroy()
     }
 
     private fun refreshPreview() {
@@ -415,6 +475,18 @@ class MainActivity : ComponentActivity() {
             store.save(config)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
             refreshPreview()
+            // Ask the watcher to say again what is playing.
+            //
+            // Turning the media row ON used to do nothing until the next track change,
+            // because the watcher declines to publish while the feature is off and the
+            // panel only ever learns about media from a broadcast. On a paused player
+            // that is forever, so the switch appeared not to work and then worked after a
+            // restart — which is the worst way for a setting to behave.
+            sendBroadcast(
+                Intent(RearActivity.ACTION_MEDIA_COMMAND)
+                    .setPackage(packageName)
+                    .putExtra(RearActivity.EXTRA_MEDIA_COMMAND, RearActivity.MEDIA_SYNC),
+            )
         }
 
         val config = store.load()
@@ -516,6 +588,13 @@ class MainActivity : ComponentActivity() {
                 config.mediaArt.ordinal,
             ) { i ->
                 write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
+            }
+            // Only under VINYL: there is no record to colour otherwise, and a control
+            // that does nothing is worse than one that is absent.
+            if (config.mediaArt == dev.kb896.aiusage.data.MediaArt.VINYL) {
+                SettingsRows.colorRow(container, "  ↳ record", config.vinylTint) { c ->
+                    write { it.copy(vinylColor = c) }
+                }
             }
         }
         if (config.showMedia && !NotificationManagerCompat.getEnabledListenerPackages(this)

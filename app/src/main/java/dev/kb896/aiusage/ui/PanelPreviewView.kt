@@ -40,11 +40,48 @@ class PanelPreviewView @JvmOverloads constructor(
         get() = dial.config
         set(value) { dial.config = value }
 
+    /**
+     * Mirror a notification onto the preview, exactly as the panel receives it.
+     *
+     * The preview and the panel are the same view class drawing the same config, but
+     * they live in different processes and only `:rear` was listening — so the preview
+     * showed the readout and none of the things that arrive by broadcast. Somebody
+     * setting up notification mirroring or the media row on the front screen was
+     * configuring features they could not see.
+     */
+    fun showNotification(
+        app: String,
+        pkg: String,
+        title: String,
+        text: String,
+        moreTitle: String,
+        moreText: String,
+    ) = dial.showNotification(app, pkg, title, text, moreTitle, moreText)
+
+    fun showMedia(
+        active: Boolean,
+        title: String,
+        artist: String,
+        playing: Boolean,
+        artPath: String,
+        durationMs: Long,
+        positionMs: Long,
+        positionAtMs: Long,
+        speed: Float,
+    ) = dial.showMedia(
+        active, title, artist, playing, artPath,
+        durationMs, positionMs, positionAtMs, speed,
+    )
+
     init {
         // Fixed at the panel's own size. The scale below does the fitting, so the child
         // never has to know it is being previewed and its layout constants stay honest.
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
         clipChildren = true
+        // A picture, not a control. See RearDialView.interactive: this sits inside the
+        // settings page's scroll view, so without it every drag past the preview was
+        // handed to the panel's pager and quietly scrolled the preview to another page.
+        dial.interactive = false
     }
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
