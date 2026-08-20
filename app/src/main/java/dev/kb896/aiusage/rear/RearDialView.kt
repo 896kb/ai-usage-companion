@@ -223,16 +223,17 @@ class RearDialView(context: Context) : View(context) {
         val sweep = ripple(rippleNow)
         // Settled into ambient: nothing but the button and the mascot, drawn below.
         val hidden = ambient && sweep == null
+        val front = sweep?.let { t ->
+            android.graphics.Path().apply {
+                addCircle(CLOSE_CX, CLOSE_CY, rippleReach() * t, android.graphics.Path.Direction.CW)
+            }
+        }
         canvas.save()
         if (sweep != null) {
             // Hiding keeps what the circle has NOT reached; showing keeps what it has.
             // The same circle in opposite senses, which is what makes the two directions
             // feel like one gesture rather than two animations.
-            val path = android.graphics.Path().apply {
-                addCircle(CLOSE_CX, CLOSE_CY, rippleReach() * sweep,
-                    android.graphics.Path.Direction.CW)
-            }
-            if (ambient) canvas.clipOutPath(path) else canvas.clipPath(path)
+            if (ambient) canvas.clipOutPath(front!!) else canvas.clipPath(front!!)
         }
 
         // Opaque, and the colour is the user's.
@@ -246,11 +247,7 @@ class RearDialView(context: Context) : View(context) {
         // watchdog cannot see. Any colour is fine; transparency is not.
         //
         // AMBIENT is the one exception, and it is a deliberate risk: see AMBIENT_ALPHA.
-        if (!hidden) {
-            canvas.drawColor(colorFor("bg", config.background or (0xFF shl 24)))
-        } else {
-            canvas.drawColor((config.background and 0x00FFFFFF) or (AMBIENT_ALPHA shl 24))
-        }
+        if (!hidden) canvas.drawColor(colorFor("bg", config.background or (0xFF shl 24)))
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
         // — it was in place for a full build while this line painted Palette.BG at full
@@ -365,8 +362,25 @@ class RearDialView(context: Context) : View(context) {
         // Outside the clip, both of them: the button is what the ripple emanates FROM
         // and the mascot is what is left behind, so neither may be eaten by it.
         if (onlyAccount == null && config.showClose) {
+            // The mascot is clipped to the EXACT COMPLEMENT of the readout, so one
+            // circle carries both: as the ripple eats the panel it uncovers the mascot
+            // already walking underneath, and reversing it covers the mascot back up.
+            //
+            // It used to cross-fade in and out over the top, which is what made it look
+            // like it spawned — a figure appearing where nothing was, rather than one
+            // that had been there all along and was being revealed.
+            if (ambient || sweep != null) {
+                canvas.save()
+                if (front != null) {
+                    if (ambient) canvas.clipPath(front) else canvas.clipOutPath(front)
+                }
+                // The ambient background belongs to this side too, or the swept region
+                // is briefly fully transparent and then snaps to its alpha at the end.
+                canvas.drawColor((config.background and 0x00FFFFFF) or (AMBIENT_ALPHA shl 24))
+                drawAmbientWalk(canvas, nowReal)
+                canvas.restore()
+            }
             drawClose(canvas, sweep)
-            if (ambient) drawAmbientWalk(canvas, nowReal, sweep)
         } else {
             closeButton = null
             ambient = false
@@ -708,20 +722,17 @@ class RearDialView(context: Context) : View(context) {
      * only mascot that travels, and travelling is the entire point of leaving it here.
      * It spans the whole panel because there is no bar to stay on any more.
      */
-    private fun drawAmbientWalk(canvas: Canvas, nowMs: Long, sweep: Float?) {
-        // Fades in as the readout leaves and out as it returns — the opposite of the
-        // button, so the two cross over halfway through the ripple.
-        val presence = when {
-            sweep == null -> 1f
-            ambient -> sweep
-            else -> 1f - sweep
-        }
-        if (presence <= 0.01f) return
+    private fun drawAmbientWalk(canvas: Canvas, nowMs: Long) {
+        // The walk is a continuous animation, so it has to ask for the next frame the
+        // way every other moving thing here does. Without this the panel stopped
+        // redrawing the moment the ripple settled — `animating` was only ever set while
+        // the sweep was in flight — and the mascot froze mid-stride with nothing else on
+        // screen to make it obvious the whole surface had stalled.
+        animating = true
 
         val stand = MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
         val h = MASCOT_HEIGHT * (stand?.scale ?: 1f)
         val w = h * WalkRig.ASPECT
-        mascotPaint.alpha = (255 * presence).toInt()
         WalkRig.draw(
             canvas, nowMs,
             left = CLOSE_CX + CLOSE_R + AMBIENT_GAP,
@@ -731,7 +742,6 @@ class RearDialView(context: Context) : View(context) {
             paint = mascotPaint,
             bodyColor = colorFor("close", config.closeColor),
         )
-        mascotPaint.alpha = 255
     }
 
     private fun drawExtras(canvas: Canvas) {
@@ -768,11 +778,14 @@ class RearDialView(context: Context) : View(context) {
                 now.get(java.util.Calendar.DAY_OF_MONTH),
             )
             extras.color = colorFor("date", config.dateTint)
+            // Icon on the right like its neighbours. It carries no information "TUE 20"
+            // does not — but a column of three rows where one lacks the mark the other
+            // two share reads as a rendering fault, and the alignment is worth more here
+            // than the argument against ornament.
+            drawIcon(canvas, PanelIcons.CALENDAR, CONTENT_RIGHT - EXTRA_ICON_H,
+                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
             extras.textAlign = Paint.Align.RIGHT
-            // No icon. The clock and the battery each have one because a bare number is
-            // ambiguous; "TUE 20" is not, and inventing a calendar glyph to keep the
-            // column tidy would be decoration standing in for meaning.
-            canvas.drawText(text, CONTENT_RIGHT, baseline, extras)
+            canvas.drawText(text, CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
             baseline += EXTRA_LINE_H
         }
         if (config.showBattery) {
