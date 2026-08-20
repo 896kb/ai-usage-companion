@@ -958,58 +958,74 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNotice(canvas: Canvas, slide: Float, nowMs: Long) {
         if (slide <= 0.001f) return
-        val h = noticeHeight(nowMs)
-        val top = -h + h * slide
-
-        // Rounded at the BOTTOM-LEFT only, to a fraction of the display's own radius.
-        //
-        // That is the one corner of this strip sitting in open panel — its top and right
-        // edges run off the screen, where the display's own rounding already shapes them,
-        // and its bottom-right meets the right edge straight. Matching the hardware's
-        // radius makes the strip read as part of the screen rather than as a rectangle
-        // laid on it, which is the whole reason to round anything here.
-        //
-        // A FRACTION of it, though. The display's 97 is a corner on a 572-tall screen;
-        // the same number on a 143-tall strip is a quarter-circle that swallows the
-        // bottom-left and cuts into the third line of text. Scaled down it still reads
-        // as the same family of curve without the strip losing a corner to it.
+        val total = noticeHeight(nowMs)
+        val top = -total + total * slide
+        val turn = wheelTurn(nowMs)
         val r = cornerRadius() / CORNER_DIVISOR
-        val shape = android.graphics.Path().apply {
+
+        // ---- the headline card ------------------------------------------------
+        //
+        // Rounded at the BOTTOM-LEFT only. That is the one corner of it sitting in open
+        // panel — its top and right edges run off the screen, where the display's own
+        // rounding already shapes them. Matching the hardware's radius, scaled down,
+        // makes it read as part of the screen rather than a rectangle laid on it: the
+        // display's 97 is a corner on a 572-tall screen and a quarter-circle on a
+        // 143-tall card.
+        val card = android.graphics.Path().apply {
             addRoundRect(
-                Panel.CUTOUT_RIGHT.toFloat(), top, Panel.WIDTH.toFloat(), top + h,
+                NOTICE_LEFT, top, Panel.WIDTH.toFloat(), top + NOTICE_H,
                 floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
                 android.graphics.Path.Direction.CW,
             )
         }
         canvas.save()
-        canvas.clipPath(shape)
-
-        // The strip's own ground, so the readout sliding under it does not show through.
+        canvas.clipPath(card)
+        noticePaint.style = Paint.Style.FILL
         noticePaint.color = colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
         noticePaint.alpha = 255
-        noticePaint.style = Paint.Style.FILL
         canvas.drawRect(
-            Panel.CUTOUT_RIGHT.toFloat(), top, Panel.WIDTH.toFloat(), top + h, noticePaint)
+            NOTICE_LEFT, top, Panel.WIDTH.toFloat(), top + NOTICE_H, noticePaint)
 
-        // Position only. Nothing fades: the strip is a window onto a drum, and a drum's
-        // rows do not become transparent as they turn — they go past the edge and are
-        // gone. Fading them as well read as two effects doing one job.
-        val turn = wheelTurn(nowMs)
-        leaving?.let { drawNoticeRow(canvas, it, top + turn * h) }
-        notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * h) }
+        // Position only. Nothing fades: this is a window onto a drum, and a drum's rows
+        // do not become transparent as they turn — they pass the edge and are gone.
+        leaving?.let { drawNoticeRow(canvas, it, top + turn * NOTICE_H) }
+        notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * NOTICE_H) }
         canvas.restore()
+        outline(canvas, card, slide)
 
-        // A hairline around the same shape, so the strip reads as something laid OVER
-        // the panel rather than as the panel having been repainted — and so the curve is
-        // drawn rather than merely cut.
-        noticePaint.color = colorFor("notice", config.notificationTint)
-        noticePaint.alpha = 90
-        noticePaint.style = Paint.Style.STROKE
-        noticePaint.strokeWidth = 1.5f
-        noticePaint.isAntiAlias = true
-        canvas.drawPath(shape, noticePaint)
-        noticePaint.alpha = 255
+        // ---- the mini card, its own section under it --------------------------
+        //
+        // Detached rather than a panel inside the first: the border closes above it and
+        // it stands on its own, narrower and shorter, with the same corner. A second
+        // thing under the first reads as "and this is also waiting"; the same content
+        // boxed inside the first reads as part of the message.
+        //
+        // All four corners rounded, unlike the card above — this one is inset on every
+        // side, so every corner of it is visible.
+        val miniH = total - NOTICE_H - MINI_GAP
+        if (miniH <= 1f) return
+        val miniTop = top + NOTICE_H + MINI_GAP
+        val mini = android.graphics.Path().apply {
+            addRoundRect(
+                NOTICE_LEFT + MINI_INSET_LEFT, miniTop,
+                Panel.WIDTH - MINI_INSET_RIGHT, miniTop + miniH,
+                r, r, android.graphics.Path.Direction.CW,
+            )
+        }
+        canvas.save()
+        canvas.clipPath(mini)
         noticePaint.style = Paint.Style.FILL
+        noticePaint.color = colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
+        noticePaint.alpha = 255
+        canvas.drawRect(
+            NOTICE_LEFT + MINI_INSET_LEFT, miniTop,
+            Panel.WIDTH - MINI_INSET_RIGHT, miniTop + miniH, noticePaint)
+
+        // Its own wheel, turning with the card above it, so a replacement moves both.
+        leaving?.takeIf { it.hasMore }?.let { drawMiniRow(canvas, it, miniTop + turn * miniH, miniH) }
+        notice?.takeIf { it.hasMore }?.let { drawMiniRow(canvas, it, miniTop - (1f - turn) * miniH, miniH) }
+        canvas.restore()
+        outline(canvas, mini, slide)
     }
 
     /**
@@ -1030,10 +1046,44 @@ class RearDialView(context: Context) : View(context) {
 
     private var cornerRadius: Float? = null
 
+    /** The hairline that makes a card read as laid OVER the panel rather than cut into it. */
+    private fun outline(canvas: Canvas, shape: android.graphics.Path, slide: Float) {
+        noticePaint.color = colorFor("notice", config.notificationTint)
+        noticePaint.alpha = (90 * slide).toInt()
+        noticePaint.style = Paint.Style.STROKE
+        noticePaint.strokeWidth = 1.5f
+        noticePaint.isAntiAlias = true
+        canvas.drawPath(shape, noticePaint)
+        noticePaint.alpha = 255
+        noticePaint.style = Paint.Style.FILL
+    }
+
+    /** The mini card's contents: the next notification in the group, no icon. */
+    private fun drawMiniRow(canvas: Canvas, item: Notice, y: Float, h: Float) {
+        val left = NOTICE_LEFT + MINI_INSET_LEFT + CASCADE_PAD
+        val width = (Panel.WIDTH - MINI_INSET_RIGHT) - left - CASCADE_PAD
+        val mid = y + h / 2f
+
+        cascadePaint.color = colorFor("notice", config.notificationTint)
+        if (item.moreText.isBlank()) {
+            cascadePaint.alpha = 210
+            canvas.drawText(noticeClip(item.moreTitle, cascadePaint, width),
+                left, mid + CASCADE_TEXT / 3f, cascadePaint)
+        } else {
+            cascadePaint.alpha = 230
+            canvas.drawText(noticeClip(item.moreTitle, cascadePaint, width),
+                left, mid - 2f, cascadePaint)
+            cascadePaint.alpha = 165
+            canvas.drawText(noticeClip(item.moreText, cascadePaint, width),
+                left, mid + CASCADE_TEXT + 3f, cascadePaint)
+        }
+        cascadePaint.alpha = 255
+    }
+
     /** One row of the wheel, at [y]. Clipped by the strip, never faded. */
     private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float) {
         val alpha = 255
-        val left = Panel.CUTOUT_RIGHT + NOTICE_PAD
+        val left = NOTICE_LEFT + NOTICE_PAD
         val right = Panel.WIDTH - NOTICE_PAD
 
         val icon = icons.getOrPut(item.pkg) {
@@ -1081,56 +1131,6 @@ class RearDialView(context: Context) : View(context) {
 
         label.alpha = 255
         heading.alpha = 255
-        if (item.hasMore) drawCascadeCard(canvas, item, y + NOTICE_H, textRight)
-    }
-
-    /**
-     * The next notification in the group, as a second card under the first.
-     *
-     * Smaller in every dimension — shorter, narrower, smaller type — because it is
-     * subordinate: the headline is what happened and this is what is also waiting. And
-     * no app icon, since the card above it already carries one and the two cards are by
-     * definition the same app.
-     *
-     * It rides the same wheel as the card above: they belong to one Notice, so a
-     * replacement turns both together and a notification from a different app — which
-     * has no sibling — collapses this card as part of the same motion.
-     */
-    private fun drawCascadeCard(canvas: Canvas, item: Notice, top: Float, textRight: Float) {
-        val left = Panel.CUTOUT_RIGHT + NOTICE_PAD + CASCADE_INDENT
-        val right = textRight
-        val bottom = top + CASCADE_H - CASCADE_GAP
-
-        noticePaint.style = Paint.Style.STROKE
-        noticePaint.strokeWidth = 1f
-        noticePaint.isAntiAlias = true
-        noticePaint.color = colorFor("notice", config.notificationTint)
-        noticePaint.alpha = 70
-        val r = cornerRadius() / CORNER_DIVISOR / 2f
-        canvas.drawRoundRect(left, top, right, bottom, r, r, noticePaint)
-        noticePaint.alpha = 255
-        noticePaint.style = Paint.Style.FILL
-
-        val inset = left + CASCADE_PAD
-        val width = right - inset - CASCADE_PAD
-        val mid = (top + bottom) / 2f
-
-        cascadePaint.color = colorFor("notice", config.notificationTint)
-        if (item.moreText.isBlank()) {
-            // Only a sender to show — centre it rather than leaving a gap where the body
-            // would have been.
-            cascadePaint.alpha = 200
-            canvas.drawText(noticeClip(item.moreTitle, cascadePaint, width),
-                inset, mid + CASCADE_TEXT / 3f, cascadePaint)
-        } else {
-            cascadePaint.alpha = 220
-            canvas.drawText(noticeClip(item.moreTitle, cascadePaint, width),
-                inset, mid - 2f, cascadePaint)
-            cascadePaint.alpha = 140
-            canvas.drawText(noticeClip(item.moreText, cascadePaint, width),
-                inset, mid + CASCADE_TEXT + 2f, cascadePaint)
-        }
-        cascadePaint.alpha = 255
     }
 
     /** [text] cut to whatever fits [width], with an ellipsis when it had to be cut. */
@@ -1921,13 +1921,31 @@ class RearDialView(context: Context) : View(context) {
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f
+        /**
+         * The cards' left edge: clear of the cutout, not flush against it.
+         *
+         * Flush, the card ran straight into the lower ring, which is drawn around a
+         * physical lens right up to the cutout boundary — two unrelated things touching
+         * with no gap read as one object with a seam. Ten units is enough to say they
+         * are separate without wasting width the text wants.
+         */
+        private val NOTICE_LEFT = Panel.CUTOUT_RIGHT + 10f
+
         private const val NOTICE_PAD = 26f
 
-        /** The second card: its band, inset, padding and type size. */
-        private const val CASCADE_H = 62f
-        private const val CASCADE_GAP = 14f
-        private const val CASCADE_INDENT = 18f
-        private const val CASCADE_PAD = 14f
+        /**
+         * The mini card: how tall it is, how far it sits below the headline card, and
+         * how far it is inset on each side.
+         *
+         * Inset MORE on the right than the left. The headline card runs to the panel
+         * edge, so a mini card ending at the same place would look like a continuation
+         * of it rather than a separate thing standing underneath.
+         */
+        private const val CASCADE_H = 76f
+        private const val MINI_GAP = 12f
+        private const val MINI_INSET_LEFT = 24f
+        private const val MINI_INSET_RIGHT = 120f
+        private const val CASCADE_PAD = 18f
         private const val CASCADE_TEXT = 15f
 
         /** The app icon: how far its right edge sits from the panel edge, and its size. */
