@@ -117,6 +117,7 @@ class RearActivity : Activity() {
         }
         setContentView(dial)
 
+
         // No-op until we are actually on the rear panel — see hideBars().
         hideBars()
 
