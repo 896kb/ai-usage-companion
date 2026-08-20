@@ -161,9 +161,6 @@ object MediaPage {
         return if (outward) edge else edge + LABEL_SIZE
     }
 
-    /** The remaining time, beside the playback dial rather than inside it. */
-    const val REMAINING_SIZE = 22f
-    const val REMAINING_GAP = 14f
 
     /** What the volume ring is called. Named, because a bare arc around a lens is not
      *  self-describing the way a bar under a track name is. */

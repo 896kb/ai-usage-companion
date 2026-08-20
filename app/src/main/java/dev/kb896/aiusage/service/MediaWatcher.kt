@@ -151,7 +151,7 @@ class MediaWatcher(private val context: Context) {
         //
         // Identifying the artwork itself has no such staging problem: a different picture
         // is a different key whenever it turns up.
-        val key = if (active) title + "\u0000" + artist + "\u0000" + artId(metadata, art)
+        val key = if (active) title + "\u0000" + artist + "\u0000" + (art?.id ?: "none")
             else null
 
         val send = { path: String? ->
@@ -202,31 +202,47 @@ class MediaWatcher(private val context: Context) {
             return
         }
         io.execute {
-            val path = runCatching { writeArt(art) }
+            val path = runCatching { writeArt(art.bitmap) }
                 .onFailure { Log.w(TAG, "cover write failed: " + it) }
                 .getOrNull()
             send(path)
         }
     }
 
+    /** A cover and what identifies it — see [cover] and the note on staged metadata. */
+    private class Cover(val bitmap: android.graphics.Bitmap, val id: String)
+
     /**
-     * The cover, from whichever of the six places a player might have put it.
+     * The cover, from whichever of the six places a player might have put it, together
+     * with something that identifies THE PICTURE ITSELF.
      *
-     * Bitmaps first, then URIs. Plenty of players — Tidal among them — carry no bitmap at
-     * all and hand out a content:// URI instead, which is cheaper for them and meant the
-     * art here was simply absent. Reading only the bitmap keys is the difference between
-     * a cover that changes with the track and one that never appears.
+     * The identity is the whole point and getting it subtly wrong put the cover one
+     * album behind twice. Players deliver a track in stages: title and artist first, then
+     * artwork. Keying on the track was the first mistake — the early callback wrote the
+     * old picture under the new track's name and the later one, carrying the right
+     * picture, was dismissed as a repeat.
      *
-     * Network URIs are not fetched. A player that points at https:// is asking this app
-     * to make a request on its behalf, on a metadata callback, for a picture 140 pixels
+     * Keying on the ART_URI was the second, and it looks like a fix right up until you
+     * notice the URI is metadata too. It updates with the title, in that same first
+     * callback, while the bitmap beside it is still the previous track's — so the old
+     * picture got written under the NEW uri, and the callback that finally carried the
+     * new bitmap matched that key exactly and was skipped. Same bug, one layer down.
+     *
+     * So the identity describes the bytes being written and nothing else: a bitmap is
+     * identified by its own generation id, and a cover decoded from a URI by that URI,
+     * because that decode is a function of it. Neither can be fresh while the picture is
+     * stale.
+     *
+     * Network URIs are not fetched. A player pointing at https:// is asking this app to
+     * make a request on its behalf, on a metadata callback, for a picture 140 pixels
      * wide — the blank label is the better answer.
      */
-    private fun cover(metadata: android.media.MediaMetadata?): android.graphics.Bitmap? {
+    private fun cover(metadata: android.media.MediaMetadata?): Cover? {
         val m = metadata ?: return null
         val bitmap = m.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: m.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
             ?: m.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-        if (bitmap != null) return bitmap
+        if (bitmap != null) return Cover(bitmap, "bmp:" + bitmap.generationId)
 
         for (key in ART_URI_KEYS) {
             val uri = m.getString(key)?.takeIf { it.isNotBlank() } ?: continue
@@ -237,7 +253,7 @@ class MediaWatcher(private val context: Context) {
                     android.graphics.BitmapFactory.decodeStream(it)
                 }
             }.getOrNull()
-            if (loaded != null) return loaded
+            if (loaded != null) return Cover(loaded, "uri:" + uri)
         }
         return null
     }
@@ -265,22 +281,6 @@ class MediaWatcher(private val context: Context) {
         if (scaled !== art) scaled.recycle()
         tmp.renameTo(artFile())
         return artFile().path
-    }
-
-    /**
-     * What identifies this cover, cheaply.
-     *
-     * The URI when the player names one, because that is stable and free to compare. A
-     * bitmap's generation id otherwise — distinct per bitmap instance, which is what is
-     * being asked here — and "none" when there is no cover at all, so a track without one
-     * still differs from the track before it.
-     */
-    private fun artId(metadata: android.media.MediaMetadata?, art: android.graphics.Bitmap?): String {
-        val uri = ART_URI_KEYS.firstNotNullOfOrNull { key ->
-            metadata?.getString(key)?.takeIf { it.isNotBlank() }
-        }
-        if (uri != null) return uri
-        return art?.generationId?.toString() ?: "none"
     }
 
     private fun artFile() = java.io.File(context.filesDir, ART_NAME)

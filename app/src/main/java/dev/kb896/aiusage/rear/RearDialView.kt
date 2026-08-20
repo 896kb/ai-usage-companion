@@ -592,25 +592,17 @@ class RearDialView(context: Context) : View(context) {
         } else {
             cameraButton = null
         }
-        canvas.restore()
-
-        // The close button, OUTSIDE the paged translate so it is on every page.
-        //
-        // It used to ride the readout and scroll away with it, which left the media page
-        // with no way out but a swipe. It is the panel's one permanent control, and it
-        // belongs to the panel rather than to a page.
-        //
-        // It does still ride a notification's push: fixed at the top-left it would sit
-        // underneath the card, whose left edge is twelve units away, and dodging down
-        // with everything else is what keeps it reachable while one is up.
+        // The close button belongs to the READOUT and scrolls away with it. It was
+        // briefly pinned across both pages, on the reasoning that it is the panel's one
+        // permanent control — but it closes the readout, and on a page that is not the
+        // readout it is a button for somewhere else. The way back from the media page is
+        // the swipe that got you there.
         if (onlyAccount == null && config.showClose && !hidden) {
-            canvas.save()
-            canvas.translate(dx, dy + push)
-            drawClose(canvas, dx, dy + push)
-            canvas.restore()
+            drawClose(canvas, dx, dy + readoutPush - paged)
         } else {
             closeButton = null
         }
+        canvas.restore()
 
         // The media page: everything on the second page except the record, which was
         // drawn behind the readout and has been travelling here the whole time.
@@ -2720,11 +2712,9 @@ class RearDialView(context: Context) : View(context) {
         x += widths[0] + MediaPage.TRANSPORT_GAP
 
         // The play/pause drum again, one size up. Same clip-and-slide as the row's.
-        val turn = playSwap(frameNowMs)
         canvas.save()
         canvas.clipRect(x, top - gh, x + gh, top + gh * 2f)
-        if (turn < 0.999f) drawIcon(canvas, PanelIcons.PLAY, x, top + turn * gh, gh)
-        if (turn > 0.001f) drawIcon(canvas, PanelIcons.PAUSE, x, top - (1f - turn) * gh, gh)
+        drawPlayPause(canvas, x, top, gh, shade(tint, 0xFF))
         canvas.restore()
         centres += x + widths[1] / 2f
         x += widths[1] + MediaPage.TRANSPORT_GAP
@@ -2877,36 +2867,9 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.CENTER
         extras.color = (tint and 0x00FFFFFF) or
             ((MediaLayout.ARTIST_ALPHA * paging).toInt().coerceIn(0, 255) shl 24)
-        val remaining = (m.durationMs - elapsed).coerceAtLeast(0L)
-        if (m.durationMs > 0L) {
-            // Remaining STRAIGHT, in the middle of the dial, rather than curved along
-            // the bottom where it started. With the two endpoints now labelled it sat
-            // thirty degrees from the total and the two overlapped into one unreadable
-            // run of digits — at this radius thirty degrees is forty-six units, and each
-            // label is fifty wide.
-            //
-            // The middle is where it belongs anyway: two endpoint labels on the rim and
-            // the headline number in the centre is what a dial looks like, and it is the
-            // one reading here you would want to catch without following a curve.
-            extras.textAlign = Paint.Align.LEFT
-            extras.textSize = MediaPage.REMAINING_SIZE
-            // BESIDE the dial, not in the middle of it. The middle of a ring is the
-            // camera lens, so the headline number was being painted onto glass — it was
-            // in every screenshot and on none of the panel. Out here it is in open
-            // display, level with the ring's centre, still reading as that dial's number
-            // because nothing else is near it.
-            canvas.drawText(
-                "-" + MediaPage.clock(remaining),
-                rings.personal.cx + rings.personal.radius + rings.personal.stroke / 2f +
-                    MediaPage.REMAINING_GAP,
-                rings.personal.cy + MediaPage.REMAINING_SIZE / 2f,
-                extras,
-            )
-            extras.textSize = MediaPage.LABEL_SIZE
-        }
-        // How far in at the arc's start, how long it runs at its end. The dial then
-        // carries the whole reading: where the track began, where it ends, and what is
-        // left of it in the gap between the two.
+        // How far in at the arc's start, how long it runs at its end. Two readings, and
+        // no third: a remaining-time counter sat between them for a while and it was the
+        // same fact a third way — the arc already shows how much is left, as a shape.
         //
         // They face opposite ways because of where they are. Text stands perpendicular to
         // its path, so tops-outward reads correctly around the upper half and tops-inward
@@ -3009,6 +2972,36 @@ class RearDialView(context: Context) : View(context) {
         centreX - width / 2f, baseline - size,
         centreX + width / 2f, baseline + size * 0.35f,
     )
+
+    /**
+     * The play/pause drum: one glyph leaves as the other arrives.
+     *
+     * Slides AND fades, which is the one place on this panel where both happen at once
+     * and the exception is deliberate. The notification wheel is a window onto a drum and
+     * its rows do not become transparent as they turn — they pass the edge and are gone,
+     * and fading them would break the illusion that there is a physical thing behind the
+     * opening. This is a single glyph on open panel with no window to pass out of, so a
+     * slide alone reads as the icon jumping rather than changing.
+     *
+     * The two are cross-faded rather than fading out and then in: at the halfway point
+     * both are half strength, which keeps the total ink roughly constant instead of
+     * blinking dark in the middle of every press.
+     */
+    private fun drawPlayPause(canvas: Canvas, x: Float, top: Float, h: Float, tint: Int) {
+        val turn = playSwap(frameNowMs)
+        fun at(alpha: Float) =
+            (tint and 0x00FFFFFF) or
+                ((((tint ushr 24) and 0xFF) * alpha).toInt().coerceIn(0, 255) shl 24)
+        if (turn < 0.999f) {
+            extras.color = at(1f - turn)
+            drawIcon(canvas, PanelIcons.PLAY, x, top + turn * h, h)
+        }
+        if (turn > 0.001f) {
+            extras.color = at(turn)
+            drawIcon(canvas, PanelIcons.PAUSE, x, top - (1f - turn) * h, h)
+        }
+        extras.color = tint
+    }
 
     /**
      * A label bent around a ring, centred on [centreDeg].
@@ -3292,15 +3285,9 @@ class RearDialView(context: Context) : View(context) {
         // of the top as play drops off the bottom. It is the same gesture as the row
         // arriving, one size down, so a track being paused and the controls appearing
         // read as the same machine.
-        val turn = playSwap(frameNowMs)
         canvas.save()
         canvas.clipRect(play, region.top, play + gh, region.bottom)
-        if (turn < 0.999f) {
-            drawIcon(canvas, PanelIcons.PLAY, play, row.glyphTop + turn * gh, gh)
-        }
-        if (turn > 0.001f) {
-            drawIcon(canvas, PanelIcons.PAUSE, play, row.glyphTop - (1f - turn) * gh, gh)
-        }
+        drawPlayPause(canvas, play, row.glyphTop, gh, tint)
         canvas.restore()
 
         val hasArtist = m.artist.isNotBlank()

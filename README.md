@@ -197,10 +197,11 @@ panel again, measured.
 
 ### Hide
 
-Top-left corner, and it is on **every page** — it does not scroll away with the readout,
-because it is the panel's one permanent control rather than part of a page. Ripples the
-readout away and leaves the mascot walking the bottom of the panel. Tap the mascot to
-bring it back.
+Top-left corner. Ripples the readout away and leaves the mascot walking the bottom of the
+panel. Tap the mascot to bring it back.
+
+It scrolls away with the readout rather than being pinned across both pages. It closes the
+*readout*, so on a page that is not the readout it would be a button for somewhere else.
 
 Only the button closes the panel. That sounds like it goes without saying, and it did not:
 the check was "was anything hit", which was true while the camera and this were the only
@@ -368,11 +369,11 @@ They do not fade out and get replaced. As you scroll, each ring **sweeps** from 
 reports about usage to what it reports about the music. Cross-fading was the first attempt
 and it looked like two rings in the same place, which is what it was.
 
-The playback dial carries the whole reading: **elapsed curved at the arc's start**,
-**total at its end**, and **remaining straight in the middle**. Two endpoint labels on the
-rim with the headline number between them is what a dial looks like — and it is why there
-are no clocks along the bottom of the page any more, which were the same two numbers again
-five hundred units from the dial they belong to.
+The playback dial is labelled at both ends: **elapsed curved at the arc's start**,
+**total at its end**. Nothing in the middle — a remaining-time counter lived there for a
+while and it was the same fact a third way, since the arc already shows what is left as a
+shape. There are no clocks along the bottom of the page either; they were the same two
+numbers again, five hundred units from the dial they belong to.
 
 Every label sits **outside** its ring, and that is a constraint rather than a preference:
 a ring is drawn concentric with a camera lens, and the lens fills the hole. There is no
@@ -457,6 +458,22 @@ appears is one you have to wait a full lap to read from the beginning.
 This is the opposite of what the notification strip does, deliberately. That strip is up
 for five seconds and the first few words are the whole point, so it ellipsises. A track
 plays for minutes; there is time to show the rest, so the rest is shown.
+
+### The cover, and why it kept lagging
+
+The cover is written to a file and passed as a path, and the cache key for that file is
+the thing that took three attempts to get right.
+
+Players do not deliver a track in one piece: **title and artist arrive first, artwork in a
+later callback**. Keying the cache on the track meant the early callback wrote the *old*
+picture under the *new* track's name, and the callback carrying the right picture was then
+dismissed as a repeat — the cover ran exactly one album behind.
+
+Keying on the artwork's URI looks like the fix and is the same bug one layer down: the URI
+is metadata too, and it updates with the title while the bitmap beside it is still the
+previous track's. The key now identifies **the bytes being written** — a bitmap by its own
+generation id, a URI-sourced cover by that URI — so it cannot be fresh while the picture is
+stale.
 
 ### What crosses to the panel
 
