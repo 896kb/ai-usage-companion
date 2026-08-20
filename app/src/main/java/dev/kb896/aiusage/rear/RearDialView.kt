@@ -554,17 +554,21 @@ class RearDialView(context: Context) : View(context) {
             // the order: the preview shows that account's panel, not its slot.
             val at = if (onlyAccount != null) 0 else position
             val geo = positions.getOrNull(at) ?: return@forEachIndexed
-            // Ring one takes the playback position over a full circle: a track has a
-            // beginning and an end, and all the way round means finished. Ring two takes
-            // the volume over a segment — see MediaPage.VOLUME_ARC_START.
+            // Ring one takes the playback position, ring two the volume — both as
+            // gauges rather than full circles, with their gaps facing each other. See
+            // MediaPage.PLAYBACK_ARC_START and VOLUME_ARC_START.
             val isVolume = at == 1
             drawRing(
                 canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath,
                 blend = paging,
                 mediaFraction = mediaFractions.getOrElse(at) { 0f },
                 mediaColor = mediaRingTint,
-                mediaStart = if (isVolume) MediaPage.VOLUME_ARC_START else -90f,
-                mediaSweep = if (isVolume) MediaPage.VOLUME_ARC_SWEEP else 360f,
+                mediaStart =
+                    if (isVolume) MediaPage.VOLUME_ARC_START
+                    else MediaPage.PLAYBACK_ARC_START,
+                mediaSweep =
+                    if (isVolume) MediaPage.VOLUME_ARC_SWEEP
+                    else MediaPage.PLAYBACK_ARC_SWEEP,
             )
         }
 
@@ -2667,9 +2671,6 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = MediaPage.CLOCK_SIZE
         val clockChars = MediaPage.clockWidth(maxOf(m.durationMs, elapsed))
         val clockW = extras.measureText("M") * clockChars
-        val barLeft = MediaPage.barLeft(Panel.CUTOUT_RIGHT.toFloat(), clockW)
-        val barRight = MediaPage.barRight(Panel.WIDTH.toFloat(), clockW)
-        val barTop = MediaPage.BAR_CY - MediaPage.BAR_H / 2f
 
         extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
         val baseline = MediaPage.BAR_CY + MediaPage.CLOCK_SIZE / 2f - 2f
@@ -2701,18 +2702,11 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = 18f
 
-        val fraction = MediaLayout.progress(elapsed, m.durationMs)
-        noticePaint.style = Paint.Style.FILL
-        noticePaint.color = shade(tint, MEDIA_TRACK_ALPHA)
-        canvas.drawRect(
-            barLeft, barTop, barRight, barTop + MediaPage.BAR_H, noticePaint)
-        if (fraction != null) {
-            noticePaint.color = shade(tint, 0xFF)
-            canvas.drawRect(
-                barLeft, barTop, barLeft + (barRight - barLeft) * fraction,
-                barTop + MediaPage.BAR_H, noticePaint,
-            )
-        }
+        // NO BAR. The playback ring is the position now, and a horizontal bar saying
+        // the same thing a hundred units below it is the reading twice — the second one
+        // competing with the first for which is the real one. The clocks stay: the ring
+        // carries remaining time in its label, and how far in and how long it runs are
+        // numbers a curve cannot give you.
 
         // ---- the speaker, riding the head of the volume arc -------------------
         //

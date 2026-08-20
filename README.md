@@ -311,8 +311,10 @@ and they fade rather than move: they are drawn concentric with the phone's actua
 lenses, and a ring in motion is a circle visibly not on the lens it traces.
 
 The page carries what the row cannot fit: the track and artist at full size, bigger
-transport buttons, a progress bar with the elapsed time at its left and the total at its
-right, and a volume column beside the record.
+transport buttons, and the elapsed and total times along the bottom. There is no progress
+bar — the playback ring is the position, and a horizontal bar saying the same thing a
+hundred units below it is the reading twice, with the second one competing for which is
+the real one.
 
 The snapping is deliberately forgiving — a short flick counts on its own, and anything
 past a third of the way commits. This is a 904x572 panel on the back of a phone being
@@ -364,9 +366,11 @@ under the playback ring, `VOLUME` over the other. Inside, because outside is off
 of the panel above and off the bottom edge below, and the gap between the two rings is
 twenty units.
 
-The volume is a **segment from two o'clock to five o'clock**, with nothing behind it.
-Playback fills a whole ring because a track has a beginning and an end, and all the way
-round means finished; volume has neither, and a full circle invited the same reading. A
+Both are **gauges rather than full circles**, and their gaps face each other: playback
+runs from half past ten round to five, volume from two to five. Two dials with their
+openings pointing at one another read as a pair; two closed circles read as two lenses
+with rings drawn on them. The gap at the bottom of the playback ring is also where its own
+label sits. A
 speaker rides the head of that arc and turns with it, so the glyph is the arc's pointer
 rather than a legend parked beside it — where it is *is* the value.
 

@@ -140,6 +140,20 @@ object MediaPage {
     const val VOLUME_ARC_SWEEP = 90f
 
     /**
+     * The playback arc: half past ten to five o'clock, clockwise over the top.
+     *
+     * A gauge rather than a full circle, and it leaves its gap at the BOTTOM — which is
+     * where the ring's own label sits, and where the volume's segment is on the ring
+     * below. Two dials with their openings pointing at each other read as a pair; two
+     * closed circles read as two lenses with rings drawn on them.
+     *
+     * Six and a half hours of the clock face is 195 degrees. In Android's angles zero is
+     * three o'clock, so half past ten is 225.
+     */
+    const val PLAYBACK_ARC_START = 225f
+    const val PLAYBACK_ARC_SWEEP = 195f
+
+    /**
      * Where the mute glyph stops showing waves.
      *
      * One threshold, not a scale. The icon is a three-state readable-from-across-a-room
