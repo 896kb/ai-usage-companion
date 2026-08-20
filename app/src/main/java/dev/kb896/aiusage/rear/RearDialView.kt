@@ -512,7 +512,7 @@ class RearDialView(context: Context) : View(context) {
             // once it has become the media page's record — where the notice shrinks it
             // instead of moving it.
             canvas.translate(dx, dy + readoutPush)
-            drawVinyl(canvas, paging, push)
+            drawVinyl(canvas, paging, push, geometry)
             canvas.restore()
         }
 
@@ -1373,6 +1373,12 @@ class RearDialView(context: Context) : View(context) {
             next.title != previous
         ) {
             skipUntil = now + SKIP_GUARD_MS
+            // And start the record changer. The track that is leaving is held so the
+            // disc can carry its own sleeve out — the cover file is a single path that
+            // has already been overwritten by now, which is why the outgoing bitmap is
+            // kept rather than re-read.
+            swapFrom = media
+            swapAt = now
         }
 
         val reported = next?.playing == true
@@ -1424,6 +1430,33 @@ class RearDialView(context: Context) : View(context) {
 
     /** The track that just stopped, kept until the record has slid off. */
     private var departing: Media? = null
+
+    /** The track being replaced, and when the change started. See [swapPhase]. */
+    private var swapFrom: Media? = null
+    private var swapAt = 0L
+
+    /**
+     * Where the record changer has got to: whether the old disc is still leaving, and
+     * how far through that leg it is. Null when nothing is changing.
+     *
+     * Two legs rather than one crossfade, because they are two different events with a
+     * moment between them — the deck is briefly empty, which is the part that makes it
+     * read as a record being changed rather than a picture being replaced.
+     */
+    private fun swapPhase(nowMs: Long): Pair<Boolean, Float>? {
+        if (swapAt == 0L) return null
+        val t = (nowMs - swapAt).toFloat()
+        return when {
+            t < MediaPage.SWAP_EXIT_MS -> true to (t / MediaPage.SWAP_EXIT_MS)
+            t < MediaPage.SWAP_EXIT_MS + MediaPage.SWAP_ENTER_MS ->
+                false to ((t - MediaPage.SWAP_EXIT_MS) / MediaPage.SWAP_ENTER_MS)
+            else -> {
+                swapAt = 0L
+                swapFrom = null
+                null
+            }
+        }
+    }
 
     /**
      * Commit the transport state once it has held still, and only then move the glyph.
@@ -2525,7 +2558,12 @@ class RearDialView(context: Context) : View(context) {
      * than in absolute greys. The background is the user's to choose, and a record mixed
      * from black would vanish on a dark panel and sit like a hole in a light one.
      */
-    private fun drawVinyl(canvas: Canvas, paging: Float, notice: Float) {
+    private fun drawVinyl(
+        canvas: Canvas,
+        paging: Float,
+        notice: Float,
+        rings: PanelGeometry,
+    ) {
         if (config.mediaArt != MediaArt.VINYL) return
         // The track that is playing, or the one that just stopped. A record cannot leave
         // if it is deleted the instant the music ends — drawVinyl used to return here and
@@ -2544,8 +2582,32 @@ class RearDialView(context: Context) : View(context) {
         // travels further than leaving from the readout — which is correct, it is
         // further up.
         val base = discAt(paging, notice)
+
+        // The record changer. The disc shrinks into the top ring and the next one grows
+        // out of the bottom one — and because a ring encircles a camera lens, where there
+        // is no display, a disc that has shrunk to ring size has genuinely gone. The
+        // rings are the two ends of the mechanism rather than a decoration on it.
+        //
+        // Scaled by `paging`, so none of it happens on the readout page: there the record
+        // is a background object with no rings to travel between.
+        var changed = base
+        var sleeve = m
+        swapPhase(frameNowMs)?.let { (leaving, progress) ->
+            animating = true
+            val ring = if (leaving) rings.personal else rings.work
+            val inRing = MediaLayout.Disc(
+                ring.cx, ring.cy, ring.radius - MediaPage.SWAP_RING_INSET)
+            val e = Tween.easeInOut(progress.coerceIn(0f, 1f))
+            val moved = if (leaving) lerpDisc(base, inRing, e) else lerpDisc(inRing, base, e)
+            changed = lerpDisc(base, moved, paging)
+            // The outgoing disc carries the outgoing sleeve.
+            if (leaving) swapFrom?.let { sleeve = it }
+        }
+
         val disc = MediaLayout.Disc(
-            base.cx, base.cy + (1f - swap) * (Panel.HEIGHT + base.radius), base.radius,
+            changed.cx,
+            changed.cy + (1f - swap) * (Panel.HEIGHT + changed.radius),
+            changed.radius,
         )
         val ink = colorFor("vinyl", config.vinylTint)
         // Full strength throughout: the slide is what says it is leaving, and a record
@@ -2599,7 +2661,10 @@ class RearDialView(context: Context) : View(context) {
 
         // The label, which is where the cover finally goes and the only part that turns.
         val label = disc.radius * MediaLayout.VINYL_LABEL
-        val cover = coverArt(m.artPath)
+        // The departing record shows the departing sleeve. There is one cover file and
+        // the new track has already overwritten it, so what leaves is the bitmap the
+        // panel had decoded before — see coverArt, which keeps the one it replaces.
+        val cover = if (sleeve !== m) priorCover ?: coverArt(m.artPath) else coverArt(m.artPath)
         val face = android.graphics.RectF(
             disc.cx - label, disc.cy - label, disc.cx + label, disc.cy + label,
         )
@@ -2685,21 +2750,36 @@ class RearDialView(context: Context) : View(context) {
         drawMediaRings(canvas, rings, paging, tint)
 
         // ---- title and artist, centred under the disc -------------------------
-        extras.textAlign = Paint.Align.CENTER
+        // Centred while it fits, scrolling when it does not — and left-aligned once it
+        // scrolls, because a marquee has to start somewhere fixed. Centring a line that
+        // is travelling means centring it on a different position every frame.
+        //
+        // The raw text goes to `rolling`, not a shortened copy: it compares strings to
+        // notice a change, and two different long titles cut to the same width are the
+        // same string.
         extras.textSize = MediaPage.TITLE_SIZE
         extras.color = shade(tint, 0xFF)
+        var runs = extras.measureText(m.title) > PAGE_TEXT_WIDTH
+        extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
         rolling(
-            canvas, "page:title", noticeClip(m.title, extras, PAGE_TEXT_WIDTH), cx,
-            MediaPage.TITLE_BASELINE, lineBand(cx, MediaPage.TITLE_BASELINE,
-                PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
+            canvas, "page:title", m.title,
+            if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
+            MediaPage.TITLE_BASELINE,
+            lineBand(cx, MediaPage.TITLE_BASELINE, PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
+            width = PAGE_TEXT_WIDTH,
         )
         if (m.artist.isNotBlank()) {
             extras.textSize = MediaPage.ARTIST_SIZE
             extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
+            runs = extras.measureText(m.artist) > PAGE_TEXT_WIDTH
+            extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
             rolling(
-                canvas, "page:artist", noticeClip(m.artist, extras, PAGE_TEXT_WIDTH), cx,
-                MediaPage.ARTIST_BASELINE, lineBand(cx, MediaPage.ARTIST_BASELINE,
-                    PAGE_TEXT_WIDTH, MediaPage.ARTIST_SIZE),
+                canvas, "page:artist", m.artist,
+                if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
+                MediaPage.ARTIST_BASELINE,
+                lineBand(cx, MediaPage.ARTIST_BASELINE, PAGE_TEXT_WIDTH,
+                    MediaPage.ARTIST_SIZE),
+                width = PAGE_TEXT_WIDTH,
             )
         }
         extras.textAlign = Paint.Align.LEFT
@@ -2940,6 +3020,8 @@ class RearDialView(context: Context) : View(context) {
         x: Float,
         baseline: Float,
         clip: android.graphics.RectF,
+        /** The column a line may scroll inside, or 0 to cut it short instead. */
+        width: Float = 0f,
         animate: Boolean = true,
     ) {
         val state = rolls.getOrPut(key) { Roll(text) }
@@ -2963,9 +3045,28 @@ class RearDialView(context: Context) : View(context) {
         val height = clip.height()
         canvas.save()
         canvas.clipRect(clip)
-        state.leaving?.let { canvas.drawText(it, x, baseline + turn * height, extras) }
-        canvas.drawText(state.shown, x, baseline - (1f - turn) * height, extras)
+        // Each row of the wheel can itself be scrolling. The two clips nest: this one
+        // is the line's band, the marquee's is the text column, and a long title being
+        // replaced by another long title needs both at once.
+        state.leaving?.let { line(canvas, it, x, baseline + turn * height, width, clip) }
+        line(canvas, state.shown, x, baseline - (1f - turn) * height, width, clip)
         canvas.restore()
+    }
+
+    /** One line: drawn plainly if it fits, scrolled if it does not. */
+    private fun line(
+        canvas: Canvas,
+        text: String,
+        x: Float,
+        baseline: Float,
+        width: Float,
+        band: android.graphics.RectF,
+    ) {
+        if (width <= 0f || extras.measureText(text) <= width) {
+            canvas.drawText(text, x, baseline, extras)
+        } else {
+            marquee(canvas, text, x, baseline, width, band)
+        }
     }
 
     /** One rolling field: what is shown, what is leaving, and when it started. */
@@ -3065,6 +3166,14 @@ class RearDialView(context: Context) : View(context) {
         }
         canvas.drawTextOnPath(text, path, 0f, 0f, extras)
     }
+
+    /** Two discs, blended. */
+    private fun lerpDisc(a: MediaLayout.Disc, b: MediaLayout.Disc, t: Float) =
+        MediaLayout.Disc(
+            a.cx + (b.cx - a.cx) * t,
+            a.cy + (b.cy - a.cy) * t,
+            a.radius + (b.radius - a.radius) * t,
+        )
 
     /**
      * Where the record is, between its two pages.
@@ -3376,7 +3485,12 @@ class RearDialView(context: Context) : View(context) {
             // Decode first, release after, and only on success — a failed decode must
             // not destroy the image a draw in flight is still holding.
             if (decoded != null) {
-                coverBitmap?.recycle()
+                // The one being replaced is KEPT, not recycled: the record changer draws
+                // the outgoing sleeve on the outgoing disc, and there is only ever one
+                // cover file — the new track has already overwritten it by the time the
+                // animation starts. Only the one before that is released.
+                priorCover?.recycle()
+                priorCover = coverBitmap
                 coverBitmap = decoded
             }
         }
@@ -3385,6 +3499,9 @@ class RearDialView(context: Context) : View(context) {
 
     private var coverKey: String? = null
     private var coverBitmap: android.graphics.Bitmap? = null
+
+    /** The sleeve before this one, for the disc on its way out. */
+    private var priorCover: android.graphics.Bitmap? = null
 
     /** ACRNM maker's mark, or the user's image. White mask, tinted at draw time — never
      *  edit the drawable. */

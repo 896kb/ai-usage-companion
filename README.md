@@ -333,6 +333,28 @@ It is built as a **page count**, not a two-state toggle, because the reason it e
 that this panel will eventually hold more accounts than fit on it. Adding a third page is
 a number.
 
+### Changing the record
+
+On the media page a track change is a **record change**. The disc shrinks and travels into
+the top ring, and the next one grows out of the bottom ring into its place. There is a
+moment between the two where the deck is empty, which is what makes it read as a record
+being swapped rather than a picture being replaced.
+
+The rings work as the two ends of that because of the thing that made them awkward
+everywhere else: a ring encircles a camera lens, and there is no display inside one. A
+disc shrunk to ring size has genuinely *gone*. It ends at the ring's diameter less ten,
+whatever size it happened to be — which varies, since a notification shrinks it.
+
+The departing disc carries the departing sleeve. There is only one cover file and the new
+track has already overwritten it by then, so the panel keeps the bitmap it last replaced
+rather than re-reading the path.
+
+### Long titles scroll here too
+
+Same marquee as the row: centred while it fits, and once it does not, left-aligned and
+scrolling. Left-aligned because a marquee has to start somewhere fixed — centring a line
+that is travelling means centring it on a different position every frame.
+
 ### Values turn over when they change
 
 Title, artist and both clocks roll on a wheel when they change — the same drum the

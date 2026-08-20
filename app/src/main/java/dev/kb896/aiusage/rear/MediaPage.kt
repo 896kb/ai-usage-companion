@@ -224,6 +224,22 @@ object MediaPage {
     const val PLAYBACK_ARC_START = 225f
     const val PLAYBACK_ARC_SWEEP = 195f
 
+    /**
+     * The record changer: how long the outgoing disc takes to leave, and the next to
+     * arrive, and how much smaller than its ring a disc is when it is in one.
+     *
+     * The rings are drawn around the camera lenses, and there is no display inside a
+     * ring — so a disc shrunk to that size is a disc that has gone. That is what makes
+     * them usable as the two ends of this: the record does not fade out, it leaves
+     * through the top lens, and the next one comes up out of the bottom one.
+     *
+     * The exit is quicker than the entrance. Something leaving needs only to be seen
+     * going; something arriving is what you are meant to look at.
+     */
+    const val SWAP_EXIT_MS = 380f
+    const val SWAP_ENTER_MS = 520f
+    const val SWAP_RING_INSET = 5f
+
     /** Where that arc ends: five o'clock. */
     val PLAYBACK_ARC_END: Float get() = PLAYBACK_ARC_START + PLAYBACK_ARC_SWEEP - 360f
 
