@@ -971,10 +971,15 @@ class RearDialView(context: Context) : View(context) {
         // makes it read as part of the screen rather than a rectangle laid on it: the
         // display's 97 is a corner on a 572-tall screen and a quarter-circle on a
         // 143-tall card.
+        // Its bottom-left rounds only when nothing is attached below it. With a mini
+        // card stuck underneath, the two are one stepped shape and a curve there would
+        // be a corner in the middle of it.
+        val attached = total - NOTICE_H > 1f
+        val cardBl = if (attached) 0f else r
         val card = android.graphics.Path().apply {
             addRoundRect(
                 NOTICE_LEFT, top, Panel.WIDTH.toFloat(), top + NOTICE_H,
-                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, cardBl, cardBl),
                 android.graphics.Path.Direction.CW,
             )
         }
@@ -993,23 +998,21 @@ class RearDialView(context: Context) : View(context) {
         canvas.restore()
         outline(canvas, card, slide)
 
-        // ---- the mini card, its own section under it --------------------------
+        // ---- the mini card, attached under it ---------------------------------
         //
-        // Detached rather than a panel inside the first: the border closes above it and
-        // it stands on its own, narrower and shorter, with the same corner. A second
-        // thing under the first reads as "and this is also waiting"; the same content
-        // boxed inside the first reads as part of the message.
-        //
-        // All four corners rounded, unlike the card above — this one is inset on every
-        // side, so every corner of it is visible.
-        val miniH = total - NOTICE_H - MINI_GAP
+        // Stuck to the card above with no gap, running to the same right edge, but
+        // stepped IN on the left — so the two make one shape with a shoulder rather than
+        // two cards floating separately. It carries the same single rounded corner the
+        // card above would have had, which is now the bottom of the whole assembly.
+        val miniH = total - NOTICE_H
         if (miniH <= 1f) return
-        val miniTop = top + NOTICE_H + MINI_GAP
+        val miniTop = top + NOTICE_H
         val mini = android.graphics.Path().apply {
             addRoundRect(
                 NOTICE_LEFT + MINI_INSET_LEFT, miniTop,
-                Panel.WIDTH - MINI_INSET_RIGHT, miniTop + miniH,
-                r, r, android.graphics.Path.Direction.CW,
+                Panel.WIDTH.toFloat(), miniTop + miniH,
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
+                android.graphics.Path.Direction.CW,
             )
         }
         canvas.save()
@@ -1019,7 +1022,7 @@ class RearDialView(context: Context) : View(context) {
         noticePaint.alpha = 255
         canvas.drawRect(
             NOTICE_LEFT + MINI_INSET_LEFT, miniTop,
-            Panel.WIDTH - MINI_INSET_RIGHT, miniTop + miniH, noticePaint)
+            Panel.WIDTH.toFloat(), miniTop + miniH, noticePaint)
 
         // Its own wheel, turning with the card above it, so a replacement moves both.
         leaving?.takeIf { it.hasMore }?.let { drawMiniRow(canvas, it, miniTop + turn * miniH, miniH) }
@@ -1061,7 +1064,7 @@ class RearDialView(context: Context) : View(context) {
     /** The mini card's contents: the next notification in the group, no icon. */
     private fun drawMiniRow(canvas: Canvas, item: Notice, y: Float, h: Float) {
         val left = NOTICE_LEFT + MINI_INSET_LEFT + CASCADE_PAD
-        val width = (Panel.WIDTH - MINI_INSET_RIGHT) - left - CASCADE_PAD
+        val width = Panel.WIDTH - left - NOTICE_PAD
         val mid = y + h / 2f
 
         cascadePaint.color = colorFor("notice", config.notificationTint)
@@ -1942,9 +1945,15 @@ class RearDialView(context: Context) : View(context) {
          * of it rather than a separate thing standing underneath.
          */
         private const val CASCADE_H = 76f
-        private const val MINI_GAP = 12f
-        private const val MINI_INSET_LEFT = 24f
-        private const val MINI_INSET_RIGHT = 120f
+
+        /**
+         * How far the mini card steps in from the card above.
+         *
+         * The step is the only thing separating them, since they are flush against each
+         * other and share a right edge — so it has to be enough to read as a shoulder
+         * rather than as a rendering seam.
+         */
+        private const val MINI_INSET_LEFT = 34f
         private const val CASCADE_PAD = 18f
         private const val CASCADE_TEXT = 15f
 
