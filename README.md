@@ -159,6 +159,95 @@ Separate warnings fire at half of a limit, then at 90% and every 2% after that.
 
 ---
 
+## The two buttons on the panel
+
+Both are off by default and both are toggles. The panel is otherwise a readout, and a
+surface that reacts to being touched is a surprise unless it was asked for.
+
+The rear display has **its own touchscreen** — a second digitizer at 904x572 — so a tap
+on the back is a real tap, not a gesture forwarded from the front.
+
+### Camera
+
+Opens the system camera on the rear display, which is what turns the main lenses into a
+selfie camera with a viewfinder you can see. The component and flags are MIUI's own, read
+off a live trace of doing it by hand; the camera app then brings up its own companion UI
+on the front by itself.
+
+Closing the camera returns to the panel. Not an assumption — panel, camera on top, back,
+panel again, measured.
+
+### Hide
+
+Ripples the readout away and leaves the mascot walking the bottom of the panel. Tap the
+mascot to bring it back.
+
+**Not a dismissal.** The panel keeps drawing, keeps polling and stays alive. An app that
+dismisses its own panel cannot put it back — placement needs Shizuku and a task that
+still exists — which is the failure this whole project is built around avoiding. What it
+does instead is go quiet: the background drops to a low alpha and the system's own rear
+screen shows through.
+
+That alpha is never zero, and the code says so twice in capitals. At zero the panel stops
+working entirely: with nothing occluding it, MIUI's SubScreenLauncher resumes, takes the
+display, and this app's window leaves the window list while its process and task record
+stay alive — a failure the respawn watchdog cannot see, because it asks whether the TASK
+is alive and the task is fine.
+
+The ripple radiates from wherever you touched, and it can be interrupted: change your
+mind halfway and it reverses from halfway, with the remaining distance setting the
+duration.
+
+## Notifications from other apps
+
+The panel can mirror your other notifications. It needs **notification access**, granted
+by hand in Settings — the onboarding list has a button for it, and that step ticks itself
+once done.
+
+A notification slides a card down from the top over a quarter of the panel and pushes the
+readout down with it. **The rings do not move**: they are drawn concentric with the
+phone's actual lenses, and shifting them would put two circles a hundred pixels from the
+hardware they trace. It holds for five seconds, then retracts.
+
+If another arrives first, the two change places on a **wheel** — the new one enters from
+the top as the old one leaves through the bottom, like a drum turning behind a window.
+Sending the outgoing one back up the way it came would read as "cancelled"; continuing
+downward says the next thing is already here.
+
+### Groups
+
+Apps that can produce several related notifications post each one **and** a summary
+standing for the lot — WhatsApp sends the message, then "2 messages from 2 chats" a
+moment behind it. Both are real notifications, and the summary arriving second used to
+replace the actual message a split second after it appeared.
+
+The summary is dropped and the group is shown instead: the newest message as the
+headline, and the next one in a smaller card attached underneath, stepped in on the left.
+That card follows the headline in and leaves ahead of it, so it reads as a consequence of
+the first rather than one object changing size.
+
+A notification from a **different** app has no sibling, so the second card collapses as
+part of the same turn.
+
+Also filtered, and none of it is news: ongoing and non-clearable notifications, anything
+an app declares as `SERVICE`, `PROGRESS` or `TRANSPORT`, this app's own, and any repeat
+of something already showing. That last one matters more than it sounds — a single post
+delivers **twice**, milliseconds apart, because the system re-delivers on ranking changes.
+
+### What it shows, and what it does not
+
+| | |
+|---|---|
+| **Always** | The app's name, its icon, and the notification's title. |
+| **Only if you ask** | The message body. It is a **separate switch** from the feature itself. |
+| **Never** | Actions, images, or anything else in the notification. |
+
+The reason for that middle row is worth stating plainly: **this display faces away from
+you.** Everything on it is shown to whoever is behind you rather than to you. Knowing
+that a message arrived and broadcasting what it said are different decisions, so they are
+different switches, and both start off. With the body switched off the group cascade
+lists **senders** rather than falling silent — the panel still says who is waiting.
+
 ## Customisation
 
 Almost everything on the panel is editable, and the settings screen shows a **live
@@ -168,12 +257,13 @@ drift from what the back of the phone is doing.
 
 | | |
 |---|---|
-| **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. |
-| **Colours** | Panel background; a per-account **accent** driving that account's ring, heading, row labels and plan tag together; each mascot's body and hardware colour separately; the clock and battery; and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
+| **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. Each is capped at what it can actually draw, measured off the real font rather than guessed, and each field says its own limit. |
+| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the battery, the camera and hide buttons, the notification strip and its ground. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
 | **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. |
 | **Account order** | Reorder the accounts and the rings follow them: ring one belongs to whichever account is first, so there is nothing to keep in step by hand. |
 | **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
-| **Extras** | A clock and a battery readout, stacked in the corner with pixel-traced glyphs. |
+| **Extras** | A clock, a date and a battery readout, stacked in the corner with pixel-traced glyphs, each its own toggle and its own colour. |
+| **Background** | On or off, and off does not mean gone — it drops to a low alpha so the system's rear screen shows through. The change eases rather than snapping. |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
 Each account gets **its own settings screen**, reached from a row on the main one and
@@ -209,6 +299,13 @@ nothing behind it and no undo. Your connected accounts stay signed in.
 - **More than two accounts**, scrolled vertically on the panel rather than stacked — which
   is why colours are named per account rather than "primary" and "secondary". The panel
   overflows at four today: 516px of content into 396px of room.
+- **Per-region click-through**, so the readout could pass touches to whatever is behind
+  it and leave only the buttons live. Investigated and **not currently possible**: the
+  only API for it needs `touchableRegion` on `ViewTreeObserver.InternalInsetsInfo`, and
+  that field is simply absent on this build — probing the class lists `contentInsets`,
+  `mTouchableInsets` and `visibleInsets` and nothing else. Not the hidden-API blocklist,
+  which would also have hidden `setTouchableInsets`, and that resolves. The `CONTENT`
+  fallback installs without error and does nothing.
 - **Mascot states that enter and leave**, rather than looping whole. The lifting mascot
   should put its headband on once, lift for as long as you are working, and take it off
   when you stop — instead of restarting the whole performance every three seconds. And
@@ -324,7 +421,11 @@ phone, understanding all of the above.
 5. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
    HyperOS is aggressive here: with restrictions on it stops the poll service, and the
    panel freezes on its last reading — showing stale numbers as though they were current.
-6. **Allow autostart.** HyperOS will not let the app start itself otherwise — not
+6. **Grant notification access** — only if you want other apps' notifications mirrored
+   onto the panel. Without it that feature does nothing and everything else works. The
+   onboarding list has a button, and unlike autostart this step can read its own state,
+   so it ticks itself once granted.
+7. **Allow autostart.** HyperOS will not let the app start itself otherwise — not
    after a reboot, and not after the system has killed it. This is the single setting
    that decides whether the panel comes back on its own or waits for you to open the
    app, and it is the same one every persistent app on this phone needs. The onboarding
@@ -333,13 +434,13 @@ phone, understanding all of the above.
    Its state is not readable by any app — MIUI exposes no permission, setting or dumpsys
    field for it — so this step is shown as advice with a button rather than as something
    that can tick itself.
-7. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
+8. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
    "close all" clears it, which kills the poll service and takes the panel down with it.
    A suggestion rather than a requirement, but it is the difference between the panel
    surviving your day and dying to a reflex. This is the one step the app cannot check
    for you — HyperOS does not expose whether an app is locked — so it is shown as advice
    rather than as a box that could never tick.
-8. **Background the app.** The panel places itself and stays there — the service puts it
+9. **Background the app.** The panel places itself and stays there — the service puts it
    on the rear display when it starts, and a watchdog puts it back if anything takes it
    away, including while the phone is asleep. Tapping the notification still re-places it
    by hand, which is the one recovery path that does not need the app opened, but it is
@@ -348,6 +449,34 @@ phone, understanding all of the above.
 **The app must stay running in the background.** The panel is drawn by this app; nothing
 renders it on your behalf. If the app is killed, the back goes dark until you open it
 again.
+
+## Staying alive
+
+Three separate things had to be true before the panel would survive a day, and each was
+independently fatal.
+
+**The foreground service is `specialUse`, not `dataSync`.** Since Android 15 a `dataSync`
+foreground service is capped at **six hours in any 24**, after which the system stops it —
+and this app targets 36. That cap describes a sync job exactly and this service not at
+all: it is not moving data on a schedule, it holds a second display alive for as long as
+the phone is on. When it was stopped the panel went with it and nothing on the device said
+why.
+
+**HyperOS autostart has to be granted**, or the system will not let the app start itself
+after a reboot or after being killed. It is the same setting every persistent app on this
+phone needs. Its state is readable by nothing — not `dumpsys package`, not `appops`, not
+`settings` — so the onboarding step is a button with no tick, and that is why.
+
+**The watchdog now works while the phone is asleep.** It used to refuse, and correctly:
+the panel activity is necessarily created on the MAIN display before being moved to the
+rear one, and it carried a turn-screen-on flag, so every respawn while the phone was
+asleep woke it. The flag is gone — the rear display is woken explicitly instead, by the
+privileged service, which can target one display where a window flag could not. Measured
+both ways: `Dozing → Awake` before, `Dozing → Dozing` after, with the panel still landing
+on the rear display.
+
+That last one is what fixed double-tapping the rear screen off and on and finding nothing
+there. The panel had died and the code had decided not to look.
 
 ## How it works
 
