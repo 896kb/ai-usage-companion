@@ -851,11 +851,15 @@ class MainActivity : ComponentActivity() {
                 textSize = 13f
                 val actionable = step.open != null || step.title == "Shizuku"
                 isEnabled = !done && actionable
+                // Coloured by whether it DOES anything, not by whether its state can be
+                // read. Those were the same thing while the only unreadable step was a
+                // line of advice with no button; the autostart step is unreadable AND
+                // pressable, and dimming it made a working button look disabled.
                 setTextColor(
                     when {
                         done -> Panel.Palette.WORK
-                        step.satisfied == null -> Panel.Palette.DIM
-                        else -> Panel.Palette.FG
+                        actionable -> Panel.Palette.FG
+                        else -> Panel.Palette.DIM
                     }
                 )
                 typeface = resources.getFont(R.font.departure_mono)
