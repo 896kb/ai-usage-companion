@@ -592,12 +592,25 @@ class RearDialView(context: Context) : View(context) {
         } else {
             cameraButton = null
         }
+        canvas.restore()
+
+        // The close button, OUTSIDE the paged translate so it is on every page.
+        //
+        // It used to ride the readout and scroll away with it, which left the media page
+        // with no way out but a swipe. It is the panel's one permanent control, and it
+        // belongs to the panel rather than to a page.
+        //
+        // It does still ride a notification's push: fixed at the top-left it would sit
+        // underneath the card, whose left edge is twelve units away, and dodging down
+        // with everything else is what keeps it reachable while one is up.
         if (onlyAccount == null && config.showClose && !hidden) {
-            drawClose(canvas, dx, dy + readoutPush - paged)
+            canvas.save()
+            canvas.translate(dx, dy + push)
+            drawClose(canvas, dx, dy + push)
+            canvas.restore()
         } else {
             closeButton = null
         }
-        canvas.restore()
 
         // The media page: everything on the second page except the record, which was
         // drawn behind the readout and has been travelling here the whole time.
@@ -1077,7 +1090,14 @@ class RearDialView(context: Context) : View(context) {
                         }
                         onMediaTap?.invoke(onMedia)
                     }
-                    hit -> {
+                    // ONLY the close button, never a general "something was hit".
+                    //
+                    // This tested `hit`, which was correct while the only two targets
+                    // were the camera and the close button. Every target added since
+                    // joined `hit`, so by the time the volume area existed a tap anywhere
+                    // above the transport row swept the whole panel away — the media page
+                    // behaved as one enormous close button.
+                    onClose -> {
                         val now = android.os.SystemClock.elapsedRealtime()
                         ambient = !ambient
                         // Continue from wherever the sweep is, not from the start. The
@@ -2737,16 +2757,15 @@ class RearDialView(context: Context) : View(context) {
         }
         val head = MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP * volumeShown
         val ring = rings.work
-        // INSIDE the arc, not outside it, and the panel's edge is what decides that.
+        // OUTSIDE the arc. Inside is the camera lens — there is no display in the hole a
+        // ring encircles, so a glyph put there is drawn onto glass.
         //
-        // Outside is the natural place for a gauge's pointer and it does not fit: the
-        // lower ring is centred 420 down a 572 panel, so at five o'clock — full volume —
-        // an outside orbit puts the glyph at y=572 and half of it off the bottom. Any
-        // orbit that fits there is back to touching the arc.
-        //
-        // The glyph is CENTRED on its orbit, so half of it comes off the clearance either
-        // way. Missing that is what made a gap of ten read as stuck to the ring.
-        val orbit = ring.radius - ring.stroke / 2f - MediaPage.MUTE_GAP - MediaPage.MUTE_H / 2f
+        // It only fits out here because it shrank. The lower ring is centred 420 down a
+        // 572 panel, so at five o'clock a 26-unit glyph clear of the arc lands half off
+        // the bottom edge; at 18 it does not. The glyph is CENTRED on its orbit, so half
+        // its height comes off the clearance too — missing that is what made a stated gap
+        // of ten read as stuck to the ring.
+        val orbit = ring.radius + ring.stroke / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
         val radians = Math.toRadians(head.toDouble())
         val hx = ring.cx + orbit * Math.cos(radians).toFloat()
         val hy = ring.cy + orbit * Math.sin(radians).toFloat()
@@ -2869,11 +2888,17 @@ class RearDialView(context: Context) : View(context) {
             // The middle is where it belongs anyway: two endpoint labels on the rim and
             // the headline number in the centre is what a dial looks like, and it is the
             // one reading here you would want to catch without following a curve.
-            extras.textAlign = Paint.Align.CENTER
+            extras.textAlign = Paint.Align.LEFT
             extras.textSize = MediaPage.REMAINING_SIZE
+            // BESIDE the dial, not in the middle of it. The middle of a ring is the
+            // camera lens, so the headline number was being painted onto glass — it was
+            // in every screenshot and on none of the panel. Out here it is in open
+            // display, level with the ring's centre, still reading as that dial's number
+            // because nothing else is near it.
             canvas.drawText(
                 "-" + MediaPage.clock(remaining),
-                rings.personal.cx,
+                rings.personal.cx + rings.personal.radius + rings.personal.stroke / 2f +
+                    MediaPage.REMAINING_GAP,
                 rings.personal.cy + MediaPage.REMAINING_SIZE / 2f,
                 extras,
             )
@@ -2897,9 +2922,12 @@ class RearDialView(context: Context) : View(context) {
                 centreDeg = MediaPage.PLAYBACK_ARC_END, outward = false,
             )
         }
+        // Bottom-left of its ring rather than over the top of it. Outside at twelve
+        // o'clock lands in the twenty units between the two rings, which is not enough,
+        // and any further out is inside the ring above. Down here there is open panel.
         curved(
             canvas, MediaPage.VOLUME_LABEL, rings.work,
-            centreDeg = 270f, outward = true,
+            centreDeg = 135f, outward = false,
         )
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = 18f
@@ -2992,6 +3020,10 @@ class RearDialView(context: Context) : View(context) {
      * in opposite directions — and getting that backwards is exactly what put an earlier
      * version of these labels on the right-hand edge of their rings, reading vertically.
      *
+     * The radius is OUTSIDE the ring, always. Inside is the camera lens the ring is
+     * drawn around, and there is no display there — labels put inside rendered into the
+     * framebuffer and onto a piece of glass.
+     *
      * The arc is built to FIT the text rather than the text positioned along a
      * half-circle. Passing a long path and centring with drawTextOnPath's hOffset is the
      * obvious way and the offset is measured along the curve, which is a way to be wrong
@@ -3004,8 +3036,8 @@ class RearDialView(context: Context) : View(context) {
         g: RingGeometry,
         centreDeg: Float,
         outward: Boolean,
-        radius: Float = MediaPage.LABEL_RADIUS,
     ) {
+        val radius = MediaPage.labelRadius(g.radius, g.stroke, outward)
         val width = extras.measureText(text)
         // What the text subtends at this radius. Android's angles are degrees, clockwise
         // from three o'clock.

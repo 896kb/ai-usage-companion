@@ -79,11 +79,38 @@ class MediaPageTest {
         assertTrue("nothing left below the buttons", panelH - buttonsBottom > 40f)
     }
 
-    @Test fun `the ring labels sit inside their rings`() {
-        // Against the panel's own ring radius: a label at a wider radius than the ring
-        // would be drawn over the arc it is naming.
-        assertTrue("the label runs outside the ring",
-            MediaPage.LABEL_RADIUS < 128f)
+    /**
+     * The one that matters about the labels, and it is not a matter of taste: a ring is
+     * drawn around a camera lens, and there is no display inside it. Anything placed
+     * there renders into the framebuffer and onto a piece of glass — perfectly, and
+     * invisibly.
+     */
+    @Test fun `ring labels clear the ring on both sides`() {
+        val radius = 128f
+        val stroke = 25f
+        val outerEdge = radius + stroke / 2f
+        val outward = MediaPage.labelRadius(radius, stroke, outward = true)
+        assertTrue("an outward label starts on the ring", outward > outerEdge)
+
+        // Inward-facing glyphs grow BACK toward the ring from their baseline, so the
+        // baseline has to start a whole line-height further out than an outward one.
+        val inward = MediaPage.labelRadius(radius, stroke, outward = false)
+        assertTrue("an inward label grows back over the ring",
+            inward - MediaPage.LABEL_SIZE > outerEdge)
+    }
+
+    /**
+     * The speaker orbits outside its ring, and at five o'clock that is the corner of the
+     * panel. It fits only because the glyph is small; a larger one lands half off the
+     * bottom edge, which is what sent an earlier version inside the ring and onto glass.
+     */
+    @Test fun `the speaker stays on the panel at full volume`() {
+        val ringCy = 420f
+        val orbit = 128f + 25f / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
+        val at5 = Math.toRadians(MediaPage.VOLUME_ARC_START.toDouble() +
+            MediaPage.VOLUME_ARC_SWEEP)
+        val bottom = ringCy + orbit * Math.sin(at5).toFloat() + MediaPage.MUTE_H / 2f
+        assertTrue("the speaker runs off the bottom at full volume: $bottom", bottom <= 572f)
     }
 
     @Test fun `clocks read as clocks`() {

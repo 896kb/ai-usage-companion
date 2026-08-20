@@ -105,7 +105,7 @@ object MediaPage {
     const val VOLUME_TRAVEL = 1f
 
     /** The mute button, beside the ring that now reports the volume. */
-    const val MUTE_H = 26f
+    const val MUTE_H = 18f
 
     /**
      * How far CLEAR of the ring's outer edge the speaker sits.
@@ -115,7 +115,7 @@ object MediaPage {
      * ten units of "gap" read as touching it. Half the glyph's height has to come out of
      * the orbit as well — see RearDialView, where the orbit is computed.
      */
-    const val MUTE_GAP = 22f
+    const val MUTE_GAP = 10f
 
     /**
      * The mute target: a patch of panel beside the speaker, at the speaker's height.
@@ -133,18 +133,37 @@ object MediaPage {
     const val MUTE_TARGET_H = 92f
 
     /**
-     * The label curved inside a ring, and how big it is.
+     * How far OUTSIDE a ring its labels sit, and how big they are.
      *
-     * INSIDE, at a radius short of the ring itself. Outside is off the panel at the top
-     * and off the bottom edge below, and the gap between the two rings is twenty units —
-     * the only room these labels have is the space the rings enclose.
+     * Outside is not a preference, it is the only place they can be seen. The rings are
+     * drawn concentric with the phone's camera lenses, and the lens is what fills the
+     * hole in the middle — there is no display inside a ring. Everything put there was
+     * rendered perfectly into the framebuffer and painted onto a camera.
+     *
+     * The clearance is small because the room is: the two rings are 276 apart with a
+     * radius of 128 and a stroke of 25 each, which leaves about twenty units of panel
+     * between them. Labels reach into that gap and out toward the main display; the
+     * angles they are placed at are chosen so they land where there is space.
      */
-    const val LABEL_RADIUS = 88f
+    const val LABEL_CLEAR = 12f
     const val LABEL_SIZE = 15f
 
-    /** The remaining time, in the middle of the playback dial. Bigger than the rim
-     *  labels: it is the reading, and they are its endpoints. */
+    /**
+     * The label radius for a ring of this size.
+     *
+     * Text stands perpendicular to its path, so which way up it is decides how much room
+     * it needs beyond the arc: [outward] glyphs grow away from the ring and only the
+     * baseline has to clear it, while inward-facing ones grow back toward it and have to
+     * start a whole line-height further out.
+     */
+    fun labelRadius(ringRadius: Float, stroke: Float, outward: Boolean): Float {
+        val edge = ringRadius + stroke / 2f + LABEL_CLEAR
+        return if (outward) edge else edge + LABEL_SIZE
+    }
+
+    /** The remaining time, beside the playback dial rather than inside it. */
     const val REMAINING_SIZE = 22f
+    const val REMAINING_GAP = 14f
 
     /** What the volume ring is called. Named, because a bare arc around a lens is not
      *  self-describing the way a bar under a track name is. */

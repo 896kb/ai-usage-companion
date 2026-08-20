@@ -197,8 +197,15 @@ panel again, measured.
 
 ### Hide
 
-Top-left corner. Ripples the readout away and leaves the mascot walking the bottom of the
-panel. Tap the mascot to bring it back.
+Top-left corner, and it is on **every page** — it does not scroll away with the readout,
+because it is the panel's one permanent control rather than part of a page. Ripples the
+readout away and leaves the mascot walking the bottom of the panel. Tap the mascot to
+bring it back.
+
+Only the button closes the panel. That sounds like it goes without saying, and it did not:
+the check was "was anything hit", which was true while the camera and this were the only
+two targets, and every control added since quietly joined it — until a tap anywhere in the
+media page's volume area swept the whole panel away.
 
 It used to sit bottom-left, on the artwork's line. It moved because the media row wanted
 that corner for a cover, and the top-left was the only genuinely empty space left: the
@@ -367,10 +374,17 @@ rim with the headline number between them is what a dial looks like — and it i
 are no clocks along the bottom of the page any more, which were the same two numbers again
 five hundred units from the dial they belong to.
 
-The labels are inside their rings, because outside is off the top of the panel above and
-off the bottom edge below, and the gap between the two rings is twenty units. The two ends
-face opposite ways: text stands perpendicular to its path, so tops-outward reads correctly
-around the upper half and tops-inward around the lower.
+Every label sits **outside** its ring, and that is a constraint rather than a preference:
+a ring is drawn concentric with a camera lens, and the lens fills the hole. There is no
+display inside a ring — anything put there renders perfectly into the framebuffer and onto
+a piece of glass.
+
+It is a tight fit. The two rings are 276 apart with a radius of 128 and a stroke of 25, so
+there are about twenty units of panel between them, and outside the top of the lower ring
+is *inside* the upper one. The labels are therefore placed where there is room rather than
+where they would look tidiest. The two ends of the playback arc also face opposite ways:
+text stands perpendicular to its path, so tops-outward reads correctly around the upper
+half and tops-inward around the lower.
 
 Both are **gauges rather than full circles**, and their gaps face each other: playback
 runs from half past ten round to five, volume from two to five. Two dials with their
