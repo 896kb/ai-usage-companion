@@ -114,7 +114,14 @@ class RearDialView(context: Context) : View(context) {
     private val noticePaint = Paint()
 
     /** One relayed notification, as much of it as the panel shows. */
-    private data class Notice(val app: String, val pkg: String, val title: String, val text: String)
+    private data class Notice(
+        val app: String,
+        val pkg: String,
+        val title: String,
+        val text: String,
+        /** The rest of this notification's group — see NotificationRelay.cascade. */
+        val more: List<String> = emptyList(),
+    )
 
     private var notice: Notice? = null
     private var leaving: Notice? = null
@@ -385,7 +392,7 @@ class RearDialView(context: Context) : View(context) {
         // the canvas side rides down and some of it leaves the bottom of the panel,
         // which is the trade: a notification is asking for attention, and for five
         // seconds it gets it.
-        val push = NOTICE_H * noticeSlide(nowReal)
+        val push = noticeHeight() * noticeSlide(nowReal)
         canvas.save()
         canvas.translate(dx, dy + push)
         if (!hidden) drawCanvasSide(canvas)
@@ -850,13 +857,19 @@ class RearDialView(context: Context) : View(context) {
      * replaces it, and the two change places on the wheel. That is what [leaving] is
      * for: through the turn there are two notices on screen, one going and one coming.
      */
-    fun showNotification(app: String, pkg: String, title: String, text: String) {
+    fun showNotification(
+        app: String,
+        pkg: String,
+        title: String,
+        text: String,
+        more: List<String> = emptyList(),
+    ) {
         val now = SystemClock.elapsedRealtime()
         // Only a REPLACEMENT turns the wheel. The first notice of a run arrives into an
         // empty strip that is itself sliding in, and turning at the same time would have
         // it enter twice over.
         if (notice != null) { leaving = notice; wheelAt = now }
-        notice = Notice(app, pkg, title, text)
+        notice = Notice(app, pkg, title, text, more)
         noticeAt = now
         invalidate()
     }
@@ -868,6 +881,18 @@ class RearDialView(context: Context) : View(context) {
      * is a consequence of there being something to say, so it retracts by itself the
      * moment the last one expires.
      */
+    /**
+     * How tall the strip needs to be right now.
+     *
+     * A quarter of the panel, plus a line for each of the group's other notifications.
+     * Taken as the MAX of the arriving and departing notices while the wheel turns, or
+     * the taller of the two would be cut off by a container sized for the shorter.
+     */
+    private fun noticeHeight(): Float {
+        val rows = maxOf(notice?.more?.size ?: 0, leaving?.more?.size ?: 0)
+        return NOTICE_H + rows * NOTICE_LINE_H
+    }
+
     private fun noticeSlide(nowMs: Long): Float {
         if (notice != null && nowMs - noticeAt > NOTICE_MS) notice = null
         if (leaving != null && nowMs - wheelAt > WHEEL_MS) leaving = null
@@ -906,7 +931,7 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNotice(canvas: Canvas, slide: Float, nowMs: Long) {
         if (slide <= 0.001f) return
-        val h = NOTICE_H
+        val h = noticeHeight()
         val top = -h + h * slide
 
         // Rounded at the BOTTOM-LEFT only, to a fraction of the display's own radius.
@@ -981,7 +1006,7 @@ class RearDialView(context: Context) : View(context) {
 
     /** One row of the wheel, at [y]. Clipped by the strip, never faded. */
     private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float) {
-        val h = NOTICE_H
+        val h = noticeHeight()
         val alpha = 255
         val left = Panel.CUTOUT_RIGHT + NOTICE_PAD
         val right = Panel.WIDTH - NOTICE_PAD
@@ -989,12 +1014,12 @@ class RearDialView(context: Context) : View(context) {
         val icon = icons.getOrPut(item.pkg) {
             runCatching { context.packageManager.getApplicationIcon(item.pkg) }.getOrNull()
         }
-        val size = h * 0.46f
+        val size = NOTICE_H * 0.46f
         val iconLeft = right - size
         if (icon != null) {
             icon.setBounds(
-                iconLeft.toInt(), (y + (h - size) / 2f).toInt(),
-                (iconLeft + size).toInt(), (y + (h + size) / 2f).toInt(),
+                iconLeft.toInt(), (y + (NOTICE_H - size) / 2f).toInt(),
+                (iconLeft + size).toInt(), (y + (NOTICE_H + size) / 2f).toInt(),
             )
             icon.alpha = alpha
             icon.draw(canvas)
@@ -1005,18 +1030,33 @@ class RearDialView(context: Context) : View(context) {
         label.alpha = (alpha * 0.6f).toInt()
         label.textAlign = Paint.Align.LEFT
         canvas.drawText(noticeClip(item.app.uppercase(), label, textRight - left),
-            left, y + h * 0.30f, label)
+            left, y + NOTICE_H * 0.30f, label)
 
         heading.color = colorFor("notice", config.notificationTint)
         heading.alpha = alpha
         heading.textAlign = Paint.Align.LEFT
         canvas.drawText(noticeClip(item.title, heading, textRight - left),
-            left, y + h * 0.56f, heading)
+            left, y + NOTICE_H * 0.56f, heading)
 
+        // The headline block sits in the top NOTICE_H of the strip whatever the strip's
+        // total height, so the cascade below it starts at a fixed offset rather than a
+        // fraction — a fraction would push the title around as the group grew.
         if (item.text.isNotBlank()) {
             label.alpha = alpha
             canvas.drawText(noticeClip(item.text, label, textRight - left),
-                left, y + h * 0.80f, label)
+                left, y + NOTICE_H * 0.80f, label)
+        }
+
+        // The rest of the group, one dim line each. Indented under the headline so they
+        // read as belonging to it rather than as more notifications of equal weight.
+        var lineY = y + NOTICE_H * 0.80f
+        for (extra in item.more) {
+            lineY += NOTICE_LINE_H
+            label.alpha = (alpha * 0.55f).toInt()
+            canvas.drawText(
+                noticeClip("· $extra", label, textRight - left - NOTICE_INDENT),
+                left + NOTICE_INDENT, lineY, label,
+            )
         }
         label.alpha = 255
         heading.alpha = 255
@@ -1811,6 +1851,10 @@ class RearDialView(context: Context) : View(context) {
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f
         private const val NOTICE_PAD = 26f
+
+        /** One cascade line, and how far it is indented under the headline. */
+        private const val NOTICE_LINE_H = 24f
+        private const val NOTICE_INDENT = 14f
 
         /** What this phone's rear display reports, for when the display will not say. */
         private const val FALLBACK_CORNER = 97f

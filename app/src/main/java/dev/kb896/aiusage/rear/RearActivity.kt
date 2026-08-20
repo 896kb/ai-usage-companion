@@ -45,6 +45,7 @@ class RearActivity : Activity() {
         const val EXTRA_NOTIFICATION_PKG = "pkg"
         const val EXTRA_NOTIFICATION_TITLE = "title"
         const val EXTRA_NOTIFICATION_TEXT = "text"
+        const val EXTRA_NOTIFICATION_MORE = "more"
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -79,6 +80,7 @@ class RearActivity : Activity() {
                     intent.getStringExtra(EXTRA_NOTIFICATION_PKG).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_TITLE).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_TEXT).orEmpty(),
+                    intent.getStringArrayExtra(EXTRA_NOTIFICATION_MORE)?.toList().orEmpty(),
                 )
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
                 // leave the current mode untouched. Re-evaluating unconditionally with

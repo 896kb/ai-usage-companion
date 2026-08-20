@@ -43,6 +43,28 @@ class NotificationRelay : NotificationListenerService() {
         if (sbn.isOngoing) return
         if (!sbn.isClearable) return
 
+        // GROUP SUMMARIES. This is the one that matters in practice.
+        //
+        // An app that can produce several related notifications posts each of them AND a
+        // summary standing for the whole group — WhatsApp sends the message, then "2
+        // messages from 2 chats" a moment later. Both are real notifications and the
+        // summary arrives second, so it replaced the actual message on the wheel a split
+        // second after it appeared: you saw who it was from just long enough to know you
+        // had missed it.
+        //
+        // The summary is the one to drop. It carries a count where the child carries the
+        // content, and the child is what someone glancing at the back of a phone wants.
+        if (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0) return
+
+        // Categories that are never news either. Same reasoning as isOngoing, but these
+        // are how an app DECLARES it rather than how the system infers it.
+        when (sbn.notification.category) {
+            android.app.Notification.CATEGORY_SERVICE,
+            android.app.Notification.CATEGORY_PROGRESS,
+            android.app.Notification.CATEGORY_TRANSPORT,
+            -> return
+        }
+
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
         val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
@@ -69,7 +91,16 @@ class NotificationRelay : NotificationListenerService() {
         }
         lastFingerprint = fingerprint
         lastAt = SystemClock.elapsedRealtime()
-        Log.i(TAG, "relaying a notification from ${sbn.packageName}")
+        // The rest of the group, cascaded under the headline.
+        //
+        // A grouped app posts one notification per conversation plus a summary; we drop
+        // the summary and show the newest child, which used to mean the other unread
+        // ones simply vanished. The listener can already see them — they are live
+        // notifications, not history — so the panel can show what the summary was
+        // counting instead of the count itself.
+        val siblings = cascade(sbn, config.showNotificationText)
+
+        Log.i(TAG, "relaying a notification from ${sbn.packageName}, ${siblings.size} more in its group")
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION)
                 .setPackage(packageName)
@@ -79,8 +110,37 @@ class NotificationRelay : NotificationListenerService() {
                 // the process boundary on every notification for no gain.
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_PKG, sbn.packageName)
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_TITLE, title.orEmpty())
-                .putExtra(RearActivity.EXTRA_NOTIFICATION_TEXT, body.orEmpty()),
+                .putExtra(RearActivity.EXTRA_NOTIFICATION_TEXT, body.orEmpty())
+                .putExtra(RearActivity.EXTRA_NOTIFICATION_MORE, siblings.toTypedArray()),
         )
+    }
+
+    /**
+     * The other live notifications in this one's group, newest first.
+     *
+     * @param withText whether the message body may be shown. When it may not, the
+     *   sender is used instead — the cascade still says WHO is waiting, which is the
+     *   part that survives the privacy switch. Falling silent entirely would make the
+     *   feature look broken to anyone who left that switch alone.
+     */
+    private fun cascade(sbn: StatusBarNotification, withText: Boolean): List<String> {
+        val group = sbn.notification.group ?: return emptyList()
+        val active = runCatching { activeNotifications }.getOrNull() ?: return emptyList()
+        return active
+            .filter {
+                it.notification.group == group &&
+                    it.key != sbn.key &&
+                    it.packageName == sbn.packageName &&
+                    it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY == 0
+            }
+            .sortedByDescending { it.postTime }
+            .mapNotNull { other ->
+                val e = other.notification.extras
+                val t = e.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
+                val h = e.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
+                (if (withText) t ?: h else h)?.takeIf { it.isNotBlank() }
+            }
+            .take(MAX_CASCADE)
     }
 
     /**
@@ -109,5 +169,14 @@ class NotificationRelay : NotificationListenerService() {
          * cost in the other is the panel flickering as a message replaces itself.
          */
         const val DEDUPE_MS = 3_000L
+
+        /**
+         * How many of a group's other notifications the cascade shows.
+         *
+         * Three. The strip grows a line per entry and it is already a quarter of the
+         * panel; past this it stops being a glance and starts being an inbox, which is
+         * what the phone in your hand is for.
+         */
+        const val MAX_CASCADE = 3
     }
 }
