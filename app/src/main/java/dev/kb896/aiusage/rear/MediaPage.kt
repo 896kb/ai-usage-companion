@@ -105,7 +105,7 @@ object MediaPage {
     const val VOLUME_TRAVEL = 1f
 
     /** The mute button, beside the ring that now reports the volume. */
-    const val MUTE_H = 36f
+    const val MUTE_H = 27f
 
     /**
      * How far CLEAR of the ring's outer edge the speaker sits.
@@ -115,7 +115,7 @@ object MediaPage {
      * ten units of "gap" read as touching it. Half the glyph's height has to come out of
      * the orbit as well — see RearDialView, where the orbit is computed.
      */
-    const val MUTE_GAP = 20f
+    const val MUTE_GAP = 30f
 
     /**
      * The mute target: a patch of panel beside the speaker, at the speaker's height.
@@ -132,8 +132,14 @@ object MediaPage {
     const val MUTE_TARGET_W = 104f
     const val MUTE_TARGET_H = 92f
 
-    /** Panel edge the speaker must stay inside of. */
-    const val SPEAKER_MARGIN = 2f
+    /**
+     * How far inside the panel's bottom edge the speaker must stay.
+     *
+     * Not a hairline. At two units the glyph is technically on the panel and visibly
+     * touching the edge, which reads as clipped whether or not it is — on a screen with
+     * rounded corners, a shape against the boundary looks like a shape running out of it.
+     */
+    const val SPEAKER_MARGIN = 12f
 
     /**
      * The furthest round the arc the speaker can go before it leaves the panel.
