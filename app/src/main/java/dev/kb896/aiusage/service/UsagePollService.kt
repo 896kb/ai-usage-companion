@@ -179,17 +179,22 @@ class UsagePollService : Service() {
     }
 
     /**
-     * "Do not relaunch right now" — screen off OR keyguard up.
+     * Whether the main screen is off or locked.
      *
-     * isKeyguardLocked() alone is not enough and was silently useless on this device:
-     * it reports the SECURE lock state, so with a swipe-only keyguard it returns false
-     * the whole time the lock screen is showing. The window manager's
-     * isKeyguardShowing said true at the same moment. A respawn was observed firing 25s
-     * into a lock because of that gap, which is exactly the `am start` across display 0
-     * this guard exists to prevent.
+     * No longer a reason to refuse a relaunch, and the history matters. RearActivity is
+     * necessarily created on the MAIN display before being moved to the rear one, and it
+     * used to carry FLAG_TURN_SCREEN_ON — so every respawn while the phone was asleep
+     * woke it. Measured: mWakefulness went Dozing -> Awake on a locked relaunch. That is
+     * what this guard existed to prevent, and the cost was that a panel which died while
+     * the screen was off stayed dead until someone unlocked and tapped the notification.
      *
-     * PowerManager.isInteractive() is the reliable half: it goes false when the main
-     * screen goes off, regardless of how the keyguard is configured.
+     * The flag is gone; the rear display is woken explicitly by the privileged service
+     * instead, which can target one display where a window flag could not. Re-measured
+     * with it removed: Dozing -> Dozing, and the panel still lands on display 1.
+     *
+     * Kept as a reading because it is still worth LOGGING which case a recovery happened
+     * in, and because the keyguard remains the one situation where a stray placement is
+     * visible rather than merely wasteful.
      */
     private fun screenOffOrLocked(): Boolean {
         val power = getSystemService(PowerManager::class.java)
@@ -406,8 +411,11 @@ class UsagePollService : Service() {
             // screen every time. USER_PRESENT drives screenReceiver, so the panel is
             // back within a moment of unlocking.
             if (screenOffOrLocked()) {
-                Log.i(TAG, "panel needs re-placing but the keyguard is up — deferring to unlock")
-                return decision
+                // Recover anyway. This used to return, because the respawn woke the
+                // phone; it no longer does. A panel that died while the screen was off
+                // is precisely the case the user cannot fix themselves — they turn the
+                // rear display on by double-tapping it and find nothing there.
+                Log.i(TAG, "re-placing the panel while the screen is off")
             }
             // `payload` carries the config, so a freshly launched panel comes up with
             // the user's ring geometry already applied. This used to need a second,

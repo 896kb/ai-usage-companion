@@ -92,13 +92,24 @@ class RearActivity : Activity() {
         // mitigation load-bearing rather than optional — a permanently-lit OLED
         // showing two fixed rings, four fixed bars and a fixed corner mark is close
         // to worst-case burn-in geometry. Do not remove the drift.
+        //
+        // NO turn-screen-on, and that is a fix rather than an omission. This activity is
+        // necessarily created on the MAIN display before being moved to the rear one —
+        // the rear display refuses a direct launch from an ordinary app, tested — so a
+        // turn-screen-on flag fires on display 0 and wakes the phone. Measured: with the
+        // device dozing, a relaunch took mWakefulness from Dozing to Awake. That is the
+        // watchdog lighting up a phone in a pocket every time it recovers the panel, and
+        // it is why recovery had to be suppressed whenever the screen was off — which in
+        // turn is why the panel stayed dead until someone tapped the notification.
+        //
+        // The rear display is woken explicitly instead, by the privileged service, with
+        // `input -d <display> keyevent WAKEUP` after every placement. That targets one
+        // display; the flag could not.
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
         )
         setShowWhenLocked(true)
-        setTurnScreenOn(true)
         // The display is LIVE inside the reported cutout — render across all 904px.
         window.attributes = window.attributes.apply {
             layoutInDisplayCutoutMode =

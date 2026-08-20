@@ -298,7 +298,14 @@ class RearUserService : IRearService.Stub {
             while (!Thread.currentThread().isInterrupted) {
                 try {
                     Thread.sleep(KEEPALIVE_MS)
-                    if (keyguardShowing()) continue
+                    // No keyguard skip. It was here because a respawn woke the main
+                    // screen — RearActivity carried FLAG_TURN_SCREEN_ON and is created
+                    // on display 0 before being moved. The flag is gone and the wake is
+                    // now aimed at the rear display alone, so the watchdog can do its
+                    // job while the phone is asleep, which is exactly when the panel
+                    // needs it: double-tapping the rear display awake and finding
+                    // nothing there was this skip.
+                    
                     when {
                         // Definitely on the main display: a move is enough, and a move
                         // is cheap and invisible. Never relaunch for this.
