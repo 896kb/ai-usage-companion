@@ -125,6 +125,11 @@ class RearDialView(context: Context) : View(context) {
     /** When the current item started its turn of the wheel. */
     private var wheelAt = 0L
 
+    /** The strip's own slide: where it was, where it is going, and when that changed. */
+    private var slideFrom = 0f
+    private var slideTo = 0f
+    private var slideAt = 0L
+
     /** App icons, kept because the same few apps notify over and over. */
     private val icons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
 
@@ -856,7 +861,25 @@ class RearDialView(context: Context) : View(context) {
     private fun noticeSlide(nowMs: Long): Float {
         if (notice != null && nowMs - noticeAt > NOTICE_MS) notice = null
         if (leaving != null && nowMs - wheelAt > WHEEL_MS) leaving = null
-        return animateTo("notice:slide", if (notice != null) 1f else 0f)
+
+        // Its own timing rather than the shared Tween, which runs at 1.8s. That is right
+        // for a bar easing to a new reading — news arriving gently — and far too slow for
+        // a panel that has to be in front of you before you have finished glancing at it.
+        val target = if (notice != null) 1f else 0f
+        if (target != slideTo) {
+            slideFrom = noticeSlideNow(nowMs)
+            slideTo = target
+            slideAt = nowMs
+        }
+        val value = noticeSlideNow(nowMs)
+        if (value != slideTo) animating = true
+        return value
+    }
+
+    private fun noticeSlideNow(nowMs: Long): Float {
+        if (slideAt == 0L) return slideTo
+        val t = ((nowMs - slideAt).toFloat() / SLIDE_MS).coerceIn(0f, 1f)
+        return slideFrom + (slideTo - slideFrom) * Tween.easeInOut(t)
     }
 
     /**
@@ -875,35 +898,76 @@ class RearDialView(context: Context) : View(context) {
         if (slide <= 0.001f) return
         val h = NOTICE_H
         val top = -h + h * slide
+
+        // Rounded at the BOTTOM-LEFT only, to the display's own corner radius.
+        //
+        // That is the one corner of this strip sitting in open panel — its top and right
+        // edges run off the screen, where the display's own rounding already shapes them,
+        // and its bottom-right meets the right edge straight. Matching the hardware's
+        // radius makes the strip read as part of the screen rather than as a rectangle
+        // laid on it, which is the whole reason to round anything here.
+        val r = cornerRadius()
+        val shape = android.graphics.Path().apply {
+            addRoundRect(
+                Panel.CUTOUT_RIGHT.toFloat(), top, Panel.WIDTH.toFloat(), top + h,
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
+                android.graphics.Path.Direction.CW,
+            )
+        }
         canvas.save()
-        canvas.clipRect(Panel.CUTOUT_RIGHT.toFloat(), 0f, Panel.WIDTH.toFloat(), top + h)
+        canvas.clipPath(shape)
 
         // The strip's own ground, so the readout sliding under it does not show through.
         noticePaint.color = colorFor("bg", config.background or (0xFF shl 24))
         noticePaint.alpha = 255
+        noticePaint.style = Paint.Style.FILL
         canvas.drawRect(
             Panel.CUTOUT_RIGHT.toFloat(), top, Panel.WIDTH.toFloat(), top + h, noticePaint)
 
+        // Position only. Nothing fades: the strip is a window onto a drum, and a drum's
+        // rows do not become transparent as they turn — they go past the edge and are
+        // gone. Fading them as well read as two effects doing one job.
         val turn = if (leaving == null) 1f
             else Tween.easeInOut(((nowMs - wheelAt).toFloat() / WHEEL_MS).coerceIn(0f, 1f))
-        leaving?.let { drawNoticeRow(canvas, it, top + turn * h, 1f - turn) }
-        notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * h, turn) }
+        leaving?.let { drawNoticeRow(canvas, it, top + turn * h) }
+        notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * h) }
         canvas.restore()
 
-        // A hairline along the bottom edge, so the strip reads as something laid OVER the
-        // panel rather than as the panel having been repainted.
+        // A hairline around the same shape, so the strip reads as something laid OVER
+        // the panel rather than as the panel having been repainted — and so the curve is
+        // drawn rather than merely cut.
         noticePaint.color = colorFor("notice", config.notificationTint)
-        noticePaint.alpha = (90 * slide).toInt()
-        canvas.drawRect(Panel.CUTOUT_RIGHT.toFloat(), top + h - 1.5f,
-            Panel.WIDTH.toFloat(), top + h, noticePaint)
+        noticePaint.alpha = 90
+        noticePaint.style = Paint.Style.STROKE
+        noticePaint.strokeWidth = 1.5f
+        noticePaint.isAntiAlias = true
+        canvas.drawPath(shape, noticePaint)
         noticePaint.alpha = 255
+        noticePaint.style = Paint.Style.FILL
     }
 
-    /** One row of the wheel, at [y], at [presence] opacity. */
-    private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float, presence: Float) {
-        if (presence <= 0.01f) return
+    /**
+     * The display's own corner radius, asked of the display rather than assumed.
+     *
+     * The rear panel reports 97. Hardcoding that would be right for this phone and
+     * silently wrong for the next one, and the API has existed since API 31 — there is
+     * no reason to guess. Falls back to the measured value only if the display declines
+     * to say, which it does on some emulated ones.
+     */
+    private fun cornerRadius(): Float {
+        cornerRadius?.let { return it }
+        val fromWindow = rootWindowInsets
+            ?.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT)
+            ?.radius
+        return (fromWindow?.toFloat() ?: FALLBACK_CORNER).also { cornerRadius = it }
+    }
+
+    private var cornerRadius: Float? = null
+
+    /** One row of the wheel, at [y]. Clipped by the strip, never faded. */
+    private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float) {
         val h = NOTICE_H
-        val alpha = (255 * presence).toInt()
+        val alpha = 255
         val left = Panel.CUTOUT_RIGHT + NOTICE_PAD
         val right = Panel.WIDTH - NOTICE_PAD
 
@@ -1724,11 +1788,17 @@ class RearDialView(context: Context) : View(context) {
         private const val NOTICE_MS = 5_000L
 
         /** How long one item takes to replace another on the wheel. */
-        private const val WHEEL_MS = 420f
+        private const val WHEEL_MS = 300f
+
+        /** How long the strip takes to arrive or leave. */
+        private const val SLIDE_MS = 260f
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f
         private const val NOTICE_PAD = 26f
+
+        /** What this phone's rear display reports, for when the display will not say. */
+        private const val FALLBACK_CORNER = 97f
 
         private const val EXTRA_ICON_H = 20f
 
