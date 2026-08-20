@@ -137,7 +137,16 @@ class UsagePollService : Service() {
             // it comes here: the Shizuku binding lives in this process and the panel's
             // does not.
             addAction(RearActivity.ACTION_OPEN_CAMERA)
+            // And its transport buttons, for the same reason again.
+            addAction(RearActivity.ACTION_MEDIA_COMMAND)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
+
+        // Held by this service rather than by NotificationRelay, even though the relay is
+        // what authorises it. A listener service is started and stopped by the system on
+        // its own schedule — it is rebound after a crash, and it is not running before
+        // the user has granted access — whereas this service is the app's one long-lived
+        // component and is already the thing that talks to the panel.
+        media = MediaWatcher(this).also { it.start() }
         // Place the panel NOW, before either loop's first delay.
         //
         // This is the whole recovery story for an app that has been killed: the panel
@@ -229,6 +238,14 @@ class UsagePollService : Service() {
             // position at the exact moment something else is about to cover it.
             if (intent?.action == RearActivity.ACTION_OPEN_CAMERA) {
                 Graph.of(this@UsagePollService).bridge.openCamera()
+                return
+            }
+            // A transport button on the back of the phone. Also not a placement problem,
+            // and also not worth a round trip through the supervisor.
+            if (intent?.action == RearActivity.ACTION_MEDIA_COMMAND) {
+                media?.command(
+                    intent.getStringExtra(RearActivity.EXTRA_MEDIA_COMMAND).orEmpty(),
+                )
                 return
             }
             safeSupervise()
@@ -488,8 +505,13 @@ class UsagePollService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    /** The active media session, or null when notification access has not been granted. */
+    private var media: MediaWatcher? = null
+
     override fun onDestroy() {
         displays.unregisterDisplayListener(displayListener)
+        media?.stop()
+        media = null
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         scope.cancel()
         super.onDestroy()

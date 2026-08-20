@@ -34,6 +34,17 @@ object SettingsRows {
         typeface = context.resources.getFont(R.font.departure_mono)
     }
 
+    /**
+     * A line of explanation under a control, in the same dim type as a row's own label.
+     *
+     * For a switch that is on but cannot do anything yet — the setting is not wrong, so
+     * it is not an error, and disabling the row would hide the feature from the person
+     * who most needs to find it. Saying why is the whole content.
+     */
+    fun note(parent: LinearLayout, text: String) {
+        parent.addView(label(parent.context, text), rowParams(dp(parent.context, 6)))
+    }
+
     private fun rowParams(topDp: Int) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
     ).apply { topMargin = topDp }

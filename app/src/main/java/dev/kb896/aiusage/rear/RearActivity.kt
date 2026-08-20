@@ -47,6 +47,49 @@ class RearActivity : Activity() {
         const val EXTRA_NOTIFICATION_TEXT = "text"
         const val EXTRA_NOTIFICATION_MORE_TITLE = "moreTitle"
         const val EXTRA_NOTIFICATION_MORE_TEXT = "moreText"
+
+        /**
+         * What is playing, on its way to the panel.
+         *
+         * Text only. The panel is told the track, the artist and whether it is running;
+         * it is never given the session, because a MediaController is bound to the
+         * process that obtained it and this one has no notification access of its own.
+         */
+        const val ACTION_MEDIA = "dev.kb896.aiusage.MEDIA"
+        const val EXTRA_MEDIA_ACTIVE = "mediaActive"
+        const val EXTRA_MEDIA_TITLE = "mediaTitle"
+        const val EXTRA_MEDIA_ARTIST = "mediaArtist"
+        const val EXTRA_MEDIA_PLAYING = "mediaPlaying"
+
+        /** A PATH to the cover, not the cover. See MediaWatcher.writeArt for why. */
+        const val EXTRA_MEDIA_ART = "mediaArt"
+
+        /**
+         * A transport button was pressed on the panel.
+         *
+         * Travels the other way for the same reason ACTION_OPEN_CAMERA does: the thing
+         * that can act on it lives in the main process. See MediaWatcher.command().
+         */
+        const val ACTION_MEDIA_COMMAND = "dev.kb896.aiusage.MEDIA_COMMAND"
+        const val EXTRA_MEDIA_COMMAND = "command"
+
+        /** The three commands, defined once. The panel sends these strings and
+         *  MediaWatcher switches on them — two copies would be two chances to typo one. */
+        const val MEDIA_PLAY_PAUSE = "playpause"
+        const val MEDIA_NEXT = "next"
+        const val MEDIA_PREVIOUS = "previous"
+
+        /**
+         * Not a transport command: the panel asking what is playing.
+         *
+         * :rear is destroyed and recreated constantly — every recovery, every placement,
+         * every time HyperOS decides to. A broadcast is not sticky, so a panel that came
+         * up after the last metadata change knew nothing about the session and showed
+         * the artwork over a playing track until the next one started. It asks instead
+         * of being told, because it is the one that knows when it is new.
+         */
+        const val MEDIA_SYNC = "sync"
+
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -83,6 +126,13 @@ class RearActivity : Activity() {
                     intent.getStringExtra(EXTRA_NOTIFICATION_TEXT).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TITLE).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TEXT).orEmpty(),
+                )
+                ACTION_MEDIA -> dial.showMedia(
+                    intent.getBooleanExtra(EXTRA_MEDIA_ACTIVE, false),
+                    intent.getStringExtra(EXTRA_MEDIA_TITLE).orEmpty(),
+                    intent.getStringExtra(EXTRA_MEDIA_ARTIST).orEmpty(),
+                    intent.getBooleanExtra(EXTRA_MEDIA_PLAYING, false),
+                    intent.getStringExtra(EXTRA_MEDIA_ART).orEmpty(),
                 )
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
                 // leave the current mode untouched. Re-evaluating unconditionally with
@@ -143,7 +193,26 @@ class RearActivity : Activity() {
         dial.onCameraTap = {
             sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
         }
+        // Same shape, same reason: the session lives in the main process, so a press
+        // here is a message rather than an action. The panel does NOT optimistically
+        // flip its own play/pause glyph on the way out — the player answers with a real
+        // state change a moment later, and guessing would show a pause button for
+        // something that refused to start.
+        dial.onMediaTap = { command ->
+            sendBroadcast(
+                Intent(ACTION_MEDIA_COMMAND)
+                    .setPackage(packageName)
+                    .putExtra(EXTRA_MEDIA_COMMAND, command),
+            )
+        }
         setContentView(dial)
+        // See MEDIA_SYNC: this process may have been created long after the media
+        // session was, and there is no other way for it to find out.
+        sendBroadcast(
+            Intent(ACTION_MEDIA_COMMAND)
+                .setPackage(packageName)
+                .putExtra(EXTRA_MEDIA_COMMAND, MEDIA_SYNC),
+        )
 
 
         // No-op until we are actually on the rear panel — see hideBars().
@@ -153,6 +222,7 @@ class RearActivity : Activity() {
             this, receiver,
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
+                addAction(ACTION_MEDIA)
             },
             ContextCompat.RECEIVER_EXPORTED,
         )

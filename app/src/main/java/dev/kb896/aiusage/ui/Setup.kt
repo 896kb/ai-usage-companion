@@ -76,8 +76,11 @@ object Setup {
             ),
             Step(
                 title = "Notification access",
-                why = "Only needed for mirroring OTHER apps' notifications onto the panel. " +
-                    "Without it that feature does nothing; everything else works.",
+                why = "Needed for two things: mirroring OTHER apps' notifications onto the " +
+                    "panel, and the media controls. Both read from this one grant — Android " +
+                    "hands out the active media sessions to whoever holds notification " +
+                    "access, so there is no separate switch for the player. Without it " +
+                    "neither feature does anything; everything else works.",
                 satisfied = NotificationManagerCompat.getEnabledListenerPackages(context)
                     .contains(context.packageName),
                 open = { Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS") },

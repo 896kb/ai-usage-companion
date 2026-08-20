@@ -110,6 +110,9 @@ class RearDialView(context: Context) : View(context) {
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
     private val mascotPaint = Paint()
 
+    /** Same again for the traced glyphs, and for a second reason — see drawIcon. */
+    private val iconPaint = Paint()
+
     /** The notification strip's ground and its edge. */
     private val noticePaint = Paint()
 
@@ -409,16 +412,16 @@ class RearDialView(context: Context) : View(context) {
         val push = noticeHeight(nowReal) * noticeSlide(nowReal)
         canvas.save()
         canvas.translate(dx, dy + push)
-        if (!hidden) drawCanvasSide(canvas)
+        if (!hidden) drawCanvasSide(canvas, dx, dy + push)
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
         if (onlyAccount == null && !hidden) drawExtras(canvas)
         // Same rule as the extras: it acts on the panel rather than on an account, so a
         // single-account preview leaves it out — and a preview is scaled, which would
         // put the touch target in the wrong place even if it were wanted there.
-        if (onlyAccount == null && config.showCamera && !hidden) drawCamera(canvas, dx, dy)
+        if (onlyAccount == null && config.showCamera && !hidden) drawCamera(canvas, dx, dy + push)
         else cameraButton = null
-        if (onlyAccount == null && config.showClose && !hidden) drawClose(canvas, dx, dy)
+        if (onlyAccount == null && config.showClose && !hidden) drawClose(canvas, dx, dy + push)
         else closeButton = null
         canvas.restore()
         canvas.restore()   // the readout clip
@@ -555,7 +558,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
-    private fun drawCanvasSide(canvas: Canvas) {
+    private fun drawCanvasSide(canvas: Canvas, dx: Float, dy: Float) {
         // In single-account mode: the account's own rows and mascot, and nothing else.
         //
         // The masthead, the clock and battery, and the maker's mark all describe the
@@ -565,7 +568,7 @@ class RearDialView(context: Context) : View(context) {
         if (onlyAccount == null) drawTitle(canvas)
         drawBars(canvas)
         drawMascots(canvas)
-        if (onlyAccount == null) drawMark(canvas)
+        if (onlyAccount == null) drawMark(canvas, dx, dy)
     }
 
     /**
@@ -673,6 +676,39 @@ class RearDialView(context: Context) : View(context) {
     /** Set by RearActivity. Nothing on the front screen listens. */
     var onCameraTap: (() -> Unit)? = null
 
+    /**
+     * The strip the transport buttons live in, or null when the row is not up.
+     *
+     * ONE rectangle for all three, plus where each glyph's centre is inside it. Not
+     * three rectangles: see MediaLayout.Row.centres for what three padded rectangles on
+     * 35-unit centres actually did.
+     */
+    private var mediaStrip: android.graphics.RectF? = null
+    private var mediaCentres: List<Float> = emptyList()
+
+    /** In drawing order, matching [mediaCentres]. */
+    private val mediaCommands = listOf(
+        RearActivity.MEDIA_PREVIOUS, RearActivity.MEDIA_PLAY_PAUSE, RearActivity.MEDIA_NEXT,
+    )
+
+    /**
+     * Which transport button a touch belongs to, or null if it missed the strip.
+     *
+     * The strip keeps the usual slop — the whole point is that this is pressed without
+     * looking — but WITHIN it the nearest centre wins outright, so the padding can be as
+     * generous as the surface needs without one button eating another.
+     */
+    private fun mediaAt(x: Float, y: Float): String? {
+        val strip = mediaStrip ?: return null
+        if (!near(strip, x, y)) return null
+        val i = mediaCentres.indices.minByOrNull { kotlin.math.abs(mediaCentres[it] - x) }
+            ?: return null
+        return mediaCommands[i]
+    }
+
+    /** Set by RearActivity, which forwards the press to the main process. */
+    var onMediaTap: ((String) -> Unit)? = null
+
     private fun near(r: android.graphics.RectF?, x: Float, y: Float): Boolean {
         val b = r ?: return false
         return x >= b.left - CAMERA_SLOP && x <= b.right + CAMERA_SLOP &&
@@ -693,7 +729,12 @@ class RearDialView(context: Context) : View(context) {
         val onClose =
             if (ambient) near(mascotButton, event.x, event.y)
             else near(closeButton, event.x, event.y)
-        val hit = onCamera || (config.showClose && onClose)
+        // The transport buttons, which exist only while the row is up and never in
+        // ambient mode — the readout has been swept away, and with it the slot they
+        // live in. Nothing here needs a showMedia check: the strip is null unless the
+        // row was actually drawn.
+        val onMedia = if (ambient) null else mediaAt(event.x, event.y)
+        val hit = onCamera || onMedia != null || (config.showClose && onClose)
 
         return when (event.actionMasked) {
             // Claim the gesture on the way down if it started on a target, so a slight
@@ -703,6 +744,9 @@ class RearDialView(context: Context) : View(context) {
             android.view.MotionEvent.ACTION_UP -> {
                 when {
                     onCamera -> onCameraTap?.invoke()
+                    // Before the close branch: a transport press is a press on the
+                    // readout, not a request to sweep it away.
+                    onMedia != null -> onMediaTap?.invoke(onMedia)
                     hit -> {
                         val now = android.os.SystemClock.elapsedRealtime()
                         ambient = !ambient
@@ -846,7 +890,8 @@ class RearDialView(context: Context) : View(context) {
         val stand = MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
         val h = MASCOT_HEIGHT * (stand?.scale ?: 1f)
         val w = h * WalkRig.ASPECT
-        val left = CLOSE_CX + CLOSE_R + AMBIENT_GAP
+        // The full width, now that the close button has moved off this row.
+        val left = CONTENT_EDGE
         val top = Panel.HEIGHT - MARK_BOTTOM - h
         val span = Panel.WIDTH - MARK_BOTTOM - left - w
         mascotButton = WalkRig.boundsAt(nowMs, left, top, h, span)
@@ -887,6 +932,84 @@ class RearDialView(context: Context) : View(context) {
         notice = Notice(app, pkg, title, text, moreTitle, moreText)
         noticeAt = now
         invalidate()
+    }
+
+    /** What is playing, as much of it as the panel shows. */
+    private data class Media(
+        val title: String,
+        val artist: String,
+        val playing: Boolean,
+        /** Where the cover was written, or empty. See MediaWatcher.writeArt. */
+        val artPath: String = "",
+    )
+
+    private var media: Media? = null
+
+    /** Where the artwork/controls drum is and where it is heading — see [mediaSwap]. */
+    private var mediaFrom = 0f
+    private var mediaTo = 0f
+    private var mediaAt = 0L
+
+    /** Same three fields again for the play/pause glyph, which turns on its own clock:
+     *  a track can be paused without the row going anywhere. */
+    private var playFrom = 0f
+    private var playTo = 0f
+    private var playAt = 0L
+
+    /**
+     * What the main process says is playing.
+     *
+     * [active] false covers both "nothing is playing" and "the feature is off", which
+     * are the same thing to the panel: give the slot back to the artwork.
+     */
+    fun showMedia(
+        active: Boolean,
+        title: String,
+        artist: String,
+        playing: Boolean,
+        artPath: String = "",
+    ) {
+        val now = SystemClock.uptimeMillis()
+        val next =
+            if (active && config.showMedia) Media(title, artist, playing, artPath) else null
+
+        // The ROW's drum turns only when the slot changes hands. A track advancing while
+        // the controls are already up is new text in a row that is already there, and
+        // sliding the whole slot for it would say the artwork had come and gone.
+        val wasShown = media != null
+        if (next != null != wasShown) {
+            mediaFrom = mediaSwap(now)
+            mediaTo = if (next != null) 1f else 0f
+            mediaAt = now
+        }
+
+        // The GLYPH's drum turns on the transport state alone. Retargeted from wherever
+        // it currently is, so tapping pause and play in quick succession reverses mid-
+        // travel instead of snapping — the same rule the ambient ripple follows.
+        val target = if (next?.playing == true) 1f else 0f
+        if (target != playTo) {
+            playFrom = playSwap(now)
+            playTo = target
+            playAt = now
+        }
+
+        media = next
+        invalidate()
+    }
+
+    /** 0 while the artwork holds the slot, 1 while the controls do. */
+    private fun mediaSwap(nowMs: Long): Float = slide(mediaFrom, mediaTo, mediaAt, nowMs)
+
+    /** 0 on the play glyph, 1 on the pause glyph. */
+    private fun playSwap(nowMs: Long): Float = slide(playFrom, playTo, playAt, nowMs)
+
+    /** One eased leg, shared by the two drums above. */
+    private fun slide(from: Float, to: Float, startMs: Long, nowMs: Long): Float {
+        if (startMs == 0L) return to
+        val t = (nowMs - startMs).toFloat() / MEDIA_MS
+        if (t >= 1f) return to
+        animating = true
+        return from + (to - from) * Tween.easeInOut(t.coerceIn(0f, 1f))
     }
 
     /**
@@ -1305,14 +1428,42 @@ class RearDialView(context: Context) : View(context) {
      * added after that was written came out battery-shaped: tall and narrow, on a
      * camera. The pair now travels together and cannot be mismatched. See PanelIcons.Icon.
      */
+    /**
+     * A traced glyph, at [h] units tall.
+     *
+     * Drawn WITHOUT anti-aliasing, on a paint of its own. The tracer emits one rectangle
+     * per pixel row of the source glyph, so a solid shape arrives as a stack of abutting
+     * bars — and an anti-aliased edge on each of them blends with the background at every
+     * shared boundary. The result is a solid glyph rendered with a hairline of panel
+     * showing through between every row: the play triangle came out looking woven. It is
+     * most obvious on the transport glyphs because they are the only FILLED ones, which
+     * is why it survived three outline icons unnoticed.
+     *
+     * Pixel art, drawn like the mascot: no anti-aliasing, crisp edges, no seams.
+     */
     private fun drawIcon(canvas: Canvas, icon: PanelIcons.Icon, x: Float, y: Float, h: Float) {
         val w = h * icon.aspect
         val left = x + (h - w) / 2f          // centred in the cell, not left-aligned in it
+        iconPaint.color = extras.color
         for (r in icon.rects) {
+            // SNAPPED TO WHOLE PIXELS, which is the whole reason this loop is not two
+            // lines. A traced row is one source pixel tall, and at 24 units from a
+            // 19-row glyph that is 1.26 device pixels: the rasteriser gives the leftover
+            // fraction partial coverage, so the rows came out alternating full and
+            // three-quarter brightness. The play triangle was visibly banded — measured
+            // at (122,129,247) and (92,98,187) on consecutive rows.
+            //
+            // Rounding each edge fixes it without a fudge factor. Row k's bottom and row
+            // k+1's top are the same expression, so they round to the same pixel: no
+            // gap, no overlap, no partial coverage. Rows land on 1 or 2 pixels depending
+            // where they fall, which is exactly what nearest-neighbour scaling of pixel
+            // art is supposed to do.
             canvas.drawRect(
-                left + r.x * w, y + r.y * h,
-                left + (r.x + r.w) * w, y + (r.y + r.h) * h,
-                extras,
+                kotlin.math.round(left + r.x * w),
+                kotlin.math.round(y + r.y * h),
+                kotlin.math.round(left + (r.x + r.w) * w),
+                kotlin.math.round(y + (r.y + r.h) * h),
+                iconPaint,
             )
         }
     }
@@ -1605,13 +1756,216 @@ class RearDialView(context: Context) : View(context) {
         if (sessionBars.isNotEmpty()) animating = true
     }
 
-    /** ACRNM maker's mark, bottom-right. White mask, tinted at draw time — never edit
-     *  the drawable. */
-    private fun drawMark(canvas: Canvas) {
+    /**
+     * The artwork slot: the maker's mark, the user's own image, or the media controls.
+     *
+     * One region, one occupant. The controls do not sit beside the artwork or shrink it
+     * — they take the whole slot for as long as something is playing and hand it back
+     * when it stops. Anything else divides 278 units of a 904-unit panel into two things
+     * that are each too small to read.
+     */
+    private fun drawMark(canvas: Canvas, dx: Float, dy: Float) {
         val region = android.graphics.RectF(
             BAR_LEFT, Panel.HEIGHT - MARK_BOTTOM - MARK_H,
             BAR_RIGHT, (Panel.HEIGHT - MARK_BOTTOM).toFloat(),
         )
+
+        val swap = mediaSwap(frameNowMs)
+        if (swap <= 0.001f) {
+            mediaStrip = null
+            drawArt(canvas, region)
+            return
+        }
+
+        // A drum, exactly like the notification wheel, and for the same reason: the two
+        // occupants of this slot are alternatives rather than states of one thing, so
+        // one leaves as the other arrives. A cross-fade would have the mark and the
+        // track name both half-visible over each other in the middle, which on a
+        // 70-unit strip is a smudge.
+        canvas.save()
+        // Clipped to the WIDER band, or the cover would be cut off at the mark's edge
+        // as it slides.
+        canvas.clipRect(mediaRegion(region))
+        val h = region.height()
+        if (swap < 0.999f) {
+            canvas.save()
+            canvas.translate(0f, swap * h)
+            drawArt(canvas, region)
+            canvas.restore()
+        }
+        canvas.save()
+        canvas.translate(0f, -(1f - swap) * h)
+        drawMediaRow(canvas, region, swap >= 0.999f, dx, dy)
+        canvas.restore()
+        canvas.restore()
+    }
+
+    /**
+     * The band the media row occupies: the artwork slot, plus the corner the close
+     * button used to sit in.
+     *
+     * Wider than the slot the mark uses. The mark is a logo and belongs on the bar
+     * column it is aligned to; the media row is three things side by side and was
+     * cramped into 278 units, clipping most track titles at thirteen characters. The
+     * space left of the bar column was doing nothing once the close button moved, and it
+     * is exactly where a cover wants to be.
+     */
+    private fun mediaRegion(mark: android.graphics.RectF) = android.graphics.RectF(
+        CONTENT_EDGE, mark.top, mark.right, mark.bottom,
+    )
+
+    /**
+     * Track and artist on the left, three transport glyphs on the right.
+     *
+     * No album art. It would have to be pushed across the process boundary as a bitmap
+     * on every track change — the one thing the notification path was careful not to do
+     * — and at 70 units square it would cost half the width that the title needs to be
+     * readable at all.
+     *
+     * The glyphs are FILLED where the clock, battery and calendar are outlines. Those
+     * are labels; these are the only things on this panel meant to be pressed, and a
+     * solid shape is a target where a hairline is a note.
+     */
+    private fun drawMediaRow(
+        canvas: Canvas,
+        region: android.graphics.RectF,
+        settled: Boolean,
+        dx: Float,
+        dy: Float,
+    ) {
+        val m = media ?: return
+        val tint = colorFor("media", config.mediaTint)
+        val band = mediaRegion(region)
+
+        // The cover first, because where it ends is where the text begins.
+        //
+        // A missing cover is ordinary — plenty of tracks have none, and a podcast or a
+        // browser tab rarely does — so the row closes up rather than leaving a hole. The
+        // text simply starts at the band's left edge instead.
+        val cover = coverArt(m.artPath)
+        var textLeft = band.left
+        if (cover != null) {
+            val square = android.graphics.RectF(
+                band.left, band.top, band.left + band.height(), band.bottom)
+            // Cropped to fill, never letterboxed: covers are square already, and the odd
+            // one that is not should lose its edges rather than sit in a box. Same
+            // placement the panel's custom artwork uses, at neutral pan and zoom — there
+            // is nothing to crop by hand here.
+            canvas.save()
+            canvas.clipRect(square)
+            canvas.drawBitmap(
+                cover, null,
+                ArtPlacement.destination(square, cover.width, cover.height, 0f, 0f, 1f),
+                artPaint,
+            )
+            canvas.restore()
+            textLeft = square.right + MediaLayout.COVER_GAP
+        }
+
+        val row = MediaLayout.of(textLeft, region.right, region.centerY())
+        val gh = MediaLayout.GLYPH_H
+        val (prev, play, next) = Triple(row.prev, row.play, row.next)
+
+        extras.color = tint
+        drawIcon(canvas, PanelIcons.PREV, prev, row.glyphTop, gh)
+        drawIcon(canvas, PanelIcons.NEXT, next, row.glyphTop, gh)
+
+        // The middle glyph is its own little drum, clipped to one cell: pause rises out
+        // of the top as play drops off the bottom. It is the same gesture as the row
+        // arriving, one size down, so a track being paused and the controls appearing
+        // read as the same machine.
+        val turn = playSwap(frameNowMs)
+        canvas.save()
+        canvas.clipRect(play, region.top, play + gh, region.bottom)
+        if (turn < 0.999f) {
+            drawIcon(canvas, PanelIcons.PLAY, play, row.glyphTop + turn * gh, gh)
+        }
+        if (turn > 0.001f) {
+            drawIcon(canvas, PanelIcons.PAUSE, play, row.glyphTop - (1f - turn) * gh, gh)
+        }
+        canvas.restore()
+
+        val hasArtist = m.artist.isNotBlank()
+        var baseline = MediaLayout.firstBaseline(region.centerY(), hasArtist)
+
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = MediaLayout.TEXT_SIZE
+        extras.color = tint
+        canvas.drawText(
+            noticeClip(m.title, extras, row.textWidth), textLeft, baseline, extras)
+        if (hasArtist) {
+            baseline += MediaLayout.LINE
+            // Dimmed against the title rather than given a colour of its own. Which of
+            // the two lines is the track is the only thing this row has to say at a
+            // glance, and a second hue would make that a question about the palette.
+            extras.color = (tint and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
+            canvas.drawText(
+                noticeClip(m.artist, extras, row.textWidth), textLeft, baseline, extras)
+        }
+        extras.textSize = 18f
+
+        // Targets only once the row has ARRIVED. A button that can be pressed while it
+        // is still sliding is a button in a place it is about to leave, and the whole
+        // travel is a fifth of a second — there is nothing to gain by accepting a press
+        // during it and a mis-tap to lose.
+        if (!settled) {
+            mediaStrip = null
+            mediaCentres = emptyList()
+            return
+        }
+        // Full region height, not the glyph's 24 units. Same reasoning as CAMERA_SLOP:
+        // this is glass on the back of a phone being held, and the glyph is what says
+        // the target is there rather than what the target is.
+        //
+        // The canvas offset is taken BACK OUT, for the reason drawCamera gives at
+        // length: touches arrive in the view's own coordinates, which neither the
+        // burn-in drift nor a notification's push ever moves. Storing the shifted strip
+        // would walk the targets away from the glyphs — a few pixels on a ten-minute
+        // cycle, and a third of the panel for the five seconds a notification is up.
+        mediaStrip = android.graphics.RectF(
+            prev - MediaLayout.GLYPH_GAP / 2f - dx,
+            region.top - dy,
+            region.right - dx,
+            region.bottom - dy,
+        )
+        mediaCentres = row.centres.map { it - dx }
+    }
+
+    /**
+     * The cover, decoded once and cached against the file's identity.
+     *
+     * Same trick and same reason as [customArt]: there is ONE cover file and it is
+     * overwritten in place, so the path never changes and caching on the path alone
+     * would pin the first album forever. Keyed on size and modification time instead,
+     * which is what actually changes when a track does.
+     */
+    private fun coverArt(path: String): android.graphics.Bitmap? {
+        if (path.isEmpty()) return null
+        val file = java.io.File(path)
+        val key = "$path:${file.lastModified()}:${file.length()}"
+        if (key != coverKey) {
+            coverKey = key
+            val decoded = try {
+                android.graphics.BitmapFactory.decodeFile(path)
+            } catch (_: Exception) {
+                null
+            }
+            // Decode first, release after, and only on success — a failed decode must
+            // not destroy the image a draw in flight is still holding.
+            if (decoded != null) {
+                coverBitmap?.recycle()
+                coverBitmap = decoded
+            }
+        }
+        return coverBitmap
+    }
+
+    private var coverKey: String? = null
+    private var coverBitmap: android.graphics.Bitmap? = null
+
+    /** ACRNM maker's mark, or the user's image. White mask, tinted at draw time — never
+     *  edit the drawable. */
+    private fun drawArt(canvas: Canvas, region: android.graphics.RectF) {
         val custom = customArt()
         if (custom != null) {
             drawCustomArt(canvas, custom, region)
@@ -1945,8 +2299,6 @@ class RearDialView(context: Context) : View(context) {
 
         private const val CLOSE_STROKE = 3f
 
-        /** Clear air between the button and where the mascot starts its walk. */
-        private const val AMBIENT_GAP = 12f
 
         /**
          * Just clear of the display cutout, on the artwork's centre line.
@@ -1961,9 +2313,33 @@ class RearDialView(context: Context) : View(context) {
          * and centred on the artwork's line like the camera is, so the two buttons and
          * the mark share one row across the panel.
          */
+        /**
+         * The left edge of everything that can be drawn OR pressed.
+         *
+         * The panel's left 296 units are the cutout — camera glass, no display and no
+         * digitizer — so this is the cutout plus the margin the rest of the panel keeps
+         * from its edges.
+         */
+        private const val CONTENT_EDGE = (Panel.CUTOUT_RIGHT + MARK_BOTTOM).toFloat()
+
         private const val CLOSE_R = 16f
-        private const val CLOSE_CX = Panel.CUTOUT_RIGHT + MARK_BOTTOM + CLOSE_R
-        private const val CLOSE_CY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
+        private const val CLOSE_CX = CONTENT_EDGE + CLOSE_R
+
+        /**
+         * TOP left, not bottom left, and it moved there to make room.
+         *
+         * It sat on the artwork's centre line, which put it in the only clear space on
+         * the bottom band — the space the media row's cover now occupies. There is
+         * nothing else in the top-left corner: the rings are drawn inside the cutout and
+         * end at 278, and the masthead is centred on the bar column and cannot reach
+         * left of 377 at its longest permitted title (see TitleLimits, which caps it at
+         * 16 characters). That leaves this corner empty and reachable.
+         *
+         * Mirrors the bottom margin so the button sits the same distance from its corner
+         * as the camera does from the opposite one.
+         */
+        private const val CLOSE_CY = MARK_BOTTOM + CLOSE_R
+
 
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
@@ -1985,6 +2361,18 @@ class RearDialView(context: Context) : View(context) {
 
         /** How long the strip takes to arrive or leave. */
         private const val SLIDE_MS = 260f
+
+        /**
+         * How long the artwork takes to hand the slot over, and the play glyph to
+         * become the pause glyph.
+         *
+         * Shorter than the notification's SLIDE_MS. That strip is 143 units tall and
+         * crosses a third of the panel; this travels 70 and is a button changing under
+         * a finger that has just pressed it. The same duration over a fifth of the
+         * distance reads as lag.
+         */
+        private const val MEDIA_MS = 200f
+
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f
@@ -2110,11 +2498,29 @@ class RearDialView(context: Context) : View(context) {
             return (Math.sin((now % period.toLong()) / period * 2 * Math.PI) * 3).toFloat()
         }
 
+        /**
+         * The burn-in walk: where the whole composition sits this minute.
+         *
+         * ROUNDED TO WHOLE PIXELS, and that is load-bearing rather than tidy. This is a
+         * translate applied to the entire canvas, so a fractional offset puts every edge
+         * on the panel a fraction of a pixel off its grid — and the traced glyphs are
+         * stacks of one-pixel rows, which the rasteriser then renders with partial
+         * coverage. The transport buttons came out banded, measured at (93,99,189) and
+         * (104,111,212) on alternating rows of a solid shape, and snapping the
+         * rectangles themselves did nothing because the translate under them was still
+         * fractional.
+         *
+         * Costs nothing. This exists to keep a static image from sitting on the same
+         * OLED pixels for hours; whether it moves in whole pixels or fractions of one is
+         * irrelevant to that, and whole pixels are what a panel drawn from pixel art
+         * wants underneath it.
+         */
         @JvmStatic
         fun driftOffset(now: Long): Pair<Float, Float> {
             val period = 600_000.0
             val phase = (now % period.toLong()) / period * 2 * Math.PI
-            return (Math.sin(phase) * 4).toFloat() to (Math.cos(phase) * 4).toFloat()
+            return Math.round(Math.sin(phase) * 4).toFloat() to
+                Math.round(Math.cos(phase) * 4).toFloat()
         }
     }
 }

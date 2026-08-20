@@ -234,6 +234,22 @@ data class PanelConfig(
      */
     val notificationBg: Int? = null,
 
+    /**
+     * Media controls in place of the bottom artwork, while something is playing.
+     *
+     * Off by default like everything else that changes the panel, and for one reason
+     * beyond consistency: this one TAKES A REGION the user has already decorated. The
+     * artwork slot accepts a custom image, and quietly covering someone's picture the
+     * first time they play a song is not a feature arriving, it is a picture going
+     * missing.
+     *
+     * It also rides on notification access, granted for a different feature entirely
+     * (see Setup's step and MediaWatcher's note). Turning on a media player as a side
+     * effect of agreeing to mirror notifications is not something the user asked for.
+     */
+    val showMedia: Boolean = false,
+    val mediaColor: Int? = null,
+
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are
@@ -252,6 +268,7 @@ data class PanelConfig(
     val dateTint: Int get() = dateColor ?: extrasColor
     val cameraTint: Int get() = cameraColor ?: extrasColor
     val notificationTint: Int get() = notificationColor ?: extrasColor
+    val mediaTint: Int get() = mediaColor ?: extrasColor
     val notificationGround: Int get() = notificationBg ?: background
 
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }

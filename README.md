@@ -179,8 +179,13 @@ panel again, measured.
 
 ### Hide
 
-Ripples the readout away and leaves the mascot walking the bottom of the panel. Tap the
-mascot to bring it back.
+Top-left corner. Ripples the readout away and leaves the mascot walking the bottom of the
+panel. Tap the mascot to bring it back.
+
+It used to sit bottom-left, on the artwork's line. It moved because the media row wanted
+that corner for a cover, and the top-left was the only genuinely empty space left: the
+rings are drawn inside the display cutout and stop at 278, and the masthead is centred on
+the bar column and cannot reach left of 377 even at its longest permitted title.
 
 **Not a dismissal.** The panel keeps drawing, keeps polling and stays alive. An app that
 dismisses its own panel cannot put it back — placement needs Shizuku and a task that
@@ -197,6 +202,53 @@ is alive and the task is fine.
 The ripple radiates from wherever you touched, and it can be interrupted: change your
 mind halfway and it reverses from halfway, with the remaining distance setting the
 duration.
+
+## Media controls
+
+When something is playing, the bottom band becomes a player: cover, track, artist and
+three buttons. When it stops, the artwork comes back. One thing in that space at a time —
+it is 70 units tall, and two things sharing it would be two things too small to read.
+
+The swap is a wheel, the same one the notification strip turns on: the artwork drops out
+of the bottom as the row rises into the top. So is the play/pause glyph, one size down —
+pause rises as play falls, inside its own cell. A track being paused and the controls
+arriving are then the same gesture at two scales rather than two unrelated effects.
+
+**No new permission.** It runs on the notification access you may already have granted for
+mirroring notifications: Android hands the active media sessions to whoever holds it,
+which is why `MediaSessionManager.getActiveSessions` is given the notification listener's
+own component. Without that grant the feature does nothing at all, and the settings row
+says so under itself rather than pretending the switch worked.
+
+It is still **its own toggle**, off by default. Two reasons, and the second is the real
+one: this takes over a region you may have put your own picture in, and quietly covering
+someone's artwork the first time they play a song is a picture going missing, not a
+feature arriving. Agreeing to mirror notifications is not agreeing to that.
+
+### What crosses to the panel
+
+Text, and one small file. Title, artist, and whether it is running. The cover is scaled to
+140px, written to the app's own storage and passed as a **path** — a bitmap in a broadcast
+is copied through the binder, which has a hard limit around a megabyte shared with every
+other transaction in flight. It is written to a temp file and renamed, because the panel
+may be decoding the previous one at that moment, and an atomic rename cannot be caught
+half-written.
+
+The buttons work the other way round. The panel has no media session of its own — a
+`MediaController` belongs to the process that obtained it, and `:rear` holds no
+notification access — so a press is a broadcast back to the main process, which owns the
+controller. Nothing is guessed on the way out: the panel does not flip its own glyph
+optimistically, it waits for the player to say what happened. A play button that refused
+to start should not look like a pause button.
+
+### If several things are playing
+
+The foremost one, as the system ranks it. Not a merge: a browser tab and a podcast paused
+an hour ago can both hold a session, and a row that showed whichever answered first would
+swap around under your hand.
+
+A session with no title is ignored — a game that took audio focus, a page with a video
+element on it — because an empty row is worse than the artwork it replaced.
 
 ## Notifications from other apps
 
@@ -422,7 +474,10 @@ phone, understanding all of the above.
    HyperOS is aggressive here: with restrictions on it stops the poll service, and the
    panel freezes on its last reading — showing stale numbers as though they were current.
 6. **Grant notification access** — only if you want other apps' notifications mirrored
-   onto the panel. Without it that feature does nothing and everything else works. The
+   onto the panel, or the media controls. Both read from this one grant; there is no
+   separate switch for the player, because Android hands out the active media sessions to
+   whoever holds notification access. Without it neither feature does anything and
+   everything else works. The
    onboarding list has a button, and unlike autostart this step can read its own state,
    so it ticks itself once granted.
 7. **Allow autostart.** HyperOS will not let the app start itself otherwise — not

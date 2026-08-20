@@ -34,6 +34,7 @@ import android.widget.SeekBar
 import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.ShizukuBridge
 import dev.kb896.aiusage.service.Graph
+import androidx.core.app.NotificationManagerCompat
 import dev.kb896.aiusage.service.UsagePollService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -500,6 +501,22 @@ class MainActivity : ComponentActivity() {
             SettingsRows.colorRow(
                 container, "  ↳ background", config.notificationGround,
             ) { c -> write { it.copy(notificationBg = c) } }
+        }
+        // Directly under Notifications, because it runs on the same grant — see Setup's
+        // notification-access step. Someone turning this on and finding it dead has the
+        // reason one row up rather than in an accordion they have not opened.
+        SettingsRows.toggleWithColor(
+            container, "Media controls", config.showMedia, config.mediaTint,
+            onChange = { on -> write { it.copy(showMedia = on) } },
+            onPick = { c -> write { it.copy(mediaColor = c) } },
+        )
+        if (config.showMedia && !NotificationManagerCompat.getEnabledListenerPackages(this)
+                .contains(packageName)
+        ) {
+            SettingsRows.note(
+                container,
+                "  ↳ needs notification access — see ONBOARDING",
+            )
         }
         SettingsRows.toggleWithColor(
             container, "Hide", config.showClose, config.closeColor,
