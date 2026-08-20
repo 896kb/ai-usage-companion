@@ -2760,17 +2760,22 @@ class RearDialView(context: Context) : View(context) {
             level <= MediaPage.VOLUME_LOUD -> PanelIcons.VOLUME_LOW
             else -> PanelIcons.VOLUME_HIGH
         }
-        val head = MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP * volumeShown
         val ring = rings.work
         // OUTSIDE the arc. Inside is the camera lens — there is no display in the hole a
         // ring encircles, so a glyph put there is drawn onto glass.
         //
-        // It only fits out here because it shrank. The lower ring is centred 420 down a
-        // 572 panel, so at five o'clock a 26-unit glyph clear of the arc lands half off
-        // the bottom edge; at 18 it does not. The glyph is CENTRED on its orbit, so half
-        // its height comes off the clearance too — missing that is what made a stated gap
-        // of ten read as stuck to the ring.
+        // The glyph is CENTRED on its orbit, so half its height comes off the clearance
+        // too — missing that is what made a stated gap of ten read as stuck to the ring.
         val orbit = ring.radius + ring.stroke / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
+        // The arc's head, held back to wherever the glyph still fits on the panel.
+        //
+        // At this size it cannot reach the end. The lower ring is centred 420 down a 572
+        // panel and the glyph orbits 178 units out, so at five o'clock its bottom lands
+        // twenty units past the edge — it rides the head to about four fifths of the
+        // range and then holds while the arc carries on. See MediaPage.speakerLimit,
+        // which works that limit out from the sizes rather than stating an angle.
+        val head = (MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP * volumeShown)
+            .coerceAtMost(MediaPage.speakerLimit(ring.cy, orbit, Panel.HEIGHT.toFloat()))
         val radians = Math.toRadians(head.toDouble())
         val hx = ring.cx + orbit * Math.cos(radians).toFloat()
         val hy = ring.cy + orbit * Math.sin(radians).toFloat()

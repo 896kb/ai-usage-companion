@@ -107,10 +107,26 @@ class MediaPageTest {
     @Test fun `the speaker stays on the panel at full volume`() {
         val ringCy = 420f
         val orbit = 128f + 25f / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
-        val at5 = Math.toRadians(MediaPage.VOLUME_ARC_START.toDouble() +
-            MediaPage.VOLUME_ARC_SWEEP)
-        val bottom = ringCy + orbit * Math.sin(at5).toFloat() + MediaPage.MUTE_H / 2f
-        assertTrue("the speaker runs off the bottom at full volume: $bottom", bottom <= 572f)
+        val limit = MediaPage.speakerLimit(ringCy, orbit, panelH)
+        val bottom = ringCy + orbit * Math.sin(Math.toRadians(limit.toDouble())).toFloat() +
+            MediaPage.MUTE_H / 2f
+        assertTrue("the speaker runs off the bottom at full volume: $bottom", bottom <= panelH)
+    }
+
+    /** The limit is a CAP, never an extension — it must not push the glyph past the end
+     *  of the arc it is supposed to be marking. */
+    @Test fun `the speaker limit never exceeds the arc`() {
+        val orbit = 128f + 25f / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
+        val limit = MediaPage.speakerLimit(420f, orbit, panelH)
+        assertTrue("the speaker overshoots the arc",
+            limit <= MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP + 0.01f)
+    }
+
+    /** With room to spare it rides the whole arc, rather than stopping short for nothing. */
+    @Test fun `a taller panel lets the speaker reach the end`() {
+        val orbit = 128f + 25f / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
+        val limit = MediaPage.speakerLimit(420f, orbit, 2_000f)
+        assertEquals(MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP, limit, 0.01f)
     }
 
     @Test fun `clocks read as clocks`() {

@@ -105,7 +105,7 @@ object MediaPage {
     const val VOLUME_TRAVEL = 1f
 
     /** The mute button, beside the ring that now reports the volume. */
-    const val MUTE_H = 18f
+    const val MUTE_H = 36f
 
     /**
      * How far CLEAR of the ring's outer edge the speaker sits.
@@ -115,7 +115,7 @@ object MediaPage {
      * ten units of "gap" read as touching it. Half the glyph's height has to come out of
      * the orbit as well — see RearDialView, where the orbit is computed.
      */
-    const val MUTE_GAP = 10f
+    const val MUTE_GAP = 20f
 
     /**
      * The mute target: a patch of panel beside the speaker, at the speaker's height.
@@ -131,6 +131,28 @@ object MediaPage {
      */
     const val MUTE_TARGET_W = 104f
     const val MUTE_TARGET_H = 92f
+
+    /** Panel edge the speaker must stay inside of. */
+    const val SPEAKER_MARGIN = 2f
+
+    /**
+     * The furthest round the arc the speaker can go before it leaves the panel.
+     *
+     * Derived, not chosen. At double size and double spacing the glyph orbits 178 units
+     * out, and the lower ring is centred 420 down a 572 panel — so at the arc's own end,
+     * five o'clock, the glyph's bottom lands twenty units past the edge. It fits out to
+     * about twenty to five and no further.
+     *
+     * So the arc still runs its full length and the speaker rides it as far as it can,
+     * then holds. Above roughly four fifths of the range the glyph stops marking the
+     * exact head. That is the trade a bigger glyph buys, and it is stated here rather
+     * than by a hardcoded angle so it corrects itself if any of the sizes move.
+     */
+    fun speakerLimit(ringCy: Float, orbit: Float, panelHeight: Float): Float {
+        val room = (panelHeight - SPEAKER_MARGIN - MUTE_H / 2f - ringCy) / orbit
+        if (room >= 1f) return VOLUME_ARC_START + VOLUME_ARC_SWEEP
+        return Math.toDegrees(Math.asin(room.toDouble())).toFloat()
+    }
 
     /**
      * How far OUTSIDE a ring its labels sit, and how big they are.
