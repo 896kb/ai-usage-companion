@@ -1399,23 +1399,27 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val RIPPLE_MS = 2400f
 
-        /** Close button radius, and its centre, in panel units. */
-        private const val CLOSE_R = 16f
         private const val CLOSE_STROKE = 3f
 
         /** Clear air between the button and where the mascot starts its walk. */
         private const val AMBIENT_GAP = 12f
 
         /**
-         * Sits clear of the lower ring, which owns most of the left column.
+         * Just clear of the display cutout, on the artwork's centre line.
          *
-         * The ring reaches 140.5 units from (150, 420) at the default geometry, so a
-         * 16-unit button at x=43 has to sit below y≈536 to miss it. That is why this is
-         * not aligned with the artwork the way the camera on the right is — there is no
-         * room on this side to put it there.
+         * The left 296 units of this panel are a CUTOUT — the physical camera glass the
+         * rings are drawn around. There is no display there and, crucially, no digitizer:
+         * a button at x=43 was drawn perfectly and could not be pressed, because nothing
+         * on that side of the panel can be. Anything interactive has to live right of
+         * Panel.CUTOUT_RIGHT.
+         *
+         * Inset from the cutout by the same margin the camera keeps from the right edge,
+         * and centred on the artwork's line like the camera is, so the two buttons and
+         * the mark share one row across the panel.
          */
-        private const val CLOSE_CX = 43f
-        private const val CLOSE_CY = 538f
+        private const val CLOSE_R = 16f
+        private const val CLOSE_CX = Panel.CUTOUT_RIGHT + MARK_BOTTOM + CLOSE_R
+        private const val CLOSE_CY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
 
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
