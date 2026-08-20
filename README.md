@@ -361,10 +361,16 @@ They do not fade out and get replaced. As you scroll, each ring **sweeps** from 
 reports about usage to what it reports about the music. Cross-fading was the first attempt
 and it looked like two rings in the same place, which is what it was.
 
-Each is labelled in text curved around the inside of its own ring: the remaining time
-under the playback ring, `VOLUME` over the other. Inside, because outside is off the top
-of the panel above and off the bottom edge below, and the gap between the two rings is
-twenty units.
+The playback dial carries the whole reading: **elapsed curved at the arc's start**,
+**total at its end**, and **remaining straight in the middle**. Two endpoint labels on the
+rim with the headline number between them is what a dial looks like — and it is why there
+are no clocks along the bottom of the page any more, which were the same two numbers again
+five hundred units from the dial they belong to.
+
+The labels are inside their rings, because outside is off the top of the panel above and
+off the bottom edge below, and the gap between the two rings is twenty units. The two ends
+face opposite ways: text stands perpendicular to its path, so tops-outward reads correctly
+around the upper half and tops-inward around the lower.
 
 Both are **gauges rather than full circles**, and their gaps face each other: playback
 runs from half past ten round to five, volume from two to five. Two dials with their
@@ -387,9 +393,11 @@ And the ring moves **linearly** with no easing while your finger is down: easing
 make a value that jumps read as a movement, and a value already being moved by hand does
 not jump — smoothing it only puts the ring behind the finger dragging it.
 
-**Tap** that area to mute. It used to be the speaker glyph, but the glyph now rides the
-arc across camera glass with no digitizer behind it, so the gesture had to come to a
-surface that has one.
+**Mute** is a compact button just clear of the cutout that tracks the speaker's height. It
+cannot *be* the speaker: the lower ring is drawn over camera glass with no digitizer behind
+it, so wherever the arc carries the glyph is somewhere a finger cannot reach. It was
+briefly a tap anywhere in the volume area, which meant every stray touch on two thirds of
+the page silenced the music.
 
 **Muted is not the same as turned all the way down**: a muted stream is holding a level it
 will come back to, where a stream at zero has lost that number. Both show the bare
@@ -404,7 +412,15 @@ track stopping, a gap while the new one loads, then playing. Acting on each one 
 play/pause glyph flick to play and back on every skip.
 
 So a report is not a verdict. A state has to hold still for half a second before it
-counts, and one that reverts inside that window never counts at all. The cost is honest: a
+counts, and one that reverts inside that window never counts at all — **unless the panel
+asked for it**. A report that matches the command just sent is evidence, because the
+player is answering a question this panel put to it, so a press of play or pause shows at
+once. The suspicion is for reports that arrive unbidden.
+
+A skip gets a longer guard still, started when the panel sends next or previous rather
+than inferred from the title changing. Inferring it had a hole: a skip that drops the
+session produces no new title to compare, and by the time the track returns there is no old
+one left to have changed from. The cost is honest: a
 real pause takes half a second to show. The button has already been pressed by then, and
 one that answers deliberately beats one that twitches under the finger.
 

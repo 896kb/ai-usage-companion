@@ -974,8 +974,13 @@ class RearDialView(context: Context) : View(context) {
         // live in. Nothing here needs a showMedia check: the strip is null unless the
         // row was actually drawn.
         val onMedia = if (ambient) null else mediaAt(event.x, event.y)
-        val onVolume = !ambient && near(volumeBar, event.x, event.y)
-        val hit = onCamera || onMedia != null || onVolume || (config.showClose && onClose)
+        val onMute = !ambient && near(muteButton, event.x, event.y)
+        // Checked after mute, so the button wins where their slop regions overlap: it
+        // sits inside the volume area, and a press meant for mute that instead began a
+        // volume drag would look identical and do the wrong thing.
+        val onVolume = !ambient && !onMute && near(volumeBar, event.x, event.y)
+        val hit = onCamera || onMedia != null || onVolume || onMute ||
+            (config.showClose && onClose)
 
         return when (event.actionMasked) {
             // Claim the gesture on the way down if it started on a target, so a slight
@@ -1048,12 +1053,30 @@ class RearDialView(context: Context) : View(context) {
                     onCamera -> onCameraTap?.invoke()
                     // Before the close branch: a transport press is a press on the
                     // readout, not a request to sweep it away.
-                    // A TAP in the volume area is mute. The speaker glyph that used to
-                    // be the button now rides the arc, over camera glass with no
-                    // digitizer behind it — so the gesture had to come to the surface
-                    // that does have one. Drag to set it, tap to silence it.
-                    onVolume -> toggleMute()
-                    onMedia != null -> onMediaTap?.invoke(onMedia)
+                    onMute -> toggleMute()
+                    onMedia != null -> {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        when (onMedia) {
+                            // A skip we ASKED FOR, which is the case the guard exists
+                            // for and the case it was missing. It used to be inferred
+                            // from the title changing, and a skip that drops the session
+                            // never produces one to compare: `active` goes false, so
+                            // there is no new title, and when the track returns there is
+                            // no old one left to have changed from.
+                            RearActivity.MEDIA_NEXT,
+                            RearActivity.MEDIA_PREVIOUS,
+                            -> skipUntil = now + SKIP_GUARD_MS
+                            // And a toggle we asked for, which needs the opposite: the
+                            // player's answer to our own button press is evidence, and
+                            // waiting half a second to believe it is lag on the one
+                            // press where the user already knows what they did.
+                            RearActivity.MEDIA_PLAY_PAUSE -> {
+                                expecting = !playGate.shown
+                                expectingUntil = now + EXPECT_MS
+                            }
+                        }
+                        onMediaTap?.invoke(onMedia)
+                    }
                     hit -> {
                         val now = android.os.SystemClock.elapsedRealtime()
                         ambient = !ambient
@@ -1330,7 +1353,10 @@ class RearDialView(context: Context) : View(context) {
         // holds a verdict back until the player has stopped changing its mind.
         // A track change starts the skip guard. Both titles have to be real for it to
         // count: arriving from nothing is not a skip, and neither is stopping.
-        val previous = media?.title
+        // Falls back to the DEPARTING track, so a skip that drops the session on the way
+        // through is still recognised when the next one arrives — by then `media` is
+        // already null and there would be nothing to compare against.
+        val previous = media?.title ?: departing?.title
         if (next != null && !previous.isNullOrBlank() && !next.title.isNullOrBlank() &&
             next.title != previous
         ) {
@@ -1416,17 +1442,38 @@ class RearDialView(context: Context) : View(context) {
         // the phone, a headset or the next track simply ending is covered too — the
         // panel has no idea which of those happened and the answer is the same for all
         // of them.
+        // An answer to our own press is believed at once.
+        expecting?.let { want ->
+            if (playGate.latest == want) {
+                expecting = null
+                if (playGate.accept()) retargetPlayGlyph(nowMs)
+                return
+            }
+            if (nowMs > expectingUntil) expecting = null else animating = true
+        }
         if (nowMs < skipUntil) {
             animating = true
             return
         }
         if (!playGate.commit(nowMs)) return
-        // Retargeted from wherever the glyph is, so a change arriving mid-travel reverses
-        // instead of snapping — the same rule the ambient ripple follows.
+        retargetPlayGlyph(nowMs)
+    }
+
+    /**
+     * Send the play/pause glyph to whatever the gate has settled on.
+     *
+     * Retargeted from wherever it currently is, so a change arriving mid-travel reverses
+     * instead of snapping — the same rule the ambient ripple follows.
+     */
+    private fun retargetPlayGlyph(nowMs: Long) {
         playFrom = playSwap(nowMs)
         playTo = if (playGate.shown) 1f else 0f
         playAt = nowMs
     }
+
+    /** A state this panel asked for, and how long it will wait to see it. */
+    private var expecting: Boolean? = null
+    private var expectingUntil = 0L
 
     private val playGate = PlayGate(MEDIA_SETTLE_MS)
 
@@ -1438,8 +1485,11 @@ class RearDialView(context: Context) : View(context) {
      */
     private val pager = PanelPager(Panel.HEIGHT.toFloat(), PAGE_SETTLE_MS)
 
-    /** The volume column's touch target, or null when the media page is not up. */
+    /** The volume area's touch target, or null when the media page is not up. */
     private var volumeBar: android.graphics.RectF? = null
+
+    /** The mute button, beside the speaker rather than on it — see drawMediaPage. */
+    private var muteButton: android.graphics.RectF? = null
 
     /**
      * The music stream's volume, 0..1.
@@ -2662,51 +2712,10 @@ class RearDialView(context: Context) : View(context) {
         drawIcon(canvas, PanelIcons.NEXT, x, top, gh)
         centres += x + widths[2] / 2f
 
-        // ---- the timeline, with a clock at each end ---------------------------
-        //
-        // Elapsed on the LEFT of the bar and total on the right. That is where every
-        // player puts them, and the alternative — both on one side — makes the reader
-        // work out which number is which every time they glance at it.
-        val elapsed = m.elapsed(SystemClock.elapsedRealtime())
-        extras.textSize = MediaPage.CLOCK_SIZE
-        val clockChars = MediaPage.clockWidth(maxOf(m.durationMs, elapsed))
-        val clockW = extras.measureText("M") * clockChars
-
-        extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
-        val baseline = MediaPage.BAR_CY + MediaPage.CLOCK_SIZE / 2f - 2f
-        // The elapsed clock does NOT roll on its ordinary tick. A second passing is the
-        // one change here that is expected, and a wheel turning once a second would be
-        // the most distracting thing on the panel. It rolls when the number JUMPS —
-        // a seek, or a new track starting — which is the only time it is news.
-        val seconds = elapsed / 1000L
-        val ticked = seconds == lastElapsedSeconds + 1L
-        lastElapsedSeconds = seconds
-        val leftX = Panel.CUTOUT_RIGHT + MediaPage.MARGIN
-        rolling(
-            canvas, "page:elapsed", MediaPage.clock(elapsed), leftX, baseline,
-            android.graphics.RectF(
-                leftX, baseline - MediaPage.CLOCK_SIZE,
-                leftX + clockW * 1.4f, baseline + MediaPage.CLOCK_SIZE * 0.35f,
-            ),
-            animate = !ticked,
-        )
-        extras.textAlign = Paint.Align.RIGHT
-        val rightX = Panel.WIDTH - MediaPage.MARGIN
-        rolling(
-            canvas, "page:total", MediaPage.clock(m.durationMs), rightX, baseline,
-            android.graphics.RectF(
-                rightX - clockW * 1.4f, baseline - MediaPage.CLOCK_SIZE,
-                rightX, baseline + MediaPage.CLOCK_SIZE * 0.35f,
-            ),
-        )
-        extras.textAlign = Paint.Align.LEFT
-        extras.textSize = 18f
-
-        // NO BAR. The playback ring is the position now, and a horizontal bar saying
-        // the same thing a hundred units below it is the reading twice — the second one
-        // competing with the first for which is the real one. The clocks stay: the ring
-        // carries remaining time in its label, and how far in and how long it runs are
-        // numbers a curve cannot give you.
+        // No clocks along the bottom. Elapsed and total are on the playback ring now,
+        // curved at the two ends of the arc that measures them; a second copy pinned to
+        // the panel's bottom corners was the same two numbers again, five hundred units
+        // from the dial they belong to and from each other.
 
         // ---- the speaker, riding the head of the volume arc -------------------
         //
@@ -2728,7 +2737,16 @@ class RearDialView(context: Context) : View(context) {
         }
         val head = MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP * volumeShown
         val ring = rings.work
-        val orbit = ring.radius + ring.stroke / 2f + MediaPage.MUTE_GAP
+        // INSIDE the arc, not outside it, and the panel's edge is what decides that.
+        //
+        // Outside is the natural place for a gauge's pointer and it does not fit: the
+        // lower ring is centred 420 down a 572 panel, so at five o'clock — full volume —
+        // an outside orbit puts the glyph at y=572 and half of it off the bottom. Any
+        // orbit that fits there is back to touching the arc.
+        //
+        // The glyph is CENTRED on its orbit, so half of it comes off the clearance either
+        // way. Missing that is what made a gap of ten read as stuck to the ring.
+        val orbit = ring.radius - ring.stroke / 2f - MediaPage.MUTE_GAP - MediaPage.MUTE_H / 2f
         val radians = Math.toRadians(head.toDouble())
         val hx = ring.cx + orbit * Math.cos(radians).toFloat()
         val hy = ring.cy + orbit * Math.sin(radians).toFloat()
@@ -2782,9 +2800,24 @@ class RearDialView(context: Context) : View(context) {
                 Panel.CUTOUT_RIGHT - dx, notice - dy,
                 Panel.WIDTH - dx, MediaPage.volumeAreaBottom() - dy,
             )
+            // Mute is a BUTTON again, not the whole area. Tap-anywhere-to-mute meant
+            // every stray touch on two thirds of the page silenced the music, which is
+            // the one thing on this panel you would not want to happen by accident.
+            //
+            // It sits just clear of the cutout at the speaker's own height, because the
+            // speaker itself is over camera glass with no digitizer behind it. Tracking
+            // the glyph's height is what keeps the two associated when they cannot share
+            // a position.
+            muteButton = android.graphics.RectF(
+                Panel.CUTOUT_RIGHT - dx,
+                hy - MediaPage.MUTE_TARGET_H / 2f - dy,
+                Panel.CUTOUT_RIGHT + MediaPage.MUTE_TARGET_W - dx,
+                hy + MediaPage.MUTE_TARGET_H / 2f - dy,
+            )
 
         } else {
             volumeBar = null
+            muteButton = null
         }
         if (m.playing) animating = true
     }
@@ -2827,9 +2860,47 @@ class RearDialView(context: Context) : View(context) {
             ((MediaLayout.ARTIST_ALPHA * paging).toInt().coerceIn(0, 255) shl 24)
         val remaining = (m.durationMs - elapsed).coerceAtLeast(0L)
         if (m.durationMs > 0L) {
-            curved(canvas, "-" + MediaPage.clock(remaining), rings.personal, below = true)
+            // Remaining STRAIGHT, in the middle of the dial, rather than curved along
+            // the bottom where it started. With the two endpoints now labelled it sat
+            // thirty degrees from the total and the two overlapped into one unreadable
+            // run of digits — at this radius thirty degrees is forty-six units, and each
+            // label is fifty wide.
+            //
+            // The middle is where it belongs anyway: two endpoint labels on the rim and
+            // the headline number in the centre is what a dial looks like, and it is the
+            // one reading here you would want to catch without following a curve.
+            extras.textAlign = Paint.Align.CENTER
+            extras.textSize = MediaPage.REMAINING_SIZE
+            canvas.drawText(
+                "-" + MediaPage.clock(remaining),
+                rings.personal.cx,
+                rings.personal.cy + MediaPage.REMAINING_SIZE / 2f,
+                extras,
+            )
+            extras.textSize = MediaPage.LABEL_SIZE
         }
-        curved(canvas, MediaPage.VOLUME_LABEL, rings.work, below = false)
+        // How far in at the arc's start, how long it runs at its end. The dial then
+        // carries the whole reading: where the track began, where it ends, and what is
+        // left of it in the gap between the two.
+        //
+        // They face opposite ways because of where they are. Text stands perpendicular to
+        // its path, so tops-outward reads correctly around the upper half and tops-inward
+        // around the lower — at five o'clock, outward would have the total reading down
+        // and to the left.
+        curved(
+            canvas, MediaPage.clock(elapsed), rings.personal,
+            centreDeg = MediaPage.PLAYBACK_ARC_START, outward = true,
+        )
+        if (m.durationMs > 0L) {
+            curved(
+                canvas, MediaPage.clock(m.durationMs), rings.personal,
+                centreDeg = MediaPage.PLAYBACK_ARC_END, outward = false,
+            )
+        }
+        curved(
+            canvas, MediaPage.VOLUME_LABEL, rings.work,
+            centreDeg = 270f, outward = true,
+        )
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = 18f
     }
@@ -2912,40 +2983,39 @@ class RearDialView(context: Context) : View(context) {
     )
 
     /**
-     * A label bent around the inside of a ring.
+     * A label bent around a ring, centred on [centreDeg].
      *
-     * [below] puts it along the ring's lower arc, [below] false along its upper one.
-     * Which arc depends on where the ring is: the top ring's label hangs under it and
-     * the bottom ring's sits over it, so both land in the gap between them rather than
-     * off the top of the panel or under its bottom edge.
+     * [outward] chooses which way up the glyphs stand: true points their tops away from
+     * the ring's centre, which is what reads correctly anywhere on the upper half; false
+     * points them inward, which is what reads correctly underneath. Text stands
+     * perpendicular to the way its path travels, so the two cases are the same arc swept
+     * in opposite directions — and getting that backwards is exactly what put an earlier
+     * version of these labels on the right-hand edge of their rings, reading vertically.
      *
-     * The arc is built to fit the text rather than the text positioned along a
-     * half-circle. Passing a 180-degree path and centring with drawTextOnPath's hOffset
-     * is the obvious way and it put both labels on the right-hand edge of their rings,
-     * reading vertically — the offset is measured along the path, and reasoning about
-     * where that lands on a curve is a way to be wrong quietly. An arc whose sweep IS
-     * the text's angular width starts and ends exactly where the text does, so the
-     * offset is zero and there is nothing to get wrong.
-     *
-     * Direction is what keeps the glyphs upright: text stands perpendicular to the way
-     * the path travels, so each arc is swept the way that has the text running left to
-     * right at the point it crosses.
+     * The arc is built to FIT the text rather than the text positioned along a
+     * half-circle. Passing a long path and centring with drawTextOnPath's hOffset is the
+     * obvious way and the offset is measured along the curve, which is a way to be wrong
+     * quietly. An arc whose sweep is the text's own angular width starts and ends exactly
+     * where the text does, so the offset is zero and there is nothing left to get wrong.
      */
-    private fun curved(canvas: Canvas, text: String, g: RingGeometry, below: Boolean) {
-        val r = MediaPage.LABEL_RADIUS
+    private fun curved(
+        canvas: Canvas,
+        text: String,
+        g: RingGeometry,
+        centreDeg: Float,
+        outward: Boolean,
+        radius: Float = MediaPage.LABEL_RADIUS,
+    ) {
         val width = extras.measureText(text)
-        // The angle the text subtends at this radius. Android's arcs are in degrees and
-        // measured clockwise from three o'clock.
-        val span = Math.toDegrees((width / r).toDouble()).toFloat()
-        scratch.set(g.cx - r, g.cy - r, g.cx + r, g.cy + r)
+        // What the text subtends at this radius. Android's angles are degrees, clockwise
+        // from three o'clock.
+        val span = Math.toDegrees((width / radius).toDouble()).toFloat()
+        scratch.set(g.cx - radius, g.cy - radius, g.cx + radius, g.cy + radius)
         val path = android.graphics.Path().apply {
-            if (below) {
-                // Bottom of the circle is 90 degrees. Travelling toward SMALLER angles
-                // moves right along the bottom, so the sweep is negative.
-                addArc(scratch, 90f + span / 2f, -span)
+            if (outward) {
+                addArc(scratch, centreDeg - span / 2f, span)
             } else {
-                // Top is 270. There, travelling toward LARGER angles moves right.
-                addArc(scratch, 270f - span / 2f, span)
+                addArc(scratch, centreDeg + span / 2f, -span)
             }
         }
         canvas.drawTextOnPath(text, path, 0f, 0f, extras)
@@ -3743,6 +3813,10 @@ class RearDialView(context: Context) : View(context) {
          * the button flicking under the finger that pressed it.
          */
         private const val SKIP_GUARD_MS = 2_000L
+
+        /** How long the panel waits for the player to answer its own play/pause press
+         *  before going back to treating reports with the usual suspicion. */
+        private const val EXPECT_MS = 3_000L
 
         /**
          * How long a full page takes to settle after a release.

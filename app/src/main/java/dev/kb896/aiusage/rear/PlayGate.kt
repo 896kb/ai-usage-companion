@@ -53,6 +53,24 @@ internal class PlayGate(private val settleMs: Long) {
     /** Whether a verdict is pending, so the caller knows to keep redrawing. */
     fun waiting(): Boolean = reported != shown
 
+    /** What the player last said, believed or not. */
+    val latest: Boolean get() = reported
+
+    /**
+     * Believe the current report at once, skipping the settle.
+     *
+     * For a state the panel ASKED FOR. The settle exists because a report on its own is
+     * not evidence of anything — but a report that matches the command just sent is: the
+     * player is answering a question this panel put to it. Waiting half a second to
+     * believe the answer to your own button press is the lag the settle was supposed to
+     * prevent, applied to the one case that never needed it.
+     */
+    fun accept(): Boolean {
+        if (reported == shown) return false
+        shown = reported
+        return true
+    }
+
     /**
      * Adopt a state with no settling at all.
      *

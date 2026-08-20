@@ -107,8 +107,30 @@ object MediaPage {
     /** The mute button, beside the ring that now reports the volume. */
     const val MUTE_H = 26f
 
-    /** How far clear of the ring's outer edge the speaker orbits. */
-    const val MUTE_GAP = 10f
+    /**
+     * How far CLEAR of the ring's outer edge the speaker sits.
+     *
+     * True clearance, which it was not: the glyph is centred on its orbit, so adding the
+     * gap to the ring's outer radius put the glyph's inner half back over the ring and
+     * ten units of "gap" read as touching it. Half the glyph's height has to come out of
+     * the orbit as well — see RearDialView, where the orbit is computed.
+     */
+    const val MUTE_GAP = 22f
+
+    /**
+     * The mute target: a patch of panel beside the speaker, at the speaker's height.
+     *
+     * Not the speaker itself, which is the frustrating part. The lower ring is drawn over
+     * the camera glass and there is no digitizer behind it, so wherever the arc carries
+     * the glyph is somewhere a finger cannot reach — the button has to live just clear of
+     * the cutout and track the glyph's height instead.
+     *
+     * And not the whole volume area either, which is what it was: tapping anywhere above
+     * the transport row muted the music, so every stray touch on two thirds of the page
+     * silenced it.
+     */
+    const val MUTE_TARGET_W = 104f
+    const val MUTE_TARGET_H = 92f
 
     /**
      * The label curved inside a ring, and how big it is.
@@ -119,6 +141,10 @@ object MediaPage {
      */
     const val LABEL_RADIUS = 88f
     const val LABEL_SIZE = 15f
+
+    /** The remaining time, in the middle of the playback dial. Bigger than the rim
+     *  labels: it is the reading, and they are its endpoints. */
+    const val REMAINING_SIZE = 22f
 
     /** What the volume ring is called. Named, because a bare arc around a lens is not
      *  self-describing the way a bar under a track name is. */
@@ -152,6 +178,9 @@ object MediaPage {
      */
     const val PLAYBACK_ARC_START = 225f
     const val PLAYBACK_ARC_SWEEP = 195f
+
+    /** Where that arc ends: five o'clock. */
+    val PLAYBACK_ARC_END: Float get() = PLAYBACK_ARC_START + PLAYBACK_ARC_SWEEP - 360f
 
     /**
      * Where the mute glyph stops showing waves.
