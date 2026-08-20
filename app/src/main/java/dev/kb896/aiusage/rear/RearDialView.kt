@@ -243,21 +243,20 @@ class RearDialView(context: Context) : View(context) {
         // background that stays put. That was the bug: the background was painted before
         // the clip existed, so a finished ripple left a full dark panel behind.
         val rippleNow = SystemClock.elapsedRealtime()
-        val sweep = ripple(rippleNow)
-        // Settled into ambient: nothing but the button and the mascot, drawn below.
-        val hidden = ambient && sweep == null
-        val front = sweep?.let { t ->
-            android.graphics.Path().apply {
-                addCircle(rippleCx, rippleCy, rippleReach() * t, android.graphics.Path.Direction.CW)
-            }
-        }
+        // ONE value: how far the ambient state has swept, 0 to 1. Both directions are the
+        // same circle read the same way — the readout survives OUTSIDE it and the mascot
+        // lives inside it — and the direction is only whether the number is rising or
+        // falling. It used to be a progress from 0 with the CLIP SENSE FLIPPED depending
+        // on which way it was going, which worked and could not be interrupted: reversing
+        // mid-sweep meant restarting from nothing in the opposite sense, so a second tap
+        // had to be ignored until the first finished.
+        val v = ambientSweep(rippleNow)
+        val hidden = v >= 0.999f
+        val front = if (v > 0.001f && v < 0.999f) android.graphics.Path().apply {
+            addCircle(rippleCx, rippleCy, rippleReach() * v, android.graphics.Path.Direction.CW)
+        } else null
         canvas.save()
-        if (sweep != null) {
-            // Hiding keeps what the circle has NOT reached; showing keeps what it has.
-            // The same circle in opposite senses, which is what makes the two directions
-            // feel like one gesture rather than two animations.
-            if (ambient) canvas.clipOutPath(front!!) else canvas.clipPath(front!!)
-        }
+        if (front != null) canvas.clipOutPath(front)
 
         // Opaque, and the colour is the user's.
         //
@@ -418,11 +417,9 @@ class RearDialView(context: Context) : View(context) {
             // It used to cross-fade in and out over the top, which is what made it look
             // like it spawned — a figure appearing where nothing was, rather than one
             // that had been there all along and was being revealed.
-            if (ambient || sweep != null) {
+            if (v > 0.001f) {
                 canvas.save()
-                if (front != null) {
-                    if (ambient) canvas.clipPath(front) else canvas.clipOutPath(front)
-                }
+                if (front != null) canvas.clipPath(front)
                 // The ambient background belongs to this side too, or the swept region
                 // is briefly fully transparent and then snaps to its alpha at the end.
                 canvas.drawColor((config.background and 0x00FFFFFF) or (SEE_THROUGH_ALPHA shl 24))
@@ -432,6 +429,7 @@ class RearDialView(context: Context) : View(context) {
         } else {
             closeButton = null
             ambient = false
+            rippleTo = 0f
         }
 
         // Next frame only while something is still moving. When everything has settled
@@ -600,6 +598,8 @@ class RearDialView(context: Context) : View(context) {
      * restart from nothing every respawn.
      */
     private var rippleStart = 0L
+    private var rippleFrom = 0f
+    private var rippleTo = 0f
 
     /**
      * Where the current ripple radiates from — the point that was touched.
@@ -623,14 +623,23 @@ class RearDialView(context: Context) : View(context) {
      * Returns null in both settled states — fully shown and fully ambient — so the
      * drawing code only pays for the clip while something is actually moving.
      */
-    private fun ripple(nowMs: Long): Float? {
-        if (rippleStart == 0L) return null
-        val t = (nowMs - rippleStart).toFloat() / RIPPLE_MS
-        if (t >= 1f) { rippleStart = 0L; return null }
+    /**
+     * How far the ambient state has swept, 0 to 1.
+     *
+     * Interruptible by construction. A tap sets a new target and the sweep continues
+     * FROM WHERE IT IS — closing halfway and changing your mind reverses from halfway,
+     * rather than being ignored until the first animation finishes or snapping back to
+     * start again. The remaining distance is what sets the duration, so a small reversal
+     * is quick and a full one is not.
+     */
+    private fun ambientSweep(nowMs: Long): Float {
+        if (rippleStart == 0L) return rippleTo
+        val span = (nowMs - rippleStart).toFloat() / RIPPLE_MS
+        if (span >= 1f) { rippleStart = 0L; return rippleTo }
         animating = true
         // Eased with the same curve as everything else that moves on this panel, so a
         // ripple and a bar settling read as one machine rather than two.
-        return Tween.easeInOut(t.coerceIn(0f, 1f))
+        return rippleFrom + (rippleTo - rippleFrom) * Tween.easeInOut(span.coerceIn(0f, 1f))
     }
 
     /**
@@ -651,11 +660,6 @@ class RearDialView(context: Context) : View(context) {
 
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
-        // A ripple in flight owns the screen. Without this a second tap mid-sweep
-        // reverses the direction from wherever it had got to, and the panel half-appears
-        // and half-leaves at once.
-        if (rippleStart != 0L) return true
-
         val onCamera = !ambient && near(cameraButton, event.x, event.y)
         // In ambient mode the whole panel is the way back, not just the button. The
         // mascot is walking and the button is a 16-unit disc on the back of a phone
@@ -679,11 +683,17 @@ class RearDialView(context: Context) : View(context) {
                 when {
                     onCamera -> onCameraTap?.invoke()
                     hit -> {
+                        val now = android.os.SystemClock.elapsedRealtime()
                         ambient = !ambient
+                        // Continue from wherever the sweep is, not from the start. The
+                        // duration shrinks with the distance left, so turning it around
+                        // near the end is near-instant rather than a full crossing.
+                        rippleFrom = ambientSweep(now)
+                        rippleTo = if (ambient) 1f else 0f
                         // From the finger, whichever direction we are going.
                         rippleCx = event.x
                         rippleCy = event.y
-                        rippleStart = android.os.SystemClock.elapsedRealtime()
+                        rippleStart = now
                         invalidate()
                     }
                 }
@@ -899,14 +909,19 @@ class RearDialView(context: Context) : View(context) {
         val h = NOTICE_H
         val top = -h + h * slide
 
-        // Rounded at the BOTTOM-LEFT only, to the display's own corner radius.
+        // Rounded at the BOTTOM-LEFT only, to a fraction of the display's own radius.
         //
         // That is the one corner of this strip sitting in open panel — its top and right
         // edges run off the screen, where the display's own rounding already shapes them,
         // and its bottom-right meets the right edge straight. Matching the hardware's
         // radius makes the strip read as part of the screen rather than as a rectangle
         // laid on it, which is the whole reason to round anything here.
-        val r = cornerRadius()
+        //
+        // A FRACTION of it, though. The display's 97 is a corner on a 572-tall screen;
+        // the same number on a 143-tall strip is a quarter-circle that swallows the
+        // bottom-left and cuts into the third line of text. Scaled down it still reads
+        // as the same family of curve without the strip losing a corner to it.
+        val r = cornerRadius() / CORNER_DIVISOR
         val shape = android.graphics.Path().apply {
             addRoundRect(
                 Panel.CUTOUT_RIGHT.toFloat(), top, Panel.WIDTH.toFloat(), top + h,
@@ -918,7 +933,7 @@ class RearDialView(context: Context) : View(context) {
         canvas.clipPath(shape)
 
         // The strip's own ground, so the readout sliding under it does not show through.
-        noticePaint.color = colorFor("bg", config.background or (0xFF shl 24))
+        noticePaint.color = colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
         noticePaint.alpha = 255
         noticePaint.style = Paint.Style.FILL
         canvas.drawRect(
@@ -1729,7 +1744,7 @@ class RearDialView(context: Context) : View(context) {
          * glanceable; this is the whole readout leaving, and at 1.8s it looked like a
          * glitch rather than a decision.
          */
-        private const val RIPPLE_MS = 2400f
+        private const val RIPPLE_MS = 1200f
 
         /**
          * How opaque the panel stays when it is meant to be see-through — ambient mode,
@@ -1799,6 +1814,14 @@ class RearDialView(context: Context) : View(context) {
 
         /** What this phone's rear display reports, for when the display will not say. */
         private const val FALLBACK_CORNER = 97f
+
+        /**
+         * How much smaller the strip's corner is than the screen's.
+         *
+         * The strip is roughly a quarter of the panel's height, so a corner sized for
+         * the whole screen is proportionally four times too round on it.
+         */
+        private const val CORNER_DIVISOR = 3f
 
         private const val EXTRA_ICON_H = 20f
 

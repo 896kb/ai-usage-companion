@@ -203,6 +203,32 @@ object SettingsRows {
         parent.addView(row, rowParams(dp(context, 2)))
     }
 
+    /**
+     * A labelled colour, with no switch beside it.
+     *
+     * For settings that are only a colour — where [toggleWithColor] would need a toggle
+     * that governs nothing, and the colour grid would put it in a different part of the
+     * screen from the thing it belongs to.
+     */
+    fun colorRow(parent: LinearLayout, name: String, colour: Int, onPick: (Int) -> Unit) {
+        val context = parent.context
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(
+            TextView(context).apply {
+                text = name
+                textSize = 13f
+                setTextColor(Panel.Palette.FG)
+                typeface = context.resources.getFont(R.font.departure_mono)
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        row.addView(swatch(context, colour, onPick))
+        parent.addView(row, rowParams(dp(context, 8)))
+    }
+
     /** A row that opens something else. The chevron is the whole affordance. */
     fun navigation(parent: LinearLayout, name: String, onClick: () -> Unit) {
         navigationButton(parent, name, onClick)

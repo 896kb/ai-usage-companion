@@ -497,6 +497,9 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 container, "  ↳ include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
+            SettingsRows.colorRow(
+                container, "  ↳ background", config.notificationGround,
+            ) { c -> write { it.copy(notificationBg = c) } }
         }
         SettingsRows.toggleWithColor(
             container, "Hide", config.showClose, config.closeColor,

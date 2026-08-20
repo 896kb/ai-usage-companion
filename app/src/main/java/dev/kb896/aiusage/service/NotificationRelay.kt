@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.service
 
 import android.content.Intent
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -51,6 +52,23 @@ class NotificationRelay : NotificationListenerService() {
         // The body only when it was asked for separately. See the class note: the back of
         // the phone is the one screen its owner cannot see and everyone else can.
         val body = if (config.showNotificationText) text else null
+
+        // The same notification arrives more than once, and not rarely: a single post
+        // measured TWO onNotificationPosted calls two milliseconds apart. The system
+        // re-delivers on ranking changes and on any update to a notification already
+        // showing, and neither is news — but the panel treated each as a fresh arrival
+        // and turned the wheel, so every message replaced itself with a copy of itself
+        // the instant it appeared.
+        //
+        // Keyed on the CONTENT rather than on sbn.key alone: an app that genuinely edits
+        // a notification in place — a download percentage, a message being corrected —
+        // keeps the same key, and that IS worth showing again.
+        val fingerprint = "${sbn.key}\u0000$title\u0000$body"
+        if (fingerprint == lastFingerprint && SystemClock.elapsedRealtime() - lastAt < DEDUPE_MS) {
+            return
+        }
+        lastFingerprint = fingerprint
+        lastAt = SystemClock.elapsedRealtime()
         Log.i(TAG, "relaying a notification from ${sbn.packageName}")
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION)
@@ -76,7 +94,20 @@ class NotificationRelay : NotificationListenerService() {
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
     }.getOrDefault(pkg)
 
+    /** The last thing relayed, and when — see the de-duplication above. */
+    private var lastFingerprint: String? = null
+    private var lastAt = 0L
+
     private companion object {
         const val TAG = "AiUsageNotif"
+
+        /**
+         * How long an identical notification is treated as the same one.
+         *
+         * Generous. The duplicates measured were milliseconds apart, but the cost of
+         * being wrong in this direction is a repeat that is silently dropped, and the
+         * cost in the other is the panel flickering as a message replaces itself.
+         */
+        const val DEDUPE_MS = 3_000L
     }
 }

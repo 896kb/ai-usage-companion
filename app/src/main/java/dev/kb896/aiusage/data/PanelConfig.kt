@@ -224,6 +224,16 @@ data class PanelConfig(
     val showNotificationText: Boolean = false,
     val notificationColor: Int? = null,
 
+    /**
+     * The strip's own ground, falling back to the panel's background.
+     *
+     * Separate because the strip is a thing laid OVER the panel — giving it a ground of
+     * its own is how it stops reading as a hole cut in the readout. Null rather than a
+     * copy of [background], so changing the panel's colour carries the strip with it
+     * until someone deliberately parts them.
+     */
+    val notificationBg: Int? = null,
+
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are
@@ -242,6 +252,7 @@ data class PanelConfig(
     val dateTint: Int get() = dateColor ?: extrasColor
     val cameraTint: Int get() = cameraColor ?: extrasColor
     val notificationTint: Int get() = notificationColor ?: extrasColor
+    val notificationGround: Int get() = notificationBg ?: background
 
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
 
