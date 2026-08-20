@@ -120,6 +120,12 @@ more than an activity you can already feel.
 
 ## The rings and the bars
 
+**The rings are arcs on bare panel** — there is no grey circle behind them. That ground
+was there to say how much of a whole the reading was, and on a panel drawn around two
+camera lenses it mostly said "there is a grey circle here": it read as hardware rather
+than as a scale. The bars keep their tracks, because a bar is a rectangle in a list and
+the ground is what makes the row legible.
+
 **The rings are clocks, not gauges** by default. Each one shows the time remaining until
 that account's 5-hour window resets, drawn concentric with the phone's actual camera
 lenses. They fill as the window runs down, so a full ring means a reset is imminent —
@@ -316,6 +322,19 @@ surface that refuses to move and gives no reason.
 It is built as a **page count**, not a two-state toggle, because the reason it exists is
 that this panel will eventually hold more accounts than fit on it. Adding a third page is
 a number.
+
+### Values turn over when they change
+
+Title, artist and both clocks roll on a wheel when they change — the same drum the
+notification strip uses — but only when they *actually* change. A track ending replaces
+four fields at once and any of them may be identical across that change: two tracks from
+one album share an artist, two of the same length share a total. Rolling a value to itself
+is a flicker claiming something happened, so each field decides for itself.
+
+The elapsed clock is the exception: it does **not** roll on its ordinary tick. A second
+passing is the one change here that is expected, and a wheel turning once a second would
+be the most distracting thing on the panel. It rolls when the number *jumps* — a seek, or
+a new track starting.
 
 ### When a notification arrives on this page
 

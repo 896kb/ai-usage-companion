@@ -554,10 +554,9 @@ class RearDialView(context: Context) : View(context) {
             // the order: the preview shows that account's panel, not its slot.
             val at = if (onlyAccount != null) 0 else position
             val geo = positions.getOrNull(at) ?: return@forEachIndexed
-            // Ring one takes the playback position and stays a full circle: a track has
-            // a beginning and an end, and going all the way round means finished. Ring
-            // two takes the volume as a segment with nothing behind it — see
-            // MediaPage.VOLUME_ARC_START.
+            // Ring one takes the playback position over a full circle: a track has a
+            // beginning and an end, and all the way round means finished. Ring two takes
+            // the volume over a segment — see MediaPage.VOLUME_ARC_START.
             val isVolume = at == 1
             drawRing(
                 canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath,
@@ -566,7 +565,6 @@ class RearDialView(context: Context) : View(context) {
                 mediaColor = mediaRingTint,
                 mediaStart = if (isVolume) MediaPage.VOLUME_ARC_START else -90f,
                 mediaSweep = if (isVolume) MediaPage.VOLUME_ARC_SWEEP else 360f,
-                mediaTrack = !isVolume,
             )
         }
 
@@ -703,8 +701,6 @@ class RearDialView(context: Context) : View(context) {
         /** Where this ring's media reading starts and how far round it can go. */
         mediaStart: Float = -90f,
         mediaSweep: Float = 360f,
-        /** Whether the media reading keeps the unfilled ring behind it. */
-        mediaTrack: Boolean = true,
     ) {
         val status = state.statuses.firstOrNull { it.account == account }
         val kind = when (spec.window) {
@@ -728,15 +724,13 @@ class RearDialView(context: Context) : View(context) {
         val visible = maxOf(presence, blend)
         if (visible <= 0f) return
 
-        track.strokeWidth = g.stroke
-        // The unfilled ring fades out on any reading that does not want one. The volume
-        // is a segment down one side of the lens, and a full dark circle behind it would
-        // still be saying "this is how much of a whole" about a value that has no whole.
-        val trackAlpha = if (mediaTrack) visible else visible * (1f - blend)
-        track.alpha = (255 * trackAlpha).toInt()
+        // NO UNFILLED RING, on either page. The grey circle behind the arc was there to
+        // say how much of a whole the reading was, and on a panel drawn around two camera
+        // lenses it mostly said "there is a grey circle here" — it read as hardware
+        // rather than as a scale, and it was the only element on the panel with a
+        // permanent visible ground. The arc alone is the reading.
         val r = g.radius + breath
         scratch.set(g.cx - r, g.cy - r, g.cx + r, g.cy + r)
-        canvas.drawArc(scratch, 0f, 360f, false, track)
 
         // No data, or data we can't vouch for: dim ring, no arc. Never render
         // a stale or absent reading as if it were live.
@@ -2613,16 +2607,18 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.CENTER
         extras.textSize = MediaPage.TITLE_SIZE
         extras.color = shade(tint, 0xFF)
-        canvas.drawText(
-            noticeClip(m.title, extras, PAGE_TEXT_WIDTH), cx,
-            MediaPage.TITLE_BASELINE, extras,
+        rolling(
+            canvas, "page:title", noticeClip(m.title, extras, PAGE_TEXT_WIDTH), cx,
+            MediaPage.TITLE_BASELINE, lineBand(cx, MediaPage.TITLE_BASELINE,
+                PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
         )
         if (m.artist.isNotBlank()) {
             extras.textSize = MediaPage.ARTIST_SIZE
             extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
-            canvas.drawText(
-                noticeClip(m.artist, extras, PAGE_TEXT_WIDTH), cx,
-                MediaPage.ARTIST_BASELINE, extras,
+            rolling(
+                canvas, "page:artist", noticeClip(m.artist, extras, PAGE_TEXT_WIDTH), cx,
+                MediaPage.ARTIST_BASELINE, lineBand(cx, MediaPage.ARTIST_BASELINE,
+                    PAGE_TEXT_WIDTH, MediaPage.ARTIST_SIZE),
             )
         }
         extras.textAlign = Paint.Align.LEFT
@@ -2677,11 +2673,31 @@ class RearDialView(context: Context) : View(context) {
 
         extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
         val baseline = MediaPage.BAR_CY + MediaPage.CLOCK_SIZE / 2f - 2f
-        canvas.drawText(MediaPage.clock(elapsed), Panel.CUTOUT_RIGHT + MediaPage.MARGIN,
-            baseline, extras)
+        // The elapsed clock does NOT roll on its ordinary tick. A second passing is the
+        // one change here that is expected, and a wheel turning once a second would be
+        // the most distracting thing on the panel. It rolls when the number JUMPS —
+        // a seek, or a new track starting — which is the only time it is news.
+        val seconds = elapsed / 1000L
+        val ticked = seconds == lastElapsedSeconds + 1L
+        lastElapsedSeconds = seconds
+        val leftX = Panel.CUTOUT_RIGHT + MediaPage.MARGIN
+        rolling(
+            canvas, "page:elapsed", MediaPage.clock(elapsed), leftX, baseline,
+            android.graphics.RectF(
+                leftX, baseline - MediaPage.CLOCK_SIZE,
+                leftX + clockW * 1.4f, baseline + MediaPage.CLOCK_SIZE * 0.35f,
+            ),
+            animate = !ticked,
+        )
         extras.textAlign = Paint.Align.RIGHT
-        canvas.drawText(
-            MediaPage.clock(m.durationMs), Panel.WIDTH - MediaPage.MARGIN, baseline, extras)
+        val rightX = Panel.WIDTH - MediaPage.MARGIN
+        rolling(
+            canvas, "page:total", MediaPage.clock(m.durationMs), rightX, baseline,
+            android.graphics.RectF(
+                rightX - clockW * 1.4f, baseline - MediaPage.CLOCK_SIZE,
+                rightX, baseline + MediaPage.CLOCK_SIZE * 0.35f,
+            ),
+        )
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = 18f
 
@@ -2823,6 +2839,83 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = 18f
     }
+
+    /**
+     * Text that turns over when it changes, like the notification strip's drum.
+     *
+     * ONLY when it actually changes, and only when the change is worth showing. A track
+     * ending and the next one starting replaces four things at once — title, artist,
+     * elapsed, total — and any of them may be identical across that change: two tracks
+     * from the same album share an artist, two tracks of the same length share a total.
+     * Rolling a value to itself is a flicker that says something happened when nothing
+     * did, so each field decides for itself.
+     *
+     * [animate] false updates the text with no movement at all. That is what the running
+     * clock uses for its ordinary tick: a second passing is not news, and a wheel turning
+     * once a second would be the most distracting thing on the panel.
+     *
+     * Position only, nothing fades — see drawNotice. A drum's rows do not become
+     * transparent as they turn, they pass the edge and are gone.
+     */
+    private fun rolling(
+        canvas: Canvas,
+        key: String,
+        text: String,
+        x: Float,
+        baseline: Float,
+        clip: android.graphics.RectF,
+        animate: Boolean = true,
+    ) {
+        val state = rolls.getOrPut(key) { Roll(text) }
+        if (text != state.shown) {
+            // A first sighting is not a change. getOrPut has already seeded `shown` with
+            // the text, so this only fires for a genuine replacement.
+            state.leaving = if (animate) state.shown else null
+            state.at = if (animate) frameNowMs else 0L
+            state.shown = text
+        }
+        val turn =
+            if (state.at == 0L) 1f
+            else ((frameNowMs - state.at) / WHEEL_MS).coerceIn(0f, 1f)
+        if (turn >= 1f) {
+            state.leaving = null
+            state.at = 0L
+        } else {
+            animating = true
+        }
+
+        val height = clip.height()
+        canvas.save()
+        canvas.clipRect(clip)
+        state.leaving?.let { canvas.drawText(it, x, baseline + turn * height, extras) }
+        canvas.drawText(state.shown, x, baseline - (1f - turn) * height, extras)
+        canvas.restore()
+    }
+
+    /** One rolling field: what is shown, what is leaving, and when it started. */
+    private class Roll(var shown: String, var leaving: String? = null, var at: Long = 0L)
+
+    private val rolls = mutableMapOf<String, Roll>()
+
+    /** The last whole second the elapsed clock showed, so an ordinary tick can be told
+     *  from a jump. -1 until the first draw, which is neither. */
+    private var lastElapsedSeconds = -1L
+
+    /**
+     * The band a line of text occupies, for a wheel to turn inside.
+     *
+     * Generous on width — a rolling replacement can be wider than the text it replaces,
+     * and a clip cut to the outgoing string would shave the incoming one.
+     */
+    private fun lineBand(
+        centreX: Float,
+        baseline: Float,
+        width: Float,
+        size: Float,
+    ) = android.graphics.RectF(
+        centreX - width / 2f, baseline - size,
+        centreX + width / 2f, baseline + size * 0.35f,
+    )
 
     /**
      * A label bent around the inside of a ring.

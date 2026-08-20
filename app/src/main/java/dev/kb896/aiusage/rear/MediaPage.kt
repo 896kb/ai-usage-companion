@@ -106,7 +106,9 @@ object MediaPage {
 
     /** The mute button, beside the ring that now reports the volume. */
     const val MUTE_H = 26f
-    const val MUTE_GAP = 16f
+
+    /** How far clear of the ring's outer edge the speaker orbits. */
+    const val MUTE_GAP = 10f
 
     /**
      * The label curved inside a ring, and how big it is.
