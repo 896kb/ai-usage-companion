@@ -1011,12 +1011,15 @@ class RearDialView(context: Context) : View(context) {
         // makes it read as part of the screen rather than a rectangle laid on it: the
         // display's 97 is a corner on a 572-tall screen and a quarter-circle on a
         // 143-tall card.
-        // Its bottom-left curve gives way as the mini card emerges. With something
-        // attached below, that corner is in the middle of a stepped shape and a curve
-        // there is a notch — so the radius fades out exactly as far as the card comes
-        // out, and the curve travels to whichever card is currently the bottom.
+        // The bottom-left curve stays, ALWAYS, and it was a mistake to fade it.
+        //
+        // The reasoning was that a card attached below puts this corner in the middle of
+        // a stepped shape, where a curve is a notch. That would be true if the mini card
+        // covered this edge — but it is stepped in by MINI_INSET_LEFT, so the corner
+        // remains an exposed outside corner of the assembly and wants rounding exactly
+        // as much as it did alone. The curve fits inside the step with room to spare.
         val m = miniSlide(nowMs)
-        val cardBl = r * (1f - m)
+        val cardBl = r
         val card = android.graphics.Path().apply {
             addRoundRect(
                 NOTICE_LEFT, top, Panel.WIDTH.toFloat(), top + NOTICE_H,
