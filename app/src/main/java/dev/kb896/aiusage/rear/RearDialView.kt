@@ -368,11 +368,14 @@ class RearDialView(context: Context) : View(context) {
         // put the touch target in the wrong place even if it were wanted there.
         if (onlyAccount == null && config.showCamera && !hidden) drawCamera(canvas, dx, dy)
         else cameraButton = null
+        if (onlyAccount == null && config.showClose && !hidden) drawClose(canvas, dx, dy)
+        else closeButton = null
         canvas.restore()
         canvas.restore()   // the readout clip
 
-        // Outside the clip, both of them: the button is what the ripple emanates FROM
-        // and the mascot is what is left behind, so neither may be eaten by it.
+        // The mascot is outside the readout's clip because it belongs to the other side
+        // of the ripple. The BUTTON is not — it is part of the readout and is swept away
+        // with it, drawn up with drawCamera above.
         if (onlyAccount == null && config.showClose) {
             // The mascot is clipped to the EXACT COMPLEMENT of the readout, so one
             // circle carries both: as the ripple eats the panel it uncovers the mascot
@@ -392,7 +395,6 @@ class RearDialView(context: Context) : View(context) {
                 drawAmbientWalk(canvas, nowReal)
                 canvas.restore()
             }
-            drawClose(canvas, sweep)
         } else {
             closeButton = null
             ambient = false
@@ -722,49 +724,37 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * The close button: a ring with an X in it, which becomes the mascot's home.
+     * The close button: a filled disc with an X knocked out of it.
      *
-     * Drawn outside the ripple's clip because it is the thing the ripple comes out of —
-     * a button that erases itself on the way past looks like it fell through the floor.
+     * Drawn INSIDE the readout's clip, with the rest of the panel, so the ripple sweeps
+     * it away and back exactly as it does everything else. It used to sit outside and
+     * cross-fade on its own — the reasoning being that the ripple came out of it and so
+     * must not eat it, which sounded right and looked wrong: one element dissolving
+     * while the surface around it was wiped reads as two different effects.
      *
-     * The X fades as the panel leaves and the mascot fades in over it, which is as close
-     * to "transforms into" as two different shapes get without tweening one into the
-     * other. A real morph between a cross and a quadruped would land somewhere neither
-     * shape survives.
+     * Filled rather than outlined. Two thin strokes on a dark panel, at a size meant to
+     * be hit without looking, is not a target; the solid shape is what makes it findable
+     * and the cross then reads as a hole in it rather than as more line work.
      */
-    private fun drawClose(canvas: Canvas, sweep: Float?) {
+    private fun drawClose(canvas: Canvas, dx: Float, dy: Float) {
+        // Drift subtracted, for the same reason the camera's is: touches arrive in the
+        // view's coordinates, which the burn-in translate never moves.
         closeButton = android.graphics.RectF(
-            CLOSE_CX - CLOSE_R, CLOSE_CY - CLOSE_R, CLOSE_CX + CLOSE_R, CLOSE_CY + CLOSE_R,
+            CLOSE_CX - CLOSE_R - dx, CLOSE_CY - CLOSE_R - dy,
+            CLOSE_CX + CLOSE_R - dx, CLOSE_CY + CLOSE_R - dy,
         )
-        // 1 while the readout is up, 0 once the mascot has it. During a ripple it is
-        // whichever direction is being travelled.
-        val presence = when {
-            sweep == null -> if (ambient) 0f else 1f
-            ambient -> 1f - sweep
-            else -> sweep
-        }
-        if (presence <= 0.01f) return
 
-        val colour = colorFor("close", config.closeColor)
-        val alpha = (255 * presence).toInt()
-
-        // A filled disc with the X knocked out of it, rather than a ring with an X
-        // inside. Outlined, it was two thin strokes on a dark panel at a size meant to
-        // be hit without looking — the solid shape is what makes it findable, and the
-        // cross reads as a hole in it rather than as more line work.
         closePaint.style = Paint.Style.FILL
-        closePaint.color = colour
-        closePaint.alpha = alpha
+        closePaint.color = colorFor("close", config.closeColor)
         canvas.drawCircle(CLOSE_CX, CLOSE_CY, CLOSE_R, closePaint)
 
-        // The X in the panel's own background, so it is the disc that is missing
-        // material rather than a second colour laid on top.
+        // The X in the panel's own background, so the disc reads as missing material
+        // rather than as a second colour laid on top.
         val arm = CLOSE_R * 0.44f
         closePaint.style = Paint.Style.STROKE
         closePaint.strokeWidth = CLOSE_STROKE
         closePaint.strokeCap = Paint.Cap.SQUARE
-        closePaint.color = colorFor("bg", config.background)
-        closePaint.alpha = alpha
+        closePaint.color = colorFor("bg", config.background or (0xFF shl 24))
         canvas.drawLine(CLOSE_CX - arm, CLOSE_CY - arm, CLOSE_CX + arm, CLOSE_CY + arm, closePaint)
         canvas.drawLine(CLOSE_CX + arm, CLOSE_CY - arm, CLOSE_CX - arm, CLOSE_CY + arm, closePaint)
     }
