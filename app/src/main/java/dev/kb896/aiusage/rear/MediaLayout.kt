@@ -25,28 +25,27 @@ object MediaLayout {
     const val GLYPH_H = 38f
 
     /**
-     * Between glyphs — and therefore how wide each one's touch band is.
+     * ONE gap, used between the glyphs AND between the text and the first of them.
      *
-     * Widened from 20 after the first build: the three sat close enough that the bands
-     * had to be generous to be hittable, and generous bands on 35-unit centres
-     * overlapped. This is the honest fix — space them so each one can own its column
-     * outright. Trimmed back to 22 when the glyphs themselves grew, since the glyph is
-     * now most of the target rather than the gap.
+     * It was two numbers: a wider gap before the group so the three buttons read as a
+     * unit rather than as four things spaced evenly across the row. That is a reasonable
+     * typographic instinct and it looked cramped on glass — evenly spaced is what was
+     * asked for, and with the row now running the full width there is room for it.
      *
-     * Every unit spent here comes out of the track title, which is why it is not wider
-     * still. MediaLayoutTest holds the floor on what the text has left.
+     * Every unit spent here comes out of the track title. MediaLayoutTest holds the
+     * floor on what is left, against the tighter of the two layouts (a square cover
+     * takes 88 units off the front that the vinyl does not).
      */
-    const val GLYPH_GAP = 22f
+    const val GAP = 44f
 
     /**
-     * Between the text column and the first glyph.
+     * Between a square cover and the track title.
      *
-     * Wider than the gaps BETWEEN the glyphs, so the three read as one group rather
-     * than as four things spaced evenly across a row.
+     * Its own number rather than [GAP]. That gap is the rhythm of the title and the
+     * three buttons, which are all things on one line; this is the space between a
+     * picture and its caption, and matching it would cost the title a further 26 units
+     * to make two unrelated distances agree.
      */
-    const val TEXT_GAP = 16f
-
-    /** Between the cover and the track title. */
     const val COVER_GAP = 18f
 
     const val TEXT_SIZE = 18f
@@ -126,14 +125,71 @@ object MediaLayout {
         // from a proportional-ish set — play is 16 wide where pause is 13 — and a fixed
         // cell would leave the gaps visibly uneven at 24 units.
         val next = right - GLYPH_H * PanelIcons.NEXT.aspect
-        val play = next - GLYPH_GAP - GLYPH_H * PanelIcons.PAUSE.aspect
-        val prev = play - GLYPH_GAP - GLYPH_H * PanelIcons.PREV.aspect
+        val play = next - GAP - GLYPH_H * PanelIcons.PAUSE.aspect
+        val prev = play - GAP - GLYPH_H * PanelIcons.PREV.aspect
         return Row(
             prev = prev,
             play = play,
             next = next,
             glyphTop = centreY - GLYPH_H / 2f,
-            textWidth = prev - TEXT_GAP - left,
+            textWidth = prev - GAP - left,
+        )
+    }
+
+    // ---- the vinyl -----------------------------------------------------------
+    //
+    // A record, not a thumbnail. The first version put the cover art over the whole disc
+    // and it read as a CD: a real record is black, its picture is a label the size of a
+    // fist in the middle, and what you see across the rest of it is grooves.
+    //
+    // It is also the size of a record rather than the size of an icon. Big enough to be
+    // one, centred in the half of the panel that is actually a display, and dropped far
+    // enough that it runs off the bottom edge — a record on a deck, not a sticker.
+
+    /** The disc's diameter, as a fraction of the panel's height. */
+    const val VINYL_DIAMETER = 1f
+
+    /**
+     * How far below centre the disc sits, as a fraction of its own diameter.
+     *
+     * Positive is down. At 0.3 roughly a third of the record is off the bottom of the
+     * panel, which is what stops it reading as a circle placed on a screen and starts it
+     * reading as an object the screen is a window onto.
+     */
+    const val VINYL_DROP = 0.3f
+
+    /** Where the label ends and the grooves begin, as fractions of the radius. */
+    const val VINYL_LABEL = 0.30f
+    const val VINYL_SPINDLE = 0.035f
+    const val VINYL_GROOVE_INNER = 0.36f
+    const val VINYL_GROOVE_OUTER = 0.97f
+
+    /**
+     * How many groove rings are drawn.
+     *
+     * They are concentric, so they do NOT show the rotation — which is correct, and is
+     * why the label has to carry it. A real record's grooves look identical at every
+     * angle too.
+     */
+    const val VINYL_GROOVES = 34
+
+    /** Centre and radius of the disc on a panel of this size. */
+    class Disc(val cx: Float, val cy: Float, val radius: Float)
+
+    /**
+     * Centred on the USABLE half of the panel, not on the panel.
+     *
+     * The left 296 units are the camera cutout — glass, with the rings drawn around the
+     * lenses behind it. A disc centred on the panel's true midpoint would sit a third of
+     * the way into that, so its visible half would look pushed to the right for no
+     * reason anyone could see.
+     */
+    fun vinyl(panelWidth: Float, panelHeight: Float, cutoutRight: Float): Disc {
+        val radius = panelHeight * VINYL_DIAMETER / 2f
+        return Disc(
+            cx = (cutoutRight + panelWidth) / 2f,
+            cy = panelHeight / 2f + VINYL_DROP * radius * 2f,
+            radius = radius,
         )
     }
 

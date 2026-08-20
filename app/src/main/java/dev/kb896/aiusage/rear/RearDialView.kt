@@ -348,6 +348,10 @@ class RearDialView(context: Context) : View(context) {
         // armEvictionTimer() guard, which uses the same clock for the same reason.
         val nowReal = SystemClock.elapsedRealtime()
         val (dx, dy) = driftOffset(nowReal)
+        // How far a notification strip has pushed the canvas side down. Computed here
+        // rather than where it is used, because the record behind the readout rides the
+        // same offset and is drawn first.
+        val push = noticeHeight(nowReal) * noticeSlide(nowReal)
 
         // The rings do NOT translate, and that is a deliberate exception to the
         // paragraph above rather than an oversight.
@@ -392,6 +396,17 @@ class RearDialView(context: Context) : View(context) {
         // ripple takes all of it together. Clipping each piece would let them vanish at
         // slightly different moments, which reads as the panel breaking rather than
         // closing.
+        // The record, behind everything on the canvas side. Drawn inside the readout's
+        // clip so the ripple sweeps it away with the rest, and under the drift for the
+        // same reason the mark is: a 572-unit disc held still on an always-on OLED is
+        // the largest burn-in target this panel has ever had.
+        if (!hidden) {
+            canvas.save()
+            canvas.translate(dx, dy + push)
+            drawVinyl(canvas)
+            canvas.restore()
+        }
+
         val order = orderedAccounts()
         val positions = listOf(geometry.personal, geometry.work)
         if (!hidden) order.forEachIndexed { position, accountIndex ->
@@ -410,7 +425,6 @@ class RearDialView(context: Context) : View(context) {
         // the canvas side rides down and some of it leaves the bottom of the panel,
         // which is the trade: a notification is asking for attention, and for five
         // seconds it gets it.
-        val push = noticeHeight(nowReal) * noticeSlide(nowReal)
         canvas.save()
         canvas.translate(dx, dy + push)
         if (!hidden) drawCanvasSide(canvas, dx, dy + push)
@@ -1887,70 +1901,132 @@ class RearDialView(context: Context) : View(context) {
      * is exactly where a cover wants to be.
      */
     /**
-     * The cover, as a square or as a record.
+     * A record, big, behind the readout.
      *
-     * The vinyl is not decoration that happens to move. It turns while the track plays
-     * and stops dead when it does not, which makes it a second reading of the transport
-     * state — visible from further away than a 30-unit glyph, on a panel that is mostly
-     * looked at from across a room.
+     * The first version drew the cover art over the whole disc and it looked like a CD,
+     * because that is what a CD is. A record is black; its picture is a label the size of
+     * a fist in the middle; and the rest of it is grooves. Getting that round meant
+     * giving up the idea that the artwork IS the disc.
+     *
+     * The grooves are concentric and therefore invariant under rotation — they cannot
+     * show that it is turning, and are not asked to. The label carries the movement,
+     * exactly as it does on a deck.
+     *
+     * Everything here is drawn against the panel's own foreground at low alpha rather
+     * than in absolute greys. The background is the user's to choose, and a record mixed
+     * from black would vanish on a dark panel and sit like a hole in a light one.
      */
-    private fun drawCover(
-        canvas: Canvas,
-        cover: android.graphics.Bitmap,
-        square: android.graphics.RectF,
-        m: Media,
-        tint: Int,
-    ) {
-        // Cropped to fill, never letterboxed: covers are square already, and the odd one
-        // that is not should lose its edges rather than sit in a box. Same placement the
-        // panel's custom artwork uses, at neutral pan and zoom — there is nothing to crop
-        // by hand here.
-        val dest = ArtPlacement.destination(square, cover.width, cover.height, 0f, 0f, 1f)
+    private fun drawVinyl(canvas: Canvas) {
+        if (config.mediaArt != MediaArt.VINYL) return
+        val m = media ?: return
+        // Fades with the row it belongs to. It does not slide: the row is a strip
+        // changing hands and this is an object the panel is a window onto, and sliding
+        // something the size of the screen would be the most violent thing on it.
+        val swap = mediaSwap(frameNowMs)
+        if (swap <= 0.001f) return
 
-        if (config.mediaArt == MediaArt.SQUARE) {
-            canvas.save()
-            canvas.clipRect(square)
-            canvas.drawBitmap(cover, null, dest, artPaint)
-            canvas.restore()
-            return
+        val disc = MediaLayout.vinyl(
+            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), Panel.CUTOUT_RIGHT.toFloat(),
+        )
+        val ink = colorFor("media", config.mediaTint)
+        fun shade(alpha: Int) = (ink and 0x00FFFFFF) or
+            ((alpha * swap).toInt().coerceIn(0, 255) shl 24)
+
+        // BLACK, not a tint wash. The first attempt built the disc out of the row's own
+        // colour at low alpha and it came out as a pale blue circle with rings on it —
+        // a radar sweep. A record is black; what you actually see of one is the light
+        // its grooves catch, which is what everything below this line is.
+        vinylPaint.style = Paint.Style.FILL
+        vinylPaint.color = (0x000000 or ((VINYL_BODY_ALPHA * swap).toInt() shl 24))
+        canvas.drawCircle(disc.cx, disc.cy, disc.radius, vinylPaint)
+
+        vinylPaint.style = Paint.Style.STROKE
+
+        // The grooves. Fine, many, and banded: every few rings is brighter, which is
+        // where one track ends and the next begins on a real pressing. Evenly spaced
+        // identical rings read as a target rather than as a surface.
+        val steps = MediaLayout.VINYL_GROOVES
+        vinylPaint.strokeWidth = VINYL_GROOVE_W
+        for (i in 0 until steps) {
+            val f = MediaLayout.VINYL_GROOVE_INNER +
+                (MediaLayout.VINYL_GROOVE_OUTER - MediaLayout.VINYL_GROOVE_INNER) *
+                (i.toFloat() / (steps - 1))
+            vinylPaint.color = shade(
+                if (i % VINYL_BAND_EVERY == 0) VINYL_BAND_ALPHA else VINYL_GROOVE_ALPHA,
+            )
+            canvas.drawCircle(disc.cx, disc.cy, disc.radius * f, vinylPaint)
         }
 
-        val cx = square.centerX()
-        val cy = square.centerY()
-        val radius = square.height() / 2f
+        // The rim, where the disc ends. A record has a raised lip and it is the brightest
+        // line on the whole thing — without it the grooves just fade out and the disc has
+        // no edge.
+        vinylPaint.strokeWidth = VINYL_RIM_W
+        vinylPaint.color = shade(VINYL_RIM_ALPHA)
+        canvas.drawCircle(disc.cx, disc.cy, disc.radius * VINYL_RIM_AT, vinylPaint)
 
+        // A sheen: two broad arcs of reflected light across the grooves. STATIC, while
+        // everything else about the label turns — a reflection belongs to the room, not
+        // to the record, and one that rotated with it would look painted on.
+        vinylPaint.strokeWidth = disc.radius * VINYL_SHEEN_W
+        vinylPaint.color = shade(VINYL_SHEEN_ALPHA)
+        val sheen = android.graphics.RectF(
+            disc.cx - disc.radius * VINYL_SHEEN_AT, disc.cy - disc.radius * VINYL_SHEEN_AT,
+            disc.cx + disc.radius * VINYL_SHEEN_AT, disc.cy + disc.radius * VINYL_SHEEN_AT,
+        )
+        canvas.drawArc(sheen, VINYL_SHEEN_FROM, VINYL_SHEEN_SWEEP, false, vinylPaint)
+        canvas.drawArc(
+            sheen, VINYL_SHEEN_FROM + 180f, VINYL_SHEEN_SWEEP, false, vinylPaint)
+
+        // The label, which is where the cover finally goes and the only part that turns.
+        val label = disc.radius * MediaLayout.VINYL_LABEL
+        val cover = coverArt(m.artPath)
+        val face = android.graphics.RectF(
+            disc.cx - label, disc.cy - label, disc.cx + label, disc.cy + label,
+        )
         canvas.save()
-        // Clip FIRST, rotate second. The circle is inscribed in the square, so a square
-        // bitmap turned about their shared centre covers the circle at every angle —
-        // there is no corner that can swing into view.
         canvas.clipPath(
             android.graphics.Path().apply {
-                addCircle(cx, cy, radius, android.graphics.Path.Direction.CW)
+                addCircle(disc.cx, disc.cy, label, android.graphics.Path.Direction.CW)
             },
         )
-        canvas.rotate(vinylAngle(m), cx, cy)
-        canvas.drawBitmap(cover, null, dest, artPaint)
+        // Clip first, rotate second: the circle is inscribed in the square, so a square
+        // bitmap turned about their shared centre covers it at every angle.
+        canvas.rotate(vinylAngle(m), disc.cx, disc.cy)
+        if (cover != null) {
+            // Held back from full strength. The transport buttons are drawn over this and
+            // a busy cover at full opacity is the one thing on the panel that can make
+            // them hard to find.
+            artPaint.alpha = (VINYL_COVER_ALPHA * swap).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(
+                cover, null,
+                ArtPlacement.destination(face, cover.width, cover.height, 0f, 0f, 1f),
+                artPaint,
+            )
+            artPaint.alpha = 255
+        } else {
+            // No cover is not no label. A record without one has a blank label, not a
+            // hole in the middle of the disc.
+            vinylPaint.style = Paint.Style.FILL
+            vinylPaint.color = shade(VINYL_LABEL_ALPHA)
+            canvas.drawCircle(disc.cx, disc.cy, label, vinylPaint)
+        }
         canvas.restore()
 
-        // A groove and a spindle, in the panel's own background rather than in black, so
-        // the record reads as material removed from the disc rather than as two dark
-        // rings painted on a picture.
-        val hole = colorFor("bg", config.background or (0xFF shl 24))
-        closePaint.style = Paint.Style.STROKE
-        closePaint.strokeWidth = VINYL_GROOVE
-        closePaint.color = (hole and 0x00FFFFFF) or (VINYL_GROOVE_ALPHA shl 24)
-        canvas.drawCircle(cx, cy, radius * VINYL_GROOVE_AT, closePaint)
+        // The label's edge, and the spindle punched through the middle of it.
+        vinylPaint.style = Paint.Style.STROKE
+        vinylPaint.strokeWidth = VINYL_RIM_W
+        vinylPaint.color = shade(VINYL_LABEL_ALPHA)
+        canvas.drawCircle(disc.cx, disc.cy, label, vinylPaint)
 
-        // The label edge, then the spindle hole itself. Tinted rather than background:
-        // it is the one part of a record that is not the sleeve art.
-        closePaint.strokeWidth = VINYL_GROOVE
-        closePaint.color = (tint and 0x00FFFFFF) or (VINYL_LABEL_ALPHA shl 24)
-        canvas.drawCircle(cx, cy, radius * VINYL_LABEL_AT, closePaint)
-
-        closePaint.style = Paint.Style.FILL
-        closePaint.color = hole
-        canvas.drawCircle(cx, cy, radius * VINYL_SPINDLE, closePaint)
+        vinylPaint.style = Paint.Style.FILL
+        vinylPaint.color = colorFor("bg", config.background or (0xFF shl 24))
+        canvas.drawCircle(
+            disc.cx, disc.cy, disc.radius * MediaLayout.VINYL_SPINDLE, vinylPaint)
     }
+
+    /** The record's body, grooves and label. Anti-aliased — it is the one thing on this
+     *  panel that is genuinely round rather than pixel art. */
+    private val vinylPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /**
      * Where the record has turned to, in degrees.
@@ -2073,7 +2149,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun mediaRegion(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, mark.right, mark.bottom,
+        CONTENT_EDGE, mark.top, MEDIA_RIGHT, mark.bottom,
     )
 
     /**
@@ -2084,7 +2160,7 @@ class RearDialView(context: Context) : View(context) {
      * room for the progress bar would have quietly stretched both.
      */
     private fun mediaClip(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, mark.right, mark.bottom + MediaLayout.PROGRESS_TOTAL,
+        CONTENT_EDGE, mark.top, MEDIA_RIGHT, mark.bottom + MediaLayout.PROGRESS_TOTAL,
     )
 
     /**
@@ -2118,16 +2194,29 @@ class RearDialView(context: Context) : View(context) {
         // A missing cover is ordinary — plenty of tracks have none, and a podcast or a
         // browser tab rarely does — so the row closes up rather than leaving a hole. The
         // text simply starts at the band's left edge instead.
-        val cover = coverArt(m.artPath)
+        // The thumbnail belongs to the SQUARE style alone. Under VINYL the record behind
+        // the readout IS the artwork, and a second copy of the same cover in the row
+        // would be the same picture twice — so the text takes the width instead.
+        val cover = if (config.mediaArt == MediaArt.SQUARE) coverArt(m.artPath) else null
         var textLeft = band.left
         if (cover != null) {
             val square = android.graphics.RectF(
                 band.left, band.top, band.left + band.height(), band.bottom)
-            drawCover(canvas, cover, square, m, tint)
+            canvas.save()
+            canvas.clipRect(square)
+            // Cropped to fill, never letterboxed: covers are square already, and the odd
+            // one that is not should lose its edges rather than sit in a box. Same
+            // placement the panel's custom artwork uses, at neutral pan and zoom.
+            canvas.drawBitmap(
+                cover, null,
+                ArtPlacement.destination(square, cover.width, cover.height, 0f, 0f, 1f),
+                artPaint,
+            )
+            canvas.restore()
             textLeft = square.right + MediaLayout.COVER_GAP
         }
 
-        val row = MediaLayout.of(textLeft, region.right, region.centerY())
+        val row = MediaLayout.of(textLeft, band.right, region.centerY())
         val gh = MediaLayout.GLYPH_H
         val (prev, play, next) = Triple(row.prev, row.play, row.next)
 
@@ -2186,9 +2275,9 @@ class RearDialView(context: Context) : View(context) {
         // would walk the targets away from the glyphs — a few pixels on a ten-minute
         // cycle, and a third of the panel for the five seconds a notification is up.
         mediaStrip = android.graphics.RectF(
-            prev - MediaLayout.GLYPH_GAP / 2f - dx,
+            prev - MediaLayout.GAP / 2f - dx,
             region.top - dy,
-            region.right - dx,
+            band.right - dx,
             region.bottom - dy,
         )
         mediaCentres = row.centres.map { it - dx }
@@ -2608,6 +2697,34 @@ class RearDialView(context: Context) : View(context) {
         private const val CAMERA_H = 30f
 
         /**
+         * The media row's right edge: where the camera button starts, less a gap.
+         *
+         * NOT the bar column's right edge, which is where it used to stop. The row is
+         * three things side by side and the bars are one thing; stopping the row where
+         * the bars stop left 80 units of empty panel between it and the camera while the
+         * track title was being clipped at thirteen characters.
+         *
+         * Derived from the camera's own placement rather than measured against it, so
+         * the two cannot drift apart. Held whether or not the camera is drawn — a row
+         * whose width depended on another switch would resize when that was toggled.
+         */
+        private val MEDIA_RIGHT: Float = run {
+            val bottom = (Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f) + CAMERA_H / 2f
+            val right = Panel.WIDTH - (Panel.HEIGHT - bottom)
+            right - CAMERA_H * PanelIcons.CAMERA.aspect - MEDIA_CAMERA_GAP
+        }
+
+        /**
+         * Between the last transport button and the camera.
+         *
+         * WIDER than the gap inside the row, deliberately, and this is the one place the
+         * even spacing does not apply. The camera is not part of the player — it opens
+         * another app — and at the row's own spacing it read as a fourth transport
+         * button. The three belong together; this says the next thing does not.
+         */
+        private const val MEDIA_CAMERA_GAP = 44f
+
+        /**
          * How far outside the drawn glyph a touch still counts.
          *
          * Generous, and it has to be: 30 panel units on a 904-unit panel is a few
@@ -2665,12 +2782,37 @@ class RearDialView(context: Context) : View(context) {
          * read from across a room as "it is playing" rather than measured.
          */
         private const val VINYL_DEG_PER_MS = 0.1f
-        private const val VINYL_GROOVE = 1.5f
-        private const val VINYL_GROOVE_AT = 0.80f
-        private const val VINYL_GROOVE_ALPHA = 0x80
-        private const val VINYL_LABEL_AT = 0.34f
-        private const val VINYL_LABEL_ALPHA = 0xAA
-        private const val VINYL_SPINDLE = 0.10f
+        /**
+         * The record's material.
+         *
+         * BODY is black over the panel, not a shade of the row's colour — see drawVinyl.
+         * Everything else is the row's tint at a low alpha, so the disc takes its
+         * highlights from whatever colour the media row was set to.
+         */
+        private const val VINYL_BODY_ALPHA = 0xC4
+        private const val VINYL_GROOVE_W = 0.9f
+        private const val VINYL_GROOVE_ALPHA = 0x1E
+
+        /** Every Nth groove is brighter — where one track ends and the next starts. */
+        private const val VINYL_BAND_EVERY = 6
+        private const val VINYL_BAND_ALPHA = 0x3C
+
+        /** The lip at the edge of the disc, the brightest line on it. */
+        private const val VINYL_RIM_W = 1.6f
+        private const val VINYL_RIM_AT = 0.985f
+        private const val VINYL_RIM_ALPHA = 0x5A
+
+        /** Reflected light across the grooves. Static — a reflection is the room's, not
+         *  the record's. */
+        private const val VINYL_SHEEN_W = 0.30f
+        private const val VINYL_SHEEN_AT = 0.66f
+        private const val VINYL_SHEEN_FROM = 205f
+        private const val VINYL_SHEEN_SWEEP = 52f
+        private const val VINYL_SHEEN_ALPHA = 0x0E
+
+        /** The cover on the label, held back so the buttons over it stay findable. */
+        private const val VINYL_COVER_ALPHA = 0xCC
+        private const val VINYL_LABEL_ALPHA = 0x55
 
         /** The unfilled part of the progress bar, against the row's tint. */
         private const val MEDIA_TRACK_ALPHA = 0x33

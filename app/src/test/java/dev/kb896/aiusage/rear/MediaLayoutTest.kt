@@ -18,12 +18,13 @@ class MediaLayoutTest {
     /**
      * The panel's real media band: x 322..720, y 476..546.
      *
-     * Wider than the artwork slot the mark uses (442..720). The row took over the corner
-     * the close button vacated, because thirteen characters of track title was not a
-     * track title.
+     * Wider than the artwork slot the mark uses (442..720) at both ends: it took the
+     * corner the close button vacated on the left, and on the right it now runs to where
+     * the camera button starts rather than stopping where the bars do. Thirteen
+     * characters of track title was not a track title.
      */
     private val left = 322f
-    private val right = 720f
+    private val right = 804f
     private val centreY = 511f
 
     /** With a cover, the text starts after it — a 70-unit square plus its gap. */
@@ -76,7 +77,7 @@ class MediaLayoutTest {
     }
 
     @Test fun `the text column never runs under the buttons`() {
-        assertEquals(row.prev - MediaLayout.TEXT_GAP, left + row.textWidth, 0.01f)
+        assertEquals(row.prev - MediaLayout.GAP, left + row.textWidth, 0.01f)
     }
 
     @Test fun `two lines are centred as a pair`() {
@@ -145,6 +146,16 @@ class MediaLayoutTest {
             MediaLayout.MARQUEE_GAP < covered.textWidth)
     }
 
+    /** One gap, between the glyphs and between the text and the first of them. */
+    @Test fun `the buttons are evenly spaced from each other and from the title`() {
+        val prevRight = row.prev + MediaLayout.GLYPH_H * PanelIcons.PREV.aspect
+        val playRight = row.play + MediaLayout.GLYPH_H * PanelIcons.PAUSE.aspect
+        val textRight = left + row.textWidth
+        assertEquals("text to prev", MediaLayout.GAP, row.prev - textRight, 0.01f)
+        assertEquals("prev to play", MediaLayout.GAP, row.play - prevRight, 0.01f)
+        assertEquals("play to next", MediaLayout.GAP, row.next - playRight, 0.01f)
+    }
+
     @Test fun `the buttons are big enough to press`() {
         // The narrowest of the three, in units. At 400dpi a unit is about 1/16 mm, so
         // this is the number that decides whether this is usable without looking.
@@ -207,5 +218,36 @@ class MediaLayoutTest {
     @Test fun `progress is a fraction of the track`() {
         assertEquals(0.5f, MediaLayout.progress(60_000L, 120_000L)!!, 0.001f)
         assertEquals(0f, MediaLayout.progress(0L, 120_000L)!!, 0.001f)
+    }
+
+    // ---- the record -------------------------------------------------------
+
+    private val disc = MediaLayout.vinyl(904f, 572f, 296f)
+
+    @Test fun `the record is centred on the usable half of the panel`() {
+        // NOT 452, the panel's true midpoint: the left 296 units are camera glass.
+        assertEquals(600f, disc.cx, 0.01f)
+    }
+
+    @Test fun `the record is as tall as the panel`() {
+        assertEquals(572f, disc.radius * 2f, 0.01f)
+    }
+
+    /** Dropped far enough to run off the bottom, so it reads as an object rather than a
+     *  circle placed on a screen — but not so far that the label leaves the panel. */
+    @Test fun `the record hangs off the bottom but keeps its label`() {
+        assertTrue("the record does not reach the bottom edge", disc.cy + disc.radius > 572f)
+        val labelBottom = disc.cy + disc.radius * MediaLayout.VINYL_LABEL
+        assertTrue("the label fell off the panel", labelBottom < 572f)
+        assertTrue("the label rose above the panel",
+            disc.cy - disc.radius * MediaLayout.VINYL_LABEL > 0f)
+    }
+
+    @Test fun `the grooves sit outside the label and inside the edge`() {
+        assertTrue("grooves run under the label",
+            MediaLayout.VINYL_GROOVE_INNER > MediaLayout.VINYL_LABEL)
+        assertTrue("grooves run off the disc", MediaLayout.VINYL_GROOVE_OUTER < 1f)
+        assertTrue("the spindle is bigger than the label",
+            MediaLayout.VINYL_SPINDLE < MediaLayout.VINYL_LABEL)
     }
 }

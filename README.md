@@ -206,8 +206,15 @@ duration.
 ## Media controls
 
 When something is playing, the bottom band becomes a player: cover, track, artist and
-three buttons — the buttons sized to be pressed on the back of a phone rather than read.
-When it stops, the artwork comes back. One thing in that space at a time —
+three buttons — sized to be pressed on the back of a phone rather than read, and evenly
+spaced from each other and from the title. When it stops, the artwork comes back.
+
+The row runs from the panel's left content edge to where the camera button starts, rather
+than stopping where the bars stop. It is three things side by side where the bars are one
+thing, and matching their column left 80 units of empty panel while the track title was
+being clipped at thirteen characters. The gap before the camera is deliberately wider than
+the row's own spacing: the camera opens another app, and at the row's rhythm it read as a
+fourth transport button. One thing in that space at a time —
 it is 70 units tall, and two things sharing it would be two things too small to read.
 
 The swap is a wheel, the same one the notification strip turns on: the artwork drops out
@@ -233,12 +240,23 @@ Two styles, chosen in settings.
 **Square** is the cover as the player supplied it, cropped to fill rather than
 letterboxed.
 
-**Vinyl** cuts it to a disc with a groove, a label edge and a spindle hole, and turns it
-while the track plays. It stops dead when the music does, which is the point: it is a
-second reading of the transport state, legible from further away than a 30-unit glyph on
-a panel that is mostly seen from across a room. It turns at about 16rpm rather than 33 —
-a real speed on a 70-unit disc is a blur, and this is meant to be read as "it is playing"
-rather than measured.
+**Vinyl** is a record the height of the panel, sitting behind the readout — centred on
+the half of the panel that is actually a display, and dropped far enough that a third of
+it runs off the bottom edge. A record on a deck rather than a circle placed on a screen.
+There is no thumbnail in the row under this style: the record *is* the artwork, and a
+second copy of the same cover beside it would be the same picture twice.
+
+It took two goes to stop looking like a CD, which is what you get when the cover art is
+the whole disc. A record is black; its picture is a label the size of a fist in the
+middle; and what you see across the rest of it is grooves — 34 of them, banded brighter
+every sixth ring where one track ends and the next begins, with a bright lip at the rim.
+A static sheen crosses the grooves: a reflection belongs to the room, not to the record,
+so it does not turn with it.
+
+The label does. It stops dead when the music does, which is the point — it is a second
+reading of the transport state, legible from much further away than a 38-unit glyph on a
+panel mostly seen from across a room. About 16rpm rather than 33, because a real speed is
+a blur.
 
 The rotation is accumulated rather than derived from the clock, so a pause stops it where
 it is instead of letting it turn on invisibly and jump on resume.
