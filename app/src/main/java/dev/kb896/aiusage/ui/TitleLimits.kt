@@ -21,17 +21,43 @@ import dev.kb896.aiusage.R
 object TitleLimits {
 
     /**
-     * The masthead is centred over the BAR COLUMN, not the whole canvas side, so that is
-     * the width it has to fit — the same span the artwork below it occupies.
+     * What the masthead can occupy, which is NOT the bar column it is centred over.
+     *
+     * It is centred at the bar column's midpoint and then free to extend past it in both
+     * directions — measuring the column itself gave 10 characters, which would have
+     * truncated the app's own default title of CLAUDE USAGE at twelve.
+     *
+     * The real limits are the content edge on the left and the extras column on the
+     * right, which shares this line: the clock and battery are right-aligned at
+     * CONTENT_RIGHT, and a title running under them is worse than one cut short. Being
+     * centred, the tighter of the two distances is what binds, doubled.
+     *
+     * Measured with the extras present. They are optional, so the cap is a little
+     * conservative when they are all switched off — the alternative is a limit that
+     * changes as other settings are toggled, which would silently invalidate a title
+     * someone had already typed.
      */
-    private const val MASTHEAD_WIDTH = 720f - 442f
+    private const val MASTHEAD_CENTRE = (442f + 720f) / 2f
+    private const val CONTENT_LEFT = 330f
+    private const val CONTENT_RIGHT = 870f
+
+    /** Icon, gap and "HH:MM" at the extras' 18px — the widest of the three rows. */
+    private const val EXTRAS_WIDTH = 20f + 8f + 5f * 18f * 0.6364f
+
+    private val MASTHEAD_WIDTH = 2f * minOf(
+        MASTHEAD_CENTRE - CONTENT_LEFT,
+        (CONTENT_RIGHT - EXTRAS_WIDTH) - MASTHEAD_CENTRE,
+    )
     private const val MASTHEAD_SIZE = 40f
 
     /**
      * An account heading shares its line with the plan tag on the right, so it gets the
      * space up to where that tag starts rather than the full column.
      */
-    private const val HEADING_WIDTH = (904f - 34f - 82f) - 330f
+    /** "MAX 5X" at the plan tag's 18px, which shares the heading's line. Declared
+     *  BEFORE the width that uses it: a const cannot read one below it. */
+    private const val PLAN_TAG_WIDTH = 6f * 18f * 0.6364f
+    private const val HEADING_WIDTH = (904f - 34f - 82f) - 330f - PLAN_TAG_WIDTH
     private const val HEADING_SIZE = 22.5f
 
     private var cached: Pair<Int, Int>? = null
