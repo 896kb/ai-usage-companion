@@ -601,14 +601,18 @@ class RearDialView(context: Context) : View(context) {
     private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
         val h = CAMERA_H
         val w = h * PanelIcons.CAMERA.aspect
-        // Vertically centred on the bottom artwork, and inset from the right edge by the
-        // same margin the artwork keeps from the bottom. It was bottom-aligned against
-        // CONTENT_RIGHT, which lined it up with the text column above rather than with
-        // the thing actually beside it — the mark and the camera share a row, so they
-        // should share a centre line and a margin.
-        val right = Panel.WIDTH - MARK_BOTTOM.toFloat()
+        // Vertically centred on the bottom artwork, and then inset from the right edge
+        // by exactly the gap that centring leaves BELOW it.
+        //
+        // Not the artwork's own bottom margin, which is what this used first: the
+        // artwork is 70 units tall and the camera 30, so centring the smaller one on the
+        // larger leaves 46 units under it while the artwork keeps 26. Matching the
+        // artwork's number therefore looked cramped — 26 beside it, 46 below it, on a
+        // glyph small enough for the difference to read as a mistake.
         val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
         val bottom = centreY + h / 2f
+        val margin = Panel.HEIGHT - bottom
+        val right = Panel.WIDTH - margin
         extras.color = colorFor("extras", config.extrasColor)
         // Positioned by its own left edge rather than by a square cell: drawIcon centres
         // within a cell of side h, which is right for the clock and battery sitting in a
@@ -664,17 +668,26 @@ class RearDialView(context: Context) : View(context) {
 
         val colour = colorFor("close", config.closeColor)
         val alpha = (255 * presence).toInt()
+
+        // A filled disc with the X knocked out of it, rather than a ring with an X
+        // inside. Outlined, it was two thin strokes on a dark panel at a size meant to
+        // be hit without looking — the solid shape is what makes it findable, and the
+        // cross reads as a hole in it rather than as more line work.
+        closePaint.style = Paint.Style.FILL
         closePaint.color = colour
         closePaint.alpha = alpha
-        closePaint.style = Paint.Style.STROKE
-        closePaint.strokeWidth = CLOSE_STROKE
         canvas.drawCircle(CLOSE_CX, CLOSE_CY, CLOSE_R, closePaint)
 
-        // The X, inset so it sits inside the ring rather than touching it.
-        val a = CLOSE_R * 0.44f
+        // The X in the panel's own background, so it is the disc that is missing
+        // material rather than a second colour laid on top.
+        val arm = CLOSE_R * 0.44f
+        closePaint.style = Paint.Style.STROKE
+        closePaint.strokeWidth = CLOSE_STROKE
         closePaint.strokeCap = Paint.Cap.SQUARE
-        canvas.drawLine(CLOSE_CX - a, CLOSE_CY - a, CLOSE_CX + a, CLOSE_CY + a, closePaint)
-        canvas.drawLine(CLOSE_CX + a, CLOSE_CY - a, CLOSE_CX - a, CLOSE_CY + a, closePaint)
+        closePaint.color = colorFor("bg", config.background)
+        closePaint.alpha = alpha
+        canvas.drawLine(CLOSE_CX - arm, CLOSE_CY - arm, CLOSE_CX + arm, CLOSE_CY + arm, closePaint)
+        canvas.drawLine(CLOSE_CX + arm, CLOSE_CY - arm, CLOSE_CX - arm, CLOSE_CY + arm, closePaint)
     }
 
     /**
