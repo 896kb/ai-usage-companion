@@ -146,6 +146,11 @@ class RearDialView(context: Context) : View(context) {
     private var slideTo = 0f
     private var slideAt = 0L
 
+    /** The mini card's, which lives inside the headline's window rather than beside it. */
+    private var miniFrom = 0f
+    private var miniTo = 0f
+    private var miniAt = 0L
+
     /** App icons, kept because the same few apps notify over and over. */
     private val icons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
 
@@ -914,10 +919,45 @@ class RearDialView(context: Context) : View(context) {
      * shorter when the wheel finishes. The height is part of the change, not a
      * consequence of it having happened.
      */
-    private fun noticeHeight(nowMs: Long): Float {
-        val turn = wheelTurn(nowMs)
-        val from = if (leaving == null) heightOf(notice) else heightOf(leaving)
-        return from + (heightOf(notice) - from) * turn
+    private fun noticeHeight(nowMs: Long): Float = NOTICE_H + CASCADE_H * miniSlide(nowMs)
+
+    /**
+     * How far the mini card is out, 0 to 1.
+     *
+     * It arrives AFTER the headline and leaves BEFORE it, by [MINI_LAG] at each end,
+     * rather than moving with it. Two cards starting and stopping on the same frame read
+     * as one object changing size; staggered, the second one reads as a consequence of
+     * the first — which is what it is.
+     *
+     * Leaving early is possible only because the dismissal is on a clock: the notice
+     * expires at a known moment, so the mini can begin retracting before anything has
+     * happened. A user-dismissed card could not do this.
+     */
+    private fun miniSlide(nowMs: Long): Float {
+        val n = notice
+        val age = nowMs - noticeAt
+        val want = n != null && n.hasMore &&
+            age >= MINI_LAG &&
+            age <= NOTICE_MS - MINI_LAG
+        val target = if (want) 1f else 0f
+        if (target != miniTo) {
+            miniFrom = miniNow(nowMs)
+            miniTo = target
+            miniAt = nowMs
+        }
+        val value = miniNow(nowMs)
+        if (value != miniTo) animating = true
+        // While waiting for the delay to elapse there is nothing to redraw for, but the
+        // frame that starts it has to be asked for or the card never appears until
+        // something else happens to invalidate.
+        if (n != null && n.hasMore && age < MINI_LAG) animating = true
+        return value
+    }
+
+    private fun miniNow(nowMs: Long): Float {
+        if (miniAt == 0L) return miniTo
+        val t = ((nowMs - miniAt).toFloat() / SLIDE_MS).coerceIn(0f, 1f)
+        return miniFrom + (miniTo - miniFrom) * Tween.easeInOut(t)
     }
 
     private fun noticeSlide(nowMs: Long): Float {
@@ -971,11 +1011,12 @@ class RearDialView(context: Context) : View(context) {
         // makes it read as part of the screen rather than a rectangle laid on it: the
         // display's 97 is a corner on a 572-tall screen and a quarter-circle on a
         // 143-tall card.
-        // Its bottom-left rounds only when nothing is attached below it. With a mini
-        // card stuck underneath, the two are one stepped shape and a curve there would
-        // be a corner in the middle of it.
-        val attached = total - NOTICE_H > 1f
-        val cardBl = if (attached) 0f else r
+        // Its bottom-left curve gives way as the mini card emerges. With something
+        // attached below, that corner is in the middle of a stepped shape and a curve
+        // there is a notch — so the radius fades out exactly as far as the card comes
+        // out, and the curve travels to whichever card is currently the bottom.
+        val m = miniSlide(nowMs)
+        val cardBl = r * (1f - m)
         val card = android.graphics.Path().apply {
             addRoundRect(
                 NOTICE_LEFT, top, Panel.WIDTH.toFloat(), top + NOTICE_H,
@@ -1004,31 +1045,51 @@ class RearDialView(context: Context) : View(context) {
         // stepped IN on the left — so the two make one shape with a shoulder rather than
         // two cards floating separately. It carries the same single rounded corner the
         // card above would have had, which is now the bottom of the whole assembly.
-        val miniH = total - NOTICE_H
-        if (miniH <= 1f) return
+        if (m <= 0.001f) return
         val miniTop = top + NOTICE_H
+        val miniLeft = NOTICE_LEFT + MINI_INSET_LEFT
+        // Drawn at full height but SLID UP behind the headline card, and clipped to the
+        // band it has emerged into. So it comes out from under the card above rather
+        // than growing in place — the difference between something arriving and
+        // something inflating.
+        val cardTop = miniTop - (1f - m) * CASCADE_H
+        val miniBottom = cardTop + CASCADE_H
         val mini = android.graphics.Path().apply {
             addRoundRect(
-                NOTICE_LEFT + MINI_INSET_LEFT, miniTop,
-                Panel.WIDTH.toFloat(), miniTop + miniH,
+                miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom,
                 floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r),
                 android.graphics.Path.Direction.CW,
             )
         }
         canvas.save()
+        canvas.clipRect(miniLeft, miniTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
         canvas.clipPath(mini)
         noticePaint.style = Paint.Style.FILL
         noticePaint.color = colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
         noticePaint.alpha = 255
         canvas.drawRect(
-            NOTICE_LEFT + MINI_INSET_LEFT, miniTop,
-            Panel.WIDTH.toFloat(), miniTop + miniH, noticePaint)
+            miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom, noticePaint)
 
         // Its own wheel, turning with the card above it, so a replacement moves both.
-        leaving?.takeIf { it.hasMore }?.let { drawMiniRow(canvas, it, miniTop + turn * miniH, miniH) }
-        notice?.takeIf { it.hasMore }?.let { drawMiniRow(canvas, it, miniTop - (1f - turn) * miniH, miniH) }
+        leaving?.takeIf { it.hasMore }
+            ?.let { drawMiniRow(canvas, it, cardTop + turn * CASCADE_H, CASCADE_H) }
+        notice?.takeIf { it.hasMore }
+            ?.let { drawMiniRow(canvas, it, cardTop - (1f - turn) * CASCADE_H, CASCADE_H) }
         canvas.restore()
-        outline(canvas, mini, slide)
+
+        // Its outline OMITS THE TOP EDGE. The card above already draws a line along its
+        // own bottom, and a second one a pixel below it read as a doubled border rather
+        // than as two sections meeting.
+        canvas.save()
+        canvas.clipRect(miniLeft, miniTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
+        val edge = android.graphics.Path().apply {
+            moveTo(miniLeft, cardTop)
+            lineTo(miniLeft, miniBottom - r)
+            quadTo(miniLeft, miniBottom, miniLeft + r, miniBottom)
+            lineTo(Panel.WIDTH.toFloat(), miniBottom)
+        }
+        outline(canvas, edge, slide)
+        canvas.restore()
     }
 
     /**
@@ -1945,6 +2006,12 @@ class RearDialView(context: Context) : View(context) {
          * of it rather than a separate thing standing underneath.
          */
         private const val CASCADE_H = 76f
+
+        /**
+         * How long after the headline the mini card follows, and how long before it it
+         * retracts. Same figure at both ends, so the stagger is symmetrical.
+         */
+        private const val MINI_LAG = 250L
 
         /**
          * How far the mini card steps in from the card above.
