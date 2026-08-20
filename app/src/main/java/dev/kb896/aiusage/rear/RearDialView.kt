@@ -113,15 +113,24 @@ class RearDialView(context: Context) : View(context) {
     /** The notification strip's ground and its edge. */
     private val noticePaint = Paint()
 
+    /** The second card's type, smaller than the headline's. */
+    private val cascadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = CASCADE_TEXT
+        typeface = label.typeface
+    }
+
     /** One relayed notification, as much of it as the panel shows. */
     private data class Notice(
         val app: String,
         val pkg: String,
         val title: String,
         val text: String,
-        /** The rest of this notification's group — see NotificationRelay.cascade. */
-        val more: List<String> = emptyList(),
-    )
+        /** The next notification in the same group — see NotificationRelay.cascade. */
+        val moreTitle: String = "",
+        val moreText: String = "",
+    ) {
+        val hasMore get() = moreTitle.isNotBlank() || moreText.isNotBlank()
+    }
 
     private var notice: Notice? = null
     private var leaving: Notice? = null
@@ -392,7 +401,7 @@ class RearDialView(context: Context) : View(context) {
         // the canvas side rides down and some of it leaves the bottom of the panel,
         // which is the trade: a notification is asking for attention, and for five
         // seconds it gets it.
-        val push = noticeHeight() * noticeSlide(nowReal)
+        val push = noticeHeight(nowReal) * noticeSlide(nowReal)
         canvas.save()
         canvas.translate(dx, dy + push)
         if (!hidden) drawCanvasSide(canvas)
@@ -862,14 +871,15 @@ class RearDialView(context: Context) : View(context) {
         pkg: String,
         title: String,
         text: String,
-        more: List<String> = emptyList(),
+        moreTitle: String = "",
+        moreText: String = "",
     ) {
         val now = SystemClock.elapsedRealtime()
         // Only a REPLACEMENT turns the wheel. The first notice of a run arrives into an
         // empty strip that is itself sliding in, and turning at the same time would have
         // it enter twice over.
         if (notice != null) { leaving = notice; wheelAt = now }
-        notice = Notice(app, pkg, title, text, more)
+        notice = Notice(app, pkg, title, text, moreTitle, moreText)
         noticeAt = now
         invalidate()
     }
@@ -888,9 +898,26 @@ class RearDialView(context: Context) : View(context) {
      * Taken as the MAX of the arriving and departing notices while the wheel turns, or
      * the taller of the two would be cut off by a container sized for the shorter.
      */
-    private fun noticeHeight(): Float {
-        val rows = maxOf(notice?.more?.size ?: 0, leaving?.more?.size ?: 0)
-        return NOTICE_H + rows * NOTICE_LINE_H
+    /** How far through a replacement the wheel is; 1 when nothing is being replaced. */
+    private fun wheelTurn(nowMs: Long): Float =
+        if (leaving == null) 1f
+        else Tween.easeInOut(((nowMs - wheelAt).toFloat() / WHEEL_MS).coerceIn(0f, 1f))
+
+    private fun heightOf(n: Notice?): Float =
+        NOTICE_H + if (n?.hasMore == true) CASCADE_H else 0f
+
+    /**
+     * How tall the strip is right now, INTERPOLATED across a replacement.
+     *
+     * So a notification from another app — which has no sibling of its own to show —
+     * collapses the second card as part of the same turn rather than snapping the strip
+     * shorter when the wheel finishes. The height is part of the change, not a
+     * consequence of it having happened.
+     */
+    private fun noticeHeight(nowMs: Long): Float {
+        val turn = wheelTurn(nowMs)
+        val from = if (leaving == null) heightOf(notice) else heightOf(leaving)
+        return from + (heightOf(notice) - from) * turn
     }
 
     private fun noticeSlide(nowMs: Long): Float {
@@ -931,7 +958,7 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNotice(canvas: Canvas, slide: Float, nowMs: Long) {
         if (slide <= 0.001f) return
-        val h = noticeHeight()
+        val h = noticeHeight(nowMs)
         val top = -h + h * slide
 
         // Rounded at the BOTTOM-LEFT only, to a fraction of the display's own radius.
@@ -967,8 +994,7 @@ class RearDialView(context: Context) : View(context) {
         // Position only. Nothing fades: the strip is a window onto a drum, and a drum's
         // rows do not become transparent as they turn — they go past the edge and are
         // gone. Fading them as well read as two effects doing one job.
-        val turn = if (leaving == null) 1f
-            else Tween.easeInOut(((nowMs - wheelAt).toFloat() / WHEEL_MS).coerceIn(0f, 1f))
+        val turn = wheelTurn(nowMs)
         leaving?.let { drawNoticeRow(canvas, it, top + turn * h) }
         notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * h) }
         canvas.restore()
@@ -1006,7 +1032,6 @@ class RearDialView(context: Context) : View(context) {
 
     /** One row of the wheel, at [y]. Clipped by the strip, never faded. */
     private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float) {
-        val h = noticeHeight()
         val alpha = 255
         val left = Panel.CUTOUT_RIGHT + NOTICE_PAD
         val right = Panel.WIDTH - NOTICE_PAD
@@ -1014,8 +1039,15 @@ class RearDialView(context: Context) : View(context) {
         val icon = icons.getOrPut(item.pkg) {
             runCatching { context.packageManager.getApplicationIcon(item.pkg) }.getOrNull()
         }
-        val size = NOTICE_H * 0.46f
-        val iconLeft = right - size
+        // Bigger, and held further off the right edge than the text is.
+        //
+        // The strip is clipped by the DISPLAY'S own top-right corner, whose arc centre
+        // sits at (807, 97) with a radius of 97. At the text's margin the icon's corner
+        // came within five pixels of that arc — geometrically clear and visibly bitten,
+        // because the icon is a rounded square and the eye reads the gap, not the maths.
+        // At this inset it clears by fifteen.
+        val size = NOTICE_H * ICON_FRACTION
+        val iconLeft = Panel.WIDTH - ICON_INSET - size
         if (icon != null) {
             icon.setBounds(
                 iconLeft.toInt(), (y + (NOTICE_H - size) / 2f).toInt(),
@@ -1047,19 +1079,58 @@ class RearDialView(context: Context) : View(context) {
                 left, y + NOTICE_H * 0.80f, label)
         }
 
-        // The rest of the group, one dim line each. Indented under the headline so they
-        // read as belonging to it rather than as more notifications of equal weight.
-        var lineY = y + NOTICE_H * 0.80f
-        for (extra in item.more) {
-            lineY += NOTICE_LINE_H
-            label.alpha = (alpha * 0.55f).toInt()
-            canvas.drawText(
-                noticeClip("· $extra", label, textRight - left - NOTICE_INDENT),
-                left + NOTICE_INDENT, lineY, label,
-            )
-        }
         label.alpha = 255
         heading.alpha = 255
+        if (item.hasMore) drawCascadeCard(canvas, item, y + NOTICE_H, textRight)
+    }
+
+    /**
+     * The next notification in the group, as a second card under the first.
+     *
+     * Smaller in every dimension — shorter, narrower, smaller type — because it is
+     * subordinate: the headline is what happened and this is what is also waiting. And
+     * no app icon, since the card above it already carries one and the two cards are by
+     * definition the same app.
+     *
+     * It rides the same wheel as the card above: they belong to one Notice, so a
+     * replacement turns both together and a notification from a different app — which
+     * has no sibling — collapses this card as part of the same motion.
+     */
+    private fun drawCascadeCard(canvas: Canvas, item: Notice, top: Float, textRight: Float) {
+        val left = Panel.CUTOUT_RIGHT + NOTICE_PAD + CASCADE_INDENT
+        val right = textRight
+        val bottom = top + CASCADE_H - CASCADE_GAP
+
+        noticePaint.style = Paint.Style.STROKE
+        noticePaint.strokeWidth = 1f
+        noticePaint.isAntiAlias = true
+        noticePaint.color = colorFor("notice", config.notificationTint)
+        noticePaint.alpha = 70
+        val r = cornerRadius() / CORNER_DIVISOR / 2f
+        canvas.drawRoundRect(left, top, right, bottom, r, r, noticePaint)
+        noticePaint.alpha = 255
+        noticePaint.style = Paint.Style.FILL
+
+        val inset = left + CASCADE_PAD
+        val width = right - inset - CASCADE_PAD
+        val mid = (top + bottom) / 2f
+
+        cascadePaint.color = colorFor("notice", config.notificationTint)
+        if (item.moreText.isBlank()) {
+            // Only a sender to show — centre it rather than leaving a gap where the body
+            // would have been.
+            cascadePaint.alpha = 200
+            canvas.drawText(noticeClip(item.moreTitle, cascadePaint, width),
+                inset, mid + CASCADE_TEXT / 3f, cascadePaint)
+        } else {
+            cascadePaint.alpha = 220
+            canvas.drawText(noticeClip(item.moreTitle, cascadePaint, width),
+                inset, mid - 2f, cascadePaint)
+            cascadePaint.alpha = 140
+            canvas.drawText(noticeClip(item.moreText, cascadePaint, width),
+                inset, mid + CASCADE_TEXT + 2f, cascadePaint)
+        }
+        cascadePaint.alpha = 255
     }
 
     /** [text] cut to whatever fits [width], with an ellipsis when it had to be cut. */
@@ -1852,9 +1923,16 @@ class RearDialView(context: Context) : View(context) {
         private const val NOTICE_H = Panel.HEIGHT / 4f
         private const val NOTICE_PAD = 26f
 
-        /** One cascade line, and how far it is indented under the headline. */
-        private const val NOTICE_LINE_H = 24f
-        private const val NOTICE_INDENT = 14f
+        /** The second card: its band, inset, padding and type size. */
+        private const val CASCADE_H = 62f
+        private const val CASCADE_GAP = 14f
+        private const val CASCADE_INDENT = 18f
+        private const val CASCADE_PAD = 14f
+        private const val CASCADE_TEXT = 15f
+
+        /** The app icon: how far its right edge sits from the panel edge, and its size. */
+        private const val ICON_INSET = 48f
+        private const val ICON_FRACTION = 0.56f
 
         /** What this phone's rear display reports, for when the display will not say. */
         private const val FALLBACK_CORNER = 97f

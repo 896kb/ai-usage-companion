@@ -98,9 +98,9 @@ class NotificationRelay : NotificationListenerService() {
         // ones simply vanished. The listener can already see them — they are live
         // notifications, not history — so the panel can show what the summary was
         // counting instead of the count itself.
-        val siblings = cascade(sbn, config.showNotificationText)
+        val next = cascade(sbn)
 
-        Log.i(TAG, "relaying a notification from ${sbn.packageName}, ${siblings.size} more in its group")
+        Log.i(TAG, "relaying from ${sbn.packageName}${if (next != null) " (+1 in group)" else ""}")
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION)
                 .setPackage(packageName)
@@ -111,21 +111,28 @@ class NotificationRelay : NotificationListenerService() {
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_PKG, sbn.packageName)
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_TITLE, title.orEmpty())
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_TEXT, body.orEmpty())
-                .putExtra(RearActivity.EXTRA_NOTIFICATION_MORE, siblings.toTypedArray()),
+                .putExtra(RearActivity.EXTRA_NOTIFICATION_MORE_TITLE, next?.first.orEmpty())
+                .putExtra(
+                    RearActivity.EXTRA_NOTIFICATION_MORE_TEXT,
+                    // The second card's body obeys the same switch as the first's.
+                    if (config.showNotificationText) next?.second.orEmpty() else "",
+                ),
         )
     }
 
     /**
-     * The other live notifications in this one's group, newest first.
+     * The NEXT live notification in this one's group, or null.
      *
-     * @param withText whether the message body may be shown. When it may not, the
-     *   sender is used instead — the cascade still says WHO is waiting, which is the
-     *   part that survives the privacy switch. Falling silent entirely would make the
-     *   feature look broken to anyone who left that switch alone.
+     * One, not a list. The panel shows it as a second card under the first rather than
+     * as a stack of lines, and a card is a thing you read — two of them is a glance and
+     * five is an inbox, which is what the phone in your hand is for.
+     *
+     * Its own title and text are kept separate so the panel can lay them out; flattening
+     * them here would decide the design in the wrong place.
      */
-    private fun cascade(sbn: StatusBarNotification, withText: Boolean): List<String> {
-        val group = sbn.notification.group ?: return emptyList()
-        val active = runCatching { activeNotifications }.getOrNull() ?: return emptyList()
+    private fun cascade(sbn: StatusBarNotification): Pair<String, String>? {
+        val group = sbn.notification.group ?: return null
+        val active = runCatching { activeNotifications }.getOrNull() ?: return null
         return active
             .filter {
                 it.notification.group == group &&
@@ -133,14 +140,13 @@ class NotificationRelay : NotificationListenerService() {
                     it.packageName == sbn.packageName &&
                     it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY == 0
             }
-            .sortedByDescending { it.postTime }
-            .mapNotNull { other ->
+            .maxByOrNull { it.postTime }
+            ?.let { other ->
                 val e = other.notification.extras
-                val t = e.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
                 val h = e.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
-                (if (withText) t ?: h else h)?.takeIf { it.isNotBlank() }
+                val t = e.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
+                if (h.isNullOrBlank() && t.isNullOrBlank()) null else (h.orEmpty() to t.orEmpty())
             }
-            .take(MAX_CASCADE)
     }
 
     /**
@@ -170,13 +176,5 @@ class NotificationRelay : NotificationListenerService() {
          */
         const val DEDUPE_MS = 3_000L
 
-        /**
-         * How many of a group's other notifications the cascade shows.
-         *
-         * Three. The strip grows a line per entry and it is already a quarter of the
-         * panel; past this it stops being a glance and starts being an inbox, which is
-         * what the phone in your hand is for.
-         */
-        const val MAX_CASCADE = 3
     }
 }
