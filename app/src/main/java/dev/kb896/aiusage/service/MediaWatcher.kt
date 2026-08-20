@@ -138,7 +138,21 @@ class MediaWatcher(private val context: Context) {
         // matter to this service, which has no UI, except that MainActivity shares the
         // process and its panel preview is on this thread too.
         val art = if (active) cover(metadata) else null
-        val key = if (active) "${'$'}title\u0000${'$'}artist" else null
+        // KEYED ON THE ARTWORK, not on the track.
+        //
+        // Keying on title and artist put the cover exactly one track behind, every time.
+        // Players do not deliver a track in one piece: the title and artist arrive first
+        // and the artwork follows a moment later, as two separate metadata callbacks. So
+        // the first callback for a new track carries the NEW title and the OLD picture —
+        // which got written under the new track's key — and the second callback, the one
+        // actually carrying the new picture, was then dismissed as "same track, nothing
+        // to do". The panel ended up holding the previous sleeve until the track after
+        // that.
+        //
+        // Identifying the artwork itself has no such staging problem: a different picture
+        // is a different key whenever it turns up.
+        val key = if (active) title + "\u0000" + artist + "\u0000" + artId(metadata, art)
+            else null
 
         val send = { path: String? ->
             context.sendBroadcast(
@@ -188,7 +202,9 @@ class MediaWatcher(private val context: Context) {
             return
         }
         io.execute {
-            val path = runCatching { writeArt(art) }.getOrNull()
+            val path = runCatching { writeArt(art) }
+                .onFailure { Log.w(TAG, "cover write failed: " + it) }
+                .getOrNull()
             send(path)
         }
     }
@@ -249,6 +265,22 @@ class MediaWatcher(private val context: Context) {
         if (scaled !== art) scaled.recycle()
         tmp.renameTo(artFile())
         return artFile().path
+    }
+
+    /**
+     * What identifies this cover, cheaply.
+     *
+     * The URI when the player names one, because that is stable and free to compare. A
+     * bitmap's generation id otherwise — distinct per bitmap instance, which is what is
+     * being asked here — and "none" when there is no cover at all, so a track without one
+     * still differs from the track before it.
+     */
+    private fun artId(metadata: android.media.MediaMetadata?, art: android.graphics.Bitmap?): String {
+        val uri = ART_URI_KEYS.firstNotNullOfOrNull { key ->
+            metadata?.getString(key)?.takeIf { it.isNotBlank() }
+        }
+        if (uri != null) return uri
+        return art?.generationId?.toString() ?: "none"
     }
 
     private fun artFile() = java.io.File(context.filesDir, ART_NAME)

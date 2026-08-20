@@ -61,22 +61,29 @@ class MediaPageTest {
         assertTrue("the record inverted", r >= MediaPage.DISC_MIN_RADIUS)
     }
 
-    @Test fun `the volume column shrinks with the record`() {
-        val (restCy, restR) = MediaPage.disc(0f)
-        val (restTop, restBottom) = MediaPage.volumeSpan(restCy, restR)
-        val (cy, r) = MediaPage.disc(notice)
-        val (top, bottom) = MediaPage.volumeSpan(cy, r)
-        assertTrue("the column did not follow the record",
-            (bottom - top) < (restBottom - restTop))
-        assertTrue("the column ran off the record", top >= cy - r)
+    /**
+     * The volume is the whole area above the transport row, not a strip inside it — so
+     * the one thing that matters is that it stops before the buttons start. An area that
+     * overlapped them would make every press a volume change.
+     */
+    @Test fun `the volume area stops clear of the buttons`() {
+        val bottom = MediaPage.volumeAreaBottom()
+        val buttonsTop = MediaPage.TRANSPORT_CY - MediaPage.TRANSPORT_H / 2f
+        assertTrue("the volume area runs into the buttons", bottom < buttonsTop)
+        assertTrue("the volume area is too small to use", bottom > 200f)
     }
 
-    /** It moves toward the edge, not with the disc — a control that walks under the
-     *  finger when a notification arrives is worse than one that keeps a wider gap. */
-    @Test fun `the volume column is anchored to the panel edge`() {
-        val left = MediaPage.volumeLeft(panelW)
-        assertEquals(panelW - MediaPage.VOLUME_MARGIN - MediaPage.VOLUME_W, left, 0.01f)
-        assertTrue("the column runs off the panel", left + MediaPage.VOLUME_W < panelW)
+    /** It has to leave the pager somewhere to work from, or there is no way back. */
+    @Test fun `there is room below the buttons to page from`() {
+        val buttonsBottom = MediaPage.TRANSPORT_CY + MediaPage.TRANSPORT_H / 2f
+        assertTrue("nothing left below the buttons", panelH - buttonsBottom > 40f)
+    }
+
+    @Test fun `the ring labels sit inside their rings`() {
+        // Against the panel's own ring radius: a label at a wider radius than the ring
+        // would be drawn over the arc it is naming.
+        assertTrue("the label runs outside the ring",
+            MediaPage.LABEL_RADIUS < 128f)
     }
 
     @Test fun `clocks read as clocks`() {

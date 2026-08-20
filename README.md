@@ -329,22 +329,50 @@ The readout also stops riding the strip once it is off-page. It sits a full pane
 above, so pushing it down slid its bottom edge back into view underneath the card — a
 strip of the first page visible behind a card on the second.
 
-### The volume column
+### The rings become the player
 
-Drag it to set the volume, with a **haptic tick per step** — so it can be set without
-looking at a screen that is facing away from you. The tick is on the step, not on the
-movement; a buzz per frame would be a rattle.
+The best thing on this page needed nothing invented: there are already two rings drawn
+concentric with the phone's actual camera lenses, and on this page they had nothing to
+say. So the **top ring becomes the playback position** and the **bottom one becomes the
+volume** — two dials, on the two pieces of hardware that look like dials.
 
-It stands against the right edge of the panel rather than beside the record, so it stays
-put when the record shrinks — a control that walks under your finger because something
-unrelated arrived is worse than one that keeps a wider gap.
+They do not fade out and get replaced. As you scroll, each ring **sweeps** from what it
+reports about usage to what it reports about the music. Cross-fading was the first attempt
+and it looked like two rings in the same place, which is what it was.
 
-Under it is a speaker that gains waves as the level rises, and it is also the mute
-button. Four states, because **muted is not the same as turned all the way down**: a muted
-stream is holding a level it will come back to, where a stream at zero has lost that
-number. This uses Android's own mute rather than zeroing the volume and remembering the
-old value in a field, so the phone and the panel agree — mute set anywhere else shows
-here, and mute set here shows everywhere else.
+Each is labelled in text curved around the inside of its own ring: the remaining time
+under the playback ring, `VOLUME` over the other. Inside, because outside is off the top
+of the panel above and off the bottom edge below, and the gap between the two rings is
+twenty units.
+
+The volume is a **segment from two o'clock to five o'clock**, with nothing behind it.
+Playback fills a whole ring because a track has a beginning and an end, and all the way
+round means finished; volume has neither, and a full circle invited the same reading. A
+speaker rides the head of that arc and turns with it, so the glyph is the arc's pointer
+rather than a legend parked beside it — where it is *is* the value.
+
+### Setting the volume
+
+The control is the **whole area above the transport buttons**, and it is a sideways drag.
+Horizontal on purpose: up and down already belongs to the pages, and splitting the panel
+into a volume half and a paging half — which was tried — moves the way back somewhere you
+have to learn. Sideways and vertical never collide, so the whole surface does both.
+
+There is a **haptic tick per step**, so it can be set without looking at a screen facing
+away from you. The tick is on the step, not on the movement; a buzz per frame is a rattle.
+And the ring moves **linearly** with no easing while your finger is down: easing exists to
+make a value that jumps read as a movement, and a value already being moved by hand does
+not jump — smoothing it only puts the ring behind the finger dragging it.
+
+**Tap** that area to mute. It used to be the speaker glyph, but the glyph now rides the
+arc across camera glass with no digitizer behind it, so the gesture had to come to a
+surface that has one.
+
+**Muted is not the same as turned all the way down**: a muted stream is holding a level it
+will come back to, where a stream at zero has lost that number. Both show the bare
+speaker; muted adds a slash cut through it. This uses Android's own mute rather than
+zeroing the volume and remembering the old value in a field, so the phone and the panel
+agree in both directions.
 
 ### The buttons wait before believing the player
 

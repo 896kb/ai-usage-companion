@@ -86,37 +86,59 @@ object MediaPage {
     const val CLOCK_GAP = 12f
 
     /**
-     * The volume column, standing to the right of the record.
+     * The volume control is the whole area above the transport row.
      *
-     * Vertical, because it is the one control here that is not a transport button and
-     * should not read as one — and because the space to the right of a disc is a tall
-     * thin gap, which is the shape a vertical bar wants.
+     * There is no slider any more. A 22-unit column on the back of a phone was a target
+     * you had to find before you could use it, which is the wrong shape for the one
+     * control here that people reach for without looking. The area is: put a finger
+     * anywhere above the buttons and move it.
+     *
+     * RELATIVE, not absolute — the volume moves by how far the finger travelled, from
+     * wherever it already was. Absolute would mean a stray touch near the top slamming
+     * the volume to maximum, on a surface nobody is looking at.
      */
-    const val VOLUME_W = 22f
+    const val VOLUME_AREA_GAP = 18f
 
-    /** How far inside the record's own span the column starts. */
-    const val VOLUME_INSET = 10f
+    fun volumeAreaBottom(): Float = TRANSPORT_CY - TRANSPORT_H / 2f - VOLUME_AREA_GAP
 
-    /** The cap under the column: a speaker whose waves follow the level. */
-    const val VOLUME_ICON_H = 26f
-    const val VOLUME_ICON_GAP = 20f
+    /** How much of the range a full sweep of that area covers. */
+    const val VOLUME_TRAVEL = 1f
+
+    /** The mute button, beside the ring that now reports the volume. */
+    const val MUTE_H = 26f
+    const val MUTE_GAP = 16f
 
     /**
-     * The column's top and bottom, tied to the record's.
+     * The label curved inside a ring, and how big it is.
      *
-     * Tied rather than fixed, so it shrinks with the disc when a notification takes the
-     * top of the panel — a full-height column beside a shrunken record would look like
-     * the record had fallen over rather than made room. The cap sits in the space below
-     * the column, inside the record's own span.
+     * INSIDE, at a radius short of the ring itself. Outside is off the panel at the top
+     * and off the bottom edge below, and the gap between the two rings is twenty units —
+     * the only room these labels have is the space the rings enclose.
      */
-    fun volumeSpan(discCy: Float, discRadius: Float): Pair<Float, Float> {
-        val top = discCy - discRadius + VOLUME_INSET
-        val bottom = discCy + discRadius - VOLUME_ICON_H - VOLUME_ICON_GAP
-        return top to bottom.coerceAtLeast(top + VOLUME_W)
-    }
+    const val LABEL_RADIUS = 88f
+    const val LABEL_SIZE = 15f
+
+    /** What the volume ring is called. Named, because a bare arc around a lens is not
+     *  self-describing the way a bar under a track name is. */
+    const val VOLUME_LABEL = "VOLUME"
 
     /**
-     * Where the level stops being "low" and starts being "high".
+     * The volume arc: two o'clock to five o'clock on the ring's face.
+     *
+     * A SEGMENT rather than a whole circle, and it earns the difference. Playback fills a
+     * ring because a track has a beginning and an end and going all the way round means
+     * finished; volume has neither, and a full circle for it invited the same reading —
+     * a ring at three quarters looked like three quarters of something completed.
+     *
+     * Down the right-hand side, where it lands beside the mute button rather than
+     * opposite it. In Android's angles zero is three o'clock and they run clockwise, so
+     * an hour on the clock face is thirty degrees and two o'clock is minus thirty.
+     */
+    const val VOLUME_ARC_START = -30f
+    const val VOLUME_ARC_SWEEP = 90f
+
+    /**
+     * Where the mute glyph stops showing waves.
      *
      * One threshold, not a scale. The icon is a three-state readable-from-across-a-room
      * summary — silent, some, plenty — and a fourth state would be a distinction nobody
@@ -140,20 +162,6 @@ object MediaPage {
     fun barRight(panelWidth: Float, clockWidth: Float): Float =
         panelWidth - MARGIN - clockWidth - CLOCK_GAP
 
-    /**
-     * Where the volume column stands: measured from the panel's right edge.
-     *
-     * From the EDGE rather than from the record, which is what it used to be. Tying it to
-     * the disc walked the column inward every time a notification shrank the disc — a
-     * control that moves under the finger because something unrelated arrived is worse
-     * than one that stays put. Measuring from the edge also puts it where a volume
-     * control belongs: out of the way, against the side.
-     */
-    fun volumeLeft(panelWidth: Float): Float = panelWidth - VOLUME_MARGIN - VOLUME_W
-
-    /** Half the gap it used to keep. It is a control, not a column of type, and it does
-     *  not need the margin the text on this page keeps. */
-    const val VOLUME_MARGIN = 45f
 
     /**
      * A duration as a clock, dropping the hours when there are none.
