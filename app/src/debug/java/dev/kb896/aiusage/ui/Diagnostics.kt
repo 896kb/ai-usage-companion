@@ -9,6 +9,7 @@ import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.ArtImport
 import dev.kb896.aiusage.data.ConfigStore
+import dev.kb896.aiusage.data.CallLog
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.StatePayload
 import kotlinx.serialization.json.Json
@@ -28,6 +29,7 @@ object Diagnostics {
 
     private val pretty = Json { prettyPrint = true }
     private var preview: TextView? = null
+    private var calls: TextView? = null
 
     /**
      * @param onReset run after a reset, to rebuild the settings rows and repaint the
@@ -37,9 +39,12 @@ object Diagnostics {
     fun install(slot: ViewGroup, onReset: () -> Unit = {}) {
         LayoutInflater.from(slot.context).inflate(R.layout.debug_panel, slot, true)
         preview = slot.findViewById(R.id.preview_text)
+        calls = slot.findViewById(R.id.calls_text)
         // The debug panel styles its own views: MainActivity cannot, because these ids
         // do not exist in a release build.
         slot.findViewById<TextView>(R.id.preview_label).setTextColor(Panel.Palette.DIM)
+        slot.findViewById<TextView>(R.id.calls_heading).setTextColor(Panel.Palette.DIM)
+        calls?.setTextColor(Panel.Palette.FG)
         preview?.setTextColor(Panel.Palette.FG)
         slot.findViewById<View>(R.id.rule_3).setBackgroundColor(Panel.Palette.RULE)
         // Same typeface as everything else. The panel is drawn in Departure Mono and a
@@ -65,7 +70,7 @@ object Diagnostics {
 
         val mono = slot.context.resources.getFont(R.font.departure_mono)
         for (id in intArrayOf(R.id.debug_heading, R.id.preview_label, R.id.preview_text,
-                R.id.mascot_heading)) {
+                R.id.mascot_heading, R.id.calls_heading, R.id.calls_text)) {
             slot.findViewById<TextView>(id).typeface = mono
         }
     }
@@ -79,5 +84,36 @@ object Diagnostics {
         } catch (_: Exception) {
             raw
         }
+        calls?.text = renderCallLog()
+    }
+
+    /**
+     * The last few Anthropic requests, newest first.
+     *
+     * The panel can show that an account is unhealthy but not why or when, and until
+     * this was wired up the only answer was logcat over adb — which is no use to
+     * somebody holding the phone. The renderer already existed in MainActivity and was
+     * never called from anywhere: dead since whatever used to append it to the state
+     * dump stopped doing so.
+     *
+     * Debug-only, and it belongs here rather than in the release UI for the same reason
+     * the payload dump does. It records outcomes, never a token and never a body — see
+     * CallLog — but "which requests failed and when" is still operator detail, not
+     * something to put in front of everyone.
+     */
+    private fun renderCallLog(): String {
+        val recent = CallLog.recent()
+        if (recent.isEmpty()) return "(none yet)"
+        val now = System.currentTimeMillis()
+        return buildString {
+            for (e in recent) {
+                // Age rather than a wall-clock time: the useful question here is "how
+                // long since", and a timestamp makes the reader do that subtraction.
+                val agoSec = ((now - e.atMillis) / 1000).coerceAtLeast(0)
+                val ago = if (agoSec >= 60) "${agoSec / 60}m" else "${agoSec}s"
+                append(ago.padStart(4)).append("  ")
+                    .append(e.account.padEnd(9)).append(e.outcome).append('\n')
+            }
+        }.trimEnd()
     }
 }
