@@ -110,6 +110,24 @@ class RearDialView(context: Context) : View(context) {
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
     private val mascotPaint = Paint()
 
+    /** The notification strip's ground and its edge. */
+    private val noticePaint = Paint()
+
+    /** One relayed notification, as much of it as the panel shows. */
+    private data class Notice(val app: String, val pkg: String, val title: String, val text: String)
+
+    private var notice: Notice? = null
+    private var leaving: Notice? = null
+
+    /** When the CURRENT notice arrived, for its five seconds. */
+    private var noticeAt = 0L
+
+    /** When the current item started its turn of the wheel. */
+    private var wheelAt = 0L
+
+    /** App icons, kept because the same few apps notify over and over. */
+    private val icons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
+
     /** The close button's ring and cross. Anti-aliased: it is the one curve here. */
     private val closePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -357,8 +375,15 @@ class RearDialView(context: Context) : View(context) {
             drawRing(canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath)
         }
 
+        // The strip pushes the readout down and the RINGS DO NOT MOVE. They are drawn
+        // concentric with the phone's actual lenses, so shifting them would put two
+        // circles a hundred pixels away from the hardware they trace. Everything else on
+        // the canvas side rides down and some of it leaves the bottom of the panel,
+        // which is the trade: a notification is asking for attention, and for five
+        // seconds it gets it.
+        val push = NOTICE_H * noticeSlide(nowReal)
         canvas.save()
-        canvas.translate(dx, dy)
+        canvas.translate(dx, dy + push)
         if (!hidden) drawCanvasSide(canvas)
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
@@ -372,6 +397,10 @@ class RearDialView(context: Context) : View(context) {
         else closeButton = null
         canvas.restore()
         canvas.restore()   // the readout clip
+
+        // Over everything, and outside the readout's ripple clip: a notification arriving
+        // while the panel is closing should still be readable.
+        drawNotice(canvas, noticeSlide(nowReal), nowReal)
 
         // The mascot is outside the readout's clip because it belongs to the other side
         // of the ripple. The BUTTON is not — it is part of the readout and is swept away
@@ -797,6 +826,129 @@ class RearDialView(context: Context) : View(context) {
             // change species on its way behind the readout.
             bodyColor = firstMascotColor(),
         )
+    }
+
+    /**
+     * Show another app's notification.
+     *
+     * A new one arriving while one is up does NOT restart the old one's clock — it
+     * replaces it, and the two change places on the wheel. That is what [leaving] is
+     * for: through the turn there are two notices on screen, one going and one coming.
+     */
+    fun showNotification(app: String, pkg: String, title: String, text: String) {
+        val now = SystemClock.elapsedRealtime()
+        // Only a REPLACEMENT turns the wheel. The first notice of a run arrives into an
+        // empty strip that is itself sliding in, and turning at the same time would have
+        // it enter twice over.
+        if (notice != null) { leaving = notice; wheelAt = now }
+        notice = Notice(app, pkg, title, text)
+        noticeAt = now
+        invalidate()
+    }
+
+    /**
+     * How far the strip is down, 0 to 1, on the same eased curve as everything else.
+     *
+     * Driven by whether a notice is live rather than by an explicit animation: the strip
+     * is a consequence of there being something to say, so it retracts by itself the
+     * moment the last one expires.
+     */
+    private fun noticeSlide(nowMs: Long): Float {
+        if (notice != null && nowMs - noticeAt > NOTICE_MS) notice = null
+        if (leaving != null && nowMs - wheelAt > WHEEL_MS) leaving = null
+        return animateTo("notice:slide", if (notice != null) 1f else 0f)
+    }
+
+    /**
+     * The notification strip: title and body on the left, the app's icon on the right.
+     *
+     * Only right of the camera cutout. The left of this panel is lens glass with the
+     * rings drawn around it — a banner there would be half on a surface that cannot show
+     * it, and the rings must not move, being aligned to physical hardware.
+     *
+     * Items enter from the top and leave through the BOTTOM, both at once when one
+     * replaces another: a drum turning behind a window rather than one card fading into
+     * the next. Sending the outgoing one back up the way it came would read as
+     * "cancelled"; continuing downward says the next thing is already here.
+     */
+    private fun drawNotice(canvas: Canvas, slide: Float, nowMs: Long) {
+        if (slide <= 0.001f) return
+        val h = NOTICE_H
+        val top = -h + h * slide
+        canvas.save()
+        canvas.clipRect(Panel.CUTOUT_RIGHT.toFloat(), 0f, Panel.WIDTH.toFloat(), top + h)
+
+        // The strip's own ground, so the readout sliding under it does not show through.
+        noticePaint.color = colorFor("bg", config.background or (0xFF shl 24))
+        noticePaint.alpha = 255
+        canvas.drawRect(
+            Panel.CUTOUT_RIGHT.toFloat(), top, Panel.WIDTH.toFloat(), top + h, noticePaint)
+
+        val turn = if (leaving == null) 1f
+            else Tween.easeInOut(((nowMs - wheelAt).toFloat() / WHEEL_MS).coerceIn(0f, 1f))
+        leaving?.let { drawNoticeRow(canvas, it, top + turn * h, 1f - turn) }
+        notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * h, turn) }
+        canvas.restore()
+
+        // A hairline along the bottom edge, so the strip reads as something laid OVER the
+        // panel rather than as the panel having been repainted.
+        noticePaint.color = colorFor("notice", config.notificationTint)
+        noticePaint.alpha = (90 * slide).toInt()
+        canvas.drawRect(Panel.CUTOUT_RIGHT.toFloat(), top + h - 1.5f,
+            Panel.WIDTH.toFloat(), top + h, noticePaint)
+        noticePaint.alpha = 255
+    }
+
+    /** One row of the wheel, at [y], at [presence] opacity. */
+    private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float, presence: Float) {
+        if (presence <= 0.01f) return
+        val h = NOTICE_H
+        val alpha = (255 * presence).toInt()
+        val left = Panel.CUTOUT_RIGHT + NOTICE_PAD
+        val right = Panel.WIDTH - NOTICE_PAD
+
+        val icon = icons.getOrPut(item.pkg) {
+            runCatching { context.packageManager.getApplicationIcon(item.pkg) }.getOrNull()
+        }
+        val size = h * 0.46f
+        val iconLeft = right - size
+        if (icon != null) {
+            icon.setBounds(
+                iconLeft.toInt(), (y + (h - size) / 2f).toInt(),
+                (iconLeft + size).toInt(), (y + (h + size) / 2f).toInt(),
+            )
+            icon.alpha = alpha
+            icon.draw(canvas)
+        }
+
+        val textRight = iconLeft - NOTICE_PAD
+        label.color = colorFor("notice", config.notificationTint)
+        label.alpha = (alpha * 0.6f).toInt()
+        label.textAlign = Paint.Align.LEFT
+        canvas.drawText(noticeClip(item.app.uppercase(), label, textRight - left),
+            left, y + h * 0.30f, label)
+
+        heading.color = colorFor("notice", config.notificationTint)
+        heading.alpha = alpha
+        heading.textAlign = Paint.Align.LEFT
+        canvas.drawText(noticeClip(item.title, heading, textRight - left),
+            left, y + h * 0.56f, heading)
+
+        if (item.text.isNotBlank()) {
+            label.alpha = alpha
+            canvas.drawText(noticeClip(item.text, label, textRight - left),
+                left, y + h * 0.80f, label)
+        }
+        label.alpha = 255
+        heading.alpha = 255
+    }
+
+    /** [text] cut to whatever fits [width], with an ellipsis when it had to be cut. */
+    private fun noticeClip(text: String, paint: Paint, width: Float): String {
+        if (paint.measureText(text) <= width) return text
+        var n = text.length
+        while (n > 1 && paint.measureText(text.take(n) + "…") > width) n--
+        return text.take(n) + "…"
     }
 
     private fun drawExtras(canvas: Canvas) {
@@ -1567,6 +1719,16 @@ class RearDialView(context: Context) : View(context) {
          * The target is what the finger needs; the glyph is only what says it is there.
          */
         private const val CAMERA_SLOP = 26f
+
+        /** How long a notification holds the strip before it retracts. */
+        private const val NOTICE_MS = 5_000L
+
+        /** How long one item takes to replace another on the wheel. */
+        private const val WHEEL_MS = 420f
+
+        /** A quarter of the panel, which is what the strip was asked for. */
+        private const val NOTICE_H = Panel.HEIGHT / 4f
+        private const val NOTICE_PAD = 26f
 
         private const val EXTRA_ICON_H = 20f
 

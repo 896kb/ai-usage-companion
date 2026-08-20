@@ -213,7 +213,6 @@ nothing behind it and no undo. Your connected accounts stay signed in.
   should put its headband on once, lift for as long as you are working, and take it off
   when you stop — instead of restarting the whole performance every three seconds. And
   the cut between one state and the next should stop being a cut.
-- **Automatic show-on-rear**, so the manual step below stops being manual.
 
 ---
 
@@ -340,9 +339,11 @@ phone, understanding all of the above.
    surviving your day and dying to a reflex. This is the one step the app cannot check
    for you — HyperOS does not expose whether an app is locked — so it is shown as advice
    rather than as a box that could never tick.
-8. **Background the app, then tap its notification** to put the panel on the back.
-
-Step 8 is the awkward one and it is known — see [Future plans](#future-plans).
+8. **Background the app.** The panel places itself and stays there — the service puts it
+   on the rear display when it starts, and a watchdog puts it back if anything takes it
+   away, including while the phone is asleep. Tapping the notification still re-places it
+   by hand, which is the one recovery path that does not need the app opened, but it is
+   no longer a step anybody has to perform.
 
 **The app must stay running in the background.** The panel is drawn by this app; nothing
 renders it on your behalf. If the app is killed, the back goes dark until you open it

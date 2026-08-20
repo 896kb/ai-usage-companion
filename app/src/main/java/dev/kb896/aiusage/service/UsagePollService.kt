@@ -449,7 +449,13 @@ class UsagePollService : Service() {
         )
         val builder = Notification.Builder(this, CHANNEL)
             .setContentTitle("AI Usage")
-            .setContentText("Tap to show on the rear panel")
+            // The empty state only — IslandNotification.decorate replaces this the
+            // moment there are readings. It used to say "tap to show on the rear panel",
+            // which was an instruction, and placing the panel by hand stopped being a
+            // step once the service started recovering it on its own. Tapping still
+            // works and is still the one recovery path that does not need the app
+            // opened; it is simply no longer something anyone has to be told.
+            .setContentText("Waiting for the first reading")
             // Ours, not a stock system glyph — this one is permanently in the
             // status bar, so it is the app's face more than any other icon.
             .setSmallIcon(R.drawable.ic_notification)

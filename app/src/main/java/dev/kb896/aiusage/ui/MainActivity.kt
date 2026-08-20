@@ -486,6 +486,19 @@ class MainActivity : ComponentActivity() {
             onPick = { c -> write { it.copy(cameraColor = c) } },
         )
         SettingsRows.toggleWithColor(
+            container, "Notifications", config.showNotifications, config.notificationTint,
+            onChange = { on -> write { it.copy(showNotifications = on) } },
+            onPick = { c -> write { it.copy(notificationColor = c) } },
+        )
+        // A SEPARATE switch, and deliberately so. This display faces away from its owner,
+        // so everything on it is shown to whoever is behind them. Knowing a message
+        // arrived and broadcasting what it said are different decisions.
+        if (config.showNotifications) {
+            SettingsRows.toggle(
+                container, "  ↳ include the message text", config.showNotificationText,
+            ) { on -> write { it.copy(showNotificationText = on) } }
+        }
+        SettingsRows.toggleWithColor(
             container, "Hide", config.showClose, config.closeColor,
             onChange = { on -> write { it.copy(showClose = on) } },
             onPick = { c -> write { it.copy(closeColor = c) } },

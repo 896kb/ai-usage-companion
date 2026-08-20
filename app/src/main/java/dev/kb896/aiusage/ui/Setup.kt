@@ -75,6 +75,14 @@ object Setup {
                 },
             ),
             Step(
+                title = "Notification access",
+                why = "Only needed for mirroring OTHER apps' notifications onto the panel. " +
+                    "Without it that feature does nothing; everything else works.",
+                satisfied = NotificationManagerCompat.getEnabledListenerPackages(context)
+                    .contains(context.packageName),
+                open = { Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS") },
+            ),
+            Step(
                 title = "Autostart",
                 why = "HyperOS will not let this app start itself otherwise — not after a " +
                     "reboot, and not after it has killed the process. This is the setting " +

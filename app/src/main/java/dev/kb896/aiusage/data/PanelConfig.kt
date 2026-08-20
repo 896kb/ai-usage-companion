@@ -212,6 +212,18 @@ data class PanelConfig(
      */
     val showBackground: Boolean = true,
 
+    /**
+     * Mirror other apps' notifications onto the panel.
+     *
+     * Off by default, and [showNotificationText] is a SEPARATE opt-in, because this
+     * display faces away from its owner: everything on it is shown to whoever is behind
+     * them rather than to them. Choosing to see that a message arrived is a different
+     * decision from choosing to broadcast what it said.
+     */
+    val showNotifications: Boolean = false,
+    val showNotificationText: Boolean = false,
+    val notificationColor: Int? = null,
+
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are
@@ -229,6 +241,7 @@ data class PanelConfig(
     val batteryTint: Int get() = batteryColor ?: extrasColor
     val dateTint: Int get() = dateColor ?: extrasColor
     val cameraTint: Int get() = cameraColor ?: extrasColor
+    val notificationTint: Int get() = notificationColor ?: extrasColor
 
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
 

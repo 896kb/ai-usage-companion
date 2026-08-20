@@ -38,6 +38,13 @@ class RearActivity : Activity() {
          * privileged part happens on the other side.
          */
         const val ACTION_OPEN_CAMERA = "dev.kb896.aiusage.OPEN_CAMERA"
+
+        /** Another app's notification, on its way to the panel. */
+        const val ACTION_NOTIFICATION = "dev.kb896.aiusage.NOTIFICATION"
+        const val EXTRA_NOTIFICATION_APP = "app"
+        const val EXTRA_NOTIFICATION_PKG = "pkg"
+        const val EXTRA_NOTIFICATION_TITLE = "title"
+        const val EXTRA_NOTIFICATION_TEXT = "text"
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -67,6 +74,12 @@ class RearActivity : Activity() {
             // dispatching on action.
             when (intent?.action) {
                 ACTION_FINISH -> finish()
+                ACTION_NOTIFICATION -> dial.showNotification(
+                    intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
+                    intent.getStringExtra(EXTRA_NOTIFICATION_PKG).orEmpty(),
+                    intent.getStringExtra(EXTRA_NOTIFICATION_TITLE).orEmpty(),
+                    intent.getStringExtra(EXTRA_NOTIFICATION_TEXT).orEmpty(),
+                )
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
                 // leave the current mode untouched. Re-evaluating unconditionally with
                 // `.orEmpty()` treated a missing extra the same as an explicit empty
@@ -134,7 +147,9 @@ class RearActivity : Activity() {
 
         ContextCompat.registerReceiver(
             this, receiver,
-            IntentFilter().apply { addAction(ACTION_STATE); addAction(ACTION_FINISH) },
+            IntentFilter().apply {
+                addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
+            },
             ContextCompat.RECEIVER_EXPORTED,
         )
         render(intent?.getStringExtra(EXTRA_STATE).orEmpty())

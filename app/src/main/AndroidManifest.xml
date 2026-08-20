@@ -49,6 +49,22 @@
             android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
             android:theme="@style/RearTheme" />
 
+        <!--
+          Mirrors other apps' notifications to the rear panel. Binding requires the
+          system permission below AND the user granting notification access by hand in
+          Settings; neither can be done from code, which is the whole cost of this
+          feature. exported must be true: the SYSTEM binds this, not us.
+        -->
+        <service
+            android:name=".service.NotificationRelay"
+            android:exported="true"
+            android:label="AI Usage panel"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".service.UsagePollService"
             android:exported="false"
