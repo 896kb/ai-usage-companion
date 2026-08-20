@@ -317,11 +317,27 @@ It is built as a **page count**, not a two-state toggle, because the reason it e
 that this panel will eventually hold more accounts than fit on it. Adding a third page is
 a number.
 
+### When a notification arrives on this page
+
+It does **not** push the page down. Everything here is anchored to the bottom of the
+panel — the transport buttons are the last thing on it — and pushing the page down put
+them off the screen, where they cannot be pressed. The record gives up the room instead:
+it shrinks to fit whatever is left, the volume column shrinks with it, and the type and
+the buttons do not move at all.
+
+The readout also stops riding the strip once it is off-page. It sits a full panel height
+above, so pushing it down slid its bottom edge back into view underneath the card — a
+strip of the first page visible behind a card on the second.
+
 ### The volume column
 
 Drag it to set the volume, with a **haptic tick per step** — so it can be set without
 looking at a screen that is facing away from you. The tick is on the step, not on the
 movement; a buzz per frame would be a rattle.
+
+It stands against the right edge of the panel rather than beside the record, so it stays
+put when the record shrinks — a control that walks under your finger because something
+unrelated arrived is worse than one that keeps a wider gap.
 
 Under it is a speaker that gains waves as the level rises, and it is also the mute
 button. Four states, because **muted is not the same as turned all the way down**: a muted

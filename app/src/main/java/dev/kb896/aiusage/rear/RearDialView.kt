@@ -398,6 +398,14 @@ class RearDialView(context: Context) : View(context) {
         }
         val paged = if (onlyAccount == null) pager.advance(frameNowMs) else 0f
         val paging = (paged / Panel.HEIGHT).coerceIn(0f, 1f)
+
+        // The notice pushes the READOUT down, and only while the readout is the page you
+        // are on. Off-page it must not: the readout sits a full panel height above, so
+        // pushing it 143 units down slid its bottom edge back into view underneath the
+        // notification — a strip of the first page visible behind a card on the second.
+        //
+        // On the media page the notice makes room a different way. See drawMediaPage.
+        val readoutPush = push * (1f - paging)
         if (pager.animating()) animating = true
 
         // The rings do NOT translate, and that is a deliberate exception to the
@@ -453,8 +461,11 @@ class RearDialView(context: Context) : View(context) {
             // travels between the two pages instead, shrinking and moving to the middle
             // as the readout leaves over the top of it. That is the whole gesture: the
             // panel turns into a record player rather than showing a second screen.
-            canvas.translate(dx, dy + push)
-            drawVinyl(canvas, paging)
+            // Rides the readout's push while it is behind the readout, and none of it
+            // once it has become the media page's record — where the notice shrinks it
+            // instead of moving it.
+            canvas.translate(dx, dy + readoutPush)
+            drawVinyl(canvas, paging, push)
             canvas.restore()
         }
 
@@ -493,8 +504,8 @@ class RearDialView(context: Context) : View(context) {
         // which is the trade: a notification is asking for attention, and for five
         // seconds it gets it.
         canvas.save()
-        canvas.translate(dx, dy + push - paged)
-        if (!hidden) drawCanvasSide(canvas, dx, dy + push - paged)
+        canvas.translate(dx, dy + readoutPush - paged)
+        if (!hidden) drawCanvasSide(canvas, dx, dy + readoutPush - paged)
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
         if (onlyAccount == null && !hidden) drawExtras(canvas)
@@ -502,12 +513,12 @@ class RearDialView(context: Context) : View(context) {
         // single-account preview leaves it out — and a preview is scaled, which would
         // put the touch target in the wrong place even if it were wanted there.
         if (onlyAccount == null && config.showCamera && !hidden) {
-            drawCamera(canvas, dx, dy + push - paged)
+            drawCamera(canvas, dx, dy + readoutPush - paged)
         } else {
             cameraButton = null
         }
         if (onlyAccount == null && config.showClose && !hidden) {
-            drawClose(canvas, dx, dy + push - paged)
+            drawClose(canvas, dx, dy + readoutPush - paged)
         } else {
             closeButton = null
         }
@@ -522,8 +533,12 @@ class RearDialView(context: Context) : View(context) {
         // height above the screen and the page came up as a bare record on black.
         if (!hidden && onlyAccount == null && paging > 0.001f) {
             canvas.save()
-            canvas.translate(dx, dy + push)
-            drawMediaPage(canvas, paging, dx, dy + push)
+            // NOT pushed by the notice. Everything on this page is anchored to the
+            // bottom of the panel and pushing it down puts the transport buttons off the
+            // screen — which is what happened, and you cannot press what has left. The
+            // record gives up the room instead.
+            canvas.translate(dx, dy)
+            drawMediaPage(canvas, paging, dx, dy, push)
             canvas.restore()
         } else if (paging <= 0.001f) {
             volumeBar = null
@@ -2225,7 +2240,7 @@ class RearDialView(context: Context) : View(context) {
      * than in absolute greys. The background is the user's to choose, and a record mixed
      * from black would vanish on a dark panel and sit like a hole in a light one.
      */
-    private fun drawVinyl(canvas: Canvas, paging: Float) {
+    private fun drawVinyl(canvas: Canvas, paging: Float, notice: Float) {
         if (config.mediaArt != MediaArt.VINYL) return
         // The track that is playing, or the one that just stopped. A record cannot leave
         // if it is deleted the instant the music ends — drawVinyl used to return here and
@@ -2243,7 +2258,7 @@ class RearDialView(context: Context) : View(context) {
         // slide runs from wherever it happens to be, so leaving from the media page
         // travels further than leaving from the readout — which is correct, it is
         // further up.
-        val base = discAt(paging)
+        val base = discAt(paging, notice)
         val disc = MediaLayout.Disc(
             base.cx, base.cy + (1f - swap) * (Panel.HEIGHT + base.radius), base.radius,
         )
@@ -2360,7 +2375,13 @@ class RearDialView(context: Context) : View(context) {
      * canvas is not translated by the page offset: the page does not slide in, it
      * assembles in place as the readout clears.
      */
-    private fun drawMediaPage(canvas: Canvas, paging: Float, dx: Float, dy: Float) {
+    private fun drawMediaPage(
+        canvas: Canvas,
+        paging: Float,
+        dx: Float,
+        dy: Float,
+        notice: Float,
+    ) {
         val m = media ?: return
         val tint = colorFor("media", config.mediaTint)
         val alpha = { a: Int -> (a * paging).toInt().coerceIn(0, 255) }
@@ -2458,9 +2479,9 @@ class RearDialView(context: Context) : View(context) {
         }
 
         // ---- the volume column, standing beside the record --------------------
-        val vLeft = MediaPage.volumeLeft(cx)
-        val vTop = MediaPage.VOLUME_TOP
-        val vBottom = MediaPage.VOLUME_BOTTOM
+        val vLeft = MediaPage.volumeLeft(Panel.WIDTH.toFloat())
+        val (discCy, discRadius) = MediaPage.disc(notice)
+        val (vTop, vBottom) = MediaPage.volumeSpan(discCy, discRadius)
         // Drawn EMPTY while muted, whatever level is being held underneath. The bar
         // reports what you can hear, and the remembered level is the icon's business.
         val level = if (muted()) 0f else volumeLevel()
@@ -2536,16 +2557,19 @@ class RearDialView(context: Context) : View(context) {
      * is about the music. Cross-fading would make it a slide transition between screens,
      * which is a different and much cheaper effect.
      */
-    private fun discAt(paging: Float): MediaLayout.Disc {
+    private fun discAt(paging: Float, notice: Float): MediaLayout.Disc {
         val readout = MediaLayout.vinyl(
             Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), Panel.CUTOUT_RIGHT.toFloat(),
         )
         if (paging <= 0.001f) return readout
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
+        // The page's disc is sized against whatever the notice has left, so a strip
+        // arriving shrinks the record rather than moving anything.
+        val (pageCy, pageRadius) = MediaPage.disc(notice)
         return MediaLayout.Disc(
             cx = readout.cx + (cx - readout.cx) * paging,
-            cy = readout.cy + (MediaPage.DISC_CY - readout.cy) * paging,
-            radius = readout.radius + (MediaPage.DISC_RADIUS - readout.radius) * paging,
+            cy = readout.cy + (pageCy - readout.cy) * paging,
+            radius = readout.radius + (pageRadius - readout.radius) * paging,
         )
     }
 

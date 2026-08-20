@@ -25,9 +25,45 @@ object MediaPage {
      * off the bottom. Here the whole disc is on screen with the controls under it, which
      * is the shape of every record player ever made and the reason the disc had to shrink
      * to get here.
+     *
+     * Its size is DERIVED rather than fixed, from the space between whatever is above it
+     * and the stack of type and buttons below — see [disc]. At rest that works out to the
+     * numbers this used to hardcode.
      */
-    const val DISC_CY = 196f
-    const val DISC_RADIUS = 146f
+    const val DISC_MARGIN = 50f
+
+    /** The top of the type stack: title, artist, transport, bar. Fixed. */
+    const val STACK_TOP = 360f
+
+    /** Between the bottom of the record and the top of that stack. */
+    const val DISC_GAP = 18f
+
+    /** Small enough to be a token, big enough to still read as a record. */
+    const val DISC_MIN_RADIUS = 34f
+
+    /**
+     * The record's centre and radius, given whatever is occupying the top of the panel.
+     *
+     * [topLimit] is where this page may start drawing — normally 0, and the height of a
+     * notification strip while one is up.
+     *
+     * THE RECORD SHRINKS; the controls do not move. A notification used to push this
+     * whole page down, which is right on the readout page — everything there is a list
+     * and a list can ride down — and wrong here, because the bottom of this page is the
+     * transport buttons and pushing them down puts them off the panel. You cannot press
+     * what has left the screen, so the one flexible thing on the page gives up the room
+     * instead.
+     */
+    fun disc(topLimit: Float): Pair<Float, Float> {
+        val top = topLimit + DISC_MARGIN
+        val bottom = STACK_TOP - DISC_GAP
+        val radius = ((bottom - top) / 2f).coerceAtLeast(DISC_MIN_RADIUS)
+        return (top + radius) to radius
+    }
+
+    /** Where the record sits with nothing above it. */
+    val DISC_CY: Float get() = disc(0f).first
+    val DISC_RADIUS: Float get() = disc(0f).second
 
     /** Type and controls, stacked under the disc. Baselines and centre lines. */
     const val TITLE_BASELINE = 386f
@@ -57,12 +93,27 @@ object MediaPage {
      * thin gap, which is the shape a vertical bar wants.
      */
     const val VOLUME_W = 22f
-    const val VOLUME_TOP = 72f
-    const val VOLUME_BOTTOM = 296f
+
+    /** How far inside the record's own span the column starts. */
+    const val VOLUME_INSET = 10f
 
     /** The cap under the column: a speaker whose waves follow the level. */
     const val VOLUME_ICON_H = 26f
     const val VOLUME_ICON_GAP = 20f
+
+    /**
+     * The column's top and bottom, tied to the record's.
+     *
+     * Tied rather than fixed, so it shrinks with the disc when a notification takes the
+     * top of the panel — a full-height column beside a shrunken record would look like
+     * the record had fallen over rather than made room. The cap sits in the space below
+     * the column, inside the record's own span.
+     */
+    fun volumeSpan(discCy: Float, discRadius: Float): Pair<Float, Float> {
+        val top = discCy - discRadius + VOLUME_INSET
+        val bottom = discCy + discRadius - VOLUME_ICON_H - VOLUME_ICON_GAP
+        return top to bottom.coerceAtLeast(top + VOLUME_W)
+    }
 
     /**
      * Where the level stops being "low" and starts being "high".
@@ -72,9 +123,6 @@ object MediaPage {
      * can make out at 26 units.
      */
     const val VOLUME_LOUD = 0.5f
-
-    /** How far the volume column sits from the disc's edge. */
-    const val VOLUME_GAP = 46f
 
     /**
      * The horizontal centre of this page, and the margins its full-width parts keep.
@@ -92,8 +140,20 @@ object MediaPage {
     fun barRight(panelWidth: Float, clockWidth: Float): Float =
         panelWidth - MARGIN - clockWidth - CLOCK_GAP
 
-    /** Where the volume column stands, given where the disc is. */
-    fun volumeLeft(centreX: Float): Float = centreX + DISC_RADIUS + VOLUME_GAP
+    /**
+     * Where the volume column stands: measured from the panel's right edge.
+     *
+     * From the EDGE rather than from the record, which is what it used to be. Tying it to
+     * the disc walked the column inward every time a notification shrank the disc — a
+     * control that moves under the finger because something unrelated arrived is worse
+     * than one that stays put. Measuring from the edge also puts it where a volume
+     * control belongs: out of the way, against the side.
+     */
+    fun volumeLeft(panelWidth: Float): Float = panelWidth - VOLUME_MARGIN - VOLUME_W
+
+    /** Half the gap it used to keep. It is a control, not a column of type, and it does
+     *  not need the margin the text on this page keeps. */
+    const val VOLUME_MARGIN = 45f
 
     /**
      * A duration as a clock, dropping the hours when there are none.
