@@ -215,6 +215,26 @@ class RearDialView(context: Context) : View(context) {
         frameNowMs = SystemClock.uptimeMillis()
         animating = false
 
+        // Everything the panel paints — background included — happens inside one clip,
+        // so the ripple takes the whole surface rather than eating the readout off a
+        // background that stays put. That was the bug: the background was painted before
+        // the clip existed, so a finished ripple left a full dark panel behind.
+        val rippleNow = SystemClock.elapsedRealtime()
+        val sweep = ripple(rippleNow)
+        // Settled into ambient: nothing but the button and the mascot, drawn below.
+        val hidden = ambient && sweep == null
+        canvas.save()
+        if (sweep != null) {
+            // Hiding keeps what the circle has NOT reached; showing keeps what it has.
+            // The same circle in opposite senses, which is what makes the two directions
+            // feel like one gesture rather than two animations.
+            val path = android.graphics.Path().apply {
+                addCircle(CLOSE_CX, CLOSE_CY, rippleReach() * sweep,
+                    android.graphics.Path.Direction.CW)
+            }
+            if (ambient) canvas.clipOutPath(path) else canvas.clipPath(path)
+        }
+
         // Opaque, and the colour is the user's.
         //
         // This was a fixed 0xB4 alpha so the system's rear wallpaper showed through. The
@@ -224,7 +244,13 @@ class RearDialView(context: Context) : View(context) {
         // SubScreenLauncher resumes, takes the display, and leaves RearActivity's window
         // out of the window list while its task record stays alive, which the respawn
         // watchdog cannot see. Any colour is fine; transparency is not.
-        canvas.drawColor(colorFor("bg", config.background or (0xFF shl 24)))
+        //
+        // AMBIENT is the one exception, and it is a deliberate risk: see AMBIENT_ALPHA.
+        if (!hidden) {
+            canvas.drawColor(colorFor("bg", config.background or (0xFF shl 24)))
+        } else {
+            canvas.drawColor((config.background and 0x00FFFFFF) or (AMBIENT_ALPHA shl 24))
+        }
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
         // — it was in place for a full build while this line painted Palette.BG at full
@@ -310,24 +336,9 @@ class RearDialView(context: Context) : View(context) {
         // ripple takes all of it together. Clipping each piece would let them vanish at
         // slightly different moments, which reads as the panel breaking rather than
         // closing.
-        val sweep = ripple(nowReal)
-        val readoutVisible = !ambient || sweep != null
-        canvas.save()
-        if (sweep != null) {
-            // Hiding: keep what the circle has NOT reached yet, so the readout is eaten
-            // outward from the button. Showing: keep what it HAS reached. Same circle,
-            // opposite sense, which is what makes the two directions feel like one
-            // gesture rather than two animations.
-            val reach = rippleReach()
-            val path = android.graphics.Path().apply {
-                addCircle(CLOSE_CX, CLOSE_CY, reach * sweep, android.graphics.Path.Direction.CW)
-            }
-            if (ambient) canvas.clipOutPath(path) else canvas.clipPath(path)
-        }
-
         val order = orderedAccounts()
         val positions = listOf(geometry.personal, geometry.work)
-        order.forEachIndexed { position, accountIndex ->
+        if (!hidden) order.forEachIndexed { position, accountIndex ->
             val account = Account.entries.getOrNull(accountIndex) ?: return@forEachIndexed
             if (onlyAccount != null && account != onlyAccount) return@forEachIndexed
             // A previewed account takes the first ring position whatever its place in
@@ -339,14 +350,14 @@ class RearDialView(context: Context) : View(context) {
 
         canvas.save()
         canvas.translate(dx, dy)
-        drawCanvasSide(canvas)
+        if (!hidden) drawCanvasSide(canvas)
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
-        if (onlyAccount == null) drawExtras(canvas)
+        if (onlyAccount == null && !hidden) drawExtras(canvas)
         // Same rule as the extras: it acts on the panel rather than on an account, so a
         // single-account preview leaves it out — and a preview is scaled, which would
         // put the touch target in the wrong place even if it were wanted there.
-        if (onlyAccount == null && config.showCamera) drawCamera(canvas, dx, dy)
+        if (onlyAccount == null && config.showCamera && !hidden) drawCamera(canvas, dx, dy)
         else cameraButton = null
         canvas.restore()
         canvas.restore()   // the readout clip
@@ -354,7 +365,7 @@ class RearDialView(context: Context) : View(context) {
         // Outside the clip, both of them: the button is what the ripple emanates FROM
         // and the mascot is what is left behind, so neither may be eaten by it.
         if (onlyAccount == null && config.showClose) {
-            drawClose(canvas, sweep, readoutVisible)
+            drawClose(canvas, sweep)
             if (ambient) drawAmbientWalk(canvas, nowReal, sweep)
         } else {
             closeButton = null
@@ -613,7 +624,7 @@ class RearDialView(context: Context) : View(context) {
         val bottom = centreY + h / 2f
         val margin = Panel.HEIGHT - bottom
         val right = Panel.WIDTH - margin
-        extras.color = colorFor("extras", config.extrasColor)
+        extras.color = colorFor("camera", config.cameraTint)
         // Positioned by its own left edge rather than by a square cell: drawIcon centres
         // within a cell of side h, which is right for the clock and battery sitting in a
         // column and wrong for something pinned to the panel's right margin.
@@ -653,7 +664,7 @@ class RearDialView(context: Context) : View(context) {
      * other. A real morph between a cross and a quadruped would land somewhere neither
      * shape survives.
      */
-    private fun drawClose(canvas: Canvas, sweep: Float?, readoutVisible: Boolean) {
+    private fun drawClose(canvas: Canvas, sweep: Float?) {
         closeButton = android.graphics.RectF(
             CLOSE_CX - CLOSE_R, CLOSE_CY - CLOSE_R, CLOSE_CX + CLOSE_R, CLOSE_CY + CLOSE_R,
         )
@@ -1435,6 +1446,24 @@ class RearDialView(context: Context) : View(context) {
          * glitch rather than a decision.
          */
         private const val RIPPLE_MS = 2400f
+
+        /**
+         * How opaque the panel stays in ambient mode.
+         *
+         * NOT zero, and this is the one number in this file that must never become it.
+         * At zero the panel stops working entirely: with nothing occluding it, MIUI's
+         * SubScreenLauncher resumes, takes the display, and RearActivity's window leaves
+         * the window list while its process and task record stay alive — a failure the
+         * respawn watchdog cannot see, because it asks whether the TASK is alive and the
+         * task is fine. See the block comment on the background fill.
+         *
+         * Low enough to see the system's own rear screen through, high enough to still
+         * be a surface. The panel ran at 0xB4 for a whole build, so the mechanism
+         * tolerates partial alpha; how far down it tolerates is not established, and
+         * this is the value to raise first if the panel ever vanishes into MIUI's
+         * launcher after a close.
+         */
+        private const val AMBIENT_ALPHA = 0x60
 
         private const val CLOSE_STROKE = 3f
 

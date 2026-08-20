@@ -198,6 +198,7 @@ data class PanelConfig(
     val clockColor: Int? = null,
     val batteryColor: Int? = null,
     val dateColor: Int? = null,
+    val cameraColor: Int? = null,
 
     /** The date, under the clock. Off by default, like the other two. */
     val showDate: Boolean = false,
@@ -218,6 +219,7 @@ data class PanelConfig(
     val clockTint: Int get() = clockColor ?: extrasColor
     val batteryTint: Int get() = batteryColor ?: extrasColor
     val dateTint: Int get() = dateColor ?: extrasColor
+    val cameraTint: Int get() = cameraColor ?: extrasColor
 
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
 

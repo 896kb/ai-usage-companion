@@ -472,12 +472,19 @@ class MainActivity : ComponentActivity() {
         // The only control the panel has. Off by default — everything else on that
         // surface is something to look at, and a readout that reacts to being touched is
         // a surprise unless it was asked for.
-        SettingsRows.toggle(container, "Camera button on the panel", config.showCamera) { on ->
-            write { it.copy(showCamera = on) }
-        }
-        SettingsRows.toggle(container, "Close button on the panel", config.showClose) { on ->
-            write { it.copy(showClose = on) }
-        }
+        // The same row as Time, Date and Battery, and named for what they are rather
+        // than described. "Camera button on the panel" was a sentence where the others
+        // were labels, which made two controls of the same kind look like two kinds.
+        SettingsRows.toggleWithColor(
+            container, "Camera", config.showCamera, config.cameraTint,
+            onChange = { on -> write { it.copy(showCamera = on) } },
+            onPick = { c -> write { it.copy(cameraColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            container, "Hide", config.showClose, config.closeColor,
+            onChange = { on -> write { it.copy(showClose = on) } },
+            onPick = { c -> write { it.copy(closeColor = c) } },
+        )
 
         // Colours as one grid, so they can be judged against each other — which is how
         // they are actually chosen — rather than down a column one at a time.
@@ -488,9 +495,7 @@ class MainActivity : ComponentActivity() {
             SettingsRows.Swatch("CLOCK & BATT", config.extrasColor) { c ->
                 write { it.copy(extrasColor = c) }
             },
-            SettingsRows.Swatch("CLOSE", config.closeColor) { c ->
-                write { it.copy(closeColor = c) }
-            },
+
         )
         SettingsRows.colorGrid(container, swatches)
 
