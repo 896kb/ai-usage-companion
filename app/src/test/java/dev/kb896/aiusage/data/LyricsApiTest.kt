@@ -5,6 +5,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -59,10 +60,19 @@ class LyricsApiTest {
         )
         assertNull("a cookie went with the request", req.getHeader("Cookie"))
         assertNull("an auth header went with the request", req.getHeader("Authorization"))
+        // The version is READ FROM THE BUILD, never written out. Four headers once went on
+        // introducing themselves as 0.1 through every release after it — a request quietly
+        // misreporting who was making it. This is what stops that coming back.
+        val agent = req.getHeader("User-Agent")!!
         assertTrue(
-            "the agent string should name the project and nothing more",
-            req.getHeader("User-Agent")!!.startsWith("claude-status/"),
+            "the agent string should name the project: $agent",
+            agent.startsWith("claude-status/"),
         )
+        assertTrue(
+            "the agent string does not carry the build's version: $agent",
+            agent.contains(dev.kb896.aiusage.BuildConfig.VERSION_NAME),
+        )
+        assertFalse("the version is hardcoded, not derived", agent.contains("0.1 "))
     }
 
     /** An untimed sheet cannot say which line is being sung, so it is not lyrics here. */

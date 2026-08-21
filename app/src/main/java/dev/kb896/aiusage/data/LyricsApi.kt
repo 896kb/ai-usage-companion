@@ -75,7 +75,7 @@ class LyricsApi(
         val req = Request.Builder().url(url)
             // LRCLIB asks projects to identify themselves. Honoured, and it carries no
             // more than the name and version — nothing about this phone or its owner.
-            .header("User-Agent", "claude-status/0.1 (android; rear panel lyrics)")
+            .header("User-Agent", Agent.saying("rear panel lyrics"))
             .get().build()
         return try {
             client.newCall(req).execute().use { res ->

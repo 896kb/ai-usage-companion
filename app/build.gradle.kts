@@ -15,15 +15,21 @@ android {
         applicationId = "dev.kb896.aiusage"
         minSdk = 34
         targetSdk = 36
-        // Version comes from the release tag when CI is building one, so the APK cannot
-        // claim to be 0.1 forever while the tags move on. Locally it stays 0.1-dev,
-        // which is a useful thing to see in an installed build.
+        // Version comes from the release tag when CI is building one, so a published APK
+        // cannot go on claiming an old number while the tags move past it. Locally it
+        // stays <version>-dev, which is a useful thing to see in an installed build.
+        //
+        // This is the ONLY place a version is written down. Everything that needs to say
+        // what it is — the User-Agent this app sends, and anything added later — reads
+        // BuildConfig.VERSION_NAME rather than repeating the digits. Four User-Agent
+        // headers were still introducing themselves as 0.1 long after this line had
+        // moved on, which is the drift the comment above was already warning about.
         //
         // versionCode must increase for every update Android will accept, and a tag name
         // does not give a number to derive one from. CI_PIPELINE_IID is monotonic per
         // project, which is exactly the guarantee needed and nothing more.
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
-        versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.1-dev"
+        versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.3.8-dev"
         ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

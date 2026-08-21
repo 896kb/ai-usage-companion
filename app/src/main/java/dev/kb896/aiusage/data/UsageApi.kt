@@ -29,7 +29,7 @@ class UsageApi(
         val req = Request.Builder().url(url)
             .header("Authorization", "Bearer $accessToken")
             .header("anthropic-beta", "oauth-2025-04-20")
-            .header("User-Agent", "claude-status/0.1 (android)")
+            .header("User-Agent", Agent.VALUE)
             .get().build()
 
         val body: String

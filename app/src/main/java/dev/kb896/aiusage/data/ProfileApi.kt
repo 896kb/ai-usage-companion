@@ -63,7 +63,7 @@ class ProfileApi(
             .url(baseUrl.newBuilder().addPathSegments("api/oauth/profile").build())
             .header("Authorization", "Bearer $accessToken")
             .header("anthropic-beta", "oauth-2025-04-20")
-            .header("User-Agent", "claude-status/0.1 (android)")
+            .header("User-Agent", Agent.VALUE)
             .build()
         return try {
             client.newCall(req).execute().use { res ->
@@ -81,7 +81,7 @@ class ProfileApi(
             .url(baseUrl.newBuilder().addPathSegments("api/oauth/profile").build())
             .header("Authorization", "Bearer $accessToken")
             .header("anthropic-beta", "oauth-2025-04-20")
-            .header("User-Agent", "claude-status/0.1 (android)")
+            .header("User-Agent", Agent.VALUE)
             .build()
         return try {
             client.newCall(req).execute().use { res ->
