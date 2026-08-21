@@ -269,6 +269,28 @@ object MediaPage {
      * a bit of arc already filled in. Perpendicular, they cross the scale instead of
      * lying on it, which is what a mark on a dial has always looked like.
      */
+    /**
+     * How far the rings slide sideways on this page, marks and all.
+     *
+     * There is not enough panel outside the top ring for a label. It is 128 across with a
+     * 25 stroke centred 150 from the left edge, so its outer edge runs from x=9.5 to
+     * x=290.5 and sits 3.5 from the top — measured, there are 63 units of room on the
+     * diagonal where the labels sit, and a mark and a label together want most of that.
+     * Long times ran off the corner.
+     *
+     * So the whole dial moves right to where the room is, taking its marks with it, and
+     * the labels stay at the radius that reads well. It moves ONLY here: on the readout
+     * the rings are drawn concentric with the phone's camera lenses and must not shift by
+     * a pixel. Scaled by the page position, so it is a drift as the panel becomes a
+     * player rather than a jump.
+     *
+     * Worth knowing this cuts against an earlier rule — the rings fade rather than slide
+     * between pages precisely because a ring in motion is visibly off its lens. It buys
+     * labels that fit, and it is one constant to set to zero if the drift reads worse
+     * than the crowding did.
+     */
+    const val RING_SHIFT_X = 40f
+
     const val TICK_GAP = 2f
     const val TICK_LEN = 14f
     const val TICK_STROKE = 2f
