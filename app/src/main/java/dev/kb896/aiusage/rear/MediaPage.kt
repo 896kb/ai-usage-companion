@@ -175,7 +175,7 @@ object MediaPage {
      * into that gap and out toward the main display, and the angles they sit at are
      * chosen so they land where there is space.
      */
-    const val LABEL_CLEAR = 6f
+    const val LABEL_CLEAR = 3f
     const val LABEL_SIZE = 15f
 
     /**
@@ -219,7 +219,21 @@ object MediaPage {
      * opposite it. In Android's angles zero is three o'clock and they run clockwise, so
      * an hour on the clock face is thirty degrees and two o'clock is minus thirty.
      */
-    const val VOLUME_ARC_START = -30f
+    /**
+     * How far the volume arc is turned back from two o'clock.
+     *
+     * Anticlockwise, because five o'clock is the bottom-right corner of a panel that is
+     * 572 tall with this ring centred 420 down it — the arc's far end and the speaker
+     * riding it were pressed against the edge. Turned back a half hour the same segment
+     * runs half past one to half past four, which is clear of it.
+     *
+     * It also buys back the speaker's full travel: at half past four the glyph fits
+     * outside the ring without the panel edge clamping it, so it marks the true head of
+     * the arc across the whole range rather than stopping short of it.
+     */
+    const val VOLUME_ROTATE = -15f
+
+    const val VOLUME_ARC_START = -30f + VOLUME_ROTATE
     const val VOLUME_ARC_SWEEP = 90f
 
     /**

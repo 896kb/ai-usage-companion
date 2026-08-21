@@ -353,6 +353,10 @@ is empty. The rings work as the two ends of that because of the thing that made 
 awkward everywhere else — a ring encircles a camera lens and there is no display inside
 one, so a disc shrunk to ring size has genuinely *gone*.
 
+The playback dial **winds back** rather than snapping when a track ends: the reading goes
+from nearly full to nothing between two frames, and a dial that jumps there reads as the
+panel having lost its place rather than as a record finishing.
+
 **A record on the readout page** has no rings to use, so it crosses instead: the old one
 slides off the bottom while the new arrives from the top, at the same moment, the way a
 stack feeds through.
@@ -460,7 +464,11 @@ arc already filled in. Crossing the scale rather than lying on it is what a mark
 has always looked like.
 
 Both are **gauges rather than full circles**, and their gaps face each other: playback
-runs from half past ten round to five, volume from two to five. Two dials with their
+runs from eleven round to half past five, volume from half past one to half past four.
+Each was turned back from where it started — the playback arc to open an angular gap for
+its labels, the volume arc because five o'clock is the bottom-right corner of a panel 572
+tall with that ring centred 420 down it, and the arc's end and the speaker riding it were
+pressed against the edge. Two dials with their
 openings pointing at one another read as a pair; two closed circles read as two lenses
 with rings drawn on them. The gap at the bottom of the playback ring is also where its own
 label sits. A

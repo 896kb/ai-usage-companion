@@ -528,9 +528,20 @@ class RearDialView(context: Context) : View(context) {
         // ring in motion is a circle visibly not on the lens it traces.
         val playing = media ?: departing
         val mediaRingTint = colorFor("media", config.mediaTint)
-        val progressFraction = playing?.let {
+        // EASED, which matters for exactly one moment: the end of a track. The reading
+        // goes from nearly full to nothing between two frames, and a dial that jumps
+        // there reads as the panel having lost its place rather than as a record
+        // finishing. Eased, it winds back.
+        //
+        // The cost during ordinary playback is a lag of the ease's own duration — half a
+        // second against a track of several minutes, which is under a third of one per
+        // cent of the arc and not visible. Paying that everywhere is far simpler than
+        // deciding per frame whether a change was a tick or a jump, and it is the same
+        // follower the volume already uses.
+        val progressRaw = playing?.let {
             MediaLayout.progress(it.elapsed(SystemClock.elapsedRealtime()), it.durationMs)
         } ?: 0f
+        val progressFraction = ease("media:progress", progressRaw, PLAYBACK_EASE_MS)
         // Eased, because the volume moves in steps under a finger and a dial that jumped
         // between notches would read as a counter rather than as a control.
         val rawVolume = if (muted()) 0f else volumeLevel()
@@ -3341,7 +3352,12 @@ class RearDialView(context: Context) : View(context) {
             // the centre, then everything below is flat text.
             canvas.rotate(if (outward) deg + 90f else deg - 90f, g.cx, g.cy)
             val x = g.cx
-            val baseline = if (outward) g.cy - radius + size / 2f else g.cy + radius + size / 2f
+            // The baseline sits EXACTLY on the label radius, as it does when the whole
+            // string is bent along a path. Half the text size was being added here and
+            // nowhere else, which pushed the outward labels down onto the ring and the
+            // inward ones out past it — the same label at two different distances
+            // depending on which way up it was, which is what read as bad alignment.
+            val baseline = if (outward) g.cy - radius else g.cy + radius
             rolling(
                 canvas, key + ":" + i, text[i].toString(), x, baseline,
                 android.graphics.RectF(
@@ -4248,6 +4264,15 @@ class RearDialView(context: Context) : View(context) {
         /** How quickly the volume ring catches up when the volume changes from
          *  somewhere else. Short — it is confirming a change, not settling to a poll. */
         private const val VOLUME_EASE_MS = 130f
+
+        /**
+         * How long the playback dial takes to wind back when a track ends.
+         *
+         * Longer than the volume's, and for the opposite reason: the volume is following
+         * a finger and must not lag it, while this is a movement nobody asked for and
+         * should be seen happening.
+         */
+        private const val PLAYBACK_EASE_MS = 550f
 
         /** How far a finger travels before the panel decides what the gesture is. */
         private const val DRAG_SLOP = 16f
