@@ -343,19 +343,28 @@ It is built as a **page count**, not a two-state toggle, because the reason it e
 that this panel will eventually hold more accounts than fit on it. Adding a third page is
 a number.
 
-### Changing the record
+### Changing tracks
 
-On the media page a track change is a **record change**. The disc shrinks and travels into
-the top ring, and the next one grows out of the bottom ring into its place. There is a
-moment between the two where the deck is empty, which is what makes it read as a record
-being swapped rather than a picture being replaced.
+Three different changes, because they are three different situations.
 
-The rings work as the two ends of that because of the thing that made them awkward
-everywhere else: a ring encircles a camera lens, and there is no display inside one. A
-disc shrunk to ring size has genuinely *gone*. It ends at the ring's diameter less ten,
-whatever size it happened to be — which varies, since a notification shrinks it.
+**A record on the media page** changes through the rings: the disc shrinks and travels into
+the top one, and the next grows out of the bottom one, with a moment between where the deck
+is empty. The rings work as the two ends of that because of the thing that made them
+awkward everywhere else — a ring encircles a camera lens and there is no display inside
+one, so a disc shrunk to ring size has genuinely *gone*.
 
-The departing disc carries the departing sleeve. There is only one cover file and the new
+**A record on the readout page** has no rings to use, so it crosses instead: the old one
+slides off the bottom while the new arrives from the top, at the same moment, the way a
+stack feeds through.
+
+**A square cover** never crosses. It leaves and the next follows it back in from the same
+side — down and up again on the readout, out to the right and back on the media page. Two
+pictures passing each other mid-air would read as a shuffle rather than a change.
+
+Which one runs is chosen by the page rather than blended across it: a flight into a ring
+and a slide off the bottom are different journeys, and halfway between them is neither.
+
+The departing cover carries the departing sleeve. There is only one cover file and the new
 track has already overwritten it by then, so the panel keeps the bitmap it last replaced
 rather than re-reading the path.
 
@@ -424,6 +433,11 @@ is *inside* the upper one. The labels are therefore placed where there is room r
 where they would look tidiest. The two ends of the playback arc also face opposite ways:
 text stands perpendicular to its path, so tops-outward reads correctly around the upper
 half and tops-inward around the lower.
+
+Each arc is marked at both ends with a **stub of its own colour**, longer and much thinner
+than the arc itself. With no groove behind them a silent volume showed nothing at all, and
+a control you cannot find at zero is a control you cannot turn up. Thin is what makes them
+read as the scale rather than as a reading that has already started.
 
 Both are **gauges rather than full circles**, and their gaps face each other: playback
 runs from half past ten round to five, volume from two to five. Two dials with their

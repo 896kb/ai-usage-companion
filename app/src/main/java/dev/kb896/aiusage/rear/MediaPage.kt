@@ -251,6 +251,27 @@ object MediaPage {
     const val SWAP_ENTER_MS = 520f
     const val SWAP_RING_INSET = 5f
 
+    /**
+     * The stubs marking where each arc begins and ends.
+     *
+     * The arcs have no groove behind them, which is right — a full grey circle behind a
+     * volume was saying "this much of a whole" about a value with no whole. But it left
+     * a silent volume showing nothing at all, and a control you cannot find at zero is a
+     * control you cannot turn up. Two short marks say where the range is without drawing
+     * the whole of it.
+     */
+    const val TICK_DEG = 11f
+
+    /**
+     * How thick, as a fraction of the ring's own stroke.
+     *
+     * LONGER AND THINNER than the arc, in the arc's own colour. At full stroke and dimmed
+     * they read as the arc having started already — a stub of reading rather than a mark
+     * on the scale. Thinner is what makes them scale rather than value, and the length is
+     * what keeps them findable once they are that thin.
+     */
+    const val TICK_WIDTH = 0.3f
+
     /** Where that arc ends: five o'clock. */
     val PLAYBACK_ARC_END: Float get() = PLAYBACK_ARC_START + PLAYBACK_ARC_SWEEP - 360f
 

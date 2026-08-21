@@ -2563,6 +2563,13 @@ class RearDialView(context: Context) : View(context) {
      * than in absolute greys. The background is the user's to choose, and a record mixed
      * from black would vanish on a dark panel and sit like a hole in a light one.
      */
+    /**
+     * The cover object: placement, and how many of them there are this frame.
+     *
+     * Split from the drawing because a track change can put TWO on the panel at once —
+     * one leaving and one arriving — and the thing that draws a record has no business
+     * knowing about that.
+     */
     private fun drawVinyl(
         canvas: Canvas,
         paging: Float,
@@ -2573,49 +2580,124 @@ class RearDialView(context: Context) : View(context) {
         // if it is deleted the instant the music ends — this used to return here and the
         // disc simply blinked out, which is the one exit a physical object never makes.
         val m = media ?: departing ?: return
-        // Fades with the row it belongs to. It does not slide: the row is a strip
-        // changing hands and this is an object the panel is a window onto, and sliding
-        // something the size of the screen would be the most violent thing on it.
         val swap = mediaSwap(frameNowMs)
         if (swap <= 0.001f) return
 
-        // Slides out of the bottom rather than fading. It arrived as an object and it
-        // leaves as one: down and off the panel, the way a record comes off a deck. The
-        // slide runs from wherever it happens to be, so leaving from the media page
-        // travels further than leaving from the readout — which is correct, it is
-        // further up.
         val base = discAt(paging, notice)
+        // Slides out of the bottom when the music stops. It arrived as an object and it
+        // leaves as one, the way a record comes off a deck.
+        val resting = MediaLayout.Disc(
+            base.cx,
+            base.cy + (1f - swap) * (Panel.HEIGHT + base.radius),
+            base.radius,
+        )
 
-        // The record changer. The disc shrinks into the top ring and the next one grows
-        // out of the bottom one — and because a ring encircles a camera lens, where there
-        // is no display, a disc that has shrunk to ring size has genuinely gone. The
-        // rings are the two ends of the mechanism rather than a decoration on it.
+        // ---- changing tracks --------------------------------------------------
         //
-        // Scaled by `paging`, so none of it happens on the readout page: there the record
-        // is a background object with no rings to travel between.
+        // The two styles change differently, because they are different objects — and
+        // the record changes differently again depending on which page it is on, because
+        // only one of them has rings to use.
         //
-        // The RECORD only. A square cover changing tracks simply becomes the next cover —
-        // flying a rectangle through a camera lens is a conceit that belongs to the thing
-        // shaped like a record.
-        var changed = base
-        var sleeve = m
-        if (config.mediaArt == MediaArt.VINYL) swapPhase(frameNowMs)?.let { (leaving, progress) ->
-            animating = true
-            val ring = if (leaving) rings.personal else rings.work
+        // A RECORD crosses: the old one slides away and the new one arrives from the
+        // opposite side at the same moment, the way a stack feeds through. A SQUARE does
+        // not cross — it leaves and the next one follows it back in from the same side,
+        // like a card being pulled out and another pushed in behind it. Two pictures
+        // passing each other mid-air would read as a shuffle rather than a change.
+        //
+        // The AXIS follows the page: down and up on the readout, where the panel is tall
+        // and the record hangs off the bottom, and sideways on the media page, where it
+        // is the only thing in the middle and there is width to move it through. Blended
+        // by `paging`, so a change caught mid-scroll travels on the diagonal rather than
+        // snapping from one axis to the other.
+        val leaving = swapFrom
+        val progress = swapProgress(frameNowMs)
+        if (progress == null || leaving == null) {
+            drawCoverAt(canvas, resting, m, paging)
+            return
+        }
+        animating = true
+
+        val reach = MediaLayout.Disc(0f, 0f, resting.radius)
+        val down = Panel.HEIGHT + reach.radius
+        val right = Panel.WIDTH - Panel.CUTOUT_RIGHT + reach.radius
+
+        fun shifted(along: Float) = MediaLayout.Disc(
+            resting.cx + right * along * paging,
+            resting.cy + down * along * (1f - paging),
+            resting.radius,
+        )
+
+        val exit = MediaPage.SWAP_EXIT_MS /
+            (MediaPage.SWAP_EXIT_MS + MediaPage.SWAP_ENTER_MS)
+
+        // ON THE MEDIA PAGE a record still changes through the rings: it shrinks into
+        // the top one and the next grows out of the bottom one. That belongs to this page
+        // and to this object — there are two lens rings here doing nothing else, and a
+        // ring encircles a lens with no display behind it, so a disc shrunk to that size
+        // has genuinely gone rather than merely faded.
+        //
+        // The readout page has no such rings to use, which is why the record slides there
+        // instead. Chosen by which page the change lands on rather than blended between
+        // them: a flight into a ring and a slide off the bottom are different journeys,
+        // and halfway between the two is neither.
+        if (config.mediaArt == MediaArt.VINYL && paging > 0.5f) {
+            val ring = if (progress < exit) rings.personal else rings.work
             val inRing = MediaLayout.Disc(
                 ring.cx, ring.cy, ring.radius - MediaPage.SWAP_RING_INSET)
-            val e = Tween.easeInOut(progress.coerceIn(0f, 1f))
-            val moved = if (leaving) lerpDisc(base, inRing, e) else lerpDisc(inRing, base, e)
-            changed = lerpDisc(base, moved, paging)
-            // The outgoing disc carries the outgoing sleeve.
-            if (leaving) swapFrom?.let { sleeve = it }
+            if (progress < exit) {
+                val e = Tween.easeInOut(progress / exit)
+                drawCoverAt(canvas, lerpDisc(resting, inRing, e), leaving, paging)
+            } else {
+                val e = Tween.easeInOut((progress - exit) / (1f - exit))
+                drawCoverAt(canvas, lerpDisc(inRing, resting, e), m, paging)
+            }
+            return
         }
 
-        val disc = MediaLayout.Disc(
-            changed.cx,
-            changed.cy + (1f - swap) * (Panel.HEIGHT + changed.radius),
-            changed.radius,
-        )
+        if (config.mediaArt == MediaArt.VINYL) {
+            // Crossing: both at once, one going and one coming from the far side.
+            val e = Tween.easeInOut(progress)
+            if (e < 0.999f) drawCoverAt(canvas, shifted(e), leaving, paging)
+            drawCoverAt(canvas, shifted(-(1f - e)), m, paging)
+            return
+        }
+
+        // Following: out first, then the next one back in behind it.
+        if (progress < exit) {
+            drawCoverAt(canvas, shifted(Tween.easeInOut(progress / exit)), leaving, paging)
+        } else {
+            val e = Tween.easeInOut((progress - exit) / (1f - exit))
+            drawCoverAt(canvas, shifted(1f - e), m, paging)
+        }
+    }
+
+    /**
+     * How far through a track change we are, 0 to 1, or null when nothing is changing.
+     *
+     * One number for both styles even though they spend it differently — the record
+     * crosses over the whole of it, the square splits it into a leaving half and an
+     * arriving one.
+     */
+    private fun swapProgress(nowMs: Long): Float? {
+        if (swapAt == 0L) return null
+        val total = MediaPage.SWAP_EXIT_MS + MediaPage.SWAP_ENTER_MS
+        val t = (nowMs - swapAt) / total
+        if (t >= 1f) {
+            swapAt = 0L
+            swapFrom = null
+            return null
+        }
+        return t.coerceIn(0f, 1f)
+    }
+
+    /** One cover, drawn at [disc]: a record, or the sleeve on its own. */
+    private fun drawCoverAt(
+        canvas: Canvas,
+        disc: MediaLayout.Disc,
+        sleeve: Media,
+        paging: Float,
+    ) {
+
         val ink = colorFor("vinyl", config.vinylTint)
         // Full strength throughout: the slide is what says it is leaving, and a record
         // that faded as it slid would read as two things happening to one object.
@@ -2629,17 +2711,17 @@ class RearDialView(context: Context) : View(context) {
         // and the other is a picture, and a picture that rotated would be a picture on a
         // turntable rather than a cover.
         if (config.mediaArt != MediaArt.VINYL) {
-            val sleeveArt = coverArt(sleeve.artPath) ?: return
-            val square = android.graphics.RectF(
+            val square = sleeveArt(sleeve) ?: return
+            val face = android.graphics.RectF(
                 disc.cx - disc.radius, disc.cy - disc.radius,
                 disc.cx + disc.radius, disc.cy + disc.radius,
             )
             canvas.save()
-            canvas.clipRect(square)
+            canvas.clipRect(face)
             artPaint.alpha = 255
             canvas.drawBitmap(
-                sleeveArt, null,
-                ArtPlacement.destination(square, sleeveArt.width, sleeveArt.height, 0f, 0f, 1f),
+                square, null,
+                ArtPlacement.destination(face, square.width, square.height, 0f, 0f, 1f),
                 artPaint,
             )
             canvas.restore()
@@ -2648,7 +2730,7 @@ class RearDialView(context: Context) : View(context) {
             vinylPaint.style = Paint.Style.STROKE
             vinylPaint.strokeWidth = SQUARE_EDGE
             vinylPaint.color = shade(VINYL_LABEL_ALPHA)
-            canvas.drawRect(square, vinylPaint)
+            canvas.drawRect(face, vinylPaint)
             return
         }
 
@@ -2702,7 +2784,7 @@ class RearDialView(context: Context) : View(context) {
         // The departing record shows the departing sleeve. There is one cover file and
         // the new track has already overwritten it, so what leaves is the bitmap the
         // panel had decoded before — see coverArt, which keeps the one it replaces.
-        val cover = if (sleeve !== m) priorCover ?: coverArt(m.artPath) else coverArt(m.artPath)
+        val cover = sleeveArt(sleeve)
         val face = android.graphics.RectF(
             disc.cx - label, disc.cy - label, disc.cx + label, disc.cy + label,
         )
@@ -2714,7 +2796,7 @@ class RearDialView(context: Context) : View(context) {
         )
         // Clip first, rotate second: the circle is inscribed in the square, so a square
         // bitmap turned about their shared centre covers it at every angle.
-        canvas.rotate(vinylAngle(m), disc.cx, disc.cy)
+        canvas.rotate(vinylAngle(sleeve), disc.cx, disc.cy)
         if (cover != null) {
             // Held back from full strength. The transport buttons are drawn over this and
             // a busy cover at full opacity is the one thing on the panel that can make
@@ -2994,6 +3076,17 @@ class RearDialView(context: Context) : View(context) {
 
         val elapsed = m.elapsed(SystemClock.elapsedRealtime())
 
+        // Where each arc starts and stops. Drawn under the labels and over nothing, so a
+        // volume at zero still shows its two ends and a track at the beginning still
+        // shows how far it has to run.
+        tick(canvas, rings.personal, MediaPage.PLAYBACK_ARC_START, tint, alpha)
+        tick(canvas, rings.personal, MediaPage.PLAYBACK_ARC_END, tint, alpha)
+        tick(canvas, rings.work, MediaPage.VOLUME_ARC_START, tint, alpha)
+        tick(
+            canvas, rings.work,
+            MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP, tint, alpha,
+        )
+
         // The rings themselves are drawn with the readout's, sweeping from the usage
         // reading to this one — see drawRing's blend. What is left here is what could not
         // travel: text, which cannot tween from one string to another, so it fades in.
@@ -3163,6 +3256,29 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
+     * A short stub of ring at [deg], marking one end of an arc's travel.
+     *
+     * The arc's own colour and radius, but longer and much thinner — so it reads as the
+     * scale the arc runs along rather than as a piece of the arc already filled in. A
+     * dimmed mark at full stroke looked like a reading that had started.
+     */
+    private fun tick(
+        canvas: Canvas,
+        g: RingGeometry,
+        deg: Float,
+        tint: Int,
+        alpha: Int,
+    ) {
+        arc.strokeWidth = g.stroke * MediaPage.TICK_WIDTH
+        arc.color = tint
+        arc.alpha = alpha
+        scratch.set(g.cx - g.radius, g.cy - g.radius, g.cx + g.radius, g.cy + g.radius)
+        canvas.drawArc(
+            scratch, deg - MediaPage.TICK_DEG / 2f, MediaPage.TICK_DEG, false, arc)
+        arc.alpha = 255
+    }
+
+    /**
      * A label bent around a ring, centred on [centreDeg].
      *
      * [outward] chooses which way up the glyphs stand: true points their tops away from
@@ -3211,6 +3327,16 @@ class RearDialView(context: Context) : View(context) {
         extras.style = Paint.Style.FILL
         extras.strokeWidth = 0f
     }
+
+    /**
+     * The bitmap belonging to a particular track.
+     *
+     * There is ONE cover file, and by the time a change is being animated the new track
+     * has already overwritten it — so a cover that is not the current one comes from the
+     * bitmap the panel decoded before and deliberately did not release. See coverArt.
+     */
+    private fun sleeveArt(sleeve: Media): android.graphics.Bitmap? =
+        if (sleeve === media) coverArt(sleeve.artPath) else priorCover ?: coverArt(sleeve.artPath)
 
     /** Two discs, blended. */
     private fun lerpDisc(a: MediaLayout.Disc, b: MediaLayout.Disc, t: Float) =
