@@ -274,6 +274,23 @@ data class PanelConfig(
      */
     val vinylColor: Int? = null,
 
+    /**
+     * Synced lyrics, curved around the record on the media page.
+     *
+     * A SEPARATE opt-in from [showMedia], and the only setting in this file that is one
+     * for a reason beyond taste: it is the single feature in the app that sends anything
+     * about the user anywhere. Switching it on means each new track's title, artist,
+     * album and length go to lrclib.net — see LyricsApi, which carries the rest of that
+     * argument, and LyricsCache, which makes it once per recording rather than once per
+     * play.
+     *
+     * So it cannot ride in on "show media", the way it would if it were merely another
+     * part of the music row. Somebody who wanted a play button on the back of their phone
+     * did not thereby ask to tell a stranger what they listen to. Off is the default and
+     * off means no request is ever built.
+     */
+    val showLyrics: Boolean = false,
+
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are

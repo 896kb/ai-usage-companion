@@ -381,6 +381,8 @@ class MainActivity : ComponentActivity() {
                     intent.getLongExtra(RearActivity.EXTRA_MEDIA_POSITION, 0L),
                     intent.getLongExtra(RearActivity.EXTRA_MEDIA_POSITION_AT, 0L),
                     intent.getFloatExtra(RearActivity.EXTRA_MEDIA_SPEED, 1f),
+                    intent.getStringExtra(RearActivity.EXTRA_MEDIA_LYRICS).orEmpty(),
+                    intent.getStringExtra(RearActivity.EXTRA_MEDIA_LYRICS_FOR).orEmpty(),
                 )
             }
         }
@@ -596,6 +598,29 @@ class MainActivity : ComponentActivity() {
                     write { it.copy(vinylColor = c) }
                 }
             }
+            // Its own row and its own warning, because it is the only setting in this app
+            // that sends anything anywhere. The note is not a disclaimer — it is the
+            // information needed to make the choice, so it sits with the switch rather
+            // than in a document nobody opens.
+            SettingsRows.toggle(container, "  ↳ lyrics", config.showLyrics) { on ->
+                // Turning it OFF wipes what was fetched. A feature that gathered data
+                // should not leave the data behind when it is switched off; anything else
+                // makes "off" mean "stopped collecting" rather than "undone".
+                if (!on) {
+                    dev.kb896.aiusage.data.LyricsCache(
+                        java.io.File(filesDir, "lyrics"),
+                    ).clear()
+                }
+                write { it.copy(showLyrics = on) }
+            }
+            SettingsRows.note(
+                container,
+                if (config.showLyrics) {
+                    "     sends each track's name, artist and length to lrclib.net"
+                } else {
+                    "     off — nothing about what you play leaves the phone"
+                },
+            )
         }
         if (config.showMedia && !NotificationManagerCompat.getEnabledListenerPackages(this)
                 .contains(packageName)

@@ -83,6 +83,24 @@ class RearActivity : Activity() {
         const val EXTRA_MEDIA_SPEED = "mediaSpeed"
 
         /**
+         * The lyric sheet, in LRC, and the recording it belongs to.
+         *
+         * Two extras rather than one because they answer different questions, and the
+         * second is what stops the artwork's oldest bug from happening again in a much
+         * more visible place. Metadata is staged, so a broadcast during a track change can
+         * carry the new title beside a sheet resolved for the old song — and words are far
+         * harder to mistake for a coincidence than a sleeve is. The panel checks that the
+         * sheet names the track it is about to hang it on, and shows nothing if it does not.
+         *
+         * The whole sheet travels, once per track, rather than a line at a time. The panel
+         * already carries the position forward on its own clock, so it can pick the line
+         * itself and change it exactly on the beat — where a broadcast per line would put
+         * every change at the mercy of when the system felt like delivering it.
+         */
+        const val EXTRA_MEDIA_LYRICS = "mediaLyrics"
+        const val EXTRA_MEDIA_LYRICS_FOR = "mediaLyricsFor"
+
+        /**
          * A transport button was pressed on the panel.
          *
          * Travels the other way for the same reason ACTION_OPEN_CAMERA does: the thing
@@ -166,6 +184,8 @@ class RearActivity : Activity() {
                     intent.getLongExtra(EXTRA_MEDIA_POSITION, 0L),
                     intent.getLongExtra(EXTRA_MEDIA_POSITION_AT, 0L),
                     intent.getFloatExtra(EXTRA_MEDIA_SPEED, 1f),
+                    intent.getStringExtra(EXTRA_MEDIA_LYRICS).orEmpty(),
+                    intent.getStringExtra(EXTRA_MEDIA_LYRICS_FOR).orEmpty(),
                 )
                 // A geometry-only nudge (bare `--ei cx1 ...`, no `state` extra) must
                 // leave the current mode untouched. Re-evaluating unconditionally with

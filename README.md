@@ -375,6 +375,48 @@ gets the full easing. Without that distinction an ease-in-out restarted every fr
 since ease-in-out begins each leg at zero velocity the dial never accumulated any: measured
 sitting at one degree while its track ran sixteen seconds.
 
+### Lyrics
+
+Off by default, and a **separate** switch from "Media controls" rather than part of it —
+because it is the only thing in this app that sends anything anywhere. Somebody who wanted
+a play button on the back of their phone did not thereby ask to tell a stranger what they
+listen to.
+
+With it on, each new track's title, artist, album and length go to
+[LRCLIB](https://lrclib.net) over HTTPS. No account, no key, and nothing identifying the
+phone or its owner goes with the request. Three things keep the cost down to that:
+
+- Off means **no request is ever built**, not a request that is discarded.
+- Every answer is cached, **including "there are none"** — otherwise instrumentals would
+  generate the most traffic of anything, being the tracks that never produce a stored
+  answer. A song on repeat leaks once, ever.
+- The cache is filed under a **hash**, so a directory listing is not a listening history
+  written in the clear. Turning the switch off **deletes** it: off means undone, not
+  "stopped collecting".
+
+A fetch waits 1.2s for the track's description to stop changing first. Metadata is staged,
+so the first callback of a new track routinely carries the new title beside the *previous*
+track's duration — and duration is both half the identity of a recording and the thing
+LRCLIB matches on. Acting on that spends a request on a recording that does not exist.
+
+On the panel: the line being sung curves along the inside arc against the record, the line
+coming next waits dimmed outside it, and on each change the outer line travels **inward**
+and brightens while the old one sinks and fades. The record gives up the room — its size is
+already derived from whatever is above it, so lyrics claim their band exactly the way a
+notification does. Only a **synced** sheet is accepted; an untimed one cannot say which line
+is being sung, and a fixed line of a song shown for its whole duration would be decoration
+that looks like a reading.
+
+The block fades in and out as a unit — switched on, scrolled to, a track turning out to have
+words — which is a different event from a line being promoted and so gets a different
+treatment: promotion travels because a song moving on has a direction; arriving does not.
+
+**A notification wins.** With a group card up there is not room for both, and rather than
+collapsing the record to a token with a ring of separate rotated letters around it, the
+words fade out and come back when the card goes. The rule is derived from the record they
+would wrap rather than written as "if a notification" — if any of the sizes move, the answer
+corrects itself.
+
 ### The two drag controls
 
 The media page carries three gestures on one surface, told apart by region **and** axis

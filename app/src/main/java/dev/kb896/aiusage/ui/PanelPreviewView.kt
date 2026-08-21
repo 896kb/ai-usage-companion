@@ -68,9 +68,11 @@ class PanelPreviewView @JvmOverloads constructor(
         positionMs: Long,
         positionAtMs: Long,
         speed: Float,
+        lyricsLrc: String = "",
+        lyricsFor: String = "",
     ) = dial.showMedia(
         active, title, artist, playing, artPath,
-        durationMs, positionMs, positionAtMs, speed,
+        durationMs, positionMs, positionAtMs, speed, lyricsLrc, lyricsFor,
     )
 
     init {

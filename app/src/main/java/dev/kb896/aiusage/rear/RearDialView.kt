@@ -1454,6 +1454,79 @@ class RearDialView(context: Context) : View(context) {
 
     private var media: Media? = null
 
+    /**
+     * The sheet for whatever is playing, and the raw text it was parsed from.
+     *
+     * The raw copy is kept ONLY so the same broadcast arriving twice does not re-parse a
+     * couple of hundred lines. Media broadcasts land on every pause, every position
+     * report and every artwork callback, and almost all of them carry the same sheet.
+     */
+    private var lyrics: dev.kb896.aiusage.data.Lrc = dev.kb896.aiusage.data.Lrc.NONE
+    private var lyricsRaw = ""
+
+    /** Which line is up, which one it came from, and when it arrived. */
+    private var lyricLine = -1
+    private var lyricFrom = -1
+    private var lyricAt = 0L
+
+    /** Whether words are WANTED. What is drawn lags this by a fade — see [lyricFade]. */
+    private var lyricsOn = false
+
+    /**
+     * How present the pair of lines is, 0 to 1.
+     *
+     * The whole block arriving or leaving, which is a different event from a line being
+     * promoted and gets a different treatment: promotion travels because a song moving on
+     * has a direction, and this fades because being switched on does not.
+     *
+     * Multiplied by the page, so scrolling between the readout and the record carries the
+     * words with it instead of snapping them on at the end of the gesture.
+     */
+    private fun lyricFade(paging: Float, notice: Float): Float =
+        ease(
+            "media:lyricfade",
+            if (lyricsOn && lyricsFit(notice)) 1f else 0f,
+            LyricsRing.FADE_MS,
+        ) * paging.coerceIn(0f, 1f)
+
+    /**
+     * How much room the lyric arcs are taking, and how much they are on their way to.
+     *
+     * The target is only ever moved on a RESOLVED answer — a sheet, or a definite "this
+     * track has none". It is deliberately NOT moved during the gap while the next track's
+     * sheet is being looked up, and that gap is why this is a held field rather than a
+     * question asked of [lyrics] each frame.
+     *
+     * Without the hold the record pumps once per song: the sheet is dropped the moment the
+     * title changes, so the disc grows back to full size, and a second later the new sheet
+     * lands and it shrinks again. Two animations per track change, neither of which is
+     * about anything the listener did. Holding the band through the gap costs a second of
+     * empty arc — a space where words are about to be — and the record simply stays put.
+     *
+     * Zero when the feature is off or a resolved track has no sheet, which is most of
+     * them: instrumentals, podcasts, browser tabs, anything nobody has written one for.
+     */
+    private var lyricsWanted = false
+
+    /**
+     * Whether the words fit alongside whatever else is on the page.
+     *
+     * Derived from the record they would wrap, rather than from a rule about
+     * notifications: if giving up the band would leave a record too small to bend a
+     * sentence around, there is no room, and the answer corrects itself if any of the
+     * sizes ever move. Measured against the FULL band rather than the eased one, so the
+     * decision cannot oscillate with its own animation.
+     */
+    private fun lyricsFit(notice: Float): Boolean =
+        MediaPage.disc(notice + LyricsRing.STACK).second >= LyricsRing.MIN_DISC
+
+    private fun lyricBand(notice: Float): Float =
+        ease(
+            "media:lyricband",
+            if (lyricsWanted && lyricsFit(notice)) LyricsRing.STACK else 0f,
+            LyricsRing.BAND_MS,
+        )
+
     /** Where the artwork/controls drum is and where it is heading — see [mediaSwap]. */
     private var mediaFrom = 0f
     private var mediaTo = 0f
@@ -1481,8 +1554,39 @@ class RearDialView(context: Context) : View(context) {
         positionMs: Long = 0L,
         positionAtMs: Long = 0L,
         speed: Float = 1f,
+        lyricsLrc: String = "",
+        lyricsFor: String = "",
     ) {
         val now = SystemClock.uptimeMillis()
+        // The sheet has to NAME the recording before it is hung on it.
+        //
+        // This is the artwork's oldest bug, pre-empted in the one place it would be most
+        // obvious. Metadata is staged, so a broadcast during a track change carries the
+        // new title beside whatever was resolved for the old one — and a stranger's words
+        // over the wrong song is not a subtle mistake the way a stale sleeve is. The id
+        // is built the same way on both sides; if they disagree, there are no lyrics yet.
+        val wants = title + " " + artist + " " + (durationMs / 1000L)
+        val resolved = config.showLyrics && active && lyricsFor.isNotEmpty() &&
+            lyricsFor == wants
+        if (!resolved) {
+            // The words of the song that just ended stop being CURRENT at once — but they
+            // are allowed the length of a fade to leave, which is not the same as being
+            // held. The bug this is not is the artwork's: showing the previous track's
+            // sheet indefinitely, as a claim about the new one.
+            lyricsOn = false
+            if (!config.showLyrics || !active) lyricsWanted = false
+        } else {
+            if (lyricsLrc != lyricsRaw) {
+                lyricsRaw = lyricsLrc
+                lyrics = dev.kb896.aiusage.data.Lrc.parse(lyricsLrc)
+                // A new sheet starts fresh rather than promoting from the last song's line.
+                lyricLine = -1
+                lyricFrom = -1
+            }
+            // A resolved answer, either way: claim the band or give it back.
+            lyricsOn = !lyrics.isEmpty
+            lyricsWanted = !lyrics.isEmpty
+        }
         val next =
             if (active && config.showMedia) {
                 Media(title, artist, playing, artPath,
@@ -2863,6 +2967,11 @@ class RearDialView(context: Context) : View(context) {
         val progress = swapProgress(frameNowMs)
         if (progress == null || leaving == null) {
             drawCoverAt(canvas, resting, m, paging)
+            // Around the settled record only. A track being changed has no sheet yet by
+            // construction — the old one was dropped the moment the title moved — so
+            // there is nothing to carry through the swap and nothing to decide about how
+            // it should travel.
+            drawLyrics(canvas, resting, paging, notice, colorFor("media", config.mediaTint))
             return
         }
         animating = true
@@ -3688,13 +3797,32 @@ class RearDialView(context: Context) : View(context) {
         g: RingGeometry,
         centreDeg: Float,
         outward: Boolean,
+    ) = curvedOn(
+        canvas, text, g.cx, g.cy,
+        MediaPage.labelRadius(g.radius, g.stroke, outward), centreDeg, outward,
+    )
+
+    /**
+     * Text bent along any circle, rather than around a ring's label orbit.
+     *
+     * The same drawing the ring labels use, with the circle handed in — because the
+     * lyrics are concentric with the RECORD, which moves and changes size, and nothing
+     * about bending a string along an arc cares which circle it is.
+     */
+    private fun curvedOn(
+        canvas: Canvas,
+        text: String,
+        cx: Float,
+        cy: Float,
+        radius: Float,
+        centreDeg: Float,
+        outward: Boolean,
     ) {
-        val radius = MediaPage.labelRadius(g.radius, g.stroke, outward)
         val width = extras.measureText(text)
         // What the text subtends at this radius. Android's angles are degrees, clockwise
         // from three o'clock.
         val span = Math.toDegrees((width / radius).toDouble()).toFloat()
-        scratch.set(g.cx - radius, g.cy - radius, g.cx + radius, g.cy + radius)
+        scratch.set(cx - radius, cy - radius, cx + radius, cy + radius)
         val path = android.graphics.Path().apply {
             if (outward) {
                 addArc(scratch, centreDeg - span / 2f, span)
@@ -3710,6 +3838,112 @@ class RearDialView(context: Context) : View(context) {
         canvas.drawTextOnPath(text, path, 0f, 0f, extras)
         extras.style = Paint.Style.FILL
         extras.strokeWidth = 0f
+    }
+
+    /**
+     * The words, curved around the record.
+     *
+     * The line being sung sits against the disc; the one coming next waits dimmed outside
+     * it. When the song moves on the outer line travels INWARD and brightens while the old
+     * one sinks toward the record and fades — so the change has a direction, and what
+     * arrives is the thing you were already reading ahead of. A cross-fade in place would
+     * deliver the same words and none of that.
+     *
+     * Drawn INSIDE the drift, with the record — which is the opposite of the rule for
+     * everything else bent around a circle here, and for the same underlying reason. The
+     * ring labels are held still because the rings are held still, being concentric with
+     * physical lenses. The record has no hardware to stay aligned with and IS a burn-in
+     * target, so it drifts; words wrapped around it have to drift with it or they would
+     * swim against the thing they are wrapped around.
+     */
+    private fun drawLyrics(
+        canvas: Canvas,
+        disc: MediaLayout.Disc,
+        paging: Float,
+        notice: Float,
+        tint: Int,
+    ) {
+        if (lyrics.isEmpty) return
+        val fade = lyricFade(paging, notice)
+        if (fade <= 0.004f) return
+        val m = media ?: return
+        // The sung position, not the dial's. While a scrub is in flight the dial is a
+        // proposal and the music has not moved — showing the words for a place nobody is
+        // listening to would be the panel narrating a gesture rather than a song.
+        //
+        // FROZEN while the block is leaving. On the way out these words belong to a song
+        // that has ended, and running the new track's clock against the old sheet would
+        // have them promoting through someone else's verses as they faded.
+        if (lyricsOn) {
+            val at = lyrics.indexAt(m.elapsed(SystemClock.elapsedRealtime()))
+            if (at != lyricLine) {
+                lyricFrom = lyricLine
+                lyricLine = at
+                lyricAt = frameNowMs
+            }
+        }
+        val t = LyricsRing.promotion(lyricFrom, lyricLine, (frameNowMs - lyricAt).toFloat())
+        if (t < 1f) animating = true
+
+        val rNow = LyricsRing.currentRadius(disc.radius)
+        val rNext = LyricsRing.nextRadius(disc.radius)
+        val eased = Tween.easeInOut(t)
+
+        val previous = extras.textSize
+        val was = extras.textAlign
+        extras.textAlign = Paint.Align.CENTER
+
+        // The line on its way out: from where it was sung, inward, fading. Only during a
+        // promotion — a settled line has no predecessor still on screen.
+        if (t < 1f) {
+            lyrics.lineAt(lyricFrom)?.let {
+                drawLyricLine(
+                    canvas, it, disc, rNow - LyricsRing.EXIT_DROP * eased, tint,
+                    alpha = ((1f - eased) * 255f * fade).toInt(),
+                )
+            }
+        }
+        // The line being sung, arriving from where it waited.
+        lyrics.lineAt(lyricLine)?.let {
+            drawLyricLine(
+                canvas, it, disc, rNext + (rNow - rNext) * eased, tint,
+                alpha = ((LyricsRing.NEXT_ALPHA +
+                    (255 - LyricsRing.NEXT_ALPHA) * eased) * fade).toInt(),
+            )
+        }
+        // And the one after it, taking up the outer arc as the promotion finishes.
+        lyrics.lineAt(lyricLine + 1)?.let {
+            drawLyricLine(
+                canvas, it, disc, rNext, tint,
+                alpha = (LyricsRing.NEXT_ALPHA * eased * fade).toInt(),
+            )
+        }
+
+        extras.textSize = previous
+        extras.textAlign = was
+    }
+
+    /** One line, fitted to its arc. Blank entries draw nothing — see Lrc. */
+    private fun drawLyricLine(
+        canvas: Canvas,
+        text: String,
+        disc: MediaLayout.Disc,
+        radius: Float,
+        tint: Int,
+        alpha: Int,
+    ) {
+        if (text.isBlank() || alpha <= 2) return
+        val fitted = LyricsRing.fit(text, radius) { size ->
+            extras.textSize = size
+            extras.measureText("0")
+        }
+        extras.textSize = fitted.size
+        extras.color = (tint and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
+        // Tops outward, which is the only way round that reads over the top of a circle.
+        curvedOn(
+            canvas, fitted.text, disc.cx, disc.cy, radius,
+            LyricsRing.CENTRE_DEG, outward = true,
+        )
     }
 
     /**
@@ -3765,8 +3999,11 @@ class RearDialView(context: Context) : View(context) {
         if (paging <= 0.001f) return readout
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
         // The page's disc is sized against whatever the notice has left, so a strip
-        // arriving shrinks the record rather than moving anything.
-        val (pageCy, pageRadius) = MediaPage.disc(notice)
+        // arriving shrinks the record rather than moving anything. Lyrics claim their
+        // band the same way and by the same mechanism — the record already knows how to
+        // be smaller when something is above it, so two things above it simply shrink it
+        // twice and neither needs to know about the other.
+        val (pageCy, pageRadius) = MediaPage.disc(notice + lyricBand(notice))
         return MediaLayout.Disc(
             cx = readout.cx + (cx - readout.cx) * paging,
             cy = readout.cy + (pageCy - readout.cy) * paging,

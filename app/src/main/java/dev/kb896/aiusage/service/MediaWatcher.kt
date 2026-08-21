@@ -131,7 +131,8 @@ class MediaWatcher(private val context: Context) {
     }
 
     private fun publish() {
-        if (!ConfigStore(context).load().showMedia) return
+        val config = ConfigStore(context).load()
+        if (!config.showMedia) return
         val c = controller
         val metadata = c?.metadata
         val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
@@ -168,6 +169,18 @@ class MediaWatcher(private val context: Context) {
         val key = if (active) title + "\u0000" + artist + "\u0000" + (art?.id ?: "none")
             else null
 
+        // The lyric sheet is identified by the RECORDING, never by the artwork — so it
+        // survives the second and third metadata callbacks of a track instead of being
+        // re-resolved by each of them, and so a fetch is not spent on a picture arriving.
+        val album = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
+        val durationMs =
+            metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        resolveLyrics(
+            if (active && config.showLyrics && durationMs > 0L)
+                Track(title.orEmpty(), artist.orEmpty(), album, durationMs / 1000L)
+            else null,
+        )
+
         val send = { path: String? ->
             context.sendBroadcast(
                 Intent(RearActivity.ACTION_MEDIA)
@@ -192,7 +205,14 @@ class MediaWatcher(private val context: Context) {
                     .putExtra(
                         RearActivity.EXTRA_MEDIA_PLAYING,
                         state == PlaybackState.STATE_PLAYING,
-                    ),
+                    )
+                    // Empty until the sheet for THIS recording has been resolved. The
+                    // panel is told which recording it belongs to as well, because a
+                    // broadcast that arrives during a track change would otherwise hang
+                    // the old song's words on the new song's record — the artwork's bug,
+                    // one more time, in a place where it would be far more obvious.
+                    .putExtra(RearActivity.EXTRA_MEDIA_LYRICS, lyricsSheet.orEmpty())
+                    .putExtra(RearActivity.EXTRA_MEDIA_LYRICS_FOR, lyricsFor.orEmpty()),
             )
         }
 
@@ -225,6 +245,96 @@ class MediaWatcher(private val context: Context) {
 
     /** A cover and what identifies it — see [cover] and the note on staged metadata. */
     private class Cover(val bitmap: android.graphics.Bitmap, val id: String)
+
+    /** A recording, as lyrics identify one: not a track, but a particular cut of it. */
+    private class Track(
+        val title: String,
+        val artist: String,
+        val album: String?,
+        val durationSec: Long,
+    ) {
+        /** Album is deliberately absent: it sharpens a QUERY but must not split a key,
+         *  since the same recording arrives with and without one from different players. */
+        val id: String get() = title + " " + artist + " " + durationSec
+    }
+
+    private var lyricsFor: String? = null
+    private var lyricsSheet: String? = null
+    private var lyricsPending: String? = null
+
+    /**
+     * Make sure the sheet on hand belongs to the track on hand.
+     *
+     * DEBOUNCED, and that is not politeness to the server — it is the staged-metadata
+     * problem again. The first callback of a new track routinely carries the new title
+     * beside the PREVIOUS track's duration, and the duration is both half the identity of
+     * a recording and the thing LRCLIB matches on. Acting on that reading spends a request
+     * on a recording that does not exist and then files the disappointing answer under a
+     * key nothing will ever ask for again. Waiting for the description to stop changing
+     * costs a second at the start of a song and asks exactly once, about the right thing.
+     */
+    private fun resolveLyrics(want: Track?) {
+        if (want == null) {
+            // Off, or nothing playing. Drop what is held so the panel is never handed
+            // the last song's words over a silent player.
+            lyricsPending = null
+            if (lyricsFor != null) {
+                lyricsFor = null
+                lyricsSheet = null
+            }
+            handler.removeCallbacks(resolve)
+            return
+        }
+        if (want.id == lyricsFor || want.id == lyricsPending) return
+        lyricsPending = want.id
+        handler.removeCallbacks(resolve)
+        pending = want
+        handler.postDelayed(resolve, SETTLE_MS)
+    }
+
+    private var pending: Track? = null
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private val resolve = Runnable {
+        val t = pending ?: return@Runnable
+        val cached = cache.get(t.title, t.artist, t.durationSec)
+        if (cached != null) {
+            // Already known, including "known to have none" — no request at all.
+            adoptLyrics(t.id, (cached as? dev.kb896.aiusage.data.LyricsCache.Entry.Sheet)?.lrc)
+            return@Runnable
+        }
+        io.execute {
+            val sheet = runCatching { api.fetch(t.title, t.artist, t.album, t.durationSec) }
+                .onFailure { Log.w(TAG, "lyrics: " + it.javaClass.simpleName) }
+                .getOrNull()
+            cache.put(
+                t.title, t.artist, t.durationSec,
+                if (sheet == null) dev.kb896.aiusage.data.LyricsCache.Entry.None
+                else dev.kb896.aiusage.data.LyricsCache.Entry.Sheet(sheet),
+            )
+            handler.post {
+                // Only if the track has not moved on underneath the request. A sheet that
+                // arrives after the song it belongs to has ended is not late, it is wrong.
+                if (lyricsPending == t.id) adoptLyrics(t.id, sheet)
+            }
+        }
+    }
+
+    private fun adoptLyrics(id: String, sheet: String?) {
+        lyricsFor = id
+        lyricsSheet = sheet
+        lyricsPending = null
+        // Say so at once. The panel is told about music when something changes, and
+        // lyrics arriving is a change nothing else is going to announce.
+        publish()
+    }
+
+    private val api by lazy { dev.kb896.aiusage.data.LyricsApi(okhttp3.OkHttpClient()) }
+
+    private val cache by lazy {
+        dev.kb896.aiusage.data.LyricsCache(java.io.File(context.filesDir, LYRICS_DIR))
+    }
 
     /**
      * The cover, from whichever of the six places a player might have put it, together
@@ -308,6 +418,18 @@ class MediaWatcher(private val context: Context) {
         const val TAG = "AiUsageMedia"
 
         const val ART_NAME = "media-art.png"
+
+        /** Where fetched sheets live. Wiped when the feature is switched off. */
+        const val LYRICS_DIR = "lyrics"
+
+        /**
+         * How long a track's description must hold still before it is worth asking about.
+         *
+         * Long enough to outlast the staging — a player delivers a track over two or three
+         * callbacks a few hundred milliseconds apart — and short enough that the words are
+         * up before anybody sings. Most songs do not start on the first second.
+         */
+        const val SETTLE_MS = 1_200L
 
         /**
          * How big the cover is stored, against a 70-unit square on the panel.
