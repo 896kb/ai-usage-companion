@@ -266,6 +266,16 @@ Two styles, chosen in settings.
 **Square** is the cover as the player supplied it, cropped to fill rather than
 letterboxed.
 
+Both styles get the media page. It was the record's alone at first, on the reasoning that
+a square cover gives nothing to carry across the transition — which was wrong: the row's
+thumbnail is an object too. It simply **travels and resizes** rather than spinning, growing
+out of the corner beside the track name into the middle of the page and shrinking back on
+the way down. A picture that rotated would be a picture on a turntable rather than a cover.
+
+The record changer stays the record's, though. Flying a rectangle through a camera lens is
+a conceit that belongs to the thing shaped like a record; a square cover changing tracks
+simply becomes the next cover.
+
 **Vinyl** has a colour of its own — grooves, rim and label edge, separate from the row's
 type, because making the grooves visible and making the title legible are not the same
 decision. It is a record the height of the panel, sitting behind the readout — centred on

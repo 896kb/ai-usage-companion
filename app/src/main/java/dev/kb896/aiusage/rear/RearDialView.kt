@@ -2569,11 +2569,9 @@ class RearDialView(context: Context) : View(context) {
         notice: Float,
         rings: PanelGeometry,
     ) {
-        if (config.mediaArt != MediaArt.VINYL) return
-        // The track that is playing, or the one that just stopped. A record cannot leave
-        // if it is deleted the instant the music ends — drawVinyl used to return here and
-        // the disc simply blinked out, which is the one exit a physical object never
-        // makes.
+        // The track that is playing, or the one that just stopped. A cover cannot leave
+        // if it is deleted the instant the music ends — this used to return here and the
+        // disc simply blinked out, which is the one exit a physical object never makes.
         val m = media ?: departing ?: return
         // Fades with the row it belongs to. It does not slide: the row is a strip
         // changing hands and this is an object the panel is a window onto, and sliding
@@ -2595,9 +2593,13 @@ class RearDialView(context: Context) : View(context) {
         //
         // Scaled by `paging`, so none of it happens on the readout page: there the record
         // is a background object with no rings to travel between.
+        //
+        // The RECORD only. A square cover changing tracks simply becomes the next cover —
+        // flying a rectangle through a camera lens is a conceit that belongs to the thing
+        // shaped like a record.
         var changed = base
         var sleeve = m
-        swapPhase(frameNowMs)?.let { (leaving, progress) ->
+        if (config.mediaArt == MediaArt.VINYL) swapPhase(frameNowMs)?.let { (leaving, progress) ->
             animating = true
             val ring = if (leaving) rings.personal else rings.work
             val inRing = MediaLayout.Disc(
@@ -2618,6 +2620,37 @@ class RearDialView(context: Context) : View(context) {
         // Full strength throughout: the slide is what says it is leaving, and a record
         // that faded as it slid would read as two things happening to one object.
         fun shade(alpha: Int) = (ink and 0x00FFFFFF) or (alpha shl 24)
+
+        // ---- the square cover, which is the same journey without the record ---
+        //
+        // No body, no grooves, no rim, no spin: it is the sleeve itself, travelling and
+        // resizing between the row's corner and the middle of the media page. That IS the
+        // difference between the two styles — one is an object pretending to be a record
+        // and the other is a picture, and a picture that rotated would be a picture on a
+        // turntable rather than a cover.
+        if (config.mediaArt != MediaArt.VINYL) {
+            val sleeveArt = coverArt(sleeve.artPath) ?: return
+            val square = android.graphics.RectF(
+                disc.cx - disc.radius, disc.cy - disc.radius,
+                disc.cx + disc.radius, disc.cy + disc.radius,
+            )
+            canvas.save()
+            canvas.clipRect(square)
+            artPaint.alpha = 255
+            canvas.drawBitmap(
+                sleeveArt, null,
+                ArtPlacement.destination(square, sleeveArt.width, sleeveArt.height, 0f, 0f, 1f),
+                artPaint,
+            )
+            canvas.restore()
+            // A hairline of the row's colour around it, because a photograph on black
+            // with no edge has no size — the corners of a dark cover simply dissolve.
+            vinylPaint.style = Paint.Style.STROKE
+            vinylPaint.strokeWidth = SQUARE_EDGE
+            vinylPaint.color = shade(VINYL_LABEL_ALPHA)
+            canvas.drawRect(square, vinylPaint)
+            return
+        }
 
         // BLACK, not a tint wash. The first attempt built the disc out of the row's own
         // colour at low alpha and it came out as a pale blue circle with rings on it —
@@ -3197,9 +3230,25 @@ class RearDialView(context: Context) : View(context) {
      * which is a different and much cheaper effect.
      */
     private fun discAt(paging: Float, notice: Float): MediaLayout.Disc {
-        val readout = MediaLayout.vinyl(
-            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), Panel.CUTOUT_RIGHT.toFloat(),
-        )
+        // Where the cover sits on the READOUT page, which is the one thing the two styles
+        // genuinely differ about. The record is a panel-height object behind everything;
+        // the square is the row's own thumbnail, tucked in the corner beside the track
+        // name. Both then travel to the same place on the media page — which is what lets
+        // one piece of arithmetic carry either of them.
+        val readout =
+            if (config.mediaArt == MediaArt.VINYL) {
+                MediaLayout.vinyl(
+                    Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+                    Panel.CUTOUT_RIGHT.toFloat(),
+                )
+            } else {
+                val half = MARK_H / 2f
+                MediaLayout.Disc(
+                    cx = CONTENT_EDGE + half,
+                    cy = Panel.HEIGHT - MARK_BOTTOM - half,
+                    radius = half,
+                )
+            }
         if (paging <= 0.001f) return readout
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
         // The page's disc is sized against whatever the notice has left, so a strip
@@ -3215,13 +3264,16 @@ class RearDialView(context: Context) : View(context) {
     /**
      * Whether there is a second page to scroll to.
      *
-     * Both conditions matter. Under a square cover there is no object to carry across
-     * the transition, so the page would be a second copy of the row with more numbers on
-     * it; and with nothing playing there is nothing for it to be a page about — a panel
-     * that scrolls to a blank record player is a panel that appears to have broken.
+     * Under EITHER cover style. It was the record's page at first, on the reasoning that
+     * a square cover gives nothing to carry across the transition — which turned out to
+     * be wrong: the row's thumbnail is an object, it simply travels rather than spins.
+     *
+     * With nothing playing there is no page, though. There would be nothing for it to be
+     * a page about, and a panel that scrolls to a blank record player is a panel that
+     * appears to have broken.
      */
     private fun mediaPageAvailable(): Boolean =
-        config.showMedia && config.mediaArt == MediaArt.VINYL &&
+        config.showMedia &&
             // The GATE, not `media`, so a skip does not take the page away and bring it
             // back underneath someone who is standing on it.
             (media != null || presenceGate.shown)
@@ -3395,24 +3447,15 @@ class RearDialView(context: Context) : View(context) {
         // The thumbnail belongs to the SQUARE style alone. Under VINYL the record behind
         // the readout IS the artwork, and a second copy of the same cover in the row
         // would be the same picture twice — so the text takes the width instead.
-        val cover = if (config.mediaArt == MediaArt.SQUARE) coverArt(m.artPath) else null
-        var textLeft = band.left
-        if (cover != null) {
-            val square = android.graphics.RectF(
-                band.left, band.top, band.left + band.height(), band.bottom)
-            canvas.save()
-            canvas.clipRect(square)
-            // Cropped to fill, never letterboxed: covers are square already, and the odd
-            // one that is not should lose its edges rather than sit in a box. Same
-            // placement the panel's custom artwork uses, at neutral pan and zoom.
-            canvas.drawBitmap(
-                cover, null,
-                ArtPlacement.destination(square, cover.width, cover.height, 0f, 0f, 1f),
-                artPaint,
-            )
-            canvas.restore()
-            textLeft = square.right + MediaLayout.COVER_GAP
-        }
+        // The thumbnail is RESERVED here but drawn elsewhere. Under the square style the
+        // cover is the object that travels between this row and the media page, so it is
+        // painted by the travelling layer — see discAt, which treats this corner as its
+        // readout-page position. Drawing it here as well would put two copies on the
+        // panel the moment the page began to move.
+        val hasCover =
+            config.mediaArt == MediaArt.SQUARE && coverArt(m.artPath) != null
+        val textLeft =
+            if (hasCover) band.left + band.height() + MediaLayout.COVER_GAP else band.left
 
         val row = MediaLayout.of(textLeft, band.right, region.centerY())
         val gh = MediaLayout.GLYPH_H
@@ -4057,6 +4100,10 @@ class RearDialView(context: Context) : View(context) {
 
         /** The cover on the label, held back so the buttons over it stay findable. */
         private const val VINYL_COVER_ALPHA = 0xCC
+
+        /** The hairline around a square cover. Without it a dark sleeve on a black panel
+         *  has no corners and therefore no size. */
+        private const val SQUARE_EDGE = 1.4f
         private const val VINYL_LABEL_ALPHA = 0x55
 
         /** The unfilled part of the progress bar, against the row's tint. */

@@ -8,9 +8,9 @@ package dev.kb896.aiusage.rear
  * about the music instead. What travels between them is the record, which is why its
  * position here is expressed as a destination for the same disc rather than as a new one.
  *
- * Exists only under the vinyl style. Under a square cover there is no object to carry
- * across the transition and nothing this page would be a bigger view *of* — it would just
- * be a second copy of the row with more numbers on it.
+ * Under either cover style. It was the record's page at first, on the reasoning that a
+ * square cover gives nothing to carry across the transition — which was wrong: the row's
+ * thumbnail is an object too, it simply travels and resizes rather than spinning.
  *
  * Pure, like MediaLayout, and for the same reason: this is arithmetic on a 904x572 panel
  * that nobody is looking at directly, where a number being wrong shows up as something
