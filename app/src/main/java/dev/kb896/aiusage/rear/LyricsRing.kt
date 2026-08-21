@@ -46,6 +46,34 @@ object LyricsRing {
     /** How far the old line sinks toward the record as it goes. */
     const val EXIT_DROP = 14f
 
+    // -- straight lines, for the square cover ------------------------------------------
+
+    /** How close a line may come to the panel's edge, or to the camera cutout. */
+    const val SIDE_MARGIN = 14f
+
+    /**
+     * How wide a straight line may be, centred on the cover.
+     *
+     * Symmetric about the cover's centre rather than filling the space to each edge: the
+     * lines are centred, so the usable width is twice the SHORTER side. Taking the whole
+     * span would let a long line run past one edge while leaving a gap at the other.
+     */
+    fun straightRoom(cx: Float, leftLimit: Float, rightLimit: Float): Float =
+        2f * minOf(cx - (leftLimit + SIDE_MARGIN), (rightLimit - SIDE_MARGIN) - cx)
+            .coerceAtLeast(0f)
+
+    /**
+     * The baseline of the line being sung, above a cover whose top edge is [coverTop].
+     *
+     * Text sits above its own baseline, so this is [GAP] clear of the cover and the glyphs
+     * run upward from there — which is what makes the stack come out to exactly [STACK],
+     * the same band the curved arcs claim. Both styles ask the record for the same room.
+     */
+    fun rowBaseline(coverTop: Float): Float = coverTop - GAP
+
+    /** The baseline of the line waiting its turn, stacked above the sung one. */
+    fun rowNextBaseline(coverTop: Float): Float = rowBaseline(coverTop) - SIZE - LINE_GAP
+
     /** How long a line takes to come in and the last one to leave. */
     const val PROMOTE_MS = 380f
 
@@ -114,11 +142,19 @@ object LyricsRing {
      * one measurement describes the whole string and the fit is arithmetic rather than a
      * search over renderings.
      */
-    fun fit(text: String, radius: Float, advanceAt: (Float) -> Float): Fitted {
-        if (text.isEmpty()) return Fitted("", SIZE)
-        // What the arc can hold, as a length along it.
-        val room = radius * Math.toRadians(MAX_SWEEP.toDouble()).toFloat()
+    fun fit(text: String, radius: Float, advanceAt: (Float) -> Float): Fitted =
+        fitTo(text, radius * Math.toRadians(MAX_SWEEP.toDouble()).toFloat(), advanceAt)
 
+    /**
+     * The same fitting against a plain length, for lines that are not bent.
+     *
+     * Under the square cover the words are straight — see [rowBaseline]. A curve is what
+     * you do to text when it has to follow the edge of a record; a photograph has no edge
+     * to follow, and bending a line around one anyway would be decoration borrowed from a
+     * shape that is not there.
+     */
+    fun fitTo(text: String, room: Float, advanceAt: (Float) -> Float): Fitted {
+        if (text.isEmpty()) return Fitted("", SIZE)
         var size = SIZE
         while (size > MIN_SIZE && advanceAt(size) * text.length > room) {
             size -= 1f

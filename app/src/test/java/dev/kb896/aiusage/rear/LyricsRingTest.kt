@@ -117,6 +117,65 @@ class LyricsRingTest {
         assertTrue("the lyrics run off the right edge", cx + reach < 904f)
     }
 
+    // -- straight lines, under the square cover ---------------------------------------
+
+    /**
+     * Both styles ask the record for the SAME band. That is what lets one reservation
+     * serve both — MediaPage.disc is handed LyricsRing.STACK either way, and neither the
+     * caller nor the disc has to know which cover is in use.
+     */
+    @Test fun `the straight stack occupies exactly the claimed band`() {
+        val coverTop = 200f
+        val topmost = LyricsRing.rowNextBaseline(coverTop) - LyricsRing.SIZE
+        assertEquals(
+            "the straight lines do not fill the same band as the arcs",
+            LyricsRing.STACK, coverTop - topmost, 0.01f,
+        )
+    }
+
+    @Test fun `the waiting line sits above the one being sung`() {
+        val coverTop = 200f
+        // Smaller y is higher up.
+        assertTrue(
+            "the next line is not stacked above the sung one",
+            LyricsRing.rowNextBaseline(coverTop) < LyricsRing.rowBaseline(coverTop),
+        )
+        assertTrue(
+            "the sung line overlaps the cover",
+            LyricsRing.rowBaseline(coverTop) <= coverTop,
+        )
+    }
+
+    /**
+     * Centred lines can only use twice the shorter side. Taking the whole span would run a
+     * long line past one edge while leaving a gap at the other.
+     */
+    @Test fun `straight room is symmetric about the cover`() {
+        // Cover centred in the usable half: both sides equal.
+        val cx = (296f + 904f) / 2f
+        val room = LyricsRing.straightRoom(cx, 296f, 904f)
+        assertEquals(904f - 296f - 2f * LyricsRing.SIDE_MARGIN, room, 0.01f)
+
+        // Pushed off-centre: the shorter side decides, so the line stays within both edges.
+        val off = LyricsRing.straightRoom(400f, 296f, 904f)
+        assertEquals(2f * (400f - 296f - LyricsRing.SIDE_MARGIN), off, 0.01f)
+        assertTrue("an off-centre line would overrun the near edge", 400f - off / 2f >= 296f)
+    }
+
+    @Test fun `a cover jammed against an edge asks for no room rather than negative room`() {
+        assertEquals(0f, LyricsRing.straightRoom(300f, 296f, 904f), 0.01f)
+    }
+
+    /** A straight line gets more room than a bent one, so it shrinks later. */
+    @Test fun `straight lines fit more than curved ones`() {
+        val line = "and every time I close my eyes I see the same thing over"
+        val straight = LyricsRing.fitTo(
+            line, LyricsRing.straightRoom((296f + 904f) / 2f, 296f, 904f), advance,
+        )
+        assertEquals("a straight line was shrunk unnecessarily", LyricsRing.SIZE, straight.size, 0.001f)
+        assertEquals(line, straight.text)
+    }
+
     // -- making room ------------------------------------------------------------------
 
     /** The rule the view applies: room for the words is decided by the record they wrap. */

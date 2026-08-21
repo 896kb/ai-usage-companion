@@ -3885,46 +3885,58 @@ class RearDialView(context: Context) : View(context) {
         val t = LyricsRing.promotion(lyricFrom, lyricLine, (frameNowMs - lyricAt).toFloat())
         if (t < 1f) animating = true
 
-        val rNow = LyricsRing.currentRadius(disc.radius)
-        val rNext = LyricsRing.nextRadius(disc.radius)
         val eased = Tween.easeInOut(t)
-
         val previous = extras.textSize
         val was = extras.textAlign
         extras.textAlign = Paint.Align.CENTER
 
-        // The line on its way out: from where it was sung, inward, fading. Only during a
-        // promotion — a settled line has no predecessor still on screen.
+        // A curve is what you do to text that has to follow the edge of a record. A
+        // square cover has no edge to follow, so under that style the lines are straight —
+        // bending them anyway would be decoration borrowed from a shape that is not there.
+        //
+        // The two share everything else: the same band, the same pair of lines, the same
+        // promotion. Only the path differs, and "further from the cover" means a larger
+        // radius in one and a higher baseline in the other.
+        val curved = config.mediaArt == MediaArt.VINYL
+        val now = if (curved) LyricsRing.currentRadius(disc.radius)
+            else LyricsRing.rowBaseline(disc.cy - disc.radius)
+        val next = if (curved) LyricsRing.nextRadius(disc.radius)
+            else LyricsRing.rowNextBaseline(disc.cy - disc.radius)
+        // Leaving means sinking toward the cover, which is inward on a circle and downward
+        // on a page — the same gesture, opposite signs.
+        val exit = if (curved) -LyricsRing.EXIT_DROP else LyricsRing.EXIT_DROP
+
+        fun place(text: String, at: Float, alpha: Int) {
+            if (curved) drawLyricArc(canvas, text, disc, at, tint, alpha)
+            else drawLyricRow(canvas, text, disc, at, tint, alpha)
+        }
+
+        // The line on its way out: from where it was sung, toward the cover, fading. Only
+        // during a promotion — a settled line has no predecessor still on screen.
         if (t < 1f) {
             lyrics.lineAt(lyricFrom)?.let {
-                drawLyricLine(
-                    canvas, it, disc, rNow - LyricsRing.EXIT_DROP * eased, tint,
-                    alpha = ((1f - eased) * 255f * fade).toInt(),
-                )
+                place(it, now + exit * eased, ((1f - eased) * 255f * fade).toInt())
             }
         }
         // The line being sung, arriving from where it waited.
         lyrics.lineAt(lyricLine)?.let {
-            drawLyricLine(
-                canvas, it, disc, rNext + (rNow - rNext) * eased, tint,
-                alpha = ((LyricsRing.NEXT_ALPHA +
+            place(
+                it, next + (now - next) * eased,
+                ((LyricsRing.NEXT_ALPHA +
                     (255 - LyricsRing.NEXT_ALPHA) * eased) * fade).toInt(),
             )
         }
-        // And the one after it, taking up the outer arc as the promotion finishes.
+        // And the one after it, taking its place as the promotion finishes.
         lyrics.lineAt(lyricLine + 1)?.let {
-            drawLyricLine(
-                canvas, it, disc, rNext, tint,
-                alpha = (LyricsRing.NEXT_ALPHA * eased * fade).toInt(),
-            )
+            place(it, next, (LyricsRing.NEXT_ALPHA * eased * fade).toInt())
         }
 
         extras.textSize = previous
         extras.textAlign = was
     }
 
-    /** One line, fitted to its arc. Blank entries draw nothing — see Lrc. */
-    private fun drawLyricLine(
+    /** One line, bent along its arc. Blank entries draw nothing — see Lrc. */
+    private fun drawLyricArc(
         canvas: Canvas,
         text: String,
         disc: MediaLayout.Disc,
@@ -3944,6 +3956,35 @@ class RearDialView(context: Context) : View(context) {
             canvas, fitted.text, disc.cx, disc.cy, radius,
             LyricsRing.CENTRE_DEG, outward = true,
         )
+    }
+
+    /**
+     * One line, straight, centred over a square cover.
+     *
+     * No stroke thickening, unlike the curved form and the ring labels. That weight exists
+     * because bent, anti-aliased type sitting over camera glass at the edge of the display
+     * is the least favourable place type can be. A horizontal line in the middle of open
+     * panel is the most favourable, and thickening it there would just make it look heavy.
+     */
+    private fun drawLyricRow(
+        canvas: Canvas,
+        text: String,
+        disc: MediaLayout.Disc,
+        baseline: Float,
+        tint: Int,
+        alpha: Int,
+    ) {
+        if (text.isBlank() || alpha <= 2) return
+        val room = LyricsRing.straightRoom(
+            disc.cx, Panel.CUTOUT_RIGHT.toFloat(), Panel.WIDTH.toFloat(),
+        )
+        val fitted = LyricsRing.fitTo(text, room) { size ->
+            extras.textSize = size
+            extras.measureText("0")
+        }
+        extras.textSize = fitted.size
+        extras.color = (tint and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
+        canvas.drawText(fitted.text, disc.cx, baseline, extras)
     }
 
     /**

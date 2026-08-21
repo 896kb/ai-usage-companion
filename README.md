@@ -434,8 +434,8 @@ so the first callback of a new track routinely carries the new title beside the 
 track's duration — and duration is both half the identity of a recording and the thing
 LRCLIB matches on. Acting on that spends a request on a recording that does not exist.
 
-On the panel: the line being sung curves along the inside arc against the record, the line
-coming next waits dimmed outside it, and on each change the outer line travels **inward**
+On the panel: under the **vinyl** style the line being sung curves along the inside arc
+against the record and the line coming next waits dimmed outside it, and on each change the outer line travels **inward**
 and brightens while the old one sinks and fades. The record gives up the room — its size is
 already derived from whatever is above it, so lyrics claim their band exactly the way a
 notification does. Only a **synced** sheet is accepted; an untimed one cannot say which line
@@ -445,6 +445,14 @@ that looks like a reading.
 The block fades in and out as a unit — switched on, scrolled to, a track turning out to have
 words — which is a different event from a line being promoted and so gets a different
 treatment: promotion travels because a song moving on has a direction; arriving does not.
+
+Under the **square** style they are **straight**, stacked above the cover — sung line
+closest to it, next line dimmed above that. A curve is what you do to text that has to
+follow the edge of a record; a photograph has no edge to follow, and bending a line around
+one anyway is decoration borrowed from a shape that is not there. Everything else is
+shared: the same band, the same pair of lines, the same promotion, with "further from the
+cover" meaning a larger radius in one and a higher baseline in the other. Straight lines
+also get more room, so they shrink later than bent ones do.
 
 **A notification wins.** With a group card up there is not room for both, and rather than
 collapsing the record to a token with a ring of separate rotated letters around it, the
