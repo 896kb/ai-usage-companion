@@ -411,7 +411,12 @@ reports about usage to what it reports about the music. Cross-fading was the fir
 and it looked like two rings in the same place, which is what it was.
 
 The playback dial is labelled at both ends: **elapsed curved at the arc's start**,
-**total at its end**. Nothing in the middle — a remaining-time counter lived there for a
+**total at its end**. Their digits roll **individually**: 1:21 to 1:22 moves one digit, not
+the whole clock. Rolling the whole string makes one second look like a change of track,
+which on a panel read out of the corner of an eye is the difference between "time is
+passing" and "something happened". The volume label carries its reading the same way —
+`VOLUME 42%`, one wheel per character, so the word acts as the unit and only the figures
+that changed move. Nothing in the middle — a remaining-time counter lived there for a
 while and it was the same fact a third way, since the arc already shows what is left as a
 shape. There are no clocks along the bottom of the page either; they were the same two
 numbers again, five hundred units from the dial they belong to.

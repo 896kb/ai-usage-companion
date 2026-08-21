@@ -2867,7 +2867,7 @@ class RearDialView(context: Context) : View(context) {
         // themselves because they belong to this page: the rings SWEEP between two
         // readings and text cannot, so it fades in with everything else that is only
         // true once you have arrived.
-        drawMediaRings(canvas, rings, paging, tint)
+        drawMediaRings(canvas, rings, paging, tint, volumeShown)
 
         // ---- title and artist, centred under the disc -------------------------
         // Centred while it fits, scrolling when it does not — and left-aligned once it
@@ -3069,6 +3069,8 @@ class RearDialView(context: Context) : View(context) {
         rings: PanelGeometry,
         paging: Float,
         tint: Int,
+        /** The eased volume the arc is drawn at, so its label reads the same number. */
+        volumeShown: Float,
     ) {
         val m = media ?: departing ?: return
         val alpha = (255 * paging).toInt().coerceIn(0, 255)
@@ -3109,22 +3111,25 @@ class RearDialView(context: Context) : View(context) {
         // its path, so tops-outward reads correctly around the upper half and tops-inward
         // around the lower — at five o'clock, outward would have the total reading down
         // and to the left.
-        curved(
-            canvas, MediaPage.clock(elapsed), rings.personal,
+        curvedRolling(
+            canvas, "dial:elapsed", MediaPage.clock(elapsed), rings.personal,
             centreDeg = MediaPage.ELAPSED_AT, outward = true,
         )
         if (m.durationMs > 0L) {
-            curved(
-                canvas, MediaPage.clock(m.durationMs), rings.personal,
+            curvedRolling(
+                canvas, "dial:total", MediaPage.clock(m.durationMs), rings.personal,
                 centreDeg = MediaPage.TOTAL_AT, outward = false,
             )
         }
         // Bottom-left of its ring rather than over the top of it. Outside at twelve
         // o'clock lands in the twenty units between the two rings, which is not enough,
         // and any further out is inside the ring above. Down here there is open panel.
-        curved(
-            canvas, MediaPage.VOLUME_LABEL, rings.work,
-            centreDeg = 135f, outward = false,
+        // VOLUME with its reading attached. One label rather than two, so the percentage
+        // rolls in the same wheel as everything else and the word acts as its unit.
+        curvedRolling(
+            canvas, "dial:volume",
+            MediaPage.VOLUME_LABEL + " " + Math.round(volumeShown * 100f) + "%",
+            rings.work, centreDeg = 135f, outward = false,
         )
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = 18f
@@ -3290,6 +3295,65 @@ class RearDialView(context: Context) : View(context) {
             arc,
         )
         arc.alpha = 255
+    }
+
+    /**
+     * A curved label whose characters roll individually when they change.
+     *
+     * One clock ticking from 1:21 to 1:22 should move ONE digit. Rolling the whole string
+     * makes a change of one second look like a change of track, which on a panel read out
+     * of the corner of an eye is the difference between "time is passing" and "something
+     * happened".
+     *
+     * Each character is drawn with the canvas TURNED so that character stands upright
+     * above the ring's centre — after which it is ordinary straight text with a
+     * rectangular clip, and the wheel is the same one the flat labels use. Bending each
+     * glyph along a path instead would mean clipping to an annular sector per character,
+     * which is a lot of geometry to arrive at the same picture.
+     *
+     * Monospaced, so the angular step is one advance divided by the radius and every
+     * character's place is arithmetic. [outward] flips the direction of travel, because
+     * left-to-right runs with increasing angle above the ring and against it below.
+     */
+    private fun curvedRolling(
+        canvas: Canvas,
+        key: String,
+        text: String,
+        g: RingGeometry,
+        centreDeg: Float,
+        outward: Boolean,
+    ) {
+        if (text.isEmpty()) return
+        val radius = MediaPage.labelRadius(g.radius, g.stroke, outward)
+        val advance = extras.measureText("0")
+        val step = Math.toDegrees((advance / radius).toDouble()).toFloat()
+        val size = extras.textSize
+        val previous = extras.textAlign
+        extras.textAlign = Paint.Align.CENTER
+        extras.style = Paint.Style.FILL_AND_STROKE
+        extras.strokeWidth = MediaPage.LABEL_WEIGHT
+
+        for (i in text.indices) {
+            val fromMiddle = (i - (text.length - 1) / 2f) * step
+            val deg = if (outward) centreDeg + fromMiddle else centreDeg - fromMiddle
+            canvas.save()
+            // Turn the canvas so this character stands upright directly above (or below)
+            // the centre, then everything below is flat text.
+            canvas.rotate(if (outward) deg + 90f else deg - 90f, g.cx, g.cy)
+            val x = g.cx
+            val baseline = if (outward) g.cy - radius + size / 2f else g.cy + radius + size / 2f
+            rolling(
+                canvas, key + ":" + i, text[i].toString(), x, baseline,
+                android.graphics.RectF(
+                    x - advance, baseline - size, x + advance, baseline + size * 0.35f,
+                ),
+            )
+            canvas.restore()
+        }
+
+        extras.style = Paint.Style.FILL
+        extras.strokeWidth = 0f
+        extras.textAlign = previous
     }
 
     /**
