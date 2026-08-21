@@ -1807,6 +1807,12 @@ class RearDialView(context: Context) : View(context) {
 
         // ---- the mini card, drawn FIRST so it sits UNDER the headline ----------
         //
+        // NO OUTLINE on either card. They used to carry a hairline stroke at a tenth of
+        // the notification's own colour, and it was doing two jobs badly: separating the
+        // card from the panel, which its opaque ground already does, and separating the
+        // two cards from each other, which the step between them does. What it added was
+        // a third edge on a shape that has two.
+        //
         // Stuck to the card above with no gap, running to the same right edge, but
         // stepped IN on the left — so the two make one shape with a shoulder rather than
         // two cards floating separately. It carries the same single rounded corner the
@@ -1848,6 +1854,32 @@ class RearDialView(context: Context) : View(context) {
             canvas.drawRect(
                 miniLeft, cardTop, Panel.WIDTH.toFloat(), miniBottom, noticePaint)
 
+            // The shadow the headline card casts onto this one.
+            //
+            // This card comes out from UNDER the one above it, and nothing said so — the
+            // two cards are the same colour, so the join between them read as one shape
+            // with a step in it rather than as one sheet lying over another. A gradient
+            // from the top edge is what tells you which is in front.
+            //
+            // Spent by half the card's height, because a shadow that reached the bottom
+            // would be a dark card rather than a shadow: the eye reads the fade as depth
+            // only while it can see where it ends.
+            //
+            // Drawn over the ground and UNDER the text. A real shadow would fall across
+            // the type as well, and on a panel read from across a room the legibility is
+            // worth more than the last of the realism.
+            val shadowTop = cardTop + r
+            noticePaint.shader = android.graphics.LinearGradient(
+                0f, shadowTop, 0f, shadowTop + CASCADE_H * MINI_SHADOW_SPAN,
+                (MINI_SHADOW_ALPHA shl 24), 0x00000000,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(
+                miniLeft, shadowTop, Panel.WIDTH.toFloat(),
+                shadowTop + CASCADE_H * MINI_SHADOW_SPAN, noticePaint,
+            )
+            noticePaint.shader = null
+
             // Padded down by the tuck, which is what keeps the text where it was. Its own
             // wheel turns with the card above it, so a replacement moves both.
             val rowTop = cardTop + r
@@ -1855,21 +1887,6 @@ class RearDialView(context: Context) : View(context) {
                 ?.let { drawMiniRow(canvas, it, rowTop + turn * CASCADE_H, CASCADE_H) }
             notice?.takeIf { it.hasMore }
                 ?.let { drawMiniRow(canvas, it, rowTop - (1f - turn) * CASCADE_H, CASCADE_H) }
-            canvas.restore()
-
-            // Its outline OMITS THE TOP EDGE, and starts at the visible top rather than
-            // the tucked one: the card above draws a line along its own bottom, and a
-            // second one a pixel below it read as a doubled border rather than as two
-            // sections meeting.
-            canvas.save()
-            canvas.clipRect(miniLeft, rowTop, Panel.WIDTH.toFloat(), miniTop + CASCADE_H * m)
-            val edge = android.graphics.Path().apply {
-                moveTo(miniLeft, rowTop)
-                lineTo(miniLeft, miniBottom - r)
-                quadTo(miniLeft, miniBottom, miniLeft + r, miniBottom)
-                lineTo(Panel.WIDTH.toFloat(), miniBottom)
-            }
-            outline(canvas, edge, slide)
             canvas.restore()
         }
 
@@ -1908,7 +1925,6 @@ class RearDialView(context: Context) : View(context) {
         leaving?.let { drawNoticeRow(canvas, it, top + turn * NOTICE_H) }
         notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * NOTICE_H) }
         canvas.restore()
-        outline(canvas, card, slide)
     }
 
     /**
@@ -1930,17 +1946,6 @@ class RearDialView(context: Context) : View(context) {
     private var cornerRadius: Float? = null
 
     /** The hairline that makes a card read as laid OVER the panel rather than cut into it. */
-    private fun outline(canvas: Canvas, shape: android.graphics.Path, slide: Float) {
-        noticePaint.color = colorFor("notice", config.notificationTint)
-        noticePaint.alpha = (90 * slide).toInt()
-        noticePaint.style = Paint.Style.STROKE
-        noticePaint.strokeWidth = 1.5f
-        noticePaint.isAntiAlias = true
-        canvas.drawPath(shape, noticePaint)
-        noticePaint.alpha = 255
-        noticePaint.style = Paint.Style.FILL
-    }
-
     /** The mini card's contents: the next notification in the group, no icon. */
     /**
      * Where the cascaded card's left edge is.
@@ -4063,6 +4068,16 @@ class RearDialView(context: Context) : View(context) {
 
         /** How far the mini card's step must stay clear of the headline's curve. */
         private const val MINI_CORNER_CLEARANCE = 4f
+
+        /**
+         * The shadow the headline card casts on the cascaded one: how dark at the top
+         * edge, and how far down it is spent.
+         *
+         * Half the card. Any further and it stops reading as depth and starts reading as
+         * a darker card — the fade is only legible as a shadow while its end is visible.
+         */
+        private const val MINI_SHADOW_ALPHA = 0x8C
+        private const val MINI_SHADOW_SPAN = 0.5f
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f

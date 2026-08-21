@@ -556,6 +556,17 @@ headline, and the next one in a smaller card attached underneath, stepped in on 
 That card follows the headline in and leaves ahead of it, so it reads as a consequence of
 the first rather than one object changing size.
 
+Neither card has a border. They carried a hairline stroke at a tenth of the notification's
+colour, doing two jobs badly: separating the card from the panel, which its opaque ground
+already does, and separating the two cards from each other, which the step between them
+does. It was a third edge on a shape that has two.
+
+What tells you which card is in front is a **shadow** instead. The two are the same colour,
+so the join between them read as one shape with a step in it rather than as one sheet lying
+over another; the second card now takes a gradient from its top edge, spent by half its own
+height. Any further and it stops reading as depth and starts reading as a darker card — the
+fade is legible as a shadow only while you can see where it ends.
+
 The second card is **taller than the band it shows in** and sits *behind* the headline,
 tucked up by a full corner radius with its contents padded down by the same amount — so
 nothing visible moves, and its square top corners are hidden. Without that, two cards of
