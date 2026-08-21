@@ -538,8 +538,21 @@ class RearDialView(context: Context) : View(context) {
         // cent of the arc and not visible. Paying that everywhere is far simpler than
         // deciding per frame whether a change was a tick or a jump, and it is the same
         // follower the volume already uses.
-        val progressRaw = playing?.let {
-            MediaLayout.progress(it.elapsed(SystemClock.elapsedRealtime()), it.durationMs)
+        // The position is FROZEN while there is no current track.
+        //
+        // A skip is not instant: the player drops the session for a moment while it loads
+        // the next one, and during that gap the only thing left to read is the track that
+        // is leaving. It is still marked as playing, so carrying its position forward ran
+        // it past its own end — the dial filled to 100% on every skip and then wound back
+        // from there, which is not the dial returning to the beginning, it is the dial
+        // going the long way round first.
+        //
+        // What is left of a departing track is whatever it last reported. It is not
+        // playing any more; it is gone.
+        val progressRaw = when {
+            media != null -> MediaLayout.progress(
+                media!!.elapsed(SystemClock.elapsedRealtime()), media!!.durationMs)
+            else -> departing?.let { MediaLayout.progress(it.positionMs, it.durationMs) }
         } ?: 0f
         val progressFraction = ease("media:progress", progressRaw, PLAYBACK_EASE_MS)
         // Eased, because the volume moves in steps under a finger and a dial that jumped

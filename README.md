@@ -353,6 +353,13 @@ is empty. The rings work as the two ends of that because of the thing that made 
 awkward everywhere else — a ring encircles a camera lens and there is no display inside
 one, so a disc shrunk to ring size has genuinely *gone*.
 
+During the gap in a skip — the moment where the player has dropped one track and not yet
+started the next — the dial **holds** rather than carrying the departing track's position
+forward. It is still flagged as playing, so extrapolating it ran it past its own end: the
+dial filled to 100% on every skip and wound back from there, which is not returning to the
+beginning, it is going the long way round first. What is left of a departing track is
+whatever it last reported; it is not playing any more.
+
 The playback dial **winds back** rather than snapping when a track ends: the reading goes
 from nearly full to nothing between two frames, and a dial that jumps there reads as the
 panel having lost its place rather than as a record finishing.
