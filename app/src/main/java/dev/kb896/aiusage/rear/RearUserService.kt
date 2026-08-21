@@ -21,6 +21,9 @@ class RearUserService : IRearService.Stub {
     /** Consecutive failed attempts to move the panel off the main display. */
     private var strandStrikes = 0
 
+    /** When the panel was last rebuilt from scratch, for the cooldown below. */
+    private var lastReplaceAt = 0L
+
     override fun destroy() = exitProcess(0)
 
     /**
@@ -45,7 +48,16 @@ class RearUserService : IRearService.Stub {
      * through `am start` on display 0 — which is the takeover this whole area exists to
      * prevent. Ambiguity has to resolve to "leave it alone".
      */
-    override fun isAlive(): Boolean = taskId() > 0 && compositingOnRear() != false
+    override fun isAlive(): Boolean {
+        if (taskId() <= 0) return false
+        // NOWHERE counts as alive: an asleep panel is not a broken one, and treating it
+        // as dead is what once turned every screen-off into a relaunch. DISPLACED does
+        // not — the task existing is exactly what makes that failure invisible.
+        return when (panelWhere()) {
+            Where.REAR, Where.NOWHERE -> true
+            Where.MAIN, Where.DISPLACED -> false
+        }
+    }
 
     override fun hide() {
         // -p $PKG scopes the broadcast to our own app. The receiver stays exported
@@ -77,7 +89,7 @@ class RearUserService : IRearService.Stub {
         // task exists" is how a silently-dead panel became unrecoverable: the task
         // outlives composition, so every subsequent show() took this branch and
         // broadcast an update to a window nobody was drawing, instead of relaunching.
-        if (placedDisplayId == displayId && taskId() > 0 && compositingOnRear() == true) {
+        if (placedDisplayId == displayId && taskId() > 0 && panelWhere() == Where.REAR) {
             update(payload); wake(displayId); return
         }
         exec("am start -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
@@ -96,7 +108,7 @@ class RearUserService : IRearService.Stub {
         // teardown paths left after verifyPlacement's and the activity's own eviction
         // guard were removed. They fired in the normal case, not an exceptional one:
         // immediately after `am start` the layer is often not composited yet, so
-        // compositingOnRear() is null rather than false, which fell through to
+        // panelWhere() answers NOWHERE rather than MAIN, which fell through to
         // isOnDisplay() — the `dumpsys window displays` read that has lied in every
         // stranding incident in this project and also simply lags a fresh placement.
         // A false reading there destroyed the panel we had just created, and the
@@ -106,7 +118,7 @@ class RearUserService : IRearService.Stub {
         // alone is strictly better than killing it: ensureOnRear() runs every keep-alive
         // tick and will move it later, whereas a finished activity has to be relaunched
         // through display 0.
-        if (compositingOnRear() == false) {
+        if (panelWhere() == Where.MAIN) {
             Log.w(TAG, "compositing on the MAIN display — re-issuing the move")
             moveToDisplay(task, displayId)
             wake(displayId)
@@ -119,10 +131,15 @@ class RearUserService : IRearService.Stub {
      * Pulls a stranded panel back onto the rear display. See the AIDL doc for why this
      * cannot live inside show().
      *
-     * Deliberately does nothing unless compositingOnRear() is a definite false. An
+     * Deliberately does nothing unless the panel is definitely on the MAIN display. An
      * unknown answer (panel asleep, layer not drawn, unparseable dump) must not move a
      * task: this runs every watchdog tick, and a check that acts on uncertainty would
      * shove a correctly-placed panel around the display topology every 20 seconds.
+     *
+     * DISPLACED is not this function's problem either, and that is not an oversight: the
+     * task is already on the rear display, merely behind something, and moving a task to
+     * the display it is already on does not raise it. That case needs a full placement —
+     * see the keep-alive.
      */
     /**
      * Launch the system camera onto the rear display.
@@ -149,7 +166,7 @@ class RearUserService : IRearService.Stub {
 
     override fun ensureOnRear(displayId: Int): Boolean {
         if (displayId < 0) return false
-        if (compositingOnRear() != false) { strandStrikes = 0; return false }
+        if (panelWhere() != Where.MAIN) { strandStrikes = 0; return false }
         val task = taskId()
         if (task <= 0) return false
         strandStrikes++
@@ -192,24 +209,63 @@ class RearUserService : IRearService.Stub {
      * a correctly-placed panel. Requiring absence from the rear section costs nothing
      * in the real failure case, where the activity genuinely never reached the panel.
      *
-     * Returns null when the output cannot be parsed or the layer appears nowhere (panel
-     * asleep, activity not yet drawn), so an unknown answer never triggers a move.
+     * "Nowhere" USED TO BE ONE ANSWER and it was two, which is the blind spot this enum
+     * exists to close. The panel not being composited means either that it is asleep —
+     * ordinary, and nothing to act on — or that something else has taken the rear display
+     * while our task sits behind it, alive and invisible. Both read as null, so the
+     * keep-alive's "composited nowhere AND no task" branch never fired for the second one:
+     * the task is precisely what still exists. Observed on device with the rear display
+     * showing HyperOS's own clock-and-steps widget, RearActivity paused in the background,
+     * the service running, and every health check reporting a healthy panel.
+     *
+     * The two are told apart by what ELSE the rear section lists. A display composing
+     * another app's layers is a display that is on and showing something; a display
+     * composing nothing at all is asleep.
      */
-    private fun compositingOnRear(): Boolean? {
+    private enum class Where {
+        /** On the rear display. The only healthy answer. */
+        REAR,
+
+        /** On the main display, over whatever the user is actually doing. */
+        MAIN,
+
+        /** Nowhere, while something else holds the rear display. Alive and invisible. */
+        DISPLACED,
+
+        /** Nowhere, and nothing else is there either: the panel is asleep. */
+        NOWHERE,
+    }
+
+    /**
+     * A layer name line in a HWC section: a window name ending in `#<id>`.
+     *
+     * Matched rather than counting lines, because a section always carries column
+     * headings and rules whether or not it is composing anything. Names are truncated
+     * with `[...]` in the middle when long, so this anchors on the end.
+     */
+    private val layerName = Regex("""^\s*\S+#\d+\s*$""", RegexOption.MULTILINE)
+
+    private fun panelWhere(): Where {
         val out = exec("dumpsys SurfaceFlinger")
-        if (!out.contains("HWC layers:")) return null
+        if (!out.contains("HWC layers:")) return Where.NOWHERE
 
         val header = Regex("""Display (\d+) \((?:active|inactive)\) HWC layers:""")
         val matches = header.findAll(out).toList()
-        if (matches.isEmpty()) return null
+        if (matches.isEmpty()) return Where.NOWHERE
 
         var onRear = false
         var onMain = false
+        // Whether the rear display is composing ANYTHING, ours or not. This is what
+        // separates an asleep panel from a hijacked one.
+        var rearBusy = false
         for ((i, m) in matches.withIndex()) {
             val start = m.range.last + 1
             val end = if (i + 1 < matches.size) matches[i + 1].range.first else out.length
-            if (!out.substring(start, end).contains("RearActivity")) continue
-            if (m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)) onRear = true else onMain = true
+            val section = out.substring(start, end)
+            val isRear = m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)
+            if (isRear && layerName.containsMatchIn(section)) rearBusy = true
+            if (!section.contains("RearActivity")) continue
+            if (isRear) onRear = true else onMain = true
         }
         // ON MAIN WINS, even when it is also on the rear. Observed on device: the panel
         // drawing as a 904x572 box over the user's foreground app while
@@ -224,9 +280,13 @@ class RearUserService : IRearService.Stub {
         // redundant move, which is cheap and invisible; the cost of missing it is the
         // user staring at the panel on the wrong screen.
         return when {
-            onMain -> false
-            onRear -> true
-            else -> null
+            onMain -> Where.MAIN
+            onRear -> Where.REAR
+            // Our layer is nowhere. If the rear display is composing someone else's, it
+            // is on and showing something that is not us, which is a failure that used to
+            // be invisible. If it is composing nothing, the panel is simply asleep.
+            rearBusy -> Where.DISPLACED
+            else -> Where.NOWHERE
         }
     }
 
@@ -292,6 +352,26 @@ class RearUserService : IRearService.Stub {
      *   - only a definite "not composited on the rear" triggers a re-place, so an
      *     unparseable dump or a momentary gap does not restart a healthy panel.
      */
+    /**
+     * Rebuild the panel, at most once per [REPLACE_COOLDOWN_MS].
+     *
+     * The cooldown is insurance against a fight rather than a normal-path delay. A single
+     * takeover — the ordinary case — is recovered on the very next tick. But if the system
+     * is REPEATEDLY bringing its own rear-screen launcher forward, replacing every tick
+     * would put the panel and HyperOS in a visible tug of war, and losing that contest
+     * slowly is better than losing it at six-second intervals in front of the user.
+     *
+     * Deliberately not a strike counter that gives up. It gives up on nothing: the panel
+     * is meant to be there, and it keeps asking for as long as the app is running.
+     */
+    private fun replace(displayId: Int, why: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastReplaceAt < REPLACE_COOLDOWN_MS) return
+        lastReplaceAt = now
+        Log.w(TAG, "keep-alive: $why — re-placing")
+        show(lastPayload, displayId)
+    }
+
     private fun startKeepAlive(displayId: Int) {
         if (keepAlive?.isAlive == true) return
         keepAlive = Thread {
@@ -306,19 +386,35 @@ class RearUserService : IRearService.Stub {
                     // needs it: double-tapping the rear display awake and finding
                     // nothing there was this skip.
                     
-                    when {
+                    // ONE reading per tick. Each call is a full `dumpsys SurfaceFlinger`,
+                    // and the old code asked twice per tick for two of its branches —
+                    // which also meant the two answers could disagree across the gap.
+                    when (val where = panelWhere()) {
                         // Definitely on the main display: a move is enough, and a move
                         // is cheap and invisible. Never relaunch for this.
-                        compositingOnRear() == false -> ensureOnRear(displayId)
+                        Where.MAIN -> ensureOnRear(displayId)
+
+                        // Alive, and behind whatever has taken the rear display. A move
+                        // cannot fix this — the task is already on the right display, it
+                        // is simply not on top — so it needs the full placement, which
+                        // goes out through display 0 and comes back to the front.
+                        //
+                        // This is the case that had no branch. HyperOS puts its own
+                        // rear-screen launcher up and our panel goes on existing behind
+                        // it: task alive, service running, nothing composited, every
+                        // check reporting health, and the user looking at a clock.
+                        Where.DISPLACED -> replace(displayId, "rear display taken")
+
                         // Composited nowhere AND no task: genuinely gone, relaunch.
                         // The task check is what makes this safe — "composited nowhere"
                         // on its own is also what a blanked display reports, and
                         // relaunching on that turned every screen-off into an `am start`
                         // on display 0.
-                        compositingOnRear() == null && taskId() <= 0 -> {
-                            Log.w(TAG, "keep-alive: no panel and no task — re-placing")
-                            show(lastPayload, displayId)
+                        Where.NOWHERE -> if (taskId() <= 0) {
+                            replace(displayId, "no panel and no task")
                         }
+
+                        Where.REAR -> Unit
                     }
                 } catch (e: InterruptedException) {
                     return@Thread
@@ -384,7 +480,21 @@ class RearUserService : IRearService.Stub {
          * both may re-place, and show() is idempotent when the panel is healthy (it
          * short-circuits to update+wake), so a duplicate tick costs one dumpsys.
          */
-        const val KEEPALIVE_MS = 20_000L
+        /**
+         * How often the panel's presence is checked.
+         *
+         * Was 20s, which is a long time to look at the wrong screen. A tick is one
+         * `dumpsys SurfaceFlinger` — measured at 40ms on this device — so at six seconds
+         * this costs under one per cent of one core, and it used to spend two of those
+         * calls per tick in some branches where it now spends one.
+         *
+         * The number is a trade against how long a failure is visible, not against
+         * battery in any meaningful sense.
+         */
+        const val KEEPALIVE_MS = 6_000L
+
+        /** The shortest gap between two full rebuilds. See replace(). */
+        const val REPLACE_COOLDOWN_MS = 15_000L
 
         /** Corrective moves to try before evicting a panel stuck on the main display. */
         const val MAX_STRAND_STRIKES = 3

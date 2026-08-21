@@ -1036,6 +1036,35 @@ on the rear display.
 That last one is what fixed double-tapping the rear screen off and on and finding nothing
 there. The panel had died and the code had decided not to look.
 
+**The panel can be alive and invisible, and that used to be undetectable.** Every health
+check answered "is our layer being composited on the rear display", with three answers:
+yes, no-it-is-on-the-main-one, and *nowhere*. That third answer was two different things
+wearing one name — the panel asleep, which is ordinary and must not be acted on, and
+HyperOS's own rear-screen launcher having taken the display while our task sits behind it,
+alive and drawing nothing. The keep-alive's recovery branch required "composited nowhere
+**and** no task", and in the second case the task is exactly what still exists. So it never
+fired. Caught on device with the rear display showing the clock-and-steps widget, the
+activity paused in the background, the service running, and every check reporting health.
+
+They are told apart by what **else** the rear display is composing. A display showing
+another app's layers is on and showing something that is not us; a display composing
+nothing at all is asleep. That is now a fourth state, and it is recovered by a full
+re-placement rather than a move — the task is already on the right display, it is simply
+not on top, and moving a task to the display it is already on does not raise it.
+
+The check also runs every **6 seconds** rather than every 20. A tick is one
+`dumpsys SurfaceFlinger`, measured at 40ms on this device, so this costs well under one per
+cent of one core — and the old code spent two of those calls per tick in some branches
+where it now spends one. Measured end to end by launching HyperOS's launcher at the panel
+on purpose: gone at +3s, back by +9s, where the same test before the change took between 16
+and 28 seconds.
+
+Rebuilds are capped at one per 15 seconds. That is insurance against a fight, not a delay
+in the normal path: a single takeover is recovered on the very next tick, but if the system
+were repeatedly bringing its own launcher forward, replacing every tick would be a visible
+tug of war. It gives up on nothing — the panel is meant to be there, and it keeps asking
+for as long as the app is running.
+
 ## How it works
 
 The rear display refuses to host an activity launched directly at it. So the app launches
