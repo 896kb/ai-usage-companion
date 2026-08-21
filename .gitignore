@@ -6,7 +6,14 @@ build/
 captures/
 .externalNativeBuild/
 .cxx/
-release/
+# ANCHORED, and it matters. This was `release/`, which git treats as "any directory
+# named release, at any depth" — so it silently swallowed app/src/release/, the source
+# set holding the no-op Diagnostics that the release variant compiles against. The file
+# existed on every machine that had ever built the app and on no clone, so debug built
+# everywhere, release built locally, and CI failed with an unresolved reference to a
+# class sitting right there in the working tree. Build output is already covered by
+# `build/` above; this only ever needs to name a real output directory.
+/app/release/
 
 # credentials — never commit an imported token blob
 *.token.json
