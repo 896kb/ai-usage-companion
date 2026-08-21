@@ -596,6 +596,10 @@ class RearDialView(context: Context) : View(context) {
         } ?: 0f
         val progressFraction =
             ease("media:progress", progressRaw, PLAYBACK_EASE_MS, epsilon = PROGRESS_JUMP)
+        // The readout page's hairline reads the SAME follower rather than the position.
+        // It is the same fact on the same panel, and two readings of it that disagree
+        // during a wind-back would be visible in the moment the pages overlap on a scroll.
+        progressShown = progressFraction
         // Eased, because the volume moves in steps under a finger and a dial that jumped
         // between notches would read as a counter rather than as a control.
         val rawVolume = if (muted()) 0f else volumeLevel()
@@ -3610,6 +3614,9 @@ class RearDialView(context: Context) : View(context) {
     private var vinylTurn = 0f
     private var vinylAt = 0L
 
+    /** The eased playback reading, shared by the dial and the readout page's hairline. */
+    private var progressShown = 0f
+
     /**
      * How far through the track we are, as a hairline under the row.
      *
@@ -3628,9 +3635,13 @@ class RearDialView(context: Context) : View(context) {
         band: android.graphics.RectF,
         tint: Int,
     ) {
-        val fraction = MediaLayout.progress(
-            m.elapsed(SystemClock.elapsedRealtime()), m.durationMs,
-        ) ?: return
+        // WHETHER to draw is this track's question — no duration, no timeline, no bar.
+        // HOW FULL is the follower's, which is why the reading is not recomputed here.
+        // This used to take the position directly, and so it was the one part of the
+        // panel that was always right and never moved: it snapped to the new track's
+        // start instead of running down to it.
+        if (m.durationMs <= 0L) return
+        val fraction = progressShown
         val top = band.bottom + MediaLayout.PROGRESS_GAP
         val bottom = top + MediaLayout.PROGRESS_H
 
