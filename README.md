@@ -353,6 +353,14 @@ is empty. The rings work as the two ends of that because of the thing that made 
 awkward everywhere else — a ring encircles a camera lens and there is no display inside
 one, so a disc shrunk to ring size has genuinely *gone*.
 
+A position **stamped before the track changed** belongs to the previous track, and is
+ignored. Players deliver a track in stages — the same staging that put the wrong sleeve on
+the record — so the first report carrying a new title can still carry the old position:
+measured, a new title arriving with thirty seconds on the clock of a track that had only
+just begun, which put the dial a sixth of the way round before it wound back. Not every
+skip does it, which is what made it look intermittent. MediaSession stamps every position
+with the clock reading it was taken at, so this is decidable rather than guessable.
+
 During the gap in a skip — the moment where the player has dropped one track and not yet
 started the next — the dial **holds** rather than carrying the departing track's position
 forward. It is still flagged as playing, so extrapolating it ran it past its own end: the

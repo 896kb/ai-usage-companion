@@ -553,9 +553,27 @@ class RearDialView(context: Context) : View(context) {
         //
         // What is left of a departing track is whatever it last reported. It is not
         // playing any more; it is gone.
+        // A POSITION STAMPED BEFORE THE TRACK CHANGED belongs to the previous track.
+        //
+        // Players deliver a track in stages — the same staging that put the wrong sleeve
+        // on the record — so the first report carrying a new title can still carry the
+        // old position. Measured: a new title arriving with 30 seconds on the clock of a
+        // track that had only just begun, which put the dial a sixth of the way round
+        // before it wound back. Not every skip does it, which is what made it look
+        // intermittent.
+        //
+        // MediaSession stamps every position with the clock reading it was taken at, so
+        // this is decidable rather than guessable: a stamp older than the change is not
+        // about this track. It self-corrects the moment the player publishes a fresh one,
+        // and gives up after a few seconds in case a player never does.
+        val current = media
+        val stale = current != null &&
+            current.positionAtMs < trackChangedAtReal &&
+            nowReal - trackChangedAtReal < POSITION_TRUST_MS
         val progressRaw = when {
-            media != null -> MediaLayout.progress(
-                media!!.elapsed(SystemClock.elapsedRealtime()), media!!.durationMs)
+            stale -> 0f
+            current != null ->
+                MediaLayout.progress(current.elapsed(nowReal), current.durationMs)
             else -> departing?.let { MediaLayout.progress(it.positionMs, it.durationMs) }
         } ?: 0f
         val progressFraction = ease("media:progress", progressRaw, PLAYBACK_EASE_MS)
@@ -1407,6 +1425,10 @@ class RearDialView(context: Context) : View(context) {
             // kept rather than re-read.
             swapFrom = media
             swapAt = now
+            // When the change happened, on the clock positions are stamped against. A
+            // report whose stamp PREDATES this is describing the track that just left —
+            // see the note in progressRaw.
+            trackChangedAtReal = SystemClock.elapsedRealtime()
             // Hold the bitmap that is ON SCREEN right now, not a path to it. There is one
             // cover file and the new track overwrites it, so asking for "the departing
             // track's artwork" by path returns whatever has since been decoded into that
@@ -1461,6 +1483,9 @@ class RearDialView(context: Context) : View(context) {
 
     /** While the clock is short of this, a track change is still in flight. */
     private var skipUntil = 0L
+
+    /** When the track last changed, on the clock positions are stamped against. */
+    private var trackChangedAtReal = 0L
 
     /** The track that just stopped, kept until the record has slid off. */
     private var departing: Media? = null
@@ -4303,6 +4328,15 @@ class RearDialView(context: Context) : View(context) {
          * the button flicking under the finger that pressed it.
          */
         private const val SKIP_GUARD_MS = 2_000L
+
+        /**
+         * How long a position stamped before a track change is disbelieved.
+         *
+         * Bounded, because a player that never refreshes its stamp would otherwise leave
+         * the dial pinned at the beginning for the whole track. Long enough to cover the
+         * gap, short enough that being wrong costs seconds rather than a song.
+         */
+        private const val POSITION_TRUST_MS = 3_000L
 
         /** How long the panel waits for the player to answer its own play/pause press
          *  before going back to treating reports with the usual suspicion. */
