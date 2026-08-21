@@ -235,33 +235,37 @@ class RearDialView(context: Context) : View(context) {
     ): Float {
         val leg = legs[key]
         if (leg == null) {
-            legs[key] = floatArrayOf(target, target, frameNowMs.toFloat())
+            legs[key] = Leg(target, target, frameNowMs)
             return target
         }
-        val (from, to, startMs) = Triple(leg[0], leg[1], leg[2])
-        val t = ((frameNowMs - startMs) / durationMs).coerceIn(0f, 1f)
-        // LINEAR for direct manipulation. Ease-in-out is right for a value that arrived
-        // on its own — a poll landing, a page settling — where the curve is what makes it
-        // read as a movement rather than a jump. The volume is a value someone is
-        // setting, and easing it means it leaves late and arrives late: the slow start is
-        // felt as lag against a finger that has already moved.
-        val value = from + (to - from) * (if (linear) t else Tween.easeInOut(t))
-        if (target != to) {
-            leg[0] = value
-            leg[1] = target
-            leg[2] = frameNowMs.toFloat()
+        // The clock is kept as a LONG. It was a Float, packed into the same array as the
+        // two values, and that quietly broke the whole thing: uptime on this device is
+        // 310 million milliseconds, where a Float can only step 32 at a time. Two frames
+        // 16ms apart rounded to the same number, the elapsed time came out as zero, and
+        // the eased value simply stopped following — measured sitting at 0.015 while its
+        // target moved from 0.166 to 0.02. The animation was never wrong; it was being
+        // told no time had passed.
+        val t = ((frameNowMs - leg.startMs).toFloat() / durationMs).coerceIn(0f, 1f)
+        val value = leg.from + (leg.to - leg.from) * (if (linear) t else Tween.easeInOut(t))
+        if (target != leg.to) {
+            leg.from = value
+            leg.to = target
+            leg.startMs = frameNowMs
         }
-        if (t < 1f || target != to) animating = true
+        if (t < 1f || target != leg.to) animating = true
         return value
     }
+
+    /** One eased value: where it came from, where it is going, and when it set off. */
+    private class Leg(var from: Float, var to: Float, var startMs: Long)
 
     /** Put an eased value exactly on its target, so it continues from there later. */
     private fun snapEase(key: String, value: Float): Float {
-        legs[key] = floatArrayOf(value, value, frameNowMs.toFloat())
+        legs[key] = Leg(value, value, frameNowMs)
         return value
     }
 
-    private val legs = mutableMapOf<String, FloatArray>()
+    private val legs = mutableMapOf<String, Leg>()
 
     /** One eased tween per animated quantity, keyed by what it drives. See Tween. */
     private val tweens = mutableMapOf<String, Tween>()
@@ -1403,6 +1407,12 @@ class RearDialView(context: Context) : View(context) {
             // kept rather than re-read.
             swapFrom = media
             swapAt = now
+            // Hold the bitmap that is ON SCREEN right now, not a path to it. There is one
+            // cover file and the new track overwrites it, so asking for "the departing
+            // track's artwork" by path returns whatever has since been decoded into that
+            // file — which is the arriving cover. That is how a record on its way out
+            // ended up wearing the sleeve of the one replacing it.
+            swapCover = coverBitmap
         }
 
         val reported = next?.playing == true
@@ -1477,6 +1487,7 @@ class RearDialView(context: Context) : View(context) {
             else -> {
                 swapAt = 0L
                 swapFrom = null
+                swapCover = null
                 null
             }
         }
@@ -2709,6 +2720,7 @@ class RearDialView(context: Context) : View(context) {
         if (t >= 1f) {
             swapAt = 0L
             swapFrom = null
+            swapCover = null
             return null
         }
         return t.coerceIn(0f, 1f)
@@ -3461,7 +3473,10 @@ class RearDialView(context: Context) : View(context) {
      * bitmap the panel decoded before and deliberately did not release. See coverArt.
      */
     private fun sleeveArt(sleeve: Media): android.graphics.Bitmap? =
-        if (sleeve === media) coverArt(sleeve.artPath) else priorCover ?: coverArt(sleeve.artPath)
+        if (sleeve === swapFrom) swapCover else coverArt(sleeve.artPath)
+
+    /** The artwork the outgoing cover keeps while it leaves. */
+    private var swapCover: android.graphics.Bitmap? = null
 
     /** Two discs, blended. */
     private fun lerpDisc(a: MediaLayout.Disc, b: MediaLayout.Disc, t: Float) =
@@ -3728,17 +3743,34 @@ class RearDialView(context: Context) : View(context) {
         val hasArtist = m.artist.isNotBlank()
         var baseline = MediaLayout.firstBaseline(region.centerY(), hasArtist)
 
+        // The same wheel the media page uses, for the same reason: a track changing is
+        // news and should be seen changing. `rolling` hands each line to the marquee when
+        // it does not fit, so a long title both turns over and then scrolls.
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = MediaLayout.TEXT_SIZE
         extras.color = tint
-        marquee(canvas, m.title, textLeft, baseline, row.textWidth, band)
+        rolling(
+            canvas, "row:title", m.title, textLeft, baseline,
+            android.graphics.RectF(
+                textLeft, baseline - MediaLayout.TEXT_SIZE,
+                textLeft + row.textWidth, baseline + MediaLayout.TEXT_SIZE * 0.35f,
+            ),
+            width = row.textWidth,
+        )
         if (hasArtist) {
             baseline += MediaLayout.LINE
             // Dimmed against the title rather than given a colour of its own. Which of
             // the two lines is the track is the only thing this row has to say at a
             // glance, and a second hue would make that a question about the palette.
             extras.color = (tint and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
-            marquee(canvas, m.artist, textLeft, baseline, row.textWidth, band)
+            rolling(
+                canvas, "row:artist", m.artist, textLeft, baseline,
+                android.graphics.RectF(
+                    textLeft, baseline - MediaLayout.TEXT_SIZE,
+                    textLeft + row.textWidth, baseline + MediaLayout.TEXT_SIZE * 0.35f,
+                ),
+                width = row.textWidth,
+            )
         }
         extras.textSize = 18f
 
@@ -3791,12 +3823,10 @@ class RearDialView(context: Context) : View(context) {
             // Decode first, release after, and only on success — a failed decode must
             // not destroy the image a draw in flight is still holding.
             if (decoded != null) {
-                // The one being replaced is KEPT, not recycled: the record changer draws
-                // the outgoing sleeve on the outgoing disc, and there is only ever one
-                // cover file — the new track has already overwritten it by the time the
-                // animation starts. Only the one before that is released.
-                priorCover?.recycle()
-                priorCover = coverBitmap
+                // NOT recycled. The bitmap being replaced may be the one a departing
+                // cover is still drawing — recycling it would draw from freed memory,
+                // and a cover animation is not worth a crash. Letting the collector have
+                // it is a 140-pixel PNG's worth of patience.
                 coverBitmap = decoded
             }
         }
@@ -3806,8 +3836,6 @@ class RearDialView(context: Context) : View(context) {
     private var coverKey: String? = null
     private var coverBitmap: android.graphics.Bitmap? = null
 
-    /** The sleeve before this one, for the disc on its way out. */
-    private var priorCover: android.graphics.Bitmap? = null
 
     /** ACRNM maker's mark, or the user's image. White mask, tinted at draw time — never
      *  edit the drawable. */

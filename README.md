@@ -375,7 +375,11 @@ pictures passing each other mid-air would read as a shuffle rather than a change
 Which one runs is chosen by the page rather than blended across it: a flight into a ring
 and a slide off the bottom are different journeys, and halfway between them is neither.
 
-The departing cover carries the departing sleeve. There is only one cover file and the new
+The departing cover carries the departing sleeve — and it is held as a **bitmap**, captured
+the moment the change begins, not looked up by path. There is one cover file and the new
+track overwrites it, so asking for "the departing track's artwork" by path returns whatever
+has since been decoded into that file: the arriving cover. That is how a record on its way
+out ended up wearing the sleeve of the one replacing it. There is only one cover file and the new
 track has already overwritten it by then, so the panel keeps the bitmap it last replaced
 rather than re-reading the path.
 
@@ -386,6 +390,9 @@ scrolling. Left-aligned because a marquee has to start somewhere fixed — centr
 that is travelling means centring it on a different position every frame.
 
 ### Values turn over when they change
+
+Title and artist roll on the readout's row too, on the same wheel — a long line both turns
+over and then scrolls.
 
 Title, artist and both clocks roll on a wheel when they change — the same drum the
 notification strip uses — but only when they *actually* change. A track ending replaces
