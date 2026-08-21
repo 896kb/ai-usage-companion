@@ -502,15 +502,6 @@ class RearDialView(context: Context) : View(context) {
         // clip so the ripple sweeps it away with the rest, and under the drift for the
         // same reason the mark is: a 572-unit disc held still on an always-on OLED is
         // the largest burn-in target this panel has ever had.
-        // Where the rings are for the MEDIA page: shifted right to make room for their
-        // labels, and by `paging` so the readout keeps them exactly on the lenses. See
-        // MediaPage.RING_SHIFT_X.
-        val dialShift = MediaPage.RING_SHIFT_X * paging
-        val dials = PanelGeometry(
-            personal = geometry.personal.copy(cx = geometry.personal.cx + dialShift),
-            work = geometry.work.copy(cx = geometry.work.cx + dialShift),
-        )
-
         if (!hidden) {
             canvas.save()
             // NOT paged. The record is the one thing that does not scroll away — it
@@ -521,7 +512,7 @@ class RearDialView(context: Context) : View(context) {
             // once it has become the media page's record — where the notice shrinks it
             // instead of moving it.
             canvas.translate(dx, dy + readoutPush)
-            drawVinyl(canvas, paging, push, dials)
+            drawVinyl(canvas, paging, push, geometry)
             canvas.restore()
         }
 
@@ -568,12 +559,7 @@ class RearDialView(context: Context) : View(context) {
             // MediaPage.PLAYBACK_ARC_START and VOLUME_ARC_START.
             val isVolume = at == 1
             drawRing(
-                canvas,
-                // The dial drifts to where its labels fit; at rest on the readout this is
-                // exactly `geo`, on the lens where it belongs.
-                if (at == 0) dials.personal.copy(radius = geo.radius, stroke = geo.stroke)
-                else dials.work.copy(radius = geo.radius, stroke = geo.stroke),
-                config.rings.getOrElse(position) { RingSpec() }, account, breath,
+                canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath,
                 blend = paging,
                 mediaFraction = mediaFractions.getOrElse(at) { 0f },
                 mediaColor = mediaRingTint,
@@ -632,7 +618,7 @@ class RearDialView(context: Context) : View(context) {
             // screen — which is what happened, and you cannot press what has left. The
             // record gives up the room instead.
             canvas.translate(dx, dy)
-            drawMediaPage(canvas, paging, dx, dy, push, dials, volumeFraction)
+            drawMediaPage(canvas, paging, dx, dy, push, geometry, volumeFraction)
             canvas.restore()
         } else if (paging <= 0.001f) {
             volumeBar = null
@@ -3112,7 +3098,10 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.CENTER
         extras.color = (tint and 0x00FFFFFF) or
             ((MediaLayout.ARTIST_ALPHA * paging).toInt().coerceIn(0, 255) shl 24)
-        // How far in at the arc's start, how long it runs at its end. Two readings, and
+        // How far in where the arc used to start, how long it runs where it used to end.
+        // The arc has been turned half an hour out from under them — see
+        // MediaPage.PLAYBACK_ROTATE — so each label sits in the gap that opened just
+        // before its own mark. Two readings, and
         // no third: a remaining-time counter sat between them for a while and it was the
         // same fact a third way — the arc already shows how much is left, as a shape.
         //
@@ -3122,12 +3111,12 @@ class RearDialView(context: Context) : View(context) {
         // and to the left.
         curved(
             canvas, MediaPage.clock(elapsed), rings.personal,
-            centreDeg = MediaPage.PLAYBACK_ARC_START, outward = true,
+            centreDeg = MediaPage.ELAPSED_AT, outward = true,
         )
         if (m.durationMs > 0L) {
             curved(
                 canvas, MediaPage.clock(m.durationMs), rings.personal,
-                centreDeg = MediaPage.PLAYBACK_ARC_END, outward = false,
+                centreDeg = MediaPage.TOTAL_AT, outward = false,
             )
         }
         // Bottom-left of its ring rather than over the top of it. Outside at twelve

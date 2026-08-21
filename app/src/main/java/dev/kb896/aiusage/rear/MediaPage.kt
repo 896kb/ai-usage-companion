@@ -168,14 +168,14 @@ object MediaPage {
      * hole in the middle — there is no display inside a ring. Everything put there was
      * rendered perfectly into the framebuffer and painted onto a camera.
      *
-     * The clearance leaves room for the end marks, which stand in the same place at the
-     * same angles — the playback labels sit at exactly the two angles those mark, so the
-     * label starts where the mark stops. It is otherwise as small as the room allows: the two rings are 276 apart with a radius of 128 and a stroke
+     * Small, because the labels no longer have to share space with the end marks: the arc
+     * is turned half an hour so its marks sit clear of them. There is not much room to
+     * spare either way — the two rings are 276 apart with a radius of 128 and a stroke
      * of 25 each, which leaves about twenty units of panel between them. Labels reach
      * into that gap and out toward the main display, and the angles they sit at are
      * chosen so they land where there is space.
      */
-    const val LABEL_CLEAR = 22f
+    const val LABEL_CLEAR = 6f
     const val LABEL_SIZE = 15f
 
     /**
@@ -233,8 +233,32 @@ object MediaPage {
      * Six and a half hours of the clock face is 195 degrees. In Android's angles zero is
      * three o'clock, so half past ten is 225.
      */
-    const val PLAYBACK_ARC_START = 225f
+    /**
+     * How far round the playback arc is turned to make room for its labels.
+     *
+     * Half an hour on the clock face. The arc runs the same length and simply starts and
+     * ends later — half past ten becomes eleven, five becomes half past five — while the
+     * two labels stay where they were. What that opens is the angular gap between where
+     * a label sits and where the arc now begins, which is the room the label needed.
+     *
+     * Turning the dial is the right axis for this. Sliding the whole ring sideways was
+     * the first attempt: it made room, and it moved a ring that is drawn concentric with
+     * a camera lens, which is the one thing about these that must not move.
+     */
+    const val PLAYBACK_ROTATE = 15f
+
+    const val PLAYBACK_ARC_START = 225f + PLAYBACK_ROTATE
     const val PLAYBACK_ARC_SWEEP = 195f
+
+    /**
+     * Where the two labels sit: the arc's ORIGINAL ends, before it was turned.
+     *
+     * They stay put and the arc moves out from under them — which is the whole point of
+     * turning it rather than moving the labels, since outside the top ring there is
+     * nowhere for a label to move to.
+     */
+    const val ELAPSED_AT = 225f
+    const val TOTAL_AT = 60f
 
     /**
      * The record changer: how long the outgoing disc takes to leave, and the next to
@@ -269,33 +293,11 @@ object MediaPage {
      * a bit of arc already filled in. Perpendicular, they cross the scale instead of
      * lying on it, which is what a mark on a dial has always looked like.
      */
-    /**
-     * How far the rings slide sideways on this page, marks and all.
-     *
-     * There is not enough panel outside the top ring for a label. It is 128 across with a
-     * 25 stroke centred 150 from the left edge, so its outer edge runs from x=9.5 to
-     * x=290.5 and sits 3.5 from the top — measured, there are 63 units of room on the
-     * diagonal where the labels sit, and a mark and a label together want most of that.
-     * Long times ran off the corner.
-     *
-     * So the whole dial moves right to where the room is, taking its marks with it, and
-     * the labels stay at the radius that reads well. It moves ONLY here: on the readout
-     * the rings are drawn concentric with the phone's camera lenses and must not shift by
-     * a pixel. Scaled by the page position, so it is a drift as the panel becomes a
-     * player rather than a jump.
-     *
-     * Worth knowing this cuts against an earlier rule — the rings fade rather than slide
-     * between pages precisely because a ring in motion is visibly off its lens. It buys
-     * labels that fit, and it is one constant to set to zero if the drift reads worse
-     * than the crowding did.
-     */
-    const val RING_SHIFT_X = 40f
-
     const val TICK_GAP = 2f
     const val TICK_LEN = 14f
     const val TICK_STROKE = 2f
 
-    /** Where that arc ends: five o'clock. */
+    /** Where that arc ends: half past five, once it has been turned. */
     val PLAYBACK_ARC_END: Float get() = PLAYBACK_ARC_START + PLAYBACK_ARC_SWEEP - 360f
 
     /**

@@ -438,12 +438,16 @@ Each arc is marked at both ends by a **hairline pointing straight out of the rin
 arc's own colour. With no groove behind them a silent volume showed nothing at all, and a
 control you cannot find at zero is a control you cannot turn up.
 
-On the media page the whole dial **slides right**, marks and all, to where its labels fit.
-There is not enough panel outside the top ring for one: it is 128 across with a 25 stroke
-centred 150 from the left edge, so measured, there are 63 units of room on the diagonal
-where the labels sit — and a mark plus a label wants most of that. Long times ran off the
-corner. It moves only here, and only as the page turns; on the readout the rings stay
-concentric with the lenses to the pixel.
+The playback arc is **turned half an hour** to make room for those labels — it starts at
+eleven rather than half past ten and ends at half past five rather than five, running the
+same length. The labels stay where they were, so what the turn opens is the angular gap
+between each label and its own mark.
+
+Turning the dial is the right axis for it. Sliding the whole ring sideways was tried first:
+it made room, and it moved a ring drawn concentric with a camera lens, which is the one
+thing about these that must not move. There is nowhere to move the labels *to* either —
+outside the top ring there are 63 units of panel on the diagonal and a mark plus a label
+wants most of that.
 
 Perpendicular, and that is the whole of it. Drawn *along* the ring the mark is an arc of the
 same circle as the reading, in the same colour — indistinguishable at a glance from a bit of
