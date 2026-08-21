@@ -307,7 +307,7 @@ object MediaPage {
      * a bit of arc already filled in. Perpendicular, they cross the scale instead of
      * lying on it, which is what a mark on a dial has always looked like.
      */
-    const val TICK_GAP = 2f
+    const val TICK_GAP = 6f
     const val TICK_LEN = 14f
     const val TICK_STROKE = 2f
 

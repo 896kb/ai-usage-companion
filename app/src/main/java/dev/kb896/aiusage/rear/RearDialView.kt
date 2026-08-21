@@ -2874,11 +2874,20 @@ class RearDialView(context: Context) : View(context) {
 
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
 
-        // The labels naming the two rings. Drawn from here rather than with the rings
-        // themselves because they belong to this page: the rings SWEEP between two
-        // readings and text cannot, so it fades in with everything else that is only
-        // true once you have arrived.
+        // The labels and end marks naming the two rings.
+        //
+        // The BURN-IN DRIFT IS UNDONE around them, and that is not a nicety. The rings
+        // are the one thing on this panel that deliberately does not drift — they are
+        // drawn concentric with the camera lenses and must stay there — while everything
+        // in this method rides the drift with the rest of the page. So a mark meant to
+        // sit two units off a ring was sliding up to four units against it on a
+        // ten-minute cycle: sometimes clear, sometimes touching, sometimes overlapping.
+        // That is the "some look aligned and some do not" of it, and the answer is that
+        // anything attached to a ring has to keep the ring's frame.
+        canvas.save()
+        canvas.translate(-dx, -dy)
         drawMediaRings(canvas, rings, paging, tint, volumeShown)
+        canvas.restore()
 
         // ---- title and artist, centred under the disc -------------------------
         // Centred while it fits, scrolling when it does not — and left-aligned once it
@@ -2972,6 +2981,10 @@ class RearDialView(context: Context) : View(context) {
             else -> PanelIcons.VOLUME_HIGH
         }
         val ring = rings.work
+        // In the RING's frame, not the page's — see the note by drawMediaRings. This
+        // orbits a ring that does not drift, so it must not drift either.
+        canvas.save()
+        canvas.translate(-dx, -dy)
         // OUTSIDE the arc. Inside is the camera lens — there is no display in the hole a
         // ring encircles, so a glyph put there is drawn onto glass.
         //
@@ -3023,6 +3036,7 @@ class RearDialView(context: Context) : View(context) {
             canvas.drawLine(x0, y0, x1, y1, closePaint)
         }
         canvas.restore()
+        canvas.restore()
 
         // Targets, and only once the page has arrived — the same rule the row follows.
         // A button that can be pressed while it is still fading in is a button in a place
@@ -3048,11 +3062,15 @@ class RearDialView(context: Context) : View(context) {
             // speaker itself is over camera glass with no digitizer behind it. Tracking
             // the glyph's height is what keeps the two associated when they cannot share
             // a position.
+            // NO drift correction on this one. `hy` comes from the ring's frame, which
+            // is the view's frame — the rings do not drift — so subtracting the drift
+            // again would walk the target away from the glyph it belongs to, in the
+            // opposite direction to the bug it was meant to fix.
             muteButton = android.graphics.RectF(
-                Panel.CUTOUT_RIGHT - dx,
-                hy - MediaPage.MUTE_TARGET_H / 2f - dy,
-                Panel.CUTOUT_RIGHT + MediaPage.MUTE_TARGET_W - dx,
-                hy + MediaPage.MUTE_TARGET_H / 2f - dy,
+                Panel.CUTOUT_RIGHT.toFloat(),
+                hy - MediaPage.MUTE_TARGET_H / 2f,
+                Panel.CUTOUT_RIGHT + MediaPage.MUTE_TARGET_W,
+                hy + MediaPage.MUTE_TARGET_H / 2f,
             )
 
         } else {

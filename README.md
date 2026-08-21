@@ -458,6 +458,14 @@ thing about these that must not move. There is nowhere to move the labels *to* e
 outside the top ring there are 63 units of panel on the diagonal and a mark plus a label
 wants most of that.
 
+Anything attached to a ring is drawn in the **ring's frame**, with the burn-in drift undone
+around it. The rings are the one thing on this panel that deliberately does not drift — they
+trace the camera lenses and must stay on them — while everything else rides a translation
+that wanders a few units on a ten-minute cycle. Marks and labels drawn in the page's frame
+were therefore sliding against a ring that never moved: sometimes clear of it, sometimes
+touching, sometimes overlapping, and never twice the same. That is what "some are aligned
+and some are not" turns out to be.
+
 Perpendicular, and that is the whole of it. Drawn *along* the ring the mark is an arc of the
 same circle as the reading, in the same colour — indistinguishable at a glance from a bit of
 arc already filled in. Crossing the scale rather than lying on it is what a mark on a dial
