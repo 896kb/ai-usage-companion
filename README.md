@@ -315,24 +315,38 @@ and it stops when paused.
 Anything with no duration — a live stream, a radio session — gets no bar at all, rather
 than an empty one that is never true.
 
+This bar and the dial on the record-player page read the **same** eased value rather than
+each working one out. It used to take the position directly, which made it the one part of
+the panel that was always right and never moved: on a track change it did not run down to
+the new start, it was already there a frame after the old track left. That it looked
+correct is exactly why it survived four rounds of work on the dial beside it — "the bar on
+the main page is fine" was true, and was also the clue, because it was fine *by skipping
+the follower that was broken*.
+
 ### Swipe up: the record player
 
-Under the vinyl style, with something playing, the panel has a **second page**. Swipe up
-from the readout and the record moves to the middle and shrinks while the readout leaves
-over the top of it; swipe down to come back. It snaps: drag freely, let go, and it lands
-on a page.
+With something playing, the panel has a **second page**. Swipe up from the readout and the
+artwork moves to the middle while the readout leaves over the top of it; swipe down to come
+back. It snaps: drag freely, let go, and it lands on a page.
 
-The record is the only thing that does not scroll. It travels between the two positions
+Under **either** cover style. This was the record's page at first, on the reasoning that a
+square cover gives nothing to carry across the transition, which turned out to be wrong:
+the row's thumbnail is an object too, it simply travels and grows rather than spinning.
+
+The artwork is the only thing that does not scroll. It travels between the two positions
 instead — one object, two destinations, interpolated — so the panel turns into a record
 player rather than sliding to a different screen. The **rings** are the other exception,
-and they fade rather than move: they are drawn concentric with the phone's actual camera
-lenses, and a ring in motion is a circle visibly not on the lens it traces.
+and they do not move at all: they are drawn concentric with the phone's actual camera
+lenses, and a ring in motion is a circle visibly not on the lens it traces. What they do
+instead is **sweep**, each one easing from what it reports about usage to what it reports
+about the music as the page turns.
 
-The page carries what the row cannot fit: the track and artist at full size, bigger
-transport buttons, and the elapsed and total times along the bottom. There is no progress
-bar — the playback ring is the position, and a horizontal bar saying the same thing a
-hundred units below it is the reading twice, with the second one competing for which is
-the real one.
+The page carries what the row cannot fit: the track and artist at full size and bigger
+transport buttons. There is no progress bar — the playback ring is the position, and a
+horizontal bar saying the same thing a hundred units below it is the reading twice, with
+the second one competing for which is the real one. The two clocks that used to sit along
+the bottom are gone with it: they were the same two numbers a third time, five hundred
+units from the dial they belong to, and they now curve around the ends of the arc itself.
 
 The snapping is deliberately forgiving — a short flick counts on its own, and anything
 past a third of the way commits. This is a 904x572 panel on the back of a phone being
@@ -374,6 +388,27 @@ alone, so the dial tracks its target exactly. Anything larger is a seek or a tra
 gets the full easing. Without that distinction an ease-in-out restarted every frame, and
 since ease-in-out begins each leg at zero velocity the dial never accumulated any: measured
 sitting at one degree while its track ran sixteen seconds.
+
+The playback dial **winds back** rather than snapping when a track ends: the reading goes
+from nearly full to nothing between two frames, and a dial that jumps there reads as the
+panel having lost its place rather than as a record finishing.
+
+**A record on the readout page** has no rings to use, so it crosses instead: the old one
+slides off the bottom while the new arrives from the top, at the same moment, the way a
+stack feeds through.
+
+**A square cover** never crosses. It leaves and the next follows it back in from the same
+side — down and up again on the readout, out to the right and back on the media page. Two
+pictures passing each other mid-air would read as a shuffle rather than a change.
+
+Which one runs is chosen by the page rather than blended across it: a flight into a ring
+and a slide off the bottom are different journeys, and halfway between them is neither.
+
+The departing cover carries the departing sleeve — and it is held as a **bitmap**, captured
+the moment the change begins, not looked up by path. There is one cover file and the new
+track overwrites it, so asking for "the departing track's artwork" by path returns whatever
+has since been decoded into that file: the arriving cover. That is how a record on its way
+out ended up wearing the sleeve of the one replacing it.
 
 ### Lyrics
 
@@ -445,29 +480,6 @@ because a reading under a finger is a proposal rather than a fact about the musi
 **outside** the area abandons the gesture — the dial is already pointed at the true position,
 so letting go is the animation.
 
-The playback dial **winds back** rather than snapping when a track ends: the reading goes
-from nearly full to nothing between two frames, and a dial that jumps there reads as the
-panel having lost its place rather than as a record finishing.
-
-**A record on the readout page** has no rings to use, so it crosses instead: the old one
-slides off the bottom while the new arrives from the top, at the same moment, the way a
-stack feeds through.
-
-**A square cover** never crosses. It leaves and the next follows it back in from the same
-side — down and up again on the readout, out to the right and back on the media page. Two
-pictures passing each other mid-air would read as a shuffle rather than a change.
-
-Which one runs is chosen by the page rather than blended across it: a flight into a ring
-and a slide off the bottom are different journeys, and halfway between them is neither.
-
-The departing cover carries the departing sleeve — and it is held as a **bitmap**, captured
-the moment the change begins, not looked up by path. There is one cover file and the new
-track overwrites it, so asking for "the departing track's artwork" by path returns whatever
-has since been decoded into that file: the arriving cover. That is how a record on its way
-out ended up wearing the sleeve of the one replacing it. There is only one cover file and the new
-track has already overwritten it by then, so the panel keeps the bitmap it last replaced
-rather than re-reading the path.
-
 ### Long titles scroll here too
 
 Same marquee as the row: centred while it fits, and once it does not, left-aligned and
@@ -495,8 +507,12 @@ a new track starting.
 It does **not** push the page down. Everything here is anchored to the bottom of the
 panel — the transport buttons are the last thing on it — and pushing the page down put
 them off the screen, where they cannot be pressed. The record gives up the room instead:
-it shrinks to fit whatever is left, the volume column shrinks with it, and the type and
-the buttons do not move at all.
+it shrinks to fit whatever is left, and the type and the buttons do not move at all.
+
+**Lyrics give way entirely** rather than shrinking with it. Room for them is decided by the
+record they wrap: with a group card up it would collapse to its floor, and a sentence bent
+around a token is a ring of separate rotated letters rather than a line. So the words fade
+out for the card and come back when it goes — see [Lyrics](#lyrics).
 
 The readout also stops riding the strip once it is off-page. It sits a full panel height
 above, so pushing it down slid its bottom edge back into view underneath the card — a
@@ -582,12 +598,35 @@ label sits. A
 speaker rides the head of that arc and turns with it, so the glyph is the arc's pointer
 rather than a legend parked beside it — where it is *is* the value.
 
+The volume arc fills **upward**: silent at the bottom of its segment, loudest at the top.
+It ran the other way first, and the speaker is the reason that was wrong — a volume filling
+downward sends its own pointer to the floor as the music gets louder, backwards against
+every volume ever drawn and backwards against the drag that sets it.
+
+That speaker is drawn at **one and a half times** its original size with three rounds of
+spacing off the ring, and it **stops short** of the arc's silent end rather than riding it
+the whole way: the lower ring is centred 420 down a 572 panel, so past a certain angle a
+glyph that big lands half off the bottom edge. The limit is worked out from the sizes
+rather than written down as an angle, so it corrects itself if any of them move. Note that
+the glyph is *centred* on its orbit, so half its height comes out of the clearance too —
+missing that is what once made a stated gap of ten read as stuck to the ring.
+
 ### Setting the volume
 
-The control is the **whole area above the transport buttons**, and it is a sideways drag.
-Horizontal on purpose: up and down already belongs to the pages, and splitting the panel
-into a volume half and a paging half — which was tried — moves the way back somewhere you
-have to learn. Sideways and vertical never collide, so the whole surface does both.
+A **vertical drag in the strip down the right-hand sixth** — see [the two drag
+controls](#the-two-drag-controls) for how the three gestures on this page stay out of each
+other's way. That is where the volume keys are on the front of this phone and it runs the
+same direction: up is louder, which is also the way the arc fills.
+
+It is **relative**, from wherever the volume already was, and this was tried both ways
+round on the way here. An absolute strip has ends — silence and maximum become places
+rather than distances to travel — which sounds better than it feels: it turns every touch
+into a commitment to a level, on a surface nobody is looking at. Relative means the gesture
+is "louder" and "quieter", and a stray tap does nothing at all.
+
+It had the whole area above the buttons and a sideways drag until the playback position
+needed somewhere to be scrubbed. That arrangement gave the widest region on the page to the
+one control with no width to it.
 
 There is a **haptic tick per step**, so it can be set without looking at a screen facing
 away from you. The tick is on the step, not on the movement; a buzz per frame is a rattle.
