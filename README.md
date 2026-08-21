@@ -368,6 +368,13 @@ dial filled to 100% on every skip and wound back from there, which is not return
 beginning, it is going the long way round first. What is left of a departing track is
 whatever it last reported; it is not playing any more.
 
+The dial follows the track continuously and only **eases when the reading jumps**. A change
+smaller than one per cent of the arc is a tick — the destination moves and the clock is left
+alone, so the dial tracks its target exactly. Anything larger is a seek or a track change and
+gets the full easing. Without that distinction an ease-in-out restarted every frame, and
+since ease-in-out begins each leg at zero velocity the dial never accumulated any: measured
+sitting at one degree while its track ran sixteen seconds.
+
 The playback dial **winds back** rather than snapping when a track ends: the reading goes
 from nearly full to nothing between two frames, and a dial that jumps there reads as the
 panel having lost its place rather than as a record finishing.

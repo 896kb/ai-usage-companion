@@ -232,6 +232,20 @@ class RearDialView(context: Context) : View(context) {
         target: Float,
         durationMs: Float,
         linear: Boolean = false,
+        /**
+         * How big a change has to be to count as a new movement.
+         *
+         * Without this, a target that creeps every frame restarts the leg every frame —
+         * and an ease-in-out begins each leg at zero velocity, so the follower never
+         * accumulates any. Measured: the playback dial sat at one degree while its track
+         * ran sixteen seconds, because each frame it was told to start moving and then
+         * asked again before it had. Below the threshold the destination is simply
+         * updated and the clock left alone, so a finished leg tracks its target exactly.
+         *
+         * The volume does not need it: it moves in discrete steps and follows linearly,
+         * where every restart begins at full speed.
+         */
+        epsilon: Float = 0f,
     ): Float {
         val leg = legs[key]
         if (leg == null) {
@@ -247,12 +261,16 @@ class RearDialView(context: Context) : View(context) {
         // told no time had passed.
         val t = ((frameNowMs - leg.startMs).toFloat() / durationMs).coerceIn(0f, 1f)
         val value = leg.from + (leg.to - leg.from) * (if (linear) t else Tween.easeInOut(t))
-        if (target != leg.to) {
+        if (Math.abs(target - leg.to) > epsilon) {
             leg.from = value
             leg.to = target
             leg.startMs = frameNowMs
+            animating = true
+        } else {
+            // A drift rather than a movement: follow it without restarting the clock.
+            leg.to = target
         }
-        if (t < 1f || target != leg.to) animating = true
+        if (t < 1f) animating = true
         return value
     }
 
@@ -576,7 +594,8 @@ class RearDialView(context: Context) : View(context) {
                 MediaLayout.progress(current.elapsed(nowReal), current.durationMs)
             else -> departing?.let { MediaLayout.progress(it.positionMs, it.durationMs) }
         } ?: 0f
-        val progressFraction = ease("media:progress", progressRaw, PLAYBACK_EASE_MS)
+        val progressFraction =
+            ease("media:progress", progressRaw, PLAYBACK_EASE_MS, epsilon = PROGRESS_JUMP)
         // Eased, because the volume moves in steps under a finger and a dial that jumped
         // between notches would read as a counter rather than as a control.
         val rawVolume = if (muted()) 0f else volumeLevel()
@@ -4366,6 +4385,15 @@ class RearDialView(context: Context) : View(context) {
          * should be seen happening.
          */
         private const val PLAYBACK_EASE_MS = 550f
+
+        /**
+         * How far the playback reading must move to count as a jump rather than a tick.
+         *
+         * One frame of an ordinary track advances the dial by about eight
+         * hundred-thousandths; a track change moves it by tenths. Anything between is
+         * a seek, and easing one of those is right.
+         */
+        private const val PROGRESS_JUMP = 0.01f
 
         /** How far a finger travels before the panel decides what the gesture is. */
         private const val DRAG_SLOP = 16f
