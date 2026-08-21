@@ -168,13 +168,14 @@ object MediaPage {
      * hole in the middle — there is no display inside a ring. Everything put there was
      * rendered perfectly into the framebuffer and painted onto a camera.
      *
-     * The clearance is small because the room is, and because these read as belonging to
-     * the arc they label: the two rings are 276 apart with a radius of 128 and a stroke
+     * The clearance leaves room for the end marks, which stand in the same place at the
+     * same angles — the playback labels sit at exactly the two angles those mark, so the
+     * label starts where the mark stops. It is otherwise as small as the room allows: the two rings are 276 apart with a radius of 128 and a stroke
      * of 25 each, which leaves about twenty units of panel between them. Labels reach
      * into that gap and out toward the main display, and the angles they sit at are
      * chosen so they land where there is space.
      */
-    const val LABEL_CLEAR = 5f
+    const val LABEL_CLEAR = 22f
     const val LABEL_SIZE = 15f
 
     /**
@@ -260,22 +261,16 @@ object MediaPage {
      * control you cannot turn up. Two short marks say where the range is without drawing
      * the whole of it.
      */
-    const val TICK_DEG = 16f
-
     /**
-     * A hairline, and it sits OUTSIDE the ring rather than on it.
+     * The marks at each end of an arc: short lines pointing straight OUT of the ring.
      *
-     * On the ring at any weight it reads as a piece of the arc already filled in — the
-     * mark and the reading are then the same object in the same place, and the eye has no
-     * way to tell "the scale starts here" from "the value starts here". Outside and thin,
-     * it is plainly a mark on a scale.
-     *
-     * The clearance is small and cannot grow: the labels start five units out and their
-     * glyphs occupy the fifteen beyond that, and the playback labels sit at exactly the
-     * angles these mark. A tick at three units with a two-unit stroke reaches 144.5 on a
-     * ring whose labels begin at 145.5.
+     * Radial, not tangential. Drawn along the ring they are arcs of the same circle as
+     * the reading — parallel to it, in its colour, and at a glance indistinguishable from
+     * a bit of arc already filled in. Perpendicular, they cross the scale instead of
+     * lying on it, which is what a mark on a dial has always looked like.
      */
-    const val TICK_GAP = 3f
+    const val TICK_GAP = 2f
+    const val TICK_LEN = 14f
     const val TICK_STROKE = 2f
 
     /** Where that arc ends: five o'clock. */

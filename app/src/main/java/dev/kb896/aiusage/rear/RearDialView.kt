@@ -3258,10 +3258,12 @@ class RearDialView(context: Context) : View(context) {
     /**
      * A short stub of ring at [deg], marking one end of an arc's travel.
      *
-     * The arc's own colour, but a hairline and set OUTSIDE the ring — so it reads as the
-     * scale the arc runs along rather than as a piece of the arc already filled in. On
-     * the ring, at any weight, the mark and the reading are the same object in the same
-     * place and there is no telling one from the other.
+     * A hairline pointing straight out of the ring, in the arc's own colour.
+     *
+     * PERPENDICULAR, which is the whole difference. Drawn along the ring — as this was
+     * twice — the mark is an arc of the same circle as the reading, in the same colour,
+     * and reads as a piece of arc already filled in. Crossing the scale rather than lying
+     * on it is what a mark on a dial has always looked like.
      */
     private fun tick(
         canvas: Canvas,
@@ -3273,11 +3275,17 @@ class RearDialView(context: Context) : View(context) {
         arc.strokeWidth = MediaPage.TICK_STROKE
         arc.color = tint
         arc.alpha = alpha
-        // Just outside the ring's own edge, not on it — see MediaPage.TICK_GAP.
-        val r = g.radius + g.stroke / 2f + MediaPage.TICK_GAP
-        scratch.set(g.cx - r, g.cy - r, g.cx + r, g.cy + r)
-        canvas.drawArc(
-            scratch, deg - MediaPage.TICK_DEG / 2f, MediaPage.TICK_DEG, false, arc)
+        // A line straight out of the ring, starting just clear of its edge.
+        val inner = g.radius + g.stroke / 2f + MediaPage.TICK_GAP
+        val outer = inner + MediaPage.TICK_LEN
+        val radians = Math.toRadians(deg.toDouble())
+        val cos = Math.cos(radians).toFloat()
+        val sin = Math.sin(radians).toFloat()
+        canvas.drawLine(
+            g.cx + inner * cos, g.cy + inner * sin,
+            g.cx + outer * cos, g.cy + outer * sin,
+            arc,
+        )
         arc.alpha = 255
     }
 

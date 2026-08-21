@@ -434,13 +434,14 @@ where they would look tidiest. The two ends of the playback arc also face opposi
 text stands perpendicular to its path, so tops-outward reads correctly around the upper
 half and tops-inward around the lower.
 
-Each arc is marked at both ends by a **hairline just outside the ring**, in the arc's own
-colour. With no groove behind them a silent volume showed nothing at all, and a control you
-cannot find at zero is a control you cannot turn up.
+Each arc is marked at both ends by a **hairline pointing straight out of the ring**, in the
+arc's own colour. With no groove behind them a silent volume showed nothing at all, and a
+control you cannot find at zero is a control you cannot turn up.
 
-Outside and thin, rather than on the ring: a mark drawn *on* the ring is the same object in
-the same place as the reading, at any weight, and there is then no telling "the scale starts
-here" from "the value starts here".
+Perpendicular, and that is the whole of it. Drawn *along* the ring the mark is an arc of the
+same circle as the reading, in the same colour — indistinguishable at a glance from a bit of
+arc already filled in. Crossing the scale rather than lying on it is what a mark on a dial
+has always looked like.
 
 Both are **gauges rather than full circles**, and their gaps face each other: playback
 runs from half past ten round to five, volume from two to five. Two dials with their
