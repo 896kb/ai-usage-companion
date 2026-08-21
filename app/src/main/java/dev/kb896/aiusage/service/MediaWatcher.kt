@@ -88,6 +88,20 @@ class MediaWatcher(private val context: Context) {
             return
         }
         val transport = controller?.transportControls ?: return
+        // The one command carrying a value — see RearActivity.MEDIA_SEEK.
+        if (action.startsWith(RearActivity.MEDIA_SEEK + ":")) {
+            val to = action.substringAfter(':').toLongOrNull() ?: return
+            // Sent whatever the session advertises. ACTION_SEEK_TO is widely under-declared
+            // — players that seek perfectly well leave it out of their action mask — so
+            // refusing on the flag would disable scrubbing for apps that support it. A
+            // player that genuinely cannot seek ignores this, and the panel's preview
+            // falls back to the real position the moment it next reports one.
+            transport.seekTo(to.coerceAtLeast(0L))
+            // Publish at once so the panel hears the new position from the player rather
+            // than sitting on its own guess until something else changes.
+            publish()
+            return
+        }
         when (action) {
             RearActivity.MEDIA_PLAY_PAUSE ->
                 if (controller?.playbackState?.state == PlaybackState.STATE_PLAYING) {

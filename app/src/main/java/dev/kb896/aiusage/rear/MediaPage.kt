@@ -86,23 +86,65 @@ object MediaPage {
     const val CLOCK_GAP = 12f
 
     /**
-     * The volume control is the whole area above the transport row.
+     * The two drag controls, and why they sit where they do.
      *
-     * There is no slider any more. A 22-unit column on the back of a phone was a target
-     * you had to find before you could use it, which is the wrong shape for the one
-     * control here that people reach for without looking. The area is: put a finger
-     * anywhere above the buttons and move it.
+     * The volume used to have the whole area above the transport row, dragged sideways,
+     * and the playback position had nothing. Both are now the other way round, which is
+     * the arrangement that matches what the hand expects:
      *
-     * RELATIVE, not absolute — the volume moves by how far the finger travelled, from
-     * wherever it already was. Absolute would mean a stray touch near the top slamming
-     * the volume to maximum, on a surface nobody is looking at.
+     *   VOLUME  — a narrow strip down the RIGHT EDGE, dragged vertically. That is where
+     *             the volume keys are on the front of the phone and which way they run.
+     *   SCRUB   — the wide area above the buttons, dragged horizontally. A timeline is a
+     *             horizontal thing everywhere else, and it is the gesture that wants room.
+     *
+     * They cannot be confused: they occupy different regions AND different axes, so
+     * neither a stray sideways wobble in the strip nor a vertical one in the open area
+     * can start the wrong control.
      */
     const val VOLUME_AREA_GAP = 18f
 
-    fun volumeAreaBottom(): Float = TRANSPORT_CY - TRANSPORT_H / 2f - VOLUME_AREA_GAP
+    /** The bottom of the open drag area: clear of the transport buttons. */
+    fun dragAreaBottom(): Float = TRANSPORT_CY - TRANSPORT_H / 2f - VOLUME_AREA_GAP
 
-    /** How much of the range a full sweep of that area covers. */
+    /** Kept under its old name for the tests and callers that already say it. */
+    fun volumeAreaBottom(): Float = dragAreaBottom()
+
+    /** The volume strip's width, as a fraction of the panel's. */
+    const val VOLUME_STRIP = 1f / 6f
+
+    /** Where that strip begins. */
+    fun volumeStripLeft(panelWidth: Float): Float = panelWidth * (1f - VOLUME_STRIP)
+
+    /**
+     * How much of the range a full sweep of the strip's height covers.
+     *
+     * RELATIVE, not absolute, and this was tried both ways round. An absolute strip has
+     * ends — silence and maximum are places rather than distances — which sounds better
+     * than it feels: it makes every touch a commitment to a level, on a surface nobody is
+     * looking at, and it moves those ends whenever anything else on the page does. The
+     * gesture wanted is "louder" and "quieter" from wherever the volume already is, which
+     * is relative, and a stray tap then does nothing at all.
+     */
     const val VOLUME_TRAVEL = 1f
+
+    /**
+     * How far a drag has moved the volume, from where the finger went down.
+     *
+     * Up is louder, which is the one thing about a vertical volume control that is not a
+     * choice — and it is the same direction the arc now fills. See [VOLUME_ARC_START].
+     */
+    fun volumeTravel(y: Float, downY: Float, panelHeight: Float): Float =
+        if (panelHeight <= 0f) 0f else (downY - y) / panelHeight * VOLUME_TRAVEL
+
+    /** The scrub area's reading at an x. Absolute: it is a timeline, not a nudge. */
+    fun scrubFraction(x: Float, left: Float, right: Float): Float =
+        if (right <= left) 0f else ((x - left) / (right - left)).coerceIn(0f, 1f)
+
+    /** How much thicker an engaged ring gets. Doubled — see the note in drawRing. */
+    const val ENGAGED_STROKE = 2f
+
+    /** How long the ring takes to thicken and grey, and to come back. */
+    const val ENGAGED_MS = 160f
 
     /** The mute button, beside the ring that now reports the volume. */
     const val MUTE_H = 27f
@@ -156,7 +198,9 @@ object MediaPage {
      */
     fun speakerLimit(ringCy: Float, orbit: Float, panelHeight: Float): Float {
         val room = (panelHeight - SPEAKER_MARGIN - MUTE_H / 2f - ringCy) / orbit
-        if (room >= 1f) return VOLUME_ARC_START + VOLUME_ARC_SWEEP
+        // The arc's LOWEST point, whichever end of it that is. It used to be the far end
+        // by construction; the arc now fills upward, so the bottom is where it starts.
+        if (room >= 1f) return maxOf(VOLUME_ARC_START, VOLUME_ARC_START + VOLUME_ARC_SWEEP)
         return Math.toDegrees(Math.asin(room.toDouble())).toFloat()
     }
 
@@ -233,8 +277,21 @@ object MediaPage {
      */
     const val VOLUME_ROTATE = -15f
 
-    const val VOLUME_ARC_START = -30f + VOLUME_ROTATE
-    const val VOLUME_ARC_SWEEP = 90f
+    /** How much of the ring the volume segment occupies: half past one to half past four. */
+    const val VOLUME_ARC_SPAN = 90f
+
+    /**
+     * The volume arc fills UPWARD: silent at the bottom of the segment, loudest at the top.
+     *
+     * So it begins at the segment's lower end and sweeps anticlockwise, which is why the
+     * sweep is negative. It ran the other way first and it was wrong for a reason that is
+     * obvious once seen — the speaker glyph rides the head of this arc, and the head is
+     * where the reading IS. A volume that fills downward sends the speaker to the floor as
+     * it gets louder, which is backwards in every place a volume has ever been drawn, and
+     * backwards against the drag that sets it: up is louder there too. See [volumeTravel].
+     */
+    const val VOLUME_ARC_START = -30f + VOLUME_ROTATE + VOLUME_ARC_SPAN
+    const val VOLUME_ARC_SWEEP = -VOLUME_ARC_SPAN
 
     /**
      * The playback arc: half past ten to five o'clock, clockwise over the top.

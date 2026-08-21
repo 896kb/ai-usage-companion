@@ -375,6 +375,34 @@ gets the full easing. Without that distinction an ease-in-out restarted every fr
 since ease-in-out begins each leg at zero velocity the dial never accumulated any: measured
 sitting at one degree while its track ran sixteen seconds.
 
+### The two drag controls
+
+The media page carries three gestures on one surface, told apart by region **and** axis
+together, so none of them can be started by accident from inside another:
+
+| gesture | where | what |
+|---|---|---|
+| vertical | anywhere | turn the page |
+| vertical | right sixth | volume |
+| horizontal | the open area above the buttons | playback position |
+
+They were the other way round first — the volume had the whole wide area and the position
+had nothing — which put the one control with no width to it on the widest region, and left
+a timeline with nowhere to be dragged.
+
+The volume is **relative**, from wherever the finger lands, and applies live: you hear the
+result, so there is nothing to confirm and nothing to take back. Its arc fills **upward**,
+silent at the bottom, and the speaker glyph rides the head — a volume that filled downward
+sent the speaker to the floor as it got louder.
+
+The position is only **previewed**. Seeking live would have the player re-buffer on every
+frame of the drag, so the dial and the clock move alone and one seek is sent on release.
+While it is held the ring **doubles its stroke and greys**: the finger doing the driving is
+on the far side of the phone and cannot be seen, so the ring has to say it is held, and grey
+because a reading under a finger is a proposal rather than a fact about the music. Lifting
+**outside** the area abandons the gesture — the dial is already pointed at the true position,
+so letting go is the animation.
+
 The playback dial **winds back** rather than snapping when a track ends: the reading goes
 from nearly full to nothing between two frames, and a dial that jumps there reads as the
 panel having lost its place rather than as a record finishing.

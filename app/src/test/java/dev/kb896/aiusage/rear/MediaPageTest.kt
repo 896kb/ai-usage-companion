@@ -114,19 +114,52 @@ class MediaPageTest {
     }
 
     /** The limit is a CAP, never an extension — it must not push the glyph past the end
-     *  of the arc it is supposed to be marking. */
+     *  of the arc it is supposed to be marking. The arc fills upward now, so its lowest
+     *  point is where it STARTS. */
     @Test fun `the speaker limit never exceeds the arc`() {
         val orbit = 128f + 25f / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
         val limit = MediaPage.speakerLimit(420f, orbit, panelH)
-        assertTrue("the speaker overshoots the arc",
-            limit <= MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP + 0.01f)
+        assertTrue("the speaker overshoots the arc", limit <= MediaPage.VOLUME_ARC_START + 0.01f)
     }
 
     /** With room to spare it rides the whole arc, rather than stopping short for nothing. */
     @Test fun `a taller panel lets the speaker reach the end`() {
         val orbit = 128f + 25f / 2f + MediaPage.MUTE_GAP + MediaPage.MUTE_H / 2f
         val limit = MediaPage.speakerLimit(420f, orbit, 2_000f)
-        assertEquals(MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP, limit, 0.01f)
+        assertEquals(MediaPage.VOLUME_ARC_START, limit, 0.01f)
+    }
+
+    /**
+     * Silent at the bottom of the segment, loudest at the top — and the speaker rides the
+     * head, so this is also the direction the glyph travels.
+     */
+    @Test fun `the volume arc fills upward`() {
+        val silent = MediaPage.VOLUME_ARC_START
+        val loudest = MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP
+        // Android's angles run clockwise from three o'clock, so a smaller angle is higher.
+        assertTrue("the arc fills downward", loudest < silent)
+        assertEquals(MediaPage.VOLUME_ARC_SPAN, silent - loudest, 0.01f)
+    }
+
+    /** The drag agrees with the arc: up is louder in both. */
+    @Test fun `dragging up raises the volume, from where the finger landed`() {
+        assertTrue("up did not raise it", MediaPage.volumeTravel(100f, 300f, panelH) > 0f)
+        assertTrue("down did not lower it", MediaPage.volumeTravel(500f, 300f, panelH) < 0f)
+        assertEquals(0f, MediaPage.volumeTravel(300f, 300f, panelH), 0.0001f)
+        // Relative: the same movement gives the same travel wherever it happened.
+        assertEquals(
+            MediaPage.volumeTravel(100f, 200f, panelH),
+            MediaPage.volumeTravel(400f, 500f, panelH),
+            0.0001f,
+        )
+    }
+
+    @Test fun `a full sweep of the panel covers the whole range`() {
+        assertEquals(
+            MediaPage.VOLUME_TRAVEL,
+            MediaPage.volumeTravel(0f, panelH, panelH),
+            0.0001f,
+        )
     }
 
     @Test fun `clocks read as clocks`() {
@@ -143,5 +176,42 @@ class MediaPageTest {
         val right = MediaPage.barRight(panelW, clockW)
         assertTrue("the bar has no room left", right > left)
         assertTrue("the bar runs under the left clock", left > 296f + MediaPage.MARGIN)
+    }
+
+    // -- the two drag controls -------------------------------------------------------
+
+    /**
+     * The strip is full height, so it crosses the transport row's band — it stays out of
+     * the buttons' way on the X axis alone. The record is centred on the usable half, and
+     * the buttons under it are narrower than the record, so the right sixth clears both.
+     */
+    @Test fun `the strip is the right sixth, clear of the cutout and of the record`() {
+        val left = MediaPage.volumeStripLeft(panelW)
+        assertEquals(panelW / 6f, panelW - left, 0.01f)
+        assertTrue("the strip reaches into the camera cutout", left > 296f)
+
+        val discCx = (296f + panelW) / 2f
+        val discRight = discCx + MediaPage.DISC_RADIUS
+        assertTrue("the strip cuts into the record", left >= discRight)
+    }
+
+    @Test fun `scrubbing maps the width to the track, and clamps`() {
+        assertEquals(0f, MediaPage.scrubFraction(300f, 300f, 700f), 0.001f)
+        assertEquals(0.5f, MediaPage.scrubFraction(500f, 300f, 700f), 0.001f)
+        assertEquals(1f, MediaPage.scrubFraction(700f, 300f, 700f), 0.001f)
+        assertEquals(0f, MediaPage.scrubFraction(-10f, 300f, 700f), 0.001f)
+        assertEquals(1f, MediaPage.scrubFraction(9_999f, 300f, 700f), 0.001f)
+    }
+
+    /** A zero-width area answers rather than dividing by zero. */
+    @Test fun `a collapsed scrub area is harmless`() {
+        assertEquals(0f, MediaPage.scrubFraction(500f, 400f, 400f), 0.001f)
+    }
+
+    @Test fun `the drag area stops clear of the buttons`() {
+        assertTrue(
+            "the drag area runs over the transport row",
+            MediaPage.dragAreaBottom() < MediaPage.TRANSPORT_CY - MediaPage.TRANSPORT_H / 2f,
+        )
     }
 }

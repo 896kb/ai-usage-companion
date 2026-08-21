@@ -91,11 +91,22 @@ class RearActivity : Activity() {
         const val ACTION_MEDIA_COMMAND = "dev.kb896.aiusage.MEDIA_COMMAND"
         const val EXTRA_MEDIA_COMMAND = "command"
 
-        /** The three commands, defined once. The panel sends these strings and
+        /** The commands, defined once. The panel sends these strings and
          *  MediaWatcher switches on them — two copies would be two chances to typo one. */
         const val MEDIA_PLAY_PAUSE = "playpause"
         const val MEDIA_NEXT = "next"
         const val MEDIA_PREVIOUS = "previous"
+
+        /**
+         * Seek, as `seek:<milliseconds>`.
+         *
+         * The one command that carries a value, and it carries it in the string rather
+         * than in a second extra. The whole path — panel callback, broadcast, receiver,
+         * MediaWatcher.command — is typed to a single String, and widening all of it so
+         * that one command could pass a number would put an unused argument in front of
+         * every other caller.
+         */
+        const val MEDIA_SEEK = "seek"
 
         /**
          * Not a transport command: the panel asking what is playing.

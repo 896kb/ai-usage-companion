@@ -588,14 +588,38 @@ class RearDialView(context: Context) : View(context) {
         val stale = current != null &&
             current.positionAtMs < trackChangedAtReal &&
             nowReal - trackChangedAtReal < POSITION_TRUST_MS
+        // A seek THIS PANEL asked for, believed until the player's own reading catches up.
+        //
+        // Exactly the staged-metadata problem again, from the other end: between sending
+        // the seek and the player reporting from its new position, every reading we have
+        // is from before the jump. Holding the value we asked for keeps the dial where the
+        // finger left it instead of snapping back for a moment and then jumping forward.
+        // Decidable rather than guessable, by the same position stamps: a reading taken
+        // before the seek is not about where the track is now.
+        if (seekedTo != null &&
+            (nowReal - seekedAt >= POSITION_TRUST_MS ||
+                (current != null && current.positionAtMs >= seekedAt))
+        ) {
+            seekedTo = null
+        }
         val progressRaw = when {
             stale -> 0f
+            seekedTo != null -> seekedTo
             current != null ->
                 MediaLayout.progress(current.elapsed(nowReal), current.durationMs)
             else -> departing?.let { MediaLayout.progress(it.positionMs, it.durationMs) }
         } ?: 0f
-        val progressFraction =
+        val scrubbing = scrubTo
+        val progressFraction = if (scrubbing != null) {
+            // NO easing under the finger, the same rule the volume follows: easing exists
+            // to make a value that JUMPS read as a movement, and a value being moved by
+            // hand does not jump. Snapping the follower also leaves it sitting exactly
+            // where the finger let go, so an abandoned scrub eases back from there rather
+            // than from wherever a lagging follower had got to.
+            snapEase("media:progress", scrubbing)
+        } else {
             ease("media:progress", progressRaw, PLAYBACK_EASE_MS, epsilon = PROGRESS_JUMP)
+        }
         // The readout page's hairline reads the SAME follower rather than the position.
         // It is the same fact on the same panel, and two readings of it that disagree
         // during a wind-back would be visible in the moment the pages overlap on a scroll.
@@ -615,6 +639,13 @@ class RearDialView(context: Context) : View(context) {
                 ease("media:volume", rawVolume, VOLUME_EASE_MS, linear = true)
             }
         val mediaFractions = listOf(progressFraction, volumeFraction)
+        // How held each dial looks. Eased, so taking hold and letting go are movements
+        // rather than a state the ring is suddenly found in.
+        // Only the playback dial. The volume applies LIVE — you hear the result, which is
+        // feedback enough — so greying it would be saying "not committed yet" about a
+        // change that already happened. The grip belongs to the control that only
+        // previews, and that is the position.
+        val mediaEngaged = listOf(engagement(Drag.SCRUB), 0f)
 
         if (!hidden) order.forEachIndexed { position, accountIndex ->
             val account = Account.entries.getOrNull(accountIndex) ?: return@forEachIndexed
@@ -638,6 +669,7 @@ class RearDialView(context: Context) : View(context) {
                 mediaSweep =
                     if (isVolume) MediaPage.VOLUME_ARC_SWEEP
                     else MediaPage.PLAYBACK_ARC_SWEEP,
+                engaged = mediaEngaged.getOrElse(at) { 0f },
             )
         }
 
@@ -779,6 +811,8 @@ class RearDialView(context: Context) : View(context) {
         /** Where this ring's media reading starts and how far round it can go. */
         mediaStart: Float = -90f,
         mediaSweep: Float = 360f,
+        /** How held this dial is, 0 to 1 — see [engagement]. */
+        engaged: Float = 0f,
     ) {
         val status = state.statuses.firstOrNull { it.account == account }
         val kind = when (spec.window) {
@@ -818,7 +852,17 @@ class RearDialView(context: Context) : View(context) {
         val usable = status != null && window != null && status.health != Health.AUTH
         if (!usable && blend <= 0f) return
 
-        arc.strokeWidth = g.stroke
+        // A dial being DRIVEN must not look like a dial being read. The finger doing the
+        // driving is on the far side of the phone and cannot be seen, so the ring itself
+        // has to say it is held: it thickens, because that is what a gripped thing does,
+        // and it greys, because a reading under a finger is a proposal rather than a fact
+        // about the music. Both come back when the finger lifts, whether the gesture was
+        // committed or abandoned — the colour says "held", not "accepted".
+        //
+        // Scaled by the page, so a ring caught mid-scroll is not greyed on the readout,
+        // where this reading has no meaning at all.
+        val grip = (engaged * blend).coerceIn(0f, 1f)
+        arc.strokeWidth = g.stroke * (1f + (MediaPage.ENGAGED_STROKE - 1f) * grip)
         // Coloured while the data is good, dimmed once a fetch has actually failed.
         // The tag beside the account label says which failure it was, so grey means
         // "this is history" rather than the unexplained grey it used to mean.
@@ -859,8 +903,11 @@ class RearDialView(context: Context) : View(context) {
         // The sweep and the colour travel together, on the page's own easing rather than
         // a tween of their own — so the dial arrives exactly as the page settles.
         val fraction = shown + (mediaFraction.coerceIn(0f, 1f) - shown) * blend
-        arc.color =
+        val settledColor =
             if (blend <= 0f) usageColor else RampColor.lerp(usageColor, mediaColor, blend)
+        arc.color =
+            if (grip <= 0f) settledColor
+            else RampColor.lerp(settledColor, Panel.Palette.DIM, grip)
         arc.alpha = (255 * visible).toInt()
         // Where the arc starts and how far it can reach both travel with the page, so a
         // ring that becomes a segment closes up as it goes rather than jumping to its new
@@ -1028,6 +1075,18 @@ class RearDialView(context: Context) : View(context) {
             y >= b.top - CAMERA_SLOP && y <= b.bottom + CAMERA_SLOP
     }
 
+    /**
+     * Inside a target on the X axis alone.
+     *
+     * For the volume strip, where the Y axis is the reading and cannot also be the test:
+     * running off the top is how you ask for maximum, so treating it as leaving the
+     * control would cancel the gesture at exactly the moment it succeeded.
+     */
+    private fun within(r: android.graphics.RectF?, x: Float): Boolean {
+        val b = r ?: return false
+        return x >= b.left - CAMERA_SLOP && x <= b.right + CAMERA_SLOP
+    }
+
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (!interactive) return false
@@ -1053,7 +1112,13 @@ class RearDialView(context: Context) : View(context) {
         // sits inside the volume area, and a press meant for mute that instead began a
         // volume drag would look identical and do the wrong thing.
         val onVolume = !ambient && !onMute && near(volumeBar, event.x, event.y)
-        val hit = onCamera || onMedia != null || onVolume || onMute ||
+        // The open area, which is everything above the buttons that is not the strip.
+        // A scrub is only offered where there is something to scrub to: a live stream or
+        // a player that reports no timeline has no position to drag, and a dial that
+        // followed the finger and then sprang back would be a control that lies.
+        val onScrub = !ambient && !onMute && !onVolume &&
+            (media?.durationMs ?: 0L) > 0L && near(scrubBar, event.x, event.y)
+        val hit = onCamera || onMedia != null || onVolume || onScrub || onMute ||
             (config.showClose && onClose)
 
         return when (event.actionMasked) {
@@ -1067,27 +1132,49 @@ class RearDialView(context: Context) : View(context) {
                 drag = Drag.UNDECIDED
                 downX = event.x
                 downY = event.y
-                volumeDownX = event.x
+                dragInBounds = true
+                volumeDownY = event.y
                 volumeDownLevel = audio
                     ?.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
                     ?.toFloat() ?: 0f
-                // Both are armed on the way down; which one gets the gesture is decided
-                // on the first move that clears the slop.
+                // All three are armed on the way down; which one gets the gesture is
+                // decided on the first move that clears the slop.
                 pager.onDown(event.y, android.os.SystemClock.uptimeMillis())
-                hit || pager.enabled() || onVolume
+                hit || pager.enabled() || onVolume || onScrub
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 val dxTravel = Math.abs(event.x - downX)
                 val dyTravel = Math.abs(event.y - downY)
                 if (drag == Drag.UNDECIDED && maxOf(dxTravel, dyTravel) >= DRAG_SLOP) {
-                    drag = if (dxTravel > dyTravel && onVolume) Drag.VOLUME else Drag.PAGE
+                    // Region AND axis, both. Each control owns one direction in one
+                    // place, so the other two remain reachable from inside it.
+                    val sideways = dxTravel > dyTravel
+                    drag = when {
+                        !sideways && onVolume -> Drag.VOLUME
+                        sideways && onScrub -> Drag.SCRUB
+                        else -> Drag.PAGE
+                    }
                     // Raising the volume on a muted stream should start from where it was
                     // muted rather than fight the mute.
                     if (drag == Drag.VOLUME && muted()) toggleMute()
                 }
                 when (drag) {
                     Drag.VOLUME -> {
-                        dragVolume(event.x)
+                        // No bounds test and nothing to take back: this applies live, and
+                        // a relative drag has no absolute position to be outside of. The
+                        // way to undo it is to drag the other way, which is how it has
+                        // always worked and is the reason it needs no ceremony.
+                        dragVolume(event.y)
+                        true
+                    }
+                    Drag.SCRUB -> {
+                        dragInBounds = near(scrubBar, event.x, event.y)
+                        val area = scrubBar
+                        if (area != null) {
+                            scrubTo =
+                                MediaPage.scrubFraction(event.x, area.left, area.right)
+                        }
+                        invalidate()
                         true
                     }
                     Drag.PAGE -> {
@@ -1102,15 +1189,16 @@ class RearDialView(context: Context) : View(context) {
                 }
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
-                drag = Drag.UNDECIDED
+                // The system taking the gesture away is not a decision to commit to it.
+                endDrag(commit = false)
                 pager.onUp(android.os.SystemClock.uptimeMillis())
                 invalidate()
                 false
             }
             android.view.MotionEvent.ACTION_UP -> {
-                if (drag == Drag.VOLUME) {
-                    dragVolume(event.x)
-                    drag = Drag.UNDECIDED
+                if (drag == Drag.VOLUME || drag == Drag.SCRUB) {
+                    if (drag == Drag.VOLUME) dragVolume(event.y)
+                    endDrag(commit = dragInBounds)
                     return true
                 }
                 drag = Drag.UNDECIDED
@@ -1640,52 +1728,131 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * Set the volume from a point on the column.
-     *
-     * Rounded to the stream's own steps rather than kept as a fraction, because that is
-     * all the system can store — a bar drawn from a finer number than the device holds
-     * would drift away from the volume it claims to show.
-     */
-    /**
      * Move the volume by how far the finger has travelled since it went down.
      *
-     * RELATIVE, not absolute, and that is the difference between an area and a slider. An
-     * absolute mapping over a region this big means a touch near the top is maximum
-     * volume — on a surface facing away from its owner, which is how you deafen someone
-     * by picking up their phone. Relative means the gesture is "louder" and "quieter"
-     * rather than "this loud", and a stray tap does nothing at all.
+     * RELATIVE, from wherever the volume already was — the axis changed when the control
+     * moved to the right-hand strip, and nothing else about it did. Absolute was tried
+     * on the way past and it was worse in use: it makes every touch a commitment to a
+     * level rather than a nudge, on a surface nobody is looking at.
+     *
+     * Rounded to the stream's own steps, because that is all the system can store — a bar
+     * drawn from a finer number than the device holds drifts away from what it claims.
      */
-    private fun dragVolume(x: Float) {
+    private fun dragVolume(y: Float) {
         val a = audio ?: return
-        val area = volumeBar ?: return
         val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
         if (max <= 0) return
-        val travelled = (x - volumeDownX) / area.width() * MediaPage.VOLUME_TRAVEL
-        val step = Math.round(volumeDownLevel + travelled * max).coerceIn(0, max)
-        applyVolume(step)
+        val travelled = MediaPage.volumeTravel(y, volumeDownY, Panel.HEIGHT.toFloat())
+        applyVolume(Math.round(volumeDownLevel + travelled * max).coerceIn(0, max))
     }
 
     /** Where the volume gesture started, and what the volume was then. */
-    private var volumeDownX = 0f
+    private var volumeDownY = 0f
     private var volumeDownLevel = 0f
+
+    /**
+     * Where the scrub has been dragged to, or null when nothing is being scrubbed.
+     *
+     * The dial and the elapsed label both read this instead of the player while it is
+     * set, which is what makes the whole page follow the finger rather than just an arc.
+     */
+    private var scrubTo: Float? = null
+
+    /** Whether the finger is still inside the control it started in. */
+    private var dragInBounds = true
 
     /**
      * Which way a drag on the media page is going, decided once and then held.
      *
-     * The volume and the pager both want drags on the same surface, so they are told
-     * apart by AXIS rather than by region: sideways is volume, up and down is the page.
-     * Splitting the panel into a volume half and a paging half was the first attempt and
-     * it was worse in the way that matters — the way back from this page moved somewhere
-     * you had to learn, and it made two gestures out of what should be one surface.
+     * Three controls share this surface and are told apart by REGION AND AXIS together,
+     * which is what makes them impossible to confuse:
+     *
+     *   the right sixth, vertically   → the volume
+     *   the open area, horizontally   → the playback position
+     *   anywhere, vertically          → the page
+     *
+     * So a sideways wobble inside the strip cannot start a scrub, and a vertical one in
+     * the open area still turns the page. Splitting the panel into regions ALONE was an
+     * earlier attempt and it was worse in the way that matters: the way back from this
+     * page moved somewhere you had to learn.
      *
      * Decided at the moment the slop is crossed and then not revisited, because a gesture
      * that changes its mind halfway does both things badly.
      */
-    private enum class Drag { UNDECIDED, VOLUME, PAGE }
+    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE }
 
     private var drag = Drag.UNDECIDED
     private var downX = 0f
     private var downY = 0f
+
+    /** The scrub area's touch target, or null when the media page is not up. */
+    private var scrubBar: android.graphics.RectF? = null
+
+    /**
+     * How engaged each control looks, 0 to 1, eased.
+     *
+     * A dial being DRIVEN should not look like a dial being read, or there is no way to
+     * tell that a finger has taken hold of it — which matters most here, because the
+     * finger is on the far side of the phone from the eye and cannot be seen. So the ring
+     * thickens and greys while it is held: grey because the reading under a finger is not
+     * yet a fact about the music, and thicker because that is what a thing being gripped
+     * does.
+     */
+    private fun engagement(which: Drag): Float =
+        ease(
+            "ring:engaged:" + which.name,
+            if (drag == which) 1f else 0f,
+            MediaPage.ENGAGED_MS,
+        )
+
+    /**
+     * Let go of a drag: commit it, or put it back.
+     *
+     * Lifting OUTSIDE the control abandons the gesture, which is the standard way to
+     * change your mind about a slider and the only one available on a surface where you
+     * cannot see what you are about to commit to.
+     *
+     * The two controls part company on WHEN they commit, and it is not an inconsistency —
+     * it is the whole reason only one of them has an abandon at all:
+     *
+     *   The volume is applied LIVE, because the point of moving it is to hear the result.
+     *   There is nothing to commit and so nothing to take back; the way to undo it is to
+     *   drag the other way.
+     *
+     *   The position is only PREVIEWED. Seeking a player live would have it re-buffer on
+     *   every frame of the drag, so the dial and the clock move alone and the seek is sent
+     *   once, on release. Abandoning sends nothing and the dial eases back on its own —
+     *   the follower is already pointed at the true position, so letting go IS the animation.
+     */
+    private fun endDrag(commit: Boolean) {
+        when (drag) {
+            Drag.SCRUB -> {
+                val to = scrubTo
+                val m = media
+                if (commit && to != null && m != null && m.durationMs > 0L) {
+                    onMediaTap?.invoke(
+                        RearActivity.MEDIA_SEEK + ":" + (to * m.durationMs).toLong(),
+                    )
+                    // Believe our own seek at once rather than holding the preview until
+                    // the player answers. The same reasoning as the play/pause gate: a
+                    // report that answers a command this panel just sent is evidence, and
+                    // waiting for it is a visible hesitation on the one gesture where the
+                    // user already knows what they did.
+                    seekedTo = to
+                    seekedAt = SystemClock.elapsedRealtime()
+                }
+                scrubTo = null
+            }
+            else -> Unit
+        }
+        drag = Drag.UNDECIDED
+        dragInBounds = true
+        invalidate()
+    }
+
+    /** A seek we asked for, believed until the player catches up. */
+    private var seekedTo: Float? = null
+    private var seekedAt = 0L
 
     /**
      * Set the stream, and tick once per step actually crossed.
@@ -3120,12 +3287,27 @@ class RearDialView(context: Context) : View(context) {
                 centres.last() + MediaPage.TRANSPORT_GAP - dx, top + gh - dy,
             )
             mediaCentres = centres.map { it - dx }
-            // The volume is the whole area above the buttons, not a strip inside it.
-            // It starts below whatever a notification is occupying, so a drag meant for
-            // the volume cannot begin on a card.
+            // The volume is a full-height strip down the right edge, and the position
+            // takes the open area to its left. They swapped places: the volume used to
+            // have the whole area and the position had nothing, which put the wide
+            // horizontal region on the control with no width to it and left a timeline
+            // with nowhere to be dragged.
+            //
+            // FULL HEIGHT, deliberately, and it is the one target here that ignores the
+            // notification push. There is no edge to find on the back of a phone, so the
+            // strip runs the whole way and spends its range over the middle 70% — see
+            // MediaPage.stripFraction. Starting it below a card would move the volume's
+            // ends every time a notification arrived.
             volumeBar = android.graphics.RectF(
+                MediaPage.volumeStripLeft(Panel.WIDTH.toFloat()) - dx, -dy,
+                Panel.WIDTH - dx, Panel.HEIGHT - dy,
+            )
+            // The scrub area starts below whatever a notification is occupying, so a drag
+            // meant for the position cannot begin on a card.
+            scrubBar = android.graphics.RectF(
                 Panel.CUTOUT_RIGHT - dx, notice - dy,
-                Panel.WIDTH - dx, MediaPage.volumeAreaBottom() - dy,
+                MediaPage.volumeStripLeft(Panel.WIDTH.toFloat()) - dx,
+                MediaPage.dragAreaBottom() - dy,
             )
             // Mute is a BUTTON again, not the whole area. Tap-anywhere-to-mute meant
             // every stray touch on two thirds of the page silenced the music, which is
@@ -3148,6 +3330,7 @@ class RearDialView(context: Context) : View(context) {
 
         } else {
             volumeBar = null
+            scrubBar = null
             muteButton = null
         }
         if (m.playing) animating = true
@@ -3213,9 +3396,18 @@ class RearDialView(context: Context) : View(context) {
         // its path, so tops-outward reads correctly around the upper half and tops-inward
         // around the lower — at five o'clock, outward would have the total reading down
         // and to the left.
+        // The clock reads WHERE THE DIAL IS, not where the player is, whenever the two
+        // disagree — which is the whole of a scrub and the moment after one. A dial that
+        // followed the finger while the number beside it stayed put would be two answers
+        // to the same question, and the number is the one you scrub by.
+        val held = scrubTo ?: seekedTo
+        val shownElapsed =
+            if (held != null && m.durationMs > 0L) (held * m.durationMs).toLong()
+            else elapsed
         curvedRolling(
-            canvas, "dial:elapsed", MediaPage.clock(elapsed), rings.personal,
+            canvas, "dial:elapsed", MediaPage.clock(shownElapsed), rings.personal,
             centreDeg = MediaPage.ELAPSED_AT, outward = true,
+            animate = scrubTo == null,
         )
         if (m.durationMs > 0L) {
             curvedRolling(
@@ -3424,6 +3616,12 @@ class RearDialView(context: Context) : View(context) {
         g: RingGeometry,
         centreDeg: Float,
         outward: Boolean,
+        /**
+         * False while a value is being DRAGGED. The wheel says "this turned over on its
+         * own"; under a finger the digits are being moved by hand, and rolling each one
+         * as it passes turns a scrub into a blur of tumbling numerals.
+         */
+        animate: Boolean = true,
     ) {
         if (text.isEmpty()) return
         val radius = MediaPage.labelRadius(g.radius, g.stroke, outward)
@@ -3454,6 +3652,7 @@ class RearDialView(context: Context) : View(context) {
                 android.graphics.RectF(
                     x - advance, baseline - size, x + advance, baseline + size * 0.35f,
                 ),
+                animate = animate,
             )
             canvas.restore()
         }
