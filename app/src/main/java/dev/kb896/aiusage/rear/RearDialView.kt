@@ -3258,9 +3258,10 @@ class RearDialView(context: Context) : View(context) {
     /**
      * A short stub of ring at [deg], marking one end of an arc's travel.
      *
-     * The arc's own colour and radius, but longer and much thinner — so it reads as the
-     * scale the arc runs along rather than as a piece of the arc already filled in. A
-     * dimmed mark at full stroke looked like a reading that had started.
+     * The arc's own colour, but a hairline and set OUTSIDE the ring — so it reads as the
+     * scale the arc runs along rather than as a piece of the arc already filled in. On
+     * the ring, at any weight, the mark and the reading are the same object in the same
+     * place and there is no telling one from the other.
      */
     private fun tick(
         canvas: Canvas,
@@ -3269,10 +3270,12 @@ class RearDialView(context: Context) : View(context) {
         tint: Int,
         alpha: Int,
     ) {
-        arc.strokeWidth = g.stroke * MediaPage.TICK_WIDTH
+        arc.strokeWidth = MediaPage.TICK_STROKE
         arc.color = tint
         arc.alpha = alpha
-        scratch.set(g.cx - g.radius, g.cy - g.radius, g.cx + g.radius, g.cy + g.radius)
+        // Just outside the ring's own edge, not on it — see MediaPage.TICK_GAP.
+        val r = g.radius + g.stroke / 2f + MediaPage.TICK_GAP
+        scratch.set(g.cx - r, g.cy - r, g.cx + r, g.cy + r)
         canvas.drawArc(
             scratch, deg - MediaPage.TICK_DEG / 2f, MediaPage.TICK_DEG, false, arc)
         arc.alpha = 255

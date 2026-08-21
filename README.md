@@ -434,10 +434,13 @@ where they would look tidiest. The two ends of the playback arc also face opposi
 text stands perpendicular to its path, so tops-outward reads correctly around the upper
 half and tops-inward around the lower.
 
-Each arc is marked at both ends with a **stub of its own colour**, longer and much thinner
-than the arc itself. With no groove behind them a silent volume showed nothing at all, and
-a control you cannot find at zero is a control you cannot turn up. Thin is what makes them
-read as the scale rather than as a reading that has already started.
+Each arc is marked at both ends by a **hairline just outside the ring**, in the arc's own
+colour. With no groove behind them a silent volume showed nothing at all, and a control you
+cannot find at zero is a control you cannot turn up.
+
+Outside and thin, rather than on the ring: a mark drawn *on* the ring is the same object in
+the same place as the reading, at any weight, and there is then no telling "the scale starts
+here" from "the value starts here".
 
 Both are **gauges rather than full circles**, and their gaps face each other: playback
 runs from half past ten round to five, volume from two to five. Two dials with their

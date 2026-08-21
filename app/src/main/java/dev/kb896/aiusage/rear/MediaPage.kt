@@ -260,17 +260,23 @@ object MediaPage {
      * control you cannot turn up. Two short marks say where the range is without drawing
      * the whole of it.
      */
-    const val TICK_DEG = 11f
+    const val TICK_DEG = 16f
 
     /**
-     * How thick, as a fraction of the ring's own stroke.
+     * A hairline, and it sits OUTSIDE the ring rather than on it.
      *
-     * LONGER AND THINNER than the arc, in the arc's own colour. At full stroke and dimmed
-     * they read as the arc having started already — a stub of reading rather than a mark
-     * on the scale. Thinner is what makes them scale rather than value, and the length is
-     * what keeps them findable once they are that thin.
+     * On the ring at any weight it reads as a piece of the arc already filled in — the
+     * mark and the reading are then the same object in the same place, and the eye has no
+     * way to tell "the scale starts here" from "the value starts here". Outside and thin,
+     * it is plainly a mark on a scale.
+     *
+     * The clearance is small and cannot grow: the labels start five units out and their
+     * glyphs occupy the fifteen beyond that, and the playback labels sit at exactly the
+     * angles these mark. A tick at three units with a two-unit stroke reaches 144.5 on a
+     * ring whose labels begin at 145.5.
      */
-    const val TICK_WIDTH = 0.3f
+    const val TICK_GAP = 3f
+    const val TICK_STROKE = 2f
 
     /** Where that arc ends: five o'clock. */
     val PLAYBACK_ARC_END: Float get() = PLAYBACK_ARC_START + PLAYBACK_ARC_SWEEP - 360f
