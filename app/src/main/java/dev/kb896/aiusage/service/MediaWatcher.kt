@@ -80,6 +80,17 @@ class MediaWatcher(private val context: Context) {
             // the system at any time, and a sync is exactly when it is worth paying for
             // a fresh look.
             runCatching {
+                // A SYNC WITH NO MANAGER STARTS ONE, rather than giving up.
+                //
+                // This used to return here, and that made the one command whose whole job
+                // is recovery unable to recover from the state most worth recovering from.
+                // If start() ran before notification access existed — or threw, or the
+                // service came up in an order where the grant was not yet visible — the
+                // manager is null for the life of the process, every sync is a no-op, and
+                // the panel shows the maker's mark over a playing track until the app is
+                // force-stopped. Seen exactly that way: eighty seconds of a recording with
+                // no music on it, fixed by killing the app.
+                if (manager == null) start()
                 val mgr = manager ?: return@runCatching
                 adopt(mgr.getActiveSessions(
                     ComponentName(context, NotificationRelay::class.java)).firstOrNull())
