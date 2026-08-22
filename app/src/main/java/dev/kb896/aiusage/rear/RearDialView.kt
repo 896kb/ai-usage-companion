@@ -1464,6 +1464,15 @@ class RearDialView(context: Context) : View(context) {
     private var lyrics: dev.kb896.aiusage.data.Lrc = dev.kb896.aiusage.data.Lrc.NONE
     private var lyricsRaw = ""
 
+    /**
+     * Which recording the held sheet was resolved for.
+     *
+     * Not the same question as "which sheet is this", which [lyricsRaw] answers. Two
+     * tracks can carry the same words — a live cut and the studio one — and the panel
+     * still has to know that the sheet on screen stopped being about what is playing.
+     */
+    private var lyricsShownFor = ""
+
     /** Which line is up, which one it came from, and when it arrived. */
     private var lyricLine = -1
     private var lyricFrom = -1
@@ -1569,15 +1578,34 @@ class RearDialView(context: Context) : View(context) {
         val resolved = config.showLyrics && active && lyricsFor.isNotEmpty() &&
             lyricsFor == wants
         if (!resolved) {
-            // The words of the song that just ended stop being CURRENT at once — but they
-            // are allowed the length of a fade to leave, which is not the same as being
-            // held. The bug this is not is the artwork's: showing the previous track's
-            // sheet indefinitely, as a claim about the new one.
+            // A SHEET ABOUT ANOTHER RECORDING GOES AT ONCE, with no fade.
+            //
+            // Fading is right for the apparatus LEAVING — switched off, scrolled away,
+            // the music stopping — where the words on screen are still about the song
+            // that is playing and simply on their way out. It is wrong for a track
+            // change, and this is where that was got wrong: the sheet was left to fade
+            // over three hundred milliseconds while the new track's title, artist and
+            // record were already up, so the old song's words appeared, briefly, to be
+            // the new song's. That is the artwork's oldest bug with a stranger's
+            // sentence in it, which is worse than a stale sleeve rather than better.
+            //
+            // Decidable rather than guessable, by the same identity the broadcast
+            // carries: if the held sheet was resolved for a different recording than the
+            // one now playing, it is not late, it is wrong.
+            if (lyricsShownFor != wants) {
+                lyricsRaw = ""
+                lyricsShownFor = ""
+                lyrics = dev.kb896.aiusage.data.Lrc.NONE
+                lyricLine = -1
+                lyricFrom = -1
+                snapEase("media:lyricfade", 0f)
+            }
             lyricsOn = false
             if (!config.showLyrics || !active) lyricsWanted = false
         } else {
-            if (lyricsLrc != lyricsRaw) {
+            if (lyricsLrc != lyricsRaw || lyricsShownFor != wants) {
                 lyricsRaw = lyricsLrc
+                lyricsShownFor = wants
                 lyrics = dev.kb896.aiusage.data.Lrc.parse(lyricsLrc)
                 // A new sheet starts fresh rather than promoting from the last song's line.
                 lyricLine = -1

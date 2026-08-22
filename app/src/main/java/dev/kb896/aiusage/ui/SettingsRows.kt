@@ -143,13 +143,34 @@ object SettingsRows {
      * (the ramp, the accents), and a lone swatch labelled TIME sitting three sections
      * away from the TIME toggle is a puzzle rather than a control.
      */
-    private fun swatch(context: Context, colour: Int, onPick: (Int) -> Unit) =
-        View(context).apply {
+    private fun swatch(context: Context, colour: Int, onPick: (Int) -> Unit): View {
+        val chip = View(context).apply {
             setBackgroundColor(colour)
             layoutParams = LinearLayout.LayoutParams(dp(context, 44), dp(context, 26))
                 .apply { marginStart = dp(context, 12) }
-            setOnClickListener { ColorPickerDialog.show(context, colour, onPick) }
         }
+        // The chip REPAINTS ITSELF, and remembers what it is now.
+        //
+        // Both of these are the bug documented in cell() above, which this function did
+        // not get. `colour` is captured when the row is built, and the rows are not
+        // rebuilt on an ordinary edit — see MainActivity.write, which deliberately only
+        // saves, pushes to the panel and refreshes the preview, because rebuilding
+        // wholesale is for structural changes that rename other rows.
+        //
+        // So the panel changed colour immediately and the chip beside the switch went on
+        // showing the old one until the app was restarted; and reopening the picker
+        // offered the pre-edit colour as though the change had never happened. A control
+        // that does not show the value it just set reads as the setting not having taken.
+        var current = colour
+        chip.setOnClickListener {
+            ColorPickerDialog.show(context, current) { picked ->
+                current = picked
+                chip.setBackgroundColor(picked)
+                onPick(picked)
+            }
+        }
+        return chip
+    }
 
     /**
      * A toggle with its own colour beside it.

@@ -32,8 +32,22 @@ object MediaPage {
      */
     const val DISC_MARGIN = 50f
 
-    /** The top of the type stack: title, artist, transport, bar. Fixed. */
-    const val STACK_TOP = 360f
+    /**
+     * The top of the type stack: title, artist, transport. Fixed.
+     *
+     * MOVED DOWN 40 UNITS, which is what makes the record bigger. Eighty-one units sat
+     * unused below the transport row — left over from when a progress bar and two clocks
+     * lived down there, and never reclaimed when the ring took over that reading and they
+     * were removed. The record derives its size from whatever is above this stack, so
+     * giving the stack a lower ceiling grows it: radius 146 to 166.
+     *
+     * FORTY-ONE of those units stay unspent, and that is a floor rather than a leftover.
+     * The gap below the buttons is where a swipe back to the readout starts, and a
+     * gesture region thinner than about forty units on the back of a phone is one you
+     * have to aim for. Fifty units of shift was tried first and took it to thirty-one,
+     * which bought four more units of radius and cost the way back.
+     */
+    const val STACK_TOP = 400f
 
     /** Between the bottom of the record and the top of that stack. */
     const val DISC_GAP = 18f
@@ -54,6 +68,14 @@ object MediaPage {
      * what has left the screen, so the one flexible thing on the page gives up the room
      * instead.
      */
+    /*
+     * At this size the record passes UNDER the volume strip by about eighteen units, and
+     * that is allowed. The strip is a touch region with nothing drawn in it — see
+     * VOLUME_STRIP — so the overlap costs no pixels and changes nothing visible. The only
+     * consequence is that a volume drag may begin on top of the record, which is what an
+     * edge gesture does on every phone. Holding the record clear of it instead would cap
+     * the radius at 153 and give up most of what the taller stack just bought.
+     */
     fun disc(topLimit: Float): Pair<Float, Float> {
         val top = topLimit + DISC_MARGIN
         val bottom = STACK_TOP - DISC_GAP
@@ -66,14 +88,14 @@ object MediaPage {
     val DISC_RADIUS: Float get() = disc(0f).second
 
     /** Type and controls, stacked under the disc. Baselines and centre lines. */
-    const val TITLE_BASELINE = 386f
-    const val ARTIST_BASELINE = 414f
+    const val TITLE_BASELINE = 426f
+    const val ARTIST_BASELINE = 454f
     const val TITLE_SIZE = 26f
     const val ARTIST_SIZE = 20f
 
     /** The transport row, centred under the type. Bigger than the readout row's: this
      *  page is the one you came to on purpose, and there is room. */
-    const val TRANSPORT_CY = 468f
+    const val TRANSPORT_CY = 508f
     const val TRANSPORT_H = 46f
     const val TRANSPORT_GAP = 58f
 

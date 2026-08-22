@@ -24,8 +24,8 @@ class MediaPageTest {
 
     @Test fun `at rest the record sits where the page was drawn for`() {
         val (cy, r) = MediaPage.disc(0f)
-        assertEquals(196f, cy, 0.01f)
-        assertEquals(146f, r, 0.01f)
+        assertEquals(216f, cy, 0.01f)
+        assertEquals(166f, r, 0.01f)
     }
 
     /** The whole point. */
@@ -185,14 +185,22 @@ class MediaPageTest {
      * the buttons' way on the X axis alone. The record is centred on the usable half, and
      * the buttons under it are narrower than the record, so the right sixth clears both.
      */
-    @Test fun `the strip is the right sixth, clear of the cutout and of the record`() {
+    /**
+     * The strip and the record DO overlap now, and that is deliberate — see the note on
+     * disc(). What still has to hold is that the strip is a real edge region: a sixth of
+     * the panel, clear of the cutout, and not so deep into the record that the record's
+     * centre falls inside it.
+     */
+    @Test fun `the strip is the right sixth and clear of the cutout`() {
         val left = MediaPage.volumeStripLeft(panelW)
         assertEquals(panelW / 6f, panelW - left, 0.01f)
         assertTrue("the strip reaches into the camera cutout", left > 296f)
 
         val discCx = (296f + panelW) / 2f
-        val discRight = discCx + MediaPage.DISC_RADIUS
-        assertTrue("the strip cuts into the record", left >= discRight)
+        assertTrue("the strip swallows the middle of the record", left > discCx)
+        val overlap = discCx + MediaPage.DISC_RADIUS - left
+        assertTrue("the record barely reaches the strip: $overlap", overlap > 0f)
+        assertTrue("the record eats too much of the strip: $overlap", overlap < 40f)
     }
 
     @Test fun `scrubbing maps the width to the track, and clamps`() {
