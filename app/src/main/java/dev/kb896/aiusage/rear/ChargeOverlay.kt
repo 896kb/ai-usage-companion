@@ -136,6 +136,36 @@ object ChargeOverlay {
     const val FULL_G = 9.81f
 
     /**
+     * Turn an angle toward another, the short way round, at a limited rate.
+     *
+     * THE SURFACE FOLLOWS THIS RATHER THAN THE SENSOR DIRECTLY, and without it a rotation
+     * is a teleport. The liquid's level is worked out from where down is, so when the
+     * phone is turned over the answer changes discontinuously and the water is simply on
+     * the other side on the next frame — no swing, no slosh, just somewhere else.
+     *
+     * The short way matters at the seam. Angles wrap at pi, so easing the raw numbers
+     * sends a surface at 179 degrees the long way round to -179 rather than the two
+     * degrees it actually moved, and the liquid spins a full turn to get somewhere it
+     * was almost already at.
+     *
+     * Rate-limited rather than eased proportionally: a proportional ease crawls the last
+     * few degrees forever, and a liquid that never quite finishes turning reads as drag
+     * in the rendering rather than as weight in the liquid.
+     */
+    fun turnToward(from: Float, to: Float, dt: Float, rate: Float): Float {
+        var delta = to - from
+        val twoPi = (Math.PI * 2).toFloat()
+        while (delta > Math.PI) delta -= twoPi
+        while (delta < -Math.PI) delta += twoPi
+        val step = rate * dt
+        if (Math.abs(delta) <= step) return to
+        return from + Math.signum(delta) * step
+    }
+
+    /** How fast the surface may swing to a new downhill, in radians per second. */
+    const val TURN_RATE = 4.2f
+
+    /**
      * How far the surface rides up and down as the phone moves, in units.
      *
      * Slosh, not waves. The liquid is answering a hand, and a hand moves slowly compared

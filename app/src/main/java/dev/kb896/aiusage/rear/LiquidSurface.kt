@@ -27,6 +27,8 @@ class LiquidSurface(private val columns: Int = COLUMNS) {
     private val speed = FloatArray(columns)
     private val spread = FloatArray(columns)
 
+    private var idle = 0f
+
     /** Which way was down last time, so a turn can be felt as a disturbance. */
     private var lastDownX = 0f
     private var lastDownY = 1f
@@ -38,6 +40,7 @@ class LiquidSurface(private val columns: Int = COLUMNS) {
     fun calm() {
         height.fill(0f)
         speed.fill(0f)
+        idle = 0f
     }
 
     /**
@@ -66,6 +69,17 @@ class LiquidSurface(private val columns: Int = COLUMNS) {
                 val across = i / (columns - 1f) - 0.5f
                 speed[i] += turn * across * TURN_FORCE
             }
+        }
+
+        // A LIVING SURFACE. Left exactly alone, a height field settles to a dead flat
+        // line, and a dead flat line is a coloured rectangle — the one thing this whole
+        // approach was meant to avoid. Real liquid in a held glass is never quite still,
+        // so a slow travelling ripple is fed in continuously. Small enough that it reads
+        // as the liquid being alive rather than as something happening to it.
+        idle += t
+        for (i in 0 until columns) {
+            val phase = idle * IDLE_SPEED + i * IDLE_WAVELENGTH
+            speed[i] += Math.sin(phase.toDouble()).toFloat() * IDLE_FORCE * t
         }
 
         for (i in 0 until columns) {
@@ -130,6 +144,11 @@ class LiquidSurface(private val columns: Int = COLUMNS) {
 
         /** Below this much turn, the phone counts as still. Keeps sensor noise out. */
         const val TURN_DEADBAND = 0.002f
+
+        /** The idle ripple: how fast it travels, how long it is, how hard it pushes. */
+        const val IDLE_SPEED = 3.1f
+        const val IDLE_WAVELENGTH = 0.55f
+        const val IDLE_FORCE = 34f
 
         const val MAX_STEP = 1f / 30f
     }

@@ -111,6 +111,54 @@ class ChargeOverlayTest {
         }
     }
 
+    // -- turning ----------------------------------------------------------------------
+
+    private val pi = Math.PI.toFloat()
+
+    @Test fun `it turns toward the target and stops there`() {
+        val a = ChargeOverlay.turnToward(0f, 1f, 0.1f, 4f)
+        assertTrue("did not move: $a", a > 0f && a < 1f)
+        assertEquals("overshot instead of landing", 1f,
+            ChargeOverlay.turnToward(0.99f, 1f, 0.1f, 4f), 0.0001f)
+    }
+
+    /**
+     * The seam. Angles wrap at pi, so easing the raw numbers sends a surface at 179
+     * degrees the long way round to -179 — a full spin to reach somewhere two degrees
+     * away, which on the panel is the liquid taking a lap of the glass.
+     */
+    @Test fun `it goes the short way across the wrap`() {
+        val from = pi - 0.05f
+        val to = -pi + 0.05f
+        val next = ChargeOverlay.turnToward(from, to, 0.016f, 4f)
+        assertTrue("went the long way round: $from -> $next", next >= from)
+    }
+
+    /** And the same in the other direction, which is a different branch. */
+    @Test fun `it goes the short way back across the wrap`() {
+        val from = -pi + 0.05f
+        val to = pi - 0.05f
+        val next = ChargeOverlay.turnToward(from, to, 0.016f, 4f)
+        assertTrue("went the long way round: $from -> $next", next <= from)
+    }
+
+    /** A half turn is the worst case, and must still finish in a reasonable time. */
+    @Test fun `a full flip completes, and takes about as long as the rate says`() {
+        var a = 0f
+        var steps = 0
+        while (Math.abs(a - pi) > 0.01f && steps < 1_000) {
+            a = ChargeOverlay.turnToward(a, pi, 1f / 60f, ChargeOverlay.TURN_RATE)
+            steps++
+        }
+        assertTrue("never got there", steps < 1_000)
+        val seconds = steps / 60f
+        assertTrue("a flip took $seconds s, which is not a swing", seconds in 0.3f..1.5f)
+    }
+
+    @Test fun `no time means no movement`() {
+        assertEquals(0.4f, ChargeOverlay.turnToward(0.4f, 3f, 0f, 4f), 0.0001f)
+    }
+
     /** Tilt it and the pull leans, rather than staying pinned to the panel's own down. */
     @Test fun `a lean is preserved`() {
         val (gx, _) = ChargeOverlay.gravity(6f, 6f)

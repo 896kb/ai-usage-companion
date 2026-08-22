@@ -909,6 +909,9 @@ class RearDialView(context: Context) : View(context) {
     private var chargeStepAt = 0L
     private var chargeTenth = -1
 
+    /** Which way the liquid currently thinks is down, in radians. See drawCharge. */
+    private var chargeDown = 0f
+
     /** The level the liquid is filling to, and the figure drawn over it. */
     private var chargeLevel = 0f
     private var chargePercent = 0
@@ -999,9 +1002,19 @@ class RearDialView(context: Context) : View(context) {
         chargeStepAt = now
 
         val (rawX, rawY) = ChargeOverlay.gravity(gravityPanelX(), gravityPanelY())
-        val gLen = Math.hypot(rawX.toDouble(), rawY.toDouble()).toFloat().coerceAtLeast(0.001f)
-        val downX = rawX / gLen
-        val downY = rawY / gLen
+        // THE DRAWN DOWN LAGS THE MEASURED ONE, on purpose.
+        //
+        // The level is worked out from where down is, so following the sensor exactly
+        // makes a rotation a teleport: turn the phone over and the water is on the other
+        // side on the very next frame. Swinging the direction round instead means the
+        // surface tilts through every angle in between, which is the liquid going round
+        // the glass rather than reappearing somewhere else.
+        val want = Math.atan2(rawX.toDouble(), rawY.toDouble()).toFloat()
+        chargeDown =
+            if (chargeStepAt == 0L || dt <= 0f) want
+            else ChargeOverlay.turnToward(chargeDown, want, dt, ChargeOverlay.TURN_RATE)
+        val downX = Math.sin(chargeDown.toDouble()).toFloat()
+        val downY = Math.cos(chargeDown.toDouble()).toFloat()
         surface.step(dt, downX, downY)
 
         val fill = ChargeOverlay.fill(elapsed, chargeLevel)
@@ -1095,8 +1108,15 @@ class RearDialView(context: Context) : View(context) {
         val was = extras.textAlign
         extras.textAlign = Paint.Align.CENTER
         extras.color = tint
+        // THE FIGURE CLIMBS WITH THE LIQUID.
+        //
+        // It used to show the final number from the first frame, which makes the reading
+        // and the picture disagree for three seconds — the water says a fifth full and
+        // the text says sixty-two per cent. Counted from the same fill fraction the
+        // surface is drawn at, so the two cannot drift apart: they are the same number
+        // twice, and it arrives exactly as the level settles.
         canvas.drawText(
-            chargePercent.toString() + "%",
+            Math.round(fill * 100f).toString() + "%",
             (left + right) / 2f, (top + bottom) / 2f + size * 0.36f, extras,
         )
         extras.textAlign = was
