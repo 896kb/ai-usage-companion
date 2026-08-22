@@ -137,6 +137,10 @@ class RearActivity : Activity() {
          */
         const val MEDIA_SYNC = "sync"
 
+        /** Show the charging cell, optionally at a stated level rather than the real one. */
+        const val ACTION_CHARGE = "dev.kb896.aiusage.CHARGE"
+        const val EXTRA_CHARGE_PERCENT = "percent"
+
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -166,6 +170,13 @@ class RearActivity : Activity() {
             // dispatching on action.
             when (intent?.action) {
                 ACTION_FINISH -> finish()
+                // Firing the charging cell by hand. The real trigger is the charger
+                // going in, which is awkward to arrange on demand and impossible to
+                // arrange at a chosen battery level — see tools/charge.sh.
+                ACTION_CHARGE -> dial.showCharging(
+                    intent.getIntExtra(EXTRA_CHARGE_PERCENT, -1)
+                        .let { if (it in 0..100) it else -1 },
+                )
                 ACTION_NOTIFICATION -> dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_PKG).orEmpty(),
@@ -275,7 +286,7 @@ class RearActivity : Activity() {
             this, receiver,
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
-                addAction(ACTION_MEDIA)
+                addAction(ACTION_MEDIA); addAction(ACTION_CHARGE)
             },
             ContextCompat.RECEIVER_EXPORTED,
         )

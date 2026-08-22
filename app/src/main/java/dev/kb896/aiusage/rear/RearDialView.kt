@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
+import androidx.core.content.ContextCompat
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.Account
@@ -359,10 +360,70 @@ class RearDialView(context: Context) : View(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         postDelayed(redrawTick, REDRAW_INTERVAL_MS)
+        // The charger going in. ACTION_POWER_CONNECTED rather than watching
+        // ACTION_BATTERY_CHANGED for a status flip: the former fires once on the event,
+        // the latter fires whenever the level or temperature moves and would have to be
+        // filtered back down to the same thing.
+        ContextCompat.registerReceiver(
+            context, powerReceiver,
+            android.content.IntentFilter(android.content.Intent.ACTION_POWER_CONNECTED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        // GRAVITY, not the accelerometer. The accelerometer carries the hand's own
+        // movement as well as gravity, so a surface answering it jitters while the phone
+        // is merely being held. Gravity is the low-passed version, and is what a liquid
+        // actually responds to.
+        //
+        // Absent on some devices, in which case the surface stays level — still a sound
+        // picture of a liquid, just a still one.
+        val sensors = context.getSystemService(android.hardware.SensorManager::class.java)
+        val gravity = sensors?.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
+        if (gravity != null) {
+            sensors.registerListener(
+                gravityListener, gravity, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        }
     }
+
+    private val powerReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
+            showCharging()
+        }
+    }
+
+    /** The gravity vector, as the sensor reports it. See chargeTilt for the axes. */
+    private var gravityX = 0f
+    private var gravityY = 0f
+
+    private val gravityListener = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            gravityX = e.values[0]
+            gravityY = e.values[1]
+            // Only while there is something to move. This fires several times a second
+            // for the life of the panel, and a redraw is not free.
+            if (chargeAt != 0L) invalidate()
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) = Unit
+    }
+
+    /**
+     * How far the liquid's surface leans, in degrees.
+     *
+     * THE AXES ARE SWAPPED going in, and not arbitrarily. The sensor reports in the
+     * DEVICE's frame — x across a phone held upright, y along it — while this panel is a
+     * landscape surface on the back of that phone. The panel's horizontal is the device's
+     * vertical, so which way is downhill HERE comes from the sensor's y.
+     *
+     * If the lean ever reads mirrored, this line is the one to turn over.
+     */
+    private fun chargeTilt(): Float = ChargeOverlay.tilt(gravityY, gravityX)
 
     override fun onDetachedFromWindow() {
         removeCallbacks(redrawTick)
+        runCatching { context.unregisterReceiver(powerReceiver) }
+        runCatching {
+            context.getSystemService(android.hardware.SensorManager::class.java)
+                ?.unregisterListener(gravityListener)
+        }
         super.onDetachedFromWindow()
     }
 
@@ -815,10 +876,130 @@ class RearDialView(context: Context) : View(context) {
             rippleTo = 0f
         }
 
+        // LAST, and outside every translate on the way here.
+        //
+        // Over both pages, unmoved by the notification push and unscrolled by the pager:
+        // the charger going in is a fact about the phone rather than about whichever page
+        // you happen to be looking at, so it appears where it appears and the panel
+        // carries on underneath.
+        drawCharge(canvas)
+
         // Next frame only while something is still moving. When everything has settled
         // this stops entirely and the view falls back to the 15s idle tick — an
         // always-on panel must not hold a 60fps loop for a display that is not changing.
         if (animating) postInvalidateOnAnimation()
+    }
+
+    /** When the cell arrived, and what it is filling to. */
+    private var chargeAt = 0L
+    private var chargeLevel = 0f
+    private var chargePercent = 0
+
+    /**
+     * Show the charging cell, filling to the battery's present level.
+     *
+     * Public because the thing that knows a charger went in is a broadcast receiver, and
+     * because it is worth being able to fire by hand — see tools/charge.sh. Re-showing
+     * while one is up restarts it rather than queueing: there is one charger and one
+     * answer, and two cells in a row would be the same fact twice.
+     */
+    fun showCharging(percent: Int = batteryPercent()) {
+        if (percent < 0) return
+        chargePercent = percent
+        chargeLevel = percent / 100f
+        chargeAt = SystemClock.elapsedRealtime()
+        invalidate()
+    }
+
+    /**
+     * The charging cell: a glass on the right that fills with liquid.
+     *
+     * NO TOUCH TARGET, and that is deliberate rather than unfinished. It sits over the
+     * volume strip, and a thing that appears unbidden for five seconds must not take the
+     * surface from underneath a finger already using it. Nothing is registered, so every
+     * touch goes straight through to whatever was there.
+     */
+    private fun drawCharge(canvas: Canvas) {
+        if (chargeAt == 0L) return
+        val elapsed = (SystemClock.elapsedRealtime() - chargeAt).toFloat()
+        if (ChargeOverlay.done(elapsed)) {
+            chargeAt = 0L
+            return
+        }
+        animating = true
+
+        val w = ChargeOverlay.width(Panel.WIDTH.toFloat())
+        val off = ChargeOverlay.offset(elapsed, w)
+        val left = Panel.WIDTH - w + off + ChargeOverlay.MARGIN
+        val right = Panel.WIDTH + off - ChargeOverlay.MARGIN
+        val top = ChargeOverlay.MARGIN
+        val bottom = Panel.HEIGHT - ChargeOverlay.MARGIN
+        val r = (right - left) * ChargeOverlay.CORNER
+        val tint = colorFor("charge", config.batteryTint)
+
+        val glass = android.graphics.Path().apply {
+            addRoundRect(left, top, right, bottom, r, r, android.graphics.Path.Direction.CW)
+        }
+
+        canvas.save()
+        canvas.clipPath(glass)
+        // The glass's own ground, so the liquid has something to be inside rather than
+        // floating over whatever the panel was drawing there.
+        noticePaint.style = Paint.Style.FILL
+        noticePaint.shader = null
+        noticePaint.color = (config.background and 0x00FFFFFF) or (CHARGE_GROUND_ALPHA shl 24)
+        canvas.drawRect(left, top, right, bottom, noticePaint)
+
+        // ---- the liquid ----------------------------------------------------------
+        val fill = ChargeOverlay.fill(elapsed, chargeLevel)
+        val surface = bottom - (bottom - top) * fill
+        val lean = Math.tan(Math.toRadians(chargeTilt().toDouble())).toFloat() *
+            (right - left) / 2f
+        // A slow rise and fall on top of the lean. The liquid is answering a hand, and a
+        // hand moves nothing like fast enough to make a ripple — so this is slosh, at a
+        // period you could count.
+        val slosh = Math.sin(elapsed / 420.0).toFloat() * ChargeOverlay.SLOSH * fill
+        val body = android.graphics.Path().apply {
+            moveTo(left, surface + lean + slosh)
+            lineTo(right, surface - lean - slosh)
+            lineTo(right, bottom)
+            lineTo(left, bottom)
+            close()
+        }
+        noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_LIQUID_ALPHA shl 24)
+        canvas.drawPath(body, noticePaint)
+
+        // The meniscus: the surface line itself, brighter than the body under it, which
+        // is what makes the liquid read as having a top rather than as a filled shape.
+        noticePaint.style = Paint.Style.STROKE
+        noticePaint.strokeWidth = CHARGE_SURFACE
+        noticePaint.color = tint
+        canvas.drawLine(left, surface + lean + slosh, right, surface - lean - slosh, noticePaint)
+        noticePaint.style = Paint.Style.FILL
+        canvas.restore()
+
+        // The rim, drawn after the clip is lifted so it is a full stroke rather than a
+        // half one clipped down its own centre line.
+        vinylPaint.style = Paint.Style.STROKE
+        vinylPaint.strokeWidth = CHARGE_RIM
+        vinylPaint.color = (tint and 0x00FFFFFF) or (CHARGE_RIM_ALPHA shl 24)
+        canvas.drawRoundRect(left, top, right, bottom, r, r, vinylPaint)
+        vinylPaint.style = Paint.Style.FILL
+
+        // The figure, in the middle of the glass. Over the liquid rather than inside it:
+        // a number that the liquid rose past and half-covered would be unreadable at
+        // exactly the moment it became interesting.
+        val size = (bottom - top) * ChargeOverlay.TEXT_SIZE
+        extras.textSize = size
+        val was = extras.textAlign
+        extras.textAlign = Paint.Align.CENTER
+        extras.color = tint
+        canvas.drawText(
+            chargePercent.toString() + "%",
+            (left + right) / 2f, (top + bottom) / 2f + size * 0.36f, extras,
+        )
+        extras.textAlign = was
+        extras.textSize = 18f
     }
 
     /**
@@ -5216,6 +5397,17 @@ class RearDialView(context: Context) : View(context) {
         private const val CAMERA_SLOP = 26f
 
         /** How long a notification holds the strip before it retracts. */
+        /** The charging cell's ink. See ChargeOverlay for the shape and the timings. */
+        // Near enough to opaque. At 0xE6 the readout underneath still read through the
+        // glass — the masthead and the bar figures are bright and thin, which is exactly
+        // what survives a wash — and a cell you can read the panel through looks like a
+        // tint laid over the panel rather than an object in front of it.
+        private const val CHARGE_GROUND_ALPHA = 0xF7
+        private const val CHARGE_LIQUID_ALPHA = 0x66
+        private const val CHARGE_RIM_ALPHA = 0x99
+        private const val CHARGE_SURFACE = 2.5f
+        private const val CHARGE_RIM = 2f
+
         private const val NOTICE_MS = 5_000L
 
         /**
