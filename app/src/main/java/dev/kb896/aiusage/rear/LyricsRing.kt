@@ -15,8 +15,19 @@ package dev.kb896.aiusage.rear
  */
 object LyricsRing {
 
-    /** Type size for a lyric line, before any shrinking to fit. */
-    const val SIZE = 15f
+    /**
+     * Type size for a lyric line, before any shrinking to fit.
+     *
+     * Raised from 15 with the room the stack gave up. Lyrics are the one thing on this
+     * page meant to be READ rather than glanced at — a number or a title is taken in as
+     * a shape, a line of words is actually parsed — so they get first claim on the space
+     * that appeared, and the record takes what is left.
+     *
+     * With lyrics OFF none of this is claimed and the record has the lot: 176 units of
+     * radius against 150 with them on. That falls out of disc() taking a top limit
+     * rather than needing a rule of its own.
+     */
+    const val SIZE = 18f
 
     /** The smallest it may shrink to before the line is cut instead. */
     const val MIN_SIZE = 11f

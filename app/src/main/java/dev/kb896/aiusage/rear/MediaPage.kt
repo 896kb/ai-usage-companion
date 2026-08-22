@@ -35,19 +35,24 @@ object MediaPage {
     /**
      * The top of the type stack: title, artist, transport. Fixed.
      *
-     * MOVED DOWN 40 UNITS, which is what makes the record bigger. Eighty-one units sat
-     * unused below the transport row — left over from when a progress bar and two clocks
-     * lived down there, and never reclaimed when the ring took over that reading and they
-     * were removed. The record derives its size from whatever is above this stack, so
-     * giving the stack a lower ceiling grows it: radius 146 to 166.
+     * MOVED DOWN 61 UNITS in total, which is what makes the record bigger. Eighty-one
+     * units sat unused below the transport row, left over from when a progress bar and
+     * two clocks lived down there and were never reclaimed once the ring took over that
+     * reading. The record derives its size from whatever is above this stack, so giving
+     * the stack a lower ceiling grows it: radius 146 to 176.
      *
-     * FORTY-ONE of those units stay unspent, and that is a floor rather than a leftover.
-     * The gap below the buttons is where a swipe back to the readout starts, and a
-     * gesture region thinner than about forty units on the back of a phone is one you
-     * have to aim for. Fifty units of shift was tried first and took it to thirty-one,
-     * which bought four more units of radius and cost the way back.
+     * TWENTY of those units stay unspent, and only because a control pressed against the
+     * edge of a rounded display reads as clipped whether or not it is.
+     *
+     * It was forty for a while, on the theory that the gap below the buttons is where a
+     * swipe back to the readout starts and that a thinner one would be a region you have
+     * to aim for. That was wrong, and checkable rather than arguable: a vertical drag
+     * beginning ON a transport button falls through to Drag.PAGE, since the button is
+     * neither the volume strip nor the scrub area, and on release `pager.dragging`
+     * returns before any tap is dispatched so the button does not fire either. The swipe
+     * can start anywhere on the page. That gap was never load-bearing.
      */
-    const val STACK_TOP = 400f
+    const val STACK_TOP = 421f
 
     /** Between the bottom of the record and the top of that stack. */
     const val DISC_GAP = 18f
@@ -88,14 +93,14 @@ object MediaPage {
     val DISC_RADIUS: Float get() = disc(0f).second
 
     /** Type and controls, stacked under the disc. Baselines and centre lines. */
-    const val TITLE_BASELINE = 426f
-    const val ARTIST_BASELINE = 454f
+    const val TITLE_BASELINE = 447f
+    const val ARTIST_BASELINE = 475f
     const val TITLE_SIZE = 26f
     const val ARTIST_SIZE = 20f
 
     /** The transport row, centred under the type. Bigger than the readout row's: this
      *  page is the one you came to on purpose, and there is room. */
-    const val TRANSPORT_CY = 508f
+    const val TRANSPORT_CY = 529f
     const val TRANSPORT_H = 46f
     const val TRANSPORT_GAP = 58f
 

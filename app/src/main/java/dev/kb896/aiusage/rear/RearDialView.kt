@@ -691,10 +691,14 @@ class RearDialView(context: Context) : View(context) {
         // Where the volume goes back to when unmuted. Eased on the same clock as the
         // arc it sits under, so engaging mute is one movement — the reading falls to
         // zero and the ghost of it stays where it was — rather than two.
+        val ghostRaw = if (muted()) mutedFrom else 0f
         val mediaGhost = listOf(
             0f,
-            ease("media:mutedfrom", if (muted()) mutedFrom else 0f, VOLUME_EASE_MS,
-                 linear = true),
+            // Pinned to the finger while it is the thing being dragged, eased otherwise —
+            // the same rule the live arc follows, and for the same reason: easing a value
+            // that is being moved by hand only puts it behind the hand.
+            if (drag == Drag.VOLUME && muted()) snapEase("media:mutedfrom", ghostRaw)
+            else ease("media:mutedfrom", ghostRaw, VOLUME_EASE_MS, linear = true),
         )
 
         if (!hidden) order.forEachIndexed { position, accountIndex ->
@@ -1205,6 +1209,7 @@ class RearDialView(context: Context) : View(context) {
                 downY = event.y
                 dragInBounds = true
                 volumeDownY = event.y
+                volumeDownGhost = mutedFrom
                 volumeDownLevel = audio
                     ?.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
                     ?.toFloat() ?: 0f
@@ -1225,9 +1230,12 @@ class RearDialView(context: Context) : View(context) {
                         sideways && onScrub -> Drag.SCRUB
                         else -> Drag.PAGE
                     }
-                    // Raising the volume on a muted stream should start from where it was
-                    // muted rather than fight the mute.
-                    if (drag == Drag.VOLUME && muted()) toggleMute()
+                    // NO auto-unmute here any more. It used to fire on the first move,
+                    // on the reasoning that raising the volume on a muted stream should
+                    // start from where it was muted rather than fight the mute — but the
+                    // effect was that the volume control could do exactly one thing while
+                    // muted, which was cancel the mute. A drag now moves the ghost and
+                    // leaves the silence alone; see dragVolume.
                 }
                 when (drag) {
                     Drag.VOLUME -> {
@@ -1996,6 +2004,21 @@ class RearDialView(context: Context) : View(context) {
         val a = audio ?: return
         val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
         if (max <= 0) return
+        val travelledNow = MediaPage.volumeTravel(y, volumeDownY, Panel.HEIGHT.toFloat())
+        if (muted()) {
+            // MUTED, SO THE DRAG SETS WHERE IT COMES BACK TO.
+            //
+            // The stream stays silent — that is what mute means, and a drag should not
+            // quietly undo it — but the level you are choosing has to be visible or you
+            // are setting a number you cannot see. So the ghost is the thing being
+            // dragged, and unmuting lands exactly where you left it.
+            //
+            // This replaces an auto-unmute on the first move, which made the volume
+            // control unable to do anything while muted except cancel the mute.
+            mutedFrom = (volumeDownGhost + travelledNow).coerceIn(0f, 1f)
+            invalidate()
+            return
+        }
         // A DRAG FORGETS THE GHOST, whatever the system thinks about mute.
         //
         // Dragging to the bottom sets the stream to zero, and Android may set its mute
@@ -2009,13 +2032,15 @@ class RearDialView(context: Context) : View(context) {
         // statement about where it should be now, and silence reached that way is just
         // silence.
         mutedFrom = 0f
-        val travelled = MediaPage.volumeTravel(y, volumeDownY, Panel.HEIGHT.toFloat())
-        applyVolume(Math.round(volumeDownLevel + travelled * max).coerceIn(0, max))
+        applyVolume(Math.round(volumeDownLevel + travelledNow * max).coerceIn(0, max))
     }
 
     /** Where the volume gesture started, and what the volume was then. */
     private var volumeDownY = 0f
     private var volumeDownLevel = 0f
+
+    /** And where the ghost was, for a drag that is moving the ghost rather than the stream. */
+    private var volumeDownGhost = 0f
 
     /**
      * Where the scrub has been dragged to, or null when nothing is being scrubbed.
@@ -2175,13 +2200,23 @@ class RearDialView(context: Context) : View(context) {
         val a = audio ?: return
         // Read BEFORE the toggle, and only when engaging it: after the call the stream
         // reports zero, and on the way back out the live level is the answer again.
-        if (!muted()) mutedFrom = volumeLevel()
+        val wasMuted = muted()
+        if (!wasMuted) mutedFrom = volumeLevel()
         runCatching {
             a.adjustStreamVolume(
                 android.media.AudioManager.STREAM_MUSIC,
                 android.media.AudioManager.ADJUST_TOGGLE_MUTE,
                 0,
             )
+        }
+        if (wasMuted) {
+            // Land on the level the ghost was showing, which is not necessarily the one
+            // Android remembers: the ghost can have been dragged while muted, and the
+            // arc has been promising that number the whole time. Honouring the system's
+            // own memory instead would make the visible promise the wrong one.
+            val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            if (max > 0) applyVolume(Math.round(mutedFrom * max).coerceIn(0, max))
+            mutedFrom = 0f
         }
         performHapticFeedback(
             android.view.HapticFeedbackConstants.CLOCK_TICK,

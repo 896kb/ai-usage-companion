@@ -24,8 +24,8 @@ class MediaPageTest {
 
     @Test fun `at rest the record sits where the page was drawn for`() {
         val (cy, r) = MediaPage.disc(0f)
-        assertEquals(216f, cy, 0.01f)
-        assertEquals(166f, r, 0.01f)
+        assertEquals(226.5f, cy, 0.01f)
+        assertEquals(176.5f, r, 0.01f)
     }
 
     /** The whole point. */
@@ -74,9 +74,20 @@ class MediaPageTest {
     }
 
     /** It has to leave the pager somewhere to work from, or there is no way back. */
-    @Test fun `there is room below the buttons to page from`() {
+    /**
+     * A MARGIN, not a gesture region. This asserted forty units on the theory that the
+     * swipe back to the readout needs somewhere to start — which is not true: a vertical
+     * drag beginning on a transport button falls through to Drag.PAGE, and `pager.dragging`
+     * stops the button firing on release. The swipe starts anywhere.
+     *
+     * What is left is the only real requirement: a control pressed against the edge of a
+     * rounded display reads as clipped whether or not it is.
+     */
+    @Test fun `the buttons stand clear of the bottom edge`() {
         val buttonsBottom = MediaPage.TRANSPORT_CY + MediaPage.TRANSPORT_H / 2f
-        assertTrue("nothing left below the buttons", panelH - buttonsBottom > 40f)
+        val gap = panelH - buttonsBottom
+        assertTrue("the buttons touch the bottom edge: $gap", gap >= 16f)
+        assertTrue("more room below the buttons than the design wants: $gap", gap <= 40f)
     }
 
     /**

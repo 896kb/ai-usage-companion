@@ -168,12 +168,18 @@ class LyricsRingTest {
 
     /** A straight line gets more room than a bent one, so it shrinks later. */
     @Test fun `straight lines fit more than curved ones`() {
-        val line = "and every time I close my eyes I see the same thing over"
+        // Long enough that the ARC has to shrink it, short enough that a straight line
+        // does not — which is the whole claim being made.
+        val line = "and every time I close my eyes I see"
         val straight = LyricsRing.fitTo(
             line, LyricsRing.straightRoom((296f + 904f) / 2f, 296f, 904f), advance,
         )
         assertEquals("a straight line was shrunk unnecessarily", LyricsRing.SIZE, straight.size, 0.001f)
         assertEquals(line, straight.text)
+        assertTrue(
+            "the same line fitted the arc too, so this proves nothing",
+            LyricsRing.fit(line, arcR, advance).size < LyricsRing.SIZE,
+        )
     }
 
     // -- making room ------------------------------------------------------------------
@@ -194,12 +200,10 @@ class LyricsRingTest {
     @Test fun `a group notification leaves no room`() {
         val group = 572f / 4f + 76f
         assertFalse("lyrics stayed up under a group card", fits(group))
-        // And the record really would have bottomed out, which is the reason.
-        assertEquals(
-            MediaPage.DISC_MIN_RADIUS,
-            MediaPage.disc(group + LyricsRing.STACK).second,
-            0.01f,
-        )
+        // And the record really would have been a token, which is the reason. It need
+        // not hit the absolute floor to be too small to bend a sentence around.
+        val r = MediaPage.disc(group + LyricsRing.STACK).second
+        assertTrue("the record is still big enough for words: $r", r < LyricsRing.MIN_DISC)
     }
 
     /** The record itself still fits under that card — it is the ARCS that do not. */
