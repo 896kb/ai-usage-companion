@@ -101,6 +101,34 @@ class NotificationRelay : NotificationListenerService() {
         val next = cascade(sbn)
 
         Log.i(TAG, "relaying from ${sbn.packageName}${if (next != null) " (+1 in group)" else ""}")
+
+        // LIGHT THE PANEL FIRST, then tell it.
+        //
+        // The rear display dozes on its own, and a notification delivered to a sleeping
+        // one is five seconds of strip animating in the dark followed by nothing to see.
+        // Worse, the panel now DROPS what arrives while it is dark — deliberately, so
+        // that waking it does not replay the night — so without this a notification while
+        // it dozed was simply lost rather than merely unseen.
+        //
+        // The order matters and so does the pause. The panel decides whether to keep a
+        // notice by asking its display whether there is a screen to show it on, and that
+        // answer does not change the instant the keyevent is sent. A fifth of a second is
+        // below noticing and comfortably past the state settling.
+        val bridge = runCatching { Graph.of(this).bridge }.getOrNull()
+        bridge?.wake("a notification")
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            relay(app, sbn, title, body, next, config)
+        }, WAKE_SETTLE_MS)
+    }
+
+    private fun relay(
+        app: String,
+        sbn: StatusBarNotification,
+        title: String?,
+        body: String?,
+        next: Pair<String, String>?,
+        config: dev.kb896.aiusage.data.PanelConfig,
+    ) {
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION)
                 .setPackage(packageName)
@@ -165,6 +193,14 @@ class NotificationRelay : NotificationListenerService() {
     private var lastAt = 0L
 
     private companion object {
+        /**
+         * How long the wake is given before the notice is sent.
+         *
+         * The panel asks its display whether it is on, and that does not become true the
+         * moment the keyevent is sent. Below noticing, comfortably past the settle.
+         */
+        const val WAKE_SETTLE_MS = 200L
+
         const val TAG = "AiUsageNotif"
 
         /**

@@ -125,6 +125,7 @@ class UsagePollService : Service() {
         // NOT_EXPORTED still receives it — RearActivity is a different process but the
         // same UID.
         ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
@@ -238,6 +239,20 @@ class UsagePollService : Service() {
             // position at the exact moment something else is about to cover it.
             if (intent?.action == RearActivity.ACTION_OPEN_CAMERA) {
                 Graph.of(this@UsagePollService).bridge.openCamera()
+                return
+            }
+            // THE CHARGER GOING IN LIGHTS THE PANEL.
+            //
+            // The cell fills over five seconds and is worth seeing, and the rear display
+            // dozes on its own to save battery — so without this, plugging the phone in
+            // while it slept animated the whole thing onto a dark screen. The panel draws
+            // it either way; this is only about there being a screen lit to draw it on.
+            //
+            // Waking lives HERE rather than in the panel, because the panel cannot: the
+            // keyevent has to be aimed at one display and that needs the privileged
+            // service, which this process holds the binding for.
+            if (intent?.action == Intent.ACTION_POWER_CONNECTED) {
+                Graph.of(this@UsagePollService).bridge.wake("the charger")
                 return
             }
             // A transport button on the back of the phone. Also not a placement problem,

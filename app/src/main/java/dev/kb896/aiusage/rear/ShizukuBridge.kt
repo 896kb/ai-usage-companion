@@ -194,6 +194,46 @@ class ShizukuBridge(private val context: Context) {
             .onFailure { Log.w(TAG, "camera launch failed: ${it.message}") }
     }
 
+    /**
+     * Light the rear panel, if it has gone to sleep.
+     *
+     * The display dozes on its own to save battery, and a panel nobody woke is a panel
+     * that missed whatever it was about to show — a notification arrives, the strip
+     * animates, and the whole five seconds happen on a dark screen. So the things worth
+     * looking at ask for the light first.
+     *
+     * Aimed at ONE display, which is the entire reason this goes through the privileged
+     * service rather than a window flag. RearActivity used to carry FLAG_TURN_SCREEN_ON
+     * and it woke the phone's main screen every time the panel was re-placed, because the
+     * activity is created on display 0 before being moved. A keyevent can be pointed
+     * somewhere; a flag on a window cannot.
+     *
+     * Silent on failure, like openCamera: there is nowhere to report it, and a rear panel
+     * that stays dark is its own message.
+     */
+    /**
+     * Light the rear display, for something that just happened on it.
+     *
+     * [reason] is only for the log, and it is there because this is the kind of thing
+     * that fails silently: the panel is usually lit already, so a wake that never
+     * happened looks exactly like one that did. When a charge or a notice turns out to
+     * have animated in the dark, the question is whether this was reached at all.
+     *
+     * Costs nothing when the display is already on, which is most of the time.
+     */
+    fun wake(reason: String = "") {
+        val display = rearDisplayId()
+        if (display < 0) return
+        val svc = service
+        if (svc == null) {
+            Log.w(TAG, "wake($reason) with no service — display stays as it was")
+            return
+        }
+        runCatching { svc.wake(display) }
+            .onSuccess { if (reason.isNotEmpty()) Log.i(TAG, "woke rear display for $reason") }
+            .onFailure { Log.w(TAG, "wake($reason) failed: ${it.message}") }
+    }
+
     fun isCalibrating(): Boolean = calibrating
 
     private companion object { const val TAG = "AiUsageBridge" }
