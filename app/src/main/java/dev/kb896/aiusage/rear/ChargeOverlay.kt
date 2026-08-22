@@ -22,8 +22,11 @@ object ChargeOverlay {
     /** How far in from the panel's edges the glass sits. */
     const val MARGIN = 16f
 
-    /** The glass's corner radius, as a fraction of its own width. */
-    const val CORNER = 0.28f
+    /** The least curve a glass may have before it reads as a box. */
+    const val MIN_CORNER = 14f
+
+    /** How hard the arriving liquid knocks the surface as the level climbs. */
+    const val SPLASH = 22f
 
     /** How long the cell takes to slide in, and to leave. */
     const val SLIDE_MS = 320f

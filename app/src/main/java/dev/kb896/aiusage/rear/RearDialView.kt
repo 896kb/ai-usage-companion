@@ -907,41 +907,13 @@ class RearDialView(context: Context) : View(context) {
     /** When the cell arrived, and what it is filling to. */
     private var chargeAt = 0L
     private var chargeStepAt = 0L
-    private var chargeSeed = 1
-    private val liquid = LiquidCell()
+    private var chargeTenth = -1
 
-    /** The offscreen the metaball field is summed into. Sized once, reused. */
-    private var chargeBitmap: android.graphics.Bitmap? = null
-    private val fieldCanvas = Canvas()
-    private val fieldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        maskFilter = android.graphics.BlurMaskFilter(
-            GOO_BLUR, android.graphics.BlurMaskFilter.Blur.NORMAL)
-        // ADDITIVE, and this is the whole trick rather than a detail.
-        //
-        // Ordinary alpha compositing SATURATES: draw one blurred circle over another and
-        // the overlap is not brighter than either, it is just opaque. A field built that
-        // way has no neck between neighbours, so the threshold below finds nothing to
-        // join and the drops stay separate — or, with a cut set high enough to be firm,
-        // almost everything falls under it and the cell looks empty. Measured that way:
-        // sixty-one drops covering four per cent of the field instead of a quarter of it.
-        //
-        // With PLUS the alphas sum, two shoulders overlapping clear the cut where neither
-        // would alone, and that is exactly the pinched join a liquid has.
-        blendMode = android.graphics.BlendMode.PLUS
-    }
-    private val gooPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    private fun chargeField(w: Int, h: Int): android.graphics.Bitmap? {
-        if (w <= 0 || h <= 0) return null
-        val had = chargeBitmap
-        if (had != null && had.width == w && had.height == h) return had
-        had?.recycle()
-        return runCatching {
-            android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-        }.getOrNull().also { chargeBitmap = it }
-    }
+    /** The level the liquid is filling to, and the figure drawn over it. */
     private var chargeLevel = 0f
     private var chargePercent = 0
+
+    private val surface = LiquidSurface()
 
     /**
      * Show the charging cell, filling to the battery's present level.
@@ -957,8 +929,8 @@ class RearDialView(context: Context) : View(context) {
         chargeLevel = percent / 100f
         chargeAt = SystemClock.elapsedRealtime()
         chargeStepAt = 0L
-        chargeSeed = (chargeSeed * 31 + percent + 7)
-        liquid.clear()
+        chargeTenth = -1
+        surface.calm()
         invalidate()
     }
 
@@ -975,7 +947,7 @@ class RearDialView(context: Context) : View(context) {
         val elapsed = (SystemClock.elapsedRealtime() - chargeAt).toFloat()
         if (ChargeOverlay.done(elapsed)) {
             chargeAt = 0L
-            liquid.clear()
+            surface.calm()
             return
         }
         animating = true
@@ -986,7 +958,17 @@ class RearDialView(context: Context) : View(context) {
         val right = Panel.WIDTH + off - ChargeOverlay.MARGIN
         val top = ChargeOverlay.MARGIN
         val bottom = Panel.HEIGHT - ChargeOverlay.MARGIN
-        val r = (right - left) * ChargeOverlay.CORNER
+        // THE SCREEN'S OWN RADIUS, carried inward.
+        //
+        // The cell is inset from the panel's edges by MARGIN, and a shape inset inside a
+        // rounded rectangle keeps concentric corners at radius minus inset — so this is
+        // the display's actual curve continued, not an approximation of it. cornerRadius()
+        // reads it from the window insets rather than assuming a number.
+        //
+        // Floored, because on a display with barely rounded corners the arithmetic gives
+        // something square, and a glass with sharp corners reads as a box.
+        val r = (cornerRadius() - ChargeOverlay.MARGIN)
+            .coerceIn(ChargeOverlay.MIN_CORNER, (right - left) / 2f)
         val tint = colorFor("charge", config.batteryTint)
 
         val glass = android.graphics.Path().apply {
@@ -1002,66 +984,90 @@ class RearDialView(context: Context) : View(context) {
         noticePaint.color = (config.background and 0x00FFFFFF) or (CHARGE_GROUND_ALPHA shl 24)
         canvas.drawRect(left, top, right, bottom, noticePaint)
 
-        // ---- the liquid, as drops --------------------------------------------------
+        // ---- the liquid, as a SURFACE ----------------------------------------------
         //
-        // A tilted line was here first, and it is a picture of a liquid rather than a
-        // liquid: it cannot pour into a corner, cannot sit on a wall when the phone is on
-        // its side, and has to be clamped to stop it becoming a diagonal slash. These
-        // fall in whatever direction gravity actually points, so the phone can go through
-        // a full turn and they go round with it. See LiquidCell.
+        // Drops were the second attempt and metaballs the third, and both were the wrong
+        // shape of answer. Blobs merging and pulling apart is what happens to liquid
+        // moving through air; this is a vessel with liquid sitting in it, and however
+        // well a heap of circles is packed the eye keeps finding the lumps — because a
+        // still liquid in a glass does not have any.
+        //
+        // What it has is a surface. One smooth line that ripples when disturbed and
+        // settles flat when left alone, which is a height field: see LiquidSurface.
         val now = SystemClock.elapsedRealtime()
         val dt = if (chargeStepAt == 0L) 0f else (now - chargeStepAt) / 1000f
         chargeStepAt = now
 
-        val cw = right - left
-        val ch = bottom - top
-        val want = Math.round(ChargeOverlay.fill(elapsed, chargeLevel) * LiquidCell.MAX_DROPS)
-        liquid.fillTo(want, cw, ch, chargeSeed)
-        // GRAVITY IN THE CELL'S OWN UNITS. The sensor reads in metres per second squared;
-        // this box is a couple of hundred units tall, so the reading is scaled to something
-        // that crosses it in about the time a real drop would.
-        val (gx, gy) = ChargeOverlay.gravity(gravityPanelX(), gravityPanelY())
-        liquid.step(dt, gx * G_SCALE, gy * G_SCALE, cw, ch)
+        val (rawX, rawY) = ChargeOverlay.gravity(gravityPanelX(), gravityPanelY())
+        val gLen = Math.hypot(rawX.toDouble(), rawY.toDouble()).toFloat().coerceAtLeast(0.001f)
+        val downX = rawX / gLen
+        val downY = rawY / gLen
+        surface.step(dt, downX, downY)
 
-        // ---- drawn as a FIELD, then cut at a threshold -----------------------------
-        //
-        // Circles drawn straight to the canvas read as beads in a jar, however well they
-        // are packed — the eye finds every outline. What makes them read as liquid is
-        // metaballs: give each drop a soft falloff, add the falloffs together, and keep
-        // only where the total passes a threshold. Two drops near each other then share
-        // one boundary, with the pinched neck between them that a liquid actually has.
-        //
-        // Done with a blur and an alpha curve rather than an AGSL shader. The shader
-        // route is available — RuntimeShader needs API 33 and this app is minSdk 34 —
-        // but it wants the drop positions as uniforms and a per-pixel loop over all of
-        // them, where this is one offscreen bitmap the size of the cell, which is 97 by
-        // 540 and costs nothing.
-        val field = chargeField(Math.round(cw), Math.round(ch))
-        if (field != null) {
-            fieldCanvas.setBitmap(field)
-            field.eraseColor(0)
-            // Solid white with a blur: the blur IS the falloff, and white keeps the
-            // alpha channel carrying the field value rather than a colour.
-            fieldPaint.color = 0xFFFFFFFF.toInt()
-            liquid.forEach { d ->
-                fieldCanvas.drawCircle(d.x, d.y, LiquidCell.RADIUS * DROP_DRAW, fieldPaint)
-            }
-            canvas.save()
-            canvas.translate(left, top)
-            // The threshold. The alpha row multiplies hard and subtracts, so the blurred
-            // shoulder is thrown away and what is left is a firm edge — everything below
-            // the cut vanishes, everything above becomes opaque.
-            gooPaint.colorFilter = android.graphics.ColorMatrixColorFilter(
-                android.graphics.ColorMatrix(floatArrayOf(
-                    0f, 0f, 0f, 0f, ((tint shr 16) and 0xFF).toFloat(),
-                    0f, 0f, 0f, 0f, ((tint shr 8) and 0xFF).toFloat(),
-                    0f, 0f, 0f, 0f, (tint and 0xFF).toFloat(),
-                    0f, 0f, 0f, GOO_CONTRAST, -GOO_CUT,
-                )))
-            gooPaint.alpha = 255
-            canvas.drawBitmap(field, 0f, 0f, gooPaint)
-            canvas.restore()
+        val fill = ChargeOverlay.fill(elapsed, chargeLevel)
+        // A knock as the level passes each tenth, so the arriving liquid disturbs the
+        // surface instead of the level sliding up under a sheet of glass.
+        val tenth = (fill * 10f).toInt()
+        if (tenth != chargeTenth) {
+            chargeTenth = tenth
+            surface.splash(0.35f + 0.3f * ((tenth * 7) % 10) / 10f, ChargeOverlay.SPLASH)
         }
+
+        canvas.save()
+        canvas.clipPath(glass)
+        // Along the surface, which is perpendicular to down. Everything below is built in
+        // this frame and then simply drawn — nothing needs to know the angle.
+        val acrossX = -downY
+        val acrossY = downX
+        val cx = (left + right) / 2f
+        val cy = (top + bottom) / 2f
+        val cw2 = (right - left)
+        val ch2 = (bottom - top)
+        // How far the cell reaches along each of the two directions. Generous on purpose:
+        // the polygon is clipped to the glass, so overshooting costs nothing and running
+        // short would leave a gap at a corner.
+        val depth = Math.abs(cw2 * downX) + Math.abs(ch2 * downY)
+        val span = Math.abs(cw2 * acrossX) + Math.abs(ch2 * acrossY)
+        // Where the flat surface sits: at the top of the cell when empty, the bottom when
+        // full, measured along the down axis.
+        val level = (0.5f - fill) * depth
+
+        val body = android.graphics.Path()
+        for (i in 0 until surface.size) {
+            val u = (i / (surface.size - 1f) - 0.5f) * span
+            val d = level + surface.heightAt(i)
+            val px = cx + acrossX * u + downX * d
+            val py = cy + acrossY * u + downY * d
+            if (i == 0) body.moveTo(px, py) else body.lineTo(px, py)
+        }
+        // Close it off well past the far side, so the fill runs to the bottom of the glass
+        // whichever way up the glass currently is.
+        body.lineTo(cx + acrossX * span / 2f + downX * depth, cy + acrossY * span / 2f + downY * depth)
+        body.lineTo(cx - acrossX * span / 2f + downX * depth, cy - acrossY * span / 2f + downY * depth)
+        body.close()
+
+        noticePaint.style = Paint.Style.FILL
+        noticePaint.shader = null
+        noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_LIQUID_ALPHA shl 24)
+        canvas.drawPath(body, noticePaint)
+
+        // The meniscus. A liquid's surface catches the light, and a brighter line along
+        // it is most of what separates "filled shape" from "something with a top".
+        noticePaint.style = Paint.Style.STROKE
+        noticePaint.strokeWidth = CHARGE_SURFACE
+        noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_MENISCUS shl 24)
+        val skin = android.graphics.Path()
+        for (i in 0 until surface.size) {
+            val u = (i / (surface.size - 1f) - 0.5f) * span
+            val d = level + surface.heightAt(i)
+            val px = cx + acrossX * u + downX * d
+            val py = cy + acrossY * u + downY * d
+            if (i == 0) skin.moveTo(px, py) else skin.lineTo(px, py)
+        }
+        canvas.drawPath(skin, noticePaint)
+        noticePaint.style = Paint.Style.FILL
+        canvas.restore()
+
         // And the glass's clip, so the rim below is a full stroke rather than a half one
         // cut down its own centre line.
         //
@@ -5500,25 +5506,12 @@ class RearDialView(context: Context) : View(context) {
         private const val CHARGE_GROUND_ALPHA = 0xF7
         private const val CHARGE_LIQUID_ALPHA = 0x66
         private const val CHARGE_RIM_ALPHA = 0x99
-        /** Sensor units to cell units. A drop crosses the glass in about a second. */
-        private const val G_SCALE = 62f
 
         /** Drops are drawn this much larger than they are simulated, so they merge. */
-        private const val DROP_DRAW = 1.0f
 
-        /**
-         * The metaball field: how far each drop's falloff reaches, and where it is cut.
-         *
-         * The blur spreads a drop into a soft shoulder; the contrast multiplies that
-         * shoulder up and the cut subtracts most of it away, leaving a firm edge. Where
-         * two shoulders overlap the sum clears the cut sooner, which is exactly the neck
-         * that makes two circles read as one body of liquid.
-         */
-        private const val GOO_BLUR = 4f
-        private const val GOO_CONTRAST = 4.5f
-        private const val GOO_CUT = 260f
 
         private const val CHARGE_SURFACE = 2.5f
+        private const val CHARGE_MENISCUS = 0xDD
         private const val CHARGE_RIM = 2f
 
         private const val NOTICE_MS = 5_000L
