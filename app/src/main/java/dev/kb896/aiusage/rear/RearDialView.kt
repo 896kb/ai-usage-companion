@@ -879,30 +879,24 @@ class RearDialView(context: Context) : View(context) {
         // time: this page does not scroll, it assembles in place as the readout leaves
         // over the top of it. Nested inside, every part of it was drawn a full panel
         // height above the screen and the page came up as a bare record on black.
-        // THE WHOLE MEDIA PAGE HANDS OVER TO THE LOCK, not just the record.
+        // THE MEDIA PAGE STAYS UP UNDER THE LOCK, and so does the record on the readout.
         //
-        // The record alone was the first attempt and it left the page looking broken: the
-        // elapsed and remaining times, the volume reading and the scrub arc are all placed
-        // AROUND the disc, so taking the disc away left them floating in the middle of an
-        // empty panel, arranged around a hole. This page IS the music player, and "instead
-        // of the art / music player, an unlock screen" applies to all of it.
-        //
-        // Faded on the lock's own drum so it leaves as the slider arrives. The layer only
-        // exists during those 200ms — at rest the alpha is exactly 1 or the page is not
-        // drawn at all — so the full-panel saveLayer is not a per-frame cost.
-        val pageAlpha = 1f - lockSwap(frameNowMs)
-        if (!hidden && onlyAccount == null && paging > 0.001f && pageAlpha > 0.004f) {
+        // Both were taken away at first — the page faded out on the lock's drum and the
+        // disc left through the bottom — and it was more than the job needed. The lock
+        // exists to stop a pocket PRESSING something, and the slider already sits over the
+        // band that holds every control on either page. What was left was a panel that
+        // went blank whenever a notification arrived, which is a lot of ceremony for a
+        // record sleeve nobody can tap.
+        if (!hidden && onlyAccount == null && paging > 0.001f) {
             canvas.save()
             // NOT pushed by the notice. Everything on this page is anchored to the
             // bottom of the panel and pushing it down puts the transport buttons off the
             // screen — which is what happened, and you cannot press what has left. The
             // record gives up the room instead.
             canvas.translate(dx, dy)
-            fading(canvas, PANEL_BOUNDS, pageAlpha) {
-                drawMediaPage(canvas, paging, dx, dy, push, geometry, volumeFraction)
-            }
+            drawMediaPage(canvas, paging, dx, dy, push, geometry, volumeFraction)
             canvas.restore()
-        } else if (paging <= 0.001f || pageAlpha <= 0.004f) {
+        } else if (paging <= 0.001f) {
             volumeBar = null
         }
         canvas.restore()   // the readout clip
@@ -4113,24 +4107,20 @@ class RearDialView(context: Context) : View(context) {
         // disc simply blinked out, which is the one exit a physical object never makes.
         val m = media ?: departing ?: return
         val swap = mediaSwap(frameNowMs)
-        // THE LOCK SENDS THE RECORD OUT THE SAME WAY THE MUSIC STOPPING DOES, down and
-        // off the bottom, and brings it back up when the lock lifts. Deliberately the
-        // same exit rather than a fade of its own: the disc is an object, and the one
-        // move it has already been given for leaving is the one it should use whatever
-        // the reason. That it comes back by simply reversing is why the instruction "the
-        // disc should spawn back with an animation" needed no new animation.
-        //
-        // Taken as the LARGER of the two departures so neither can undo the other — a
-        // track ending while the panel is locked must not slide the record back in.
-        val gone = maxOf(1f - swap, lockSwap(frameNowMs))
-        if (gone >= 0.999f) return
+        if (swap <= 0.001f) return
 
+        // THE LOCK LEAVES THE RECORD ALONE, at the user's decision after seeing it both
+        // ways. It was sent out and brought back at first, on the same exit the music
+        // stopping gives it — which animated well, and was the wrong call: the disc is
+        // scenery rather than a control, so hiding it bought no safety and cost the panel
+        // most of what it looks like. What has to go is anything that can be PRESSED, and
+        // the slider covers that band on both pages by itself.
         val base = discAt(paging, notice)
         // Slides out of the bottom when the music stops. It arrived as an object and it
         // leaves as one, the way a record comes off a deck.
         val resting = MediaLayout.Disc(
             base.cx,
-            base.cy + gone * (Panel.HEIGHT + base.radius),
+            base.cy + (1f - swap) * (Panel.HEIGHT + base.radius),
             base.radius,
         )
 
@@ -6179,10 +6169,6 @@ class RearDialView(context: Context) : View(context) {
         /** Slack around a faded corner glyph, covering its margin and the drift. */
         private const val FADE_PAD = 60f
 
-        /** The whole panel, for a layer that covers it. Generous, to allow for the drift. */
-        private val PANEL_BOUNDS = android.graphics.RectF(
-            -FADE_PAD, -FADE_PAD, Panel.WIDTH + FADE_PAD, Panel.HEIGHT + FADE_PAD,
-        )
 
         /**
          * The least time a lock may last before it can put the display out.
