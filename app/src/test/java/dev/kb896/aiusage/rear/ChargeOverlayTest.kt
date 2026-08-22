@@ -76,39 +76,50 @@ class ChargeOverlayTest {
         assertEquals(0f, ChargeOverlay.fill(ChargeOverlay.FILL_MS, -2f), 0.001f)
     }
 
-    // -- the surface ------------------------------------------------------------------
-
-    @Test fun `flat when the panel is level`() {
-        assertEquals(0f, ChargeOverlay.tilt(0f, 9.81f), 0.01f)
-    }
-
-    @Test fun `it leans the way the panel leans`() {
-        assertTrue("did not lean right", ChargeOverlay.tilt(3f, 9f) > 0f)
-        assertTrue("did not lean left", ChargeOverlay.tilt(-3f, 9f) < 0f)
-    }
+    // -- gravity ----------------------------------------------------------------------
 
     /**
-     * A faithful surface stays level however far the glass turns, which in a narrow cell
-     * is a diagonal line corner to corner — a broken drawing rather than a liquid.
+     * The case that made this necessary: a phone lying flat, which is how a rear screen
+     * gets looked at. Honestly projected there is no gravity in the panel's plane at all.
      */
-    @Test fun `the lean is clamped hard`() {
-        assertEquals(ChargeOverlay.MAX_TILT, ChargeOverlay.tilt(50f, 1f), 0.01f)
-        assertEquals(-ChargeOverlay.MAX_TILT, ChargeOverlay.tilt(-50f, 1f), 0.01f)
-        var gx = -60f
-        while (gx <= 60f) {
-            val a = ChargeOverlay.tilt(gx, 4f)
-            assertTrue("out of clamp at $gx: $a", Math.abs(a) <= ChargeOverlay.MAX_TILT + 0.01f)
-            gx += 3f
+    @Test fun `a flat panel still has a down`() {
+        val (gx, gy) = ChargeOverlay.gravity(-0.17f, 0.51f)
+        assertTrue("no downward pull when flat: $gy", gy > 9f)
+        assertTrue("invented a sideways pull: $gx", Math.abs(gx) < 0.5f)
+    }
+
+    @Test fun `upright is left alone`() {
+        // The direction is kept; only the length is standardised.
+        val (gx, gy) = ChargeOverlay.gravity(-0.31f, 9.77f)
+        assertEquals(-0.31f, gx, 0.05f)
+        assertEquals(9.81f, gy, 0.05f)
+    }
+
+    /** However the phone is held, the liquid feels about one g. Never none, never two. */
+    @Test fun `the total is always about one g`() {
+        var a = 0.0
+        while (a < 2 * Math.PI) {
+            for (scale in listOf(0f, 0.3f, 0.7f, 1f)) {
+                val gx = (Math.cos(a) * ChargeOverlay.FULL_G * scale).toFloat()
+                val gy = (Math.sin(a) * ChargeOverlay.FULL_G * scale).toFloat()
+                val (ox, oy) = ChargeOverlay.gravity(gx, gy)
+                val mag = Math.hypot(ox.toDouble(), oy.toDouble()).toFloat()
+                assertTrue("felt %.2f g at angle %.2f scale %.1f".format(mag / 9.81f, a, scale),
+                    mag > 8f && mag < 12f)
+            }
+            a += Math.PI / 12
         }
     }
 
-    /** Upside down is still a lean, not a flip: the sign follows gx alone. */
-    @Test fun `turning the phone over does not invert the lean`() {
-        assertTrue(ChargeOverlay.tilt(3f, -9f) > 0f)
-        assertTrue(ChargeOverlay.tilt(-3f, -9f) < 0f)
+    /** Tilt it and the pull leans, rather than staying pinned to the panel's own down. */
+    @Test fun `a lean is preserved`() {
+        val (gx, _) = ChargeOverlay.gravity(6f, 6f)
+        assertTrue("the lean was flattened out: $gx", gx > 4f)
     }
 
-    @Test fun `no reading is flat rather than an error`() {
-        assertEquals(0f, ChargeOverlay.tilt(0f, 0f), 0.001f)
+    /** Upside down, the liquid belongs at the top. Nothing here should fight that. */
+    @Test fun `a fully inverted phone pulls upward`() {
+        val (_, gy) = ChargeOverlay.gravity(0f, -9.8f)
+        assertTrue("did not pull upward when inverted: $gy", gy < -8f)
     }
 }

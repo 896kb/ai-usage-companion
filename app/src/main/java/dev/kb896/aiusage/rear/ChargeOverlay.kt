@@ -90,14 +90,47 @@ object ChargeOverlay {
      * the caller's job to arrange — the rear display is landscape on the back of a
      * portrait phone, so the sensor's axes and this one's are not the same.
      */
-    fun tilt(gx: Float, gy: Float): Float {
-        if (gx == 0f && gy == 0f) return 0f
-        val deg = Math.toDegrees(Math.atan2(gx.toDouble(), Math.abs(gy.toDouble()))).toFloat()
-        return deg.coerceIn(-MAX_TILT, MAX_TILT)
+    /**
+     * Gravity for the liquid, from the panel-plane components of a real reading.
+     *
+     * THE PANEL ALWAYS FEELS A FULL G, and whatever the tilt does not account for is
+     * treated as pointing down the panel. That is a deliberate lie, and it is the
+     * difference between a readout and a curiosity.
+     *
+     * Honestly projected, a rear screen lying flat on a desk — which is exactly how one
+     * gets looked at — has NO gravity in its own plane: measured at (-0.17, +0.51) with
+     * the phone face down, against 9.8 straight through the screen. The drops then sit
+     * wherever they were poured, and a battery at 70% shows as a full glass stuck to the
+     * ceiling. Correct physics, useless picture.
+     *
+     * So the missing component is added downward. Upright, the tilt accounts for all of
+     * it and nothing is added; flat, all of it is added and the liquid simply falls to
+     * the bottom of the cell; in between it leans by exactly as much as the phone does.
+     * Turn the phone in its own plane and the pool goes round with it, because the
+     * measured part still dominates.
+     */
+    fun gravity(gx: Float, gy: Float): Pair<Float, Float> {
+        val inPlane = Math.hypot(gx.toDouble(), gy.toDouble()).toFloat()
+        // How much of a real tilt there is to go on, 0 when flat and 1 when upright.
+        val trust = (inPlane / FULL_G).coerceIn(0f, 1f)
+        // The measured direction, or straight down when there is nothing to measure.
+        val ux = if (inPlane > 0.001f) gx / inPlane else 0f
+        val uy = if (inPlane > 0.001f) gy / inPlane else 1f
+        // BLENDED AS DIRECTIONS, then given a fixed length. Adding a downward component
+        // to the reading was the first attempt and it cancels itself: a phone tilted so
+        // that the panel's "up" is slightly favoured has a small upward reading, and
+        // adding a large downward one to it leaves almost nothing — the liquid feels a
+        // third of a g and drifts. Blending which WAY is down, and then always pulling
+        // with the same force, has no such hole.
+        val dx = ux * trust
+        val dy = uy * trust + (1f - trust)
+        val len = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+        if (len < 0.0001f) return 0f to FULL_G
+        return (dx / len * FULL_G) to (dy / len * FULL_G)
     }
 
-    /** The steepest lean the surface is allowed. */
-    const val MAX_TILT = 18f
+    /** One gravity, in the units the sensor reports. */
+    const val FULL_G = 9.81f
 
     /**
      * How far the surface rides up and down as the phone moves, in units.
@@ -107,6 +140,14 @@ object ChargeOverlay {
      */
     const val SLOSH = 3.5f
 
-    /** How much of the cell's height the percentage occupies. */
-    const val TEXT_SIZE = 0.13f
+    /**
+     * The percentage's type size, as a fraction of the cell's WIDTH.
+     *
+     * Off the width, not the height, which is the mistake it was: a thirteenth of a
+     * 540-tall glass is seventy units, and three monospaced characters at seventy units
+     * are a hundred and thirty-five wide in a glass that is ninety-seven. The figure ran
+     * out of both sides of the thing it was meant to be inside. What constrains a line of
+     * text here is the narrow dimension, so that is the one it is measured against.
+     */
+    const val TEXT_SIZE = 0.30f
 }
