@@ -4485,6 +4485,22 @@ class RearDialView(context: Context) : View(context) {
         val top = MediaPage.TRANSPORT_CY - gh / 2f
         val centres = mutableListOf<Float>()
 
+        // THE BUTTONS LEAVE WHEN THE LOCK ARRIVES, on the lock's own drum — down and out
+        // through the bottom, the same movement the readout's row makes as the slider
+        // takes its place.
+        //
+        // Covering them was not enough. The slider is opaque and sits over this row, but
+        // it is a stadium 70 units tall and these glyphs are centred at 529 on a panel
+        // 572 deep, so their bottom edge showed underneath it. A control half-visible
+        // beneath the thing that exists to say "you cannot press this" is worse than
+        // either state on its own.
+        val lockOut = lockSwap(frameNowMs)
+        canvas.save()
+        if (lockOut > 0.001f) {
+            canvas.clipRect(0f, top - gh, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+            canvas.translate(0f, lockOut * (Panel.HEIGHT - top + gh))
+        }
+
         extras.color = shade(tint, 0xFF)
         drawIcon(canvas, PanelIcons.PREV, x, top, gh)
         centres += x + widths[0] / 2f
@@ -4500,6 +4516,7 @@ class RearDialView(context: Context) : View(context) {
 
         drawIcon(canvas, PanelIcons.NEXT, x, top, gh)
         centres += x + widths[2] / 2f
+        canvas.restore()
 
         // No clocks along the bottom. Elapsed and total are on the playback ring now,
         // curved at the two ends of the arc that measures them; a second copy pinned to
@@ -4626,7 +4643,9 @@ class RearDialView(context: Context) : View(context) {
         // Targets, and only once the page has arrived — the same rule the row follows.
         // A button that can be pressed while it is still fading in is a button in a place
         // it does not yet occupy.
-        if (paging >= 0.999f) {
+        // And their targets go with them, from the first frame of the movement rather
+        // than the last. A glyph on its way off the panel must not still answer.
+        if (paging >= 0.999f && lockOut <= 0.001f) {
             mediaStrip = android.graphics.RectF(
                 centres.first() - MediaPage.TRANSPORT_GAP - dx, top - dy,
                 centres.last() + MediaPage.TRANSPORT_GAP - dx, top + gh - dy,
