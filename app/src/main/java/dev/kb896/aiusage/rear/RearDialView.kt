@@ -470,6 +470,26 @@ class RearDialView(context: Context) : View(context) {
         val wantsMediaPage = onlyAccount == null && mediaPageAvailable()
         if (wantsMediaPage) {
             pager.pages = 2
+            // COME BACK TO THE PAGE YOU WERE ON.
+            //
+            // The :rear process is destroyed and recreated constantly — every recovery,
+            // every re-placement, every time HyperOS decides to — and it holds no state,
+            // by design, so that a respawned panel is never briefly wrong. That is right
+            // for everything it DRAWS, all of which arrives in one payload. It is wrong
+            // for where you were standing: being put back on the readout because the
+            // system restarted a process is the panel losing your place for a reason
+            // that is nothing to do with you.
+            //
+            // Restored WITHOUT animating, and only once. A panel that comes up and then
+            // visibly scrolls to the media page is showing you a transition you did not
+            // make; it should simply already be there.
+            if (!pageRestored) {
+                pageRestored = true
+                if (panelPrefs.getInt(KEY_PAGE, 0) == 1) {
+                    pager.goTo(1, frameNowMs)
+                    pager.advance(frameNowMs + PAGE_SETTLE_MS.toLong())
+                }
+            }
         } else if (pager.pages > 1) {
             // The media page can vanish while you are standing on it — the music stops,
             // and the page it was about goes with it. Walk back rather than cutting: the
@@ -479,6 +499,15 @@ class RearDialView(context: Context) : View(context) {
             if (pager.restingAt(0)) pager.pages = 1
         }
         val paged = if (onlyAccount == null) pager.advance(frameNowMs) else 0f
+        // Written only when it SETTLES, not while a drag is in flight: a scroll that is
+        // abandoned halfway never happened, and a file written sixty times a second
+        // during a swipe is a lot of I/O to record something that is still changing.
+        if (interactive && pageRestored && pager.restingAt(pager.page) &&
+            pager.page != pageSaved
+        ) {
+            pageSaved = pager.page
+            panelPrefs.edit().putInt(KEY_PAGE, pageSaved).apply()
+        }
         val paging = (paged / Panel.HEIGHT).coerceIn(0f, 1f)
 
         // The notice pushes the READOUT down, and only while the readout is the page you
@@ -1533,6 +1562,10 @@ class RearDialView(context: Context) : View(context) {
      */
     private var lyricsShownFor = ""
 
+    /** The sheet the departing record carries out with it — see drawLeavingLyrics. */
+    private var swapLyrics: dev.kb896.aiusage.data.Lrc = dev.kb896.aiusage.data.Lrc.NONE
+    private var swapLyricLine = -1
+
     /** Which line is up, which one it came from, and when it arrived. */
     private var lyricLine = -1
     private var lyricFrom = -1
@@ -1653,6 +1686,16 @@ class RearDialView(context: Context) : View(context) {
             // carries: if the held sheet was resolved for a different recording than the
             // one now playing, it is not late, it is wrong.
             if (lyricsShownFor != wants) {
+                // Handed to the record that is leaving, exactly as the artwork is — see
+                // swapCover. The words belong to that disc, so they go out with it and
+                // fade on the way rather than being cut off the instant the title
+                // changes. What they must never do is attach to the ARRIVING disc, which
+                // is why this is a snapshot travelling with the old one rather than the
+                // live sheet being allowed to linger.
+                if (!lyrics.isEmpty) {
+                    swapLyrics = lyrics
+                    swapLyricLine = lyricLine
+                }
                 lyricsRaw = ""
                 lyricsShownFor = ""
                 lyrics = dev.kb896.aiusage.data.Lrc.NONE
@@ -1893,6 +1936,25 @@ class RearDialView(context: Context) : View(context) {
      */
     private val pager = PanelPager(Panel.HEIGHT.toFloat(), PAGE_SETTLE_MS)
 
+    /**
+     * Where the panel keeps the little it must survive its own process.
+     *
+     * ITS OWN FILE, not the config. The config is the user's settings, written by the
+     * front screen and read here; this is the panel's own scratch note about where it
+     * was standing, and mixing the two would mean a scroll position rides in the same
+     * blob as everything a person deliberately chose.
+     *
+     * Only this process reads or writes it, which matters: SharedPreferences caches per
+     * process, so a file edited under a live reader is ignored. Here the reader is the
+     * writer, and a respawn is a fresh process reading fresh.
+     */
+    private val panelPrefs by lazy {
+        context.getSharedPreferences(PANEL_PREFS, android.content.Context.MODE_PRIVATE)
+    }
+
+    private var pageRestored = false
+    private var pageSaved = 0
+
     /** The volume area's touch target, or null when the media page is not up. */
     private var volumeBar: android.graphics.RectF? = null
 
@@ -1934,6 +1996,19 @@ class RearDialView(context: Context) : View(context) {
         val a = audio ?: return
         val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
         if (max <= 0) return
+        // A DRAG FORGETS THE GHOST, whatever the system thinks about mute.
+        //
+        // Dragging to the bottom sets the stream to zero, and Android may set its mute
+        // flag along with it — so the panel found itself "muted" holding a remembered
+        // level from some earlier press of the mute button. The ghost then promised a
+        // volume that unmuting would not restore, which is worse than no ghost: it is a
+        // reading that is confidently wrong.
+        //
+        // The ghost belongs to the mute BUTTON alone. That is the only gesture that
+        // means "keep this level, I will want it back"; setting the volume by hand is a
+        // statement about where it should be now, and silence reached that way is just
+        // silence.
+        mutedFrom = 0f
         val travelled = MediaPage.volumeTravel(y, volumeDownY, Panel.HEIGHT.toFloat())
         applyVolume(Math.round(volumeDownLevel + travelled * max).coerceIn(0, max))
     }
@@ -3095,6 +3170,11 @@ class RearDialView(context: Context) : View(context) {
         val leaving = swapFrom
         val progress = swapProgress(frameNowMs)
         if (progress == null || leaving == null) {
+            // The change is over: the departing sheet has nothing left to travel with.
+            if (!swapLyrics.isEmpty) {
+                swapLyrics = dev.kb896.aiusage.data.Lrc.NONE
+                swapLyricLine = -1
+            }
             drawCoverAt(canvas, resting, m, paging)
             // Around the settled record only. A track being changed has no sheet yet by
             // construction — the old one was dropped the moment the title moved — so
@@ -3134,7 +3214,10 @@ class RearDialView(context: Context) : View(context) {
                 ring.cx, ring.cy, ring.radius - MediaPage.SWAP_RING_INSET)
             if (progress < exit) {
                 val e = Tween.easeInOut(progress / exit)
-                drawCoverAt(canvas, lerpDisc(resting, inRing, e), leaving, paging)
+                val going = lerpDisc(resting, inRing, e)
+                drawCoverAt(canvas, going, leaving, paging)
+                drawLeavingLyrics(canvas, going, 1f - e, paging,
+                    colorFor("media", config.mediaTint))
             } else {
                 val e = Tween.easeInOut((progress - exit) / (1f - exit))
                 drawCoverAt(canvas, lerpDisc(inRing, resting, e), m, paging)
@@ -3145,14 +3228,23 @@ class RearDialView(context: Context) : View(context) {
         if (config.mediaArt == MediaArt.VINYL) {
             // Crossing: both at once, one going and one coming from the far side.
             val e = Tween.easeInOut(progress)
-            if (e < 0.999f) drawCoverAt(canvas, shifted(e), leaving, paging)
+            if (e < 0.999f) {
+                val going = shifted(e)
+                drawCoverAt(canvas, going, leaving, paging)
+                drawLeavingLyrics(canvas, going, 1f - e, paging,
+                    colorFor("media", config.mediaTint))
+            }
             drawCoverAt(canvas, shifted(-(1f - e)), m, paging)
             return
         }
 
         // Following: out first, then the next one back in behind it.
         if (progress < exit) {
-            drawCoverAt(canvas, shifted(Tween.easeInOut(progress / exit)), leaving, paging)
+            val e = Tween.easeInOut(progress / exit)
+            val going = shifted(e)
+            drawCoverAt(canvas, going, leaving, paging)
+            drawLeavingLyrics(canvas, going, 1f - e, paging,
+                colorFor("media", config.mediaTint))
         } else {
             val e = Tween.easeInOut((progress - exit) / (1f - exit))
             drawCoverAt(canvas, shifted(1f - e), m, paging)
@@ -3508,14 +3600,29 @@ class RearDialView(context: Context) : View(context) {
         )
         // The waves, concentric on the cone's mouth and clipped to a wedge, so they read
         // as sound leaving the speaker rather than as rings around it.
-        if (waves > 0) {
+        run {
             closePaint.style = Paint.Style.STROKE
             closePaint.strokeCap = Paint.Cap.ROUND
             closePaint.strokeWidth = mh * WAVE_STROKE
-            closePaint.color = extras.color
             val originX = hx + speakerW / 2f
-            for (i in 1..waves) {
-                val r = mh * (WAVE_FIRST + WAVE_STEP * (i - 1))
+            for (i in 1..WAVE_MAX) {
+                // A WAVE LEAVES THE CONE AND TRAVELS OUT, rather than appearing where it
+                // will end up. That is what sound does, and it is also what makes a
+                // change of one step legible: a wave arriving at full radius is a shape
+                // switching on somewhere in the corner of your eye, where one moving
+                // outward from the speaker's mouth reads as the speaker doing something.
+                //
+                // Each has its own leg, so going from one wave to three sends two out
+                // together from where they belong rather than as one group. Turning down
+                // runs the same journey backwards, into the cone.
+                val out = ease("vol:wave:" + i, if (i <= waves) 1f else 0f, WAVE_MS)
+                if (out <= 0.01f) continue
+                // Radius from the cone's mouth outward. Alpha with it, so a wave that has
+                // barely left is not a hard dot sitting on the speaker's lip.
+                val r = mh * (WAVE_FIRST + WAVE_STEP * (i - 1)) * out
+                closePaint.color = (extras.color and 0x00FFFFFF) or
+                    ((((extras.color ushr 24) and 0xFF) * out).toInt()
+                        .coerceIn(0, 255) shl 24)
                 scratch.set(originX - r, hy - r, originX + r, hy + r)
                 canvas.drawArc(scratch, -WAVE_SPREAD / 2f, WAVE_SPREAD, false, closePaint)
             }
@@ -4090,6 +4197,42 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = was
     }
 
+    /**
+     * The departing record's words, going out with it.
+     *
+     * Only ever drawn around the disc that is LEAVING, and only while it is leaving. The
+     * lines are the ones that were up when the track changed — frozen, because they are
+     * about a song that has ended and running its clock on would have them promoting
+     * through verses nobody is listening to.
+     */
+    private fun drawLeavingLyrics(
+        canvas: Canvas,
+        disc: MediaLayout.Disc,
+        fade: Float,
+        paging: Float,
+        tint: Int,
+    ) {
+        if (swapLyrics.isEmpty || fade <= 0.01f || paging <= 0.001f) return
+        val a = (fade * paging).coerceIn(0f, 1f)
+        val curved = config.mediaArt == MediaArt.VINYL
+        val now = if (curved) LyricsRing.currentRadius(disc.radius)
+            else LyricsRing.rowBaseline(disc.cy - disc.radius)
+        val next = if (curved) LyricsRing.nextRadius(disc.radius)
+            else LyricsRing.rowNextBaseline(disc.cy - disc.radius)
+        val was = extras.textAlign
+        val size = extras.textSize
+        extras.textAlign = Paint.Align.CENTER
+        fun place(text: String, at: Float, alpha: Int) {
+            if (curved) drawLyricArc(canvas, text, disc, at, tint, alpha)
+            else drawLyricRow(canvas, text, disc, at, tint, alpha)
+        }
+        swapLyrics.lineAt(swapLyricLine)?.let { place(it, now, (255 * a).toInt()) }
+        swapLyrics.lineAt(swapLyricLine + 1)
+            ?.let { place(it, next, (LyricsRing.NEXT_ALPHA * a).toInt()) }
+        extras.textSize = size
+        extras.textAlign = was
+    }
+
     /** One line, bent along its arc. Blank entries draw nothing — see Lrc. */
     private fun drawLyricArc(
         canvas: Canvas,
@@ -4227,12 +4370,31 @@ class RearDialView(context: Context) : View(context) {
     /**
      * Where the record has turned to, in degrees.
      *
-     * Accumulated rather than computed from the clock, because it has to STOP when the
-     * music does and pick up from where it stopped. A rotation derived from wall time
-     * would keep turning through a pause behind the scenes and jump on resume, which is
-     * the one thing this is meant to communicate.
+     * DERIVED FROM THE POSITION IN THE TRACK, at one revolution per [SPIN_MS] of music,
+     * rather than accumulated off the wall clock. The angle is then a picture of where
+     * the track is rather than of how long the panel has been awake, and three separate
+     * behaviours stop needing code of their own:
+     *
+     *  - It stops on pause, because the position stops.
+     *  - It turns UNDER A SCRUB, forward or backward, because it reads the same eased
+     *    follower the dial does, and that follower is pinned to the finger while a drag
+     *    is in flight.
+     *  - It SPINS BACK when a scrub is abandoned outside the area, because the follower
+     *    eases back to the true position and the record simply follows it there.
+     *
+     * The follower is one frame stale here — the record is drawn before this frame's
+     * reading is worked out — which at sixteen milliseconds is a third of a degree.
+     *
+     * A track with NO TIMELINE has no position to derive from: a live stream, a radio
+     * session. Those keep the old accumulating spin, so the record still reads as
+     * running rather than as stopped.
      */
     private fun vinylAngle(m: Media): Float {
+        if (m.durationMs > 0L) {
+            if (m.playing) animating = true
+            val elapsed = progressShown.coerceIn(0f, 1f) * m.durationMs
+            return (elapsed / SPIN_MS * 360f) % 360f
+        }
         val now = frameNowMs
         val since = if (vinylAt == 0L) 0L else now - vinylAt
         vinylAt = now
@@ -5024,6 +5186,9 @@ class RearDialView(context: Context) : View(context) {
          * own height. PanelPager shortens it in proportion to the distance actually
          * left, so a release near the edge still lands at once.
          */
+        private const val PANEL_PREFS = "rear_panel"
+        private const val KEY_PAGE = "page"
+
         private const val PAGE_SETTLE_MS = 340f
 
         /** How long the volume ring takes to catch up with a step. Short: it is
@@ -5062,6 +5227,18 @@ class RearDialView(context: Context) : View(context) {
         /** How much of each circle is drawn, in degrees, centred on straight out. */
         private const val WAVE_SPREAD = 108f
 
+        /** The most the speaker ever shows — see MediaPage.volumeWaves. */
+        private const val WAVE_MAX = 3
+
+        /**
+         * How long a wave takes to travel out of the cone, or back into it.
+         *
+         * Quick. This is feedback on a control being turned, not an event: a drag across
+         * the volume strip crosses both thresholds in well under a second, and a wave
+         * still ambling outward while the next one leaves would read as lag.
+         */
+        private const val WAVE_MS = 220f
+
         private const val MUTE_SLASH = 2.5f
 
         /** How far outside the volume column a touch still counts. It is 10 units wide
@@ -5083,6 +5260,16 @@ class RearDialView(context: Context) : View(context) {
          * read from across a room as "it is playing" rather than measured.
          */
         private const val VINYL_DEG_PER_MS = 0.1f
+
+        /**
+         * How much music one revolution of the record represents.
+         *
+         * Ten seconds. Nothing like a real record — 33 rpm is one turn per 1.8s — and
+         * that is the point: this disc is a readout as much as an object, and at record
+         * speed a scrub is a blur and ordinary playback is a flicker on an always-on
+         * panel. Slow enough to follow with the eye makes winding legible AS winding.
+         */
+        private const val SPIN_MS = 10_000f
         /**
          * The record's material.
          *
