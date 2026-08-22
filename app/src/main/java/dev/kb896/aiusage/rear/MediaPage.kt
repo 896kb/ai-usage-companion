@@ -400,7 +400,25 @@ object MediaPage {
      * summary — silent, some, plenty — and a fourth state would be a distinction nobody
      * can make out at 26 units.
      */
-    const val VOLUME_LOUD = 0.5f
+    /**
+     * How many waves the speaker shows, 0 to 3, for a level 0..1.
+     *
+     * EVEN THIRDS, where this used to be a single threshold at a half: one glyph below
+     * it, another above, and nothing in between. Three bands means the icon reports
+     * roughly where the volume is rather than only which half of the range it is in,
+     * which is most of what an icon on a display you glance at can usefully say.
+     *
+     * Zero waves is SILENCE — a level of nothing, with the stream still live. It is not
+     * the same as muted, which keeps a level it will come back to and says so with a
+     * slash and a ghost arc, and telling the two apart is the whole reason this returns
+     * a count rather than picking one of two pictures.
+     */
+    fun volumeWaves(level: Float): Int = when {
+        level <= 0f -> 0
+        level < 1f / 3f -> 1
+        level < 2f / 3f -> 2
+        else -> 3
+    }
 
     /**
      * The horizontal centre of this page, and the margins its full-width parts keep.

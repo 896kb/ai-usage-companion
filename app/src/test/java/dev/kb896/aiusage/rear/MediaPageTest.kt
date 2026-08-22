@@ -178,6 +178,36 @@ class MediaPageTest {
         assertTrue("the bar runs under the left clock", left > 296f + MediaPage.MARGIN)
     }
 
+    /**
+     * Silence and mute are different states, and the icon has to say which.
+     *
+     * Zero waves means the stream is live and set to nothing; mute keeps a level it will
+     * return to, and shows a slash and a ghost arc instead. Collapsing them would make
+     * the one recoverable state and the one deliberate state look identical.
+     */
+    @Test fun `the speaker shows nothing at silence`() {
+        assertEquals(0, MediaPage.volumeWaves(0f))
+        assertEquals(0, MediaPage.volumeWaves(-0.1f))
+    }
+
+    /** Even thirds, where it used to be one threshold at a half. */
+    @Test fun `the waves change on thirds`() {
+        assertEquals(1, MediaPage.volumeWaves(0.01f))
+        assertEquals(1, MediaPage.volumeWaves(0.32f))
+        assertEquals(2, MediaPage.volumeWaves(1f / 3f))
+        assertEquals(2, MediaPage.volumeWaves(0.65f))
+        assertEquals(3, MediaPage.volumeWaves(2f / 3f))
+        assertEquals(3, MediaPage.volumeWaves(1f))
+    }
+
+    /** Never more than the icon can draw, whatever it is handed. */
+    @Test fun `the count stays in range`() {
+        for (i in -20..120) {
+            val n = MediaPage.volumeWaves(i / 100f)
+            assertTrue("out of range at $i: $n", n in 0..3)
+        }
+    }
+
     // -- the two drag controls -------------------------------------------------------
 
     /**

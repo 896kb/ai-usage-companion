@@ -3453,11 +3453,22 @@ class RearDialView(context: Context) : View(context) {
         // something to look at.
         val isMuted = muted()
         val level = if (isMuted) 0f else volumeLevel()
-        val speaker = when {
-            isMuted || level <= 0f -> PanelIcons.VOLUME_OFF
-            level <= MediaPage.VOLUME_LOUD -> PanelIcons.VOLUME_LOW
-            else -> PanelIcons.VOLUME_HIGH
-        }
+        // THE CONE IS A GLYPH; THE WAVES ARE DRAWN.
+        //
+        // It used to be three whole glyphs — no waves, one wave, and the three-wave one
+        // above a single threshold at half volume — so the middle of the range had no
+        // picture of its own. There is no fourth glyph to reach for: this font's only
+        // clean two-wave speaker is Octicons' f485, whose cone is an OUTLINE where every
+        // FontAwesome one here is solid, and putting the two side by side on a dial is a
+        // mismatch you notice immediately. Clipping a wave off the three-wave glyph was
+        // the other attempt, and its arcs merge into one run at the top and bottom rows,
+        // so every clip leaves a stub where it cut through them.
+        //
+        // So the bare cone is the glyph and the waves are arcs, which the panel draws
+        // everywhere already — the rings, the ticks, and this glyph's own mute slash.
+        // Nothing has to match a typeface, the count is free, and it scales exactly.
+        val speaker = PanelIcons.VOLUME_OFF
+        val waves = if (isMuted) 0 else MediaPage.volumeWaves(level)
         val ring = rings.work
         // In the RING's frame, not the page's — see the note by drawMediaRings. This
         // orbits a ring that does not drift, so it must not drift either.
@@ -3495,6 +3506,21 @@ class RearDialView(context: Context) : View(context) {
             hx - speakerW / 2f - (mh - speakerW) / 2f, hy - mh / 2f, mh,
             smooth = true,
         )
+        // The waves, concentric on the cone's mouth and clipped to a wedge, so they read
+        // as sound leaving the speaker rather than as rings around it.
+        if (waves > 0) {
+            closePaint.style = Paint.Style.STROKE
+            closePaint.strokeCap = Paint.Cap.ROUND
+            closePaint.strokeWidth = mh * WAVE_STROKE
+            closePaint.color = extras.color
+            val originX = hx + speakerW / 2f
+            for (i in 1..waves) {
+                val r = mh * (WAVE_FIRST + WAVE_STEP * (i - 1))
+                scratch.set(originX - r, hy - r, originX + r, hy + r)
+                canvas.drawArc(scratch, -WAVE_SPREAD / 2f, WAVE_SPREAD, false, closePaint)
+            }
+            closePaint.strokeWidth = 0f
+        }
         if (isMuted) {
             // TWO strokes: a wider one in the panel's own background, then the slash
             // itself inside it. The gap is what makes the line read as a cut THROUGH the
@@ -5028,6 +5054,14 @@ class RearDialView(context: Context) : View(context) {
         private const val DRAG_SLOP = 16f
 
         /** The stroke through a muted speaker. */
+        /** The waves beside the cone, as fractions of the glyph's height. */
+        private const val WAVE_FIRST = 0.34f
+        private const val WAVE_STEP = 0.24f
+        private const val WAVE_STROKE = 0.09f
+
+        /** How much of each circle is drawn, in degrees, centred on straight out. */
+        private const val WAVE_SPREAD = 108f
+
         private const val MUTE_SLASH = 2.5f
 
         /** How far outside the volume column a touch still counts. It is 10 units wide
