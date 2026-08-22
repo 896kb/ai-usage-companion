@@ -73,7 +73,23 @@ class RearUserService : IRearService.Stub {
         exec("am broadcast -p $PKG -a $ACTION_STATE --es state ${shellQuote(payload)}")
     }
 
+    /**
+     * Whether the panel is asleep on purpose.
+     *
+     * Volatile because the keep-alive thread reads it and a binder thread writes it.
+     */
+    @Volatile private var dozing = false
+
+    override fun setDozing(dozing: Boolean) {
+        this.dozing = dozing
+        Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
+    }
+
     override fun wake(displayId: Int) {
+        // An explicit wake is somebody deciding the panel should be lit, which ends the
+        // sleep by definition. Not gated on `dozing` — gating it here would make the
+        // notification that wakes a dozing panel the one thing that cannot.
+        dozing = false
         // Required. The activity is created on display 0 where the screen is
         // already on, so FLAG_TURN_SCREEN_ON has nothing to act on; without
         // this the task is placed and focused but the panel stays state=OFF.
@@ -90,7 +106,12 @@ class RearUserService : IRearService.Stub {
         // outlives composition, so every subsequent show() took this branch and
         // broadcast an update to a window nobody was drawing, instead of relaunching.
         if (placedDisplayId == displayId && taskId() > 0 && panelWhere() == Where.REAR) {
-            update(payload); wake(displayId); return
+            // The payload still goes through — the panel should be correct whenever it is
+            // next seen — but it is NOT lit for it. A status update is not a reason to
+            // wake a display somebody deliberately let go.
+            update(payload)
+            if (!dozing) wake(displayId)
+            return
         }
         exec("am start -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
         val task = pollTaskId()
@@ -249,7 +270,7 @@ class RearUserService : IRearService.Stub {
         val out = exec("dumpsys SurfaceFlinger")
         if (!out.contains("HWC layers:")) return Where.NOWHERE
 
-        val header = Regex("""Display (\d+) \((?:active|inactive)\) HWC layers:""")
+        val header = Regex("""Display (\d+) \((active|inactive)\) HWC layers:""")
         val matches = header.findAll(out).toList()
         if (matches.isEmpty()) return Where.NOWHERE
 
@@ -258,12 +279,19 @@ class RearUserService : IRearService.Stub {
         // Whether the rear display is composing ANYTHING, ours or not. This is what
         // separates an asleep panel from a hijacked one.
         var rearBusy = false
+        // And whether that display is powered at all. SurfaceFlinger says so in the same
+        // header — measured: the front display read "(inactive)" with mScreenState=OFF
+        // while the rear read "(active)" with mScreenState=ON, in one dump.
+        var rearActive = false
         for ((i, m) in matches.withIndex()) {
             val start = m.range.last + 1
             val end = if (i + 1 < matches.size) matches[i + 1].range.first else out.length
             val section = out.substring(start, end)
             val isRear = m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)
-            if (isRear && layerName.containsMatchIn(section)) rearBusy = true
+            if (isRear) {
+                if (m.groupValues[2] == "active") rearActive = true
+                if (layerName.containsMatchIn(section)) rearBusy = true
+            }
             if (!section.contains("RearActivity")) continue
             if (isRear) onRear = true else onMain = true
         }
@@ -285,7 +313,19 @@ class RearUserService : IRearService.Stub {
             // Our layer is nowhere. If the rear display is composing someone else's, it
             // is on and showing something that is not us, which is a failure that used to
             // be invisible. If it is composing nothing, the panel is simply asleep.
-            rearBusy -> Where.DISPLACED
+            //
+            // "IS ON" IS NOT AN ASSUMPTION ANY MORE, IT IS CHECKED. A powered-down display
+            // is composing nothing of ours and often something of MIUI's, which read as
+            // "taken" — so the moment the panel deliberately let the display doze, the
+            // watchdog re-placed it, and re-placing calls wake(). The panel woke itself
+            // up about ten seconds after asking to sleep, every time, and the sleep looked
+            // like it simply did not work.
+            //
+            // Nothing is composing on a dark display in any sense worth acting on. Falling
+            // through to NOWHERE is the safe answer: that branch relaunches only when the
+            // task is genuinely gone, so a panel that really did die while the display was
+            // out is still recovered, and one that is merely dark is left alone.
+            rearBusy && rearActive -> Where.DISPLACED
             else -> Where.NOWHERE
         }
     }
@@ -386,6 +426,15 @@ class RearUserService : IRearService.Stub {
                     // needs it: double-tapping the rear display awake and finding
                     // nothing there was this skip.
                     
+                    // NOTHING TO RECOVER ON A DISPLAY THAT IS OFF ON PURPOSE. Every
+                    // reading below is about where the panel is being composited, and a
+                    // dark display composites nothing of ours and often something of
+                    // MIUI's — which reads as "taken" and gets the panel re-placed, and
+                    // re-placing wakes it. Skipping the tick is also simply correct: the
+                    // panel cannot be in the wrong place on a screen nobody can see, and
+                    // the moment anything lights it again this resumes.
+                    if (dozing) continue
+
                     // ONE reading per tick. Each call is a full `dumpsys SurfaceFlinger`,
                     // and the old code asked twice per tick for two of its branches —
                     // which also meant the two answers could disagree across the gap.

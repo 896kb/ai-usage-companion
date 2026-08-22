@@ -81,6 +81,13 @@ class UsagePollService : Service() {
             val woke = on && !panelWasOn
             panelWasOn = on
             if (!woke) return
+            // THE BACKSTOP for the dozing flag. Everything else that clears it depends on
+            // the panel still being alive to say so, and the one case the supervisors
+            // exist for is the panel not being alive. A lit display is proof the sleep is
+            // over whoever ended it, so the flag is dropped here before the supervisor
+            // runs — otherwise a panel that died while dozing would be left unrecovered,
+            // and the user would double-tap the rear screen and find nothing there.
+            Graph.of(this@UsagePollService).bridge.setDozing(false)
             scope.launch { safeSupervise() }
         }
     }
@@ -140,6 +147,8 @@ class UsagePollService : Service() {
             addAction(RearActivity.ACTION_OPEN_CAMERA)
             // And its transport buttons, for the same reason again.
             addAction(RearActivity.ACTION_MEDIA_COMMAND)
+            // The panel telling us it has let its display go, or taken it back.
+            addAction(RearActivity.ACTION_DOZING)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         // Held by this service rather than by NotificationRelay, even though the relay is
@@ -251,6 +260,13 @@ class UsagePollService : Service() {
             // Waking lives HERE rather than in the panel, because the panel cannot: the
             // keyevent has to be aimed at one display and that needs the privileged
             // service, which this process holds the binding for.
+            // THE PANEL IS ASLEEP ON PURPOSE — or awake again. Neither supervisor can
+            // work this out for itself; see IRearService.setDozing.
+            if (intent?.action == RearActivity.ACTION_DOZING) {
+                Graph.of(this@UsagePollService).bridge
+                    .setDozing(intent.getBooleanExtra(RearActivity.EXTRA_DOZING, false))
+                return
+            }
             if (intent?.action == Intent.ACTION_POWER_CONNECTED) {
                 // Same reasoning as the notification path: only a panel that was dark
                 // gets locked. Plugging in a phone you are holding and watching the cell
@@ -426,12 +442,20 @@ class UsagePollService : Service() {
      *    not something this task can close without new infrastructure.
      */
     private fun ensurePlaced(app: Graph, payload: String): Watchdog.Decision {
-        val decision = Watchdog.decide(watchdogState, app.bridge.isPanelAlive(), app.bridge.isCalibrating())
+        val decision = Watchdog.decide(
+            watchdogState,
+            app.bridge.isPanelAlive(),
+            app.bridge.isCalibrating(),
+            // Re-placing calls show(), and show() lights the display — so this watchdog,
+            // doing exactly its job, undid every deliberate sleep. See Watchdog.decide.
+            app.bridge.isDozing(),
+        )
         watchdogState = decision.state
         if (decision.isNewState) {
             Log.i(TAG, when (decision.state) {
                 Watchdog.State.DEAD -> "rear panel not present — re-placing"
                 Watchdog.State.CALIBRATING -> "calibrate mode active — watchdog standing down"
+                Watchdog.State.DOZING -> "panel asleep on purpose — watchdog standing down"
                 Watchdog.State.ALIVE -> "rear panel confirmed alive"
             })
         }

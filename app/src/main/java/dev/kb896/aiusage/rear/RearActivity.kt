@@ -151,6 +151,16 @@ class RearActivity : Activity() {
          */
         const val ACTION_LOCK = "dev.kb896.aiusage.LOCK"
 
+        /**
+         * The panel has let its display go dark on purpose, or has taken it back.
+         *
+         * Travels to the main process because that is where the two supervisors live, and
+         * neither of them can work this out for itself: an asleep panel and a hijacked one
+         * composite identically. See IRearService.setDozing.
+         */
+        const val ACTION_DOZING = "dev.kb896.aiusage.DOZING"
+        const val EXTRA_DOZING = "dozing"
+
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -170,7 +180,7 @@ class RearActivity : Activity() {
          * Past MIUI's own power-down, which onCreate measures at about five seconds, so
          * the restore happens behind a dark screen rather than in front of somebody.
          */
-        const val SLEEP_SETTLE_MS = 5_500L
+        const val SLEEP_FALLBACK_MS = 30_000L
     }
 
     private lateinit var dial: RearDialView
@@ -295,6 +305,7 @@ class RearActivity : Activity() {
         // that release queued, because the lock has just been given a fresh reason.
         dial.onNeedsScreen = {
             window.decorView.removeCallbacks(restorePanel)
+            awaitingDoze = false
             holdScreen(true)
         }
         setContentView(dial)
@@ -354,6 +365,7 @@ class RearActivity : Activity() {
         // unlock itself underneath it — the restore firing for a lock that has since been
         // renewed.
         window.decorView.removeCallbacks(restorePanel)
+        awaitingDoze = false
         holdScreen(true)
         dial.lock()
     }
@@ -381,6 +393,11 @@ class RearActivity : Activity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         holding = on
+        // Tell the supervisors. They will otherwise recover a panel that is not lost, and
+        // recovery lights the display — see IRearService.setDozing.
+        sendBroadcast(
+            Intent(ACTION_DOZING).setPackage(packageName).putExtra(EXTRA_DOZING, !on),
+        )
     }
 
     private var holding = true
@@ -402,8 +419,45 @@ class RearActivity : Activity() {
 
     private fun onLockSpent() {
         holdScreen(false)
+        awaitingDoze = true
         window.decorView.removeCallbacks(restorePanel)
-        window.decorView.postDelayed(restorePanel, SLEEP_SETTLE_MS)
+        // A FALLBACK, not the plan. The panel hands back when the display is actually seen
+        // to go out — see onDisplayState — because how long that takes is MIUI's business
+        // and not ours. Timing it was the first attempt and it was wrong by a mile: the
+        // hand-back was set for five and a half seconds and the display went dark after
+        // eleven, so the lock vanished in front of somebody while the screen was still lit,
+        // which is precisely the bug this pair of changes is about. This only exists so a
+        // display that never dozes at all cannot leave the panel locked for good.
+        window.decorView.postDelayed(restorePanel, SLEEP_FALLBACK_MS)
+    }
+
+    /** Waiting for the display to actually go out after the lock let go of it. */
+    private var awaitingDoze = false
+
+    /**
+     * The rear display changed power state.
+     *
+     * TWO things hang off this, and they are opposite ends of the same sleep.
+     *
+     * Going DARK is the signal to hand the panel back: the lock has run out, the display
+     * has gone, and the artwork and the player can return behind it where nobody watches
+     * them do it. That is the instruction's order — sleep, and then put things back.
+     *
+     * Coming back LIT is when the screen hold is taken again, and only after the display
+     * has genuinely been dark. Re-taking it merely because the display reports itself on
+     * was the first version and it stopped the sleep from ever happening: a display on its
+     * way down is still on, and every property change on the way down handed the hold
+     * straight back.
+     */
+    private fun onDisplayState(on: Boolean) {
+        if (!on) {
+            if (!awaitingDoze) return
+            awaitingDoze = false
+            window.decorView.removeCallbacks(restorePanel)
+            window.decorView.post(restorePanel)
+            return
+        }
+        if (!holding && !awaitingDoze) holdScreen(true)
     }
 
     /**
@@ -421,8 +475,7 @@ class RearActivity : Activity() {
         override fun onDisplayRemoved(displayId: Int) = Unit
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != display?.displayId) return
-            if (holding) return
-            if (display?.state == android.view.Display.STATE_ON) holdScreen(true)
+            onDisplayState(display?.state == android.view.Display.STATE_ON)
         }
     }
 

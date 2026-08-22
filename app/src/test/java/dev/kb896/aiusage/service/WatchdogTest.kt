@@ -83,4 +83,47 @@ class WatchdogTest {
         assertFalse(second.isNewState)
         assertFalse(second.shouldRespawn)
     }
+
+    // -- dozing -----------------------------------------------------------------------
+
+    /**
+     * The bug this state exists for: re-placing the panel WAKES the display, so a
+     * watchdog that respawned a deliberately-sleeping panel undid the sleep. Measured on
+     * device as "rear display taken — re-placing" followed by a wake, on a display that
+     * had gone dark four hundred milliseconds earlier.
+     */
+    @Test fun `a dozing panel is never respawned`() {
+        val d = Watchdog.decide(previous = null, alive = false, calibrating = false, dozing = true)
+        assertEquals(Watchdog.State.DOZING, d.state)
+        assertFalse("re-placing a dozing panel wakes it", d.shouldRespawn)
+    }
+
+    /** A dozing panel is alive; the reading is not in dispute, only what to do about it. */
+    @Test fun `dozing wins over alive`() {
+        val d = Watchdog.decide(previous = null, alive = true, calibrating = false, dozing = true)
+        assertEquals(Watchdog.State.DOZING, d.state)
+    }
+
+    /** Nothing calibrates on a dark screen. */
+    @Test fun `dozing wins over calibrating`() {
+        val d = Watchdog.decide(previous = null, alive = false, calibrating = true, dozing = true)
+        assertEquals(Watchdog.State.DOZING, d.state)
+    }
+
+    /** And the moment it stops dozing, an absent panel is a dead one again. */
+    @Test fun `waking restores the respawn`() {
+        val d = Watchdog.decide(
+            previous = Watchdog.State.DOZING, alive = false, calibrating = false, dozing = false,
+        )
+        assertEquals(Watchdog.State.DEAD, d.state)
+        assertTrue("a panel that died while dozing is left dead", d.shouldRespawn)
+    }
+
+    /** Omitted entirely, nothing changes — every existing caller keeps its behaviour. */
+    @Test fun `not dozing by default`() {
+        assertEquals(
+            Watchdog.State.DEAD,
+            Watchdog.decide(previous = null, alive = false, calibrating = false).state,
+        )
+    }
 }

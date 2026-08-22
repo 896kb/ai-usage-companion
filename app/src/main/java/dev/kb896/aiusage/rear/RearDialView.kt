@@ -2913,7 +2913,8 @@ class RearDialView(context: Context) : View(context) {
     private fun keepAwakeFor() {
         onNeedsScreen?.invoke()
         if (!locked) return
-        lockArmedAt = frameNowMs.takeIf { it != 0L } ?: SystemClock.uptimeMillis()
+        // Same clock, same reason as lock().
+        lockArmedAt = SystemClock.uptimeMillis()
         lockExpiredSent = false
     }
 
@@ -2925,7 +2926,14 @@ class RearDialView(context: Context) : View(context) {
      * and comes back every time somebody messages you.
      */
     fun lock() {
-        val now = frameNowMs.takeIf { it != 0L } ?: SystemClock.uptimeMillis()
+        // THE REAL CLOCK, NOT THE FRAME CLOCK. frameNowMs is the last frame the panel
+        // DREW, and a panel that has been dozing has not drawn for as long as it slept —
+        // so stamping the lock with it dated the lock minutes into the past, the grace
+        // period below read as long expired, and the lock let go of the display on its
+        // first frame. Which then cascaded: the release armed the wait for a doze, the
+        // display was still settling out of one, and the hand-back fired at once. The
+        // panel woke for a notification and was unlocked again before it arrived.
+        val now = SystemClock.uptimeMillis()
         // A fresh reason re-arms the expiry WHETHER OR NOT the panel was already locked,
         // and that half is not idempotent on purpose. Everything else here is: a second
         // notification must not restart the slider's arrival.
@@ -2952,7 +2960,7 @@ class RearDialView(context: Context) : View(context) {
     fun unlock() {
         if (!locked) return
         locked = false
-        lockAt = frameNowMs
+        lockAt = SystemClock.uptimeMillis()
         lockProgress = 0f
         lockSpringAt = 0L
         lockGrabbed = false

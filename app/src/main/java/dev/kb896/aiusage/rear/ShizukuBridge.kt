@@ -235,6 +235,10 @@ class ShizukuBridge(private val context: Context) {
         // that difference is the whole basis for locking. A fifth of a second later, when
         // the notification reaches the panel, both look identical.
         val wasDark = darkNow(display)
+        // Somebody has decided the panel should be lit, so it is no longer asleep on
+        // purpose. Cleared on this side too, not just in the service, or the watchdog here
+        // would go on standing down over a panel that is wide awake.
+        dozing = false
         runCatching { svc.wake(display) }
             .onSuccess {
                 if (reason.isNotEmpty()) {
@@ -264,6 +268,24 @@ class ShizukuBridge(private val context: Context) {
     }
 
     fun isCalibrating(): Boolean = calibrating
+
+    /**
+     * The panel is asleep on purpose, or is not any more.
+     *
+     * Held HERE as well as forwarded, for the same reason `calibrating` is: the watchdog
+     * in this process has to be able to ask, and asking across the binder would fail
+     * exactly when the service is not bound — which is one of the states the watchdog
+     * exists to notice.
+     */
+    fun setDozing(value: Boolean) {
+        dozing = value
+        runCatching { service?.setDozing(value) }
+            .onFailure { Log.w(TAG, "setDozing($value) failed: ${it.message}") }
+    }
+
+    fun isDozing(): Boolean = dozing
+
+    @Volatile private var dozing = false
 
     private companion object { const val TAG = "AiUsageBridge" }
 }

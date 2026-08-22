@@ -22,21 +22,41 @@ package dev.kb896.aiusage.service
  */
 object Watchdog {
 
-    enum class State { ALIVE, DEAD, CALIBRATING }
+    enum class State { ALIVE, DEAD, CALIBRATING, DOZING }
 
     data class Decision(val state: State, val isNewState: Boolean) {
-        /** Only a confirmed-dead, non-calibrating panel gets re-placed. */
+        /** Only a confirmed-dead panel that is neither calibrating nor dozing. */
         val shouldRespawn: Boolean get() = state == State.DEAD
     }
 
     /**
-     * [calibrating] wins over [alive]: a live activity mid-calibration is a
-     * distinct state from an ordinary alive panel — UsagePollService.tick() also
-     * skips its own routine update() push in that state, so a periodic broadcast
-     * can't silently flip the panel out of the calibration view either.
+     * [dozing] and [calibrating] both win over [alive], and dozing wins outright.
+     *
+     * DOZING is the panel having let its own display go dark on purpose, and it has to
+     * stop the respawn for a reason the other two do not share: re-placing the panel
+     * WAKES the display. So the watchdog doing exactly its job undid every deliberate
+     * sleep about ten seconds after it began, and the sleep looked like a feature that
+     * did not work. Measured on device — "keep-alive: rear display taken — re-placing"
+     * followed by a wake, on a display that had gone dark four hundred milliseconds
+     * earlier.
+     *
+     * It wins over `alive` because a dozing panel IS alive; the reading is not in
+     * dispute, only what should be done about it. And over `calibrating` because
+     * nothing calibrates on a dark screen.
+     *
+     * Safe to stand down for the same reason CALIBRATING is: it lasts exactly as long as
+     * the panel says it does, and anything that lights the display ends it — including
+     * the display simply coming back on, which UsagePollService clears the flag from
+     * before this next runs.
      */
-    fun decide(previous: State?, alive: Boolean, calibrating: Boolean): Decision {
+    fun decide(
+        previous: State?,
+        alive: Boolean,
+        calibrating: Boolean,
+        dozing: Boolean = false,
+    ): Decision {
         val state = when {
+            dozing -> State.DOZING
             calibrating -> State.CALIBRATING
             alive -> State.ALIVE
             else -> State.DEAD

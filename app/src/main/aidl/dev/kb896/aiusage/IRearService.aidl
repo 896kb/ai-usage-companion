@@ -53,4 +53,17 @@ interface IRearService {
      * arbitrary component is a lever.
      */
     boolean openCamera(int displayId) = 7;
+
+    /**
+     * The panel has deliberately let its display go dark. Stand down until told otherwise.
+     *
+     * Needed because this service cannot tell a panel that is asleep on purpose from one
+     * that has been shoved aside, and the two look identical from here: our layer stops
+     * compositing and MIUI's rear-screen doze service starts. The keep-alive read that as
+     * "rear display taken", re-placed the panel, and re-placing wakes it — so the panel
+     * woke itself about ten seconds after every deliberate sleep, and the sleep looked
+     * like it simply did not work. Composition cannot answer this question; only the panel
+     * knows, so the panel says.
+     */
+    void setDozing(boolean dozing) = 8;
 }
