@@ -2200,15 +2200,22 @@ class RearDialView(context: Context) : View(context) {
         val a = audio ?: return
         // Read BEFORE the toggle, and only when engaging it: after the call the stream
         // reports zero, and on the way back out the live level is the answer again.
+        // ADJUST_MUTE and ADJUST_UNMUTE rather than ADJUST_TOGGLE_MUTE. The toggle asks
+        // the system which way to go, and the system's answer comes from the same
+        // overloaded flag: at zero volume it already considers the stream muted, so
+        // "toggle" on a stream the user had merely turned down would UNMUTE it and put
+        // the volume back up. Saying which direction is meant removes the question.
         val wasMuted = muted()
         if (!wasMuted) mutedFrom = volumeLevel()
         runCatching {
             a.adjustStreamVolume(
                 android.media.AudioManager.STREAM_MUSIC,
-                android.media.AudioManager.ADJUST_TOGGLE_MUTE,
+                if (wasMuted) android.media.AudioManager.ADJUST_UNMUTE
+                else android.media.AudioManager.ADJUST_MUTE,
                 0,
             )
         }
+        mutedHere = !wasMuted
         if (wasMuted) {
             // Land on the level the ghost was showing, which is not necessarily the one
             // Android remembers: the ghost can have been dragged while muted, and the
@@ -2217,6 +2224,9 @@ class RearDialView(context: Context) : View(context) {
             val max = a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
             if (max > 0) applyVolume(Math.round(mutedFrom * max).coerceIn(0, max))
             mutedFrom = 0f
+            // applyVolume can trip the system flag again on the way past zero, so the
+            // panel's own state is restated after it rather than before.
+            mutedHere = false
         }
         performHapticFeedback(
             android.view.HapticFeedbackConstants.CLOCK_TICK,
@@ -2225,8 +2235,35 @@ class RearDialView(context: Context) : View(context) {
         invalidate()
     }
 
-    private fun muted(): Boolean =
-        audio?.isStreamMute(android.media.AudioManager.STREAM_MUSIC) == true
+    /**
+     * Muted, as this panel means it: a deliberate silence with a level to come back to.
+     *
+     * NOT the system's own flag, and that is the whole point. Setting STREAM_MUSIC to
+     * zero makes isStreamMute() true, so as far as Android is concerned "muted" and
+     * "turned all the way down" are the same bit — and they are not the same thing here.
+     * One keeps a level it will return to and shows it as a ghost arc; the other IS the
+     * level, with nothing held in reserve and nothing to promise.
+     *
+     * Reading the system flag conflated them, and the result was worse than cosmetic:
+     * dragging to the bottom set the flag, the panel then believed itself muted, and the
+     * next drag moved the GHOST instead of the volume — so once you reached silence by
+     * hand you could not get back out of it by hand.
+     *
+     * So the state is owned here and set only by [toggleMute]. The system flag still has
+     * one job: if it says the stream is live while this says otherwise, something else
+     * unmuted it — the volume keys, another app — and this defers to that.
+     */
+    private fun muted(): Boolean {
+        if (mutedHere && audio?.isStreamMute(android.media.AudioManager.STREAM_MUSIC)
+            == false
+        ) {
+            mutedHere = false
+            mutedFrom = 0f
+        }
+        return mutedHere
+    }
+
+    private var mutedHere = false
 
 
 
