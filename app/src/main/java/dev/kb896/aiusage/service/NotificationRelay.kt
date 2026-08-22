@@ -115,7 +115,15 @@ class NotificationRelay : NotificationListenerService() {
         // answer does not change the instant the keyevent is sent. A fifth of a second is
         // below noticing and comfortably past the state settling.
         val bridge = runCatching { Graph.of(this).bridge }.getOrNull()
-        bridge?.wake("a notification")
+        // A panel that was DARK a moment ago is a panel nobody was looking at, and a
+        // phone nobody is looking at is very often in a pocket. Lock it, so the
+        // notification does not arrive on a surface where a thigh can work the transport
+        // buttons. If it was already lit, nothing changes: it was already there to be
+        // touched, and seizing up in front of somebody using it would be the cure doing
+        // the harm.
+        if (bridge?.wake("a notification") == true) {
+            sendBroadcast(Intent(RearActivity.ACTION_LOCK).setPackage(packageName))
+        }
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             relay(app, sbn, title, body, next, config)
         }, WAKE_SETTLE_MS)

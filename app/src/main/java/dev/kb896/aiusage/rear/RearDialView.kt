@@ -540,6 +540,26 @@ class RearDialView(context: Context) : View(context) {
         // same offset and is drawn first.
         val push = noticeHeight(nowReal) * noticeSlide(nowReal)
 
+        // THE LOCK OUTLIVES WHAT RAISED IT BY EXACTLY NOTHING. Checked after the slide
+        // has been advanced for this frame, so "the strip has retracted" is this frame's
+        // answer rather than the previous one's.
+        //
+        // The grace period is not politeness, it is a race. The lock is armed by its own
+        // broadcast and the notification follows a fifth of a second later — the wake has
+        // to land before the notice or the panel drops it — so for that fifth of a second
+        // the panel is locked with nothing on it, which is indistinguishable from a lock
+        // whose notice has already been and gone. Without the floor the panel armed and
+        // expired before the thing it woke for ever arrived.
+        //
+        // Fired ONCE. This runs every frame, and putting the display out is not something
+        // to ask for sixty times a second.
+        if (locked && !lockExpiredSent && frameNowMs - lockArmedAt > LOCK_MIN_MS &&
+            lockSpent(nowReal)
+        ) {
+            lockExpiredSent = true
+            onLockExpired?.invoke()
+        }
+
         // Paging. The media page exists only under the vinyl style and only while
         // something is playing — see MediaPage for why a square cover gets no second
         // page. A preview is never paged: it is a picture of the panel on a phone screen,
@@ -822,8 +842,19 @@ class RearDialView(context: Context) : View(context) {
         // Same rule as the extras: it acts on the panel rather than on an account, so a
         // single-account preview leaves it out — and a preview is scaled, which would
         // put the touch target in the wrong place even if it were wanted there.
-        if (onlyAccount == null && config.showCamera && !hidden) {
-            drawCamera(canvas, dx, dy + readoutPush - paged)
+        // THE PANEL'S OWN BUTTONS GO WHEN THE LOCK ARRIVES. The camera one has to — it
+        // sits in the bottom-right corner and the slider spans 80% of the usable panel,
+        // so they occupy the same pixels — but both would be wrong to leave anyway: a
+        // control that is drawn and does nothing is worse than one that is not there,
+        // because it invites the press the lock then swallows.
+        //
+        // Faded on the lock's own drum rather than cut, so they leave as the slider
+        // arrives instead of blinking out in front of it.
+        val unlocked = 1f - lockSwap(frameNowMs)
+        if (onlyAccount == null && config.showCamera && !hidden && unlocked > 0.004f) {
+            fading(canvas, cameraFadeBounds(), unlocked) {
+                drawCamera(canvas, dx, dy + readoutPush - paged)
+            }
         } else {
             cameraButton = null
         }
@@ -832,8 +863,10 @@ class RearDialView(context: Context) : View(context) {
         // permanent control — but it closes the readout, and on a page that is not the
         // readout it is a button for somewhere else. The way back from the media page is
         // the swipe that got you there.
-        if (onlyAccount == null && config.showClose && !hidden) {
-            drawClose(canvas, dx, dy + readoutPush - paged)
+        if (onlyAccount == null && config.showClose && !hidden && unlocked > 0.004f) {
+            fading(canvas, closeFadeBounds(), unlocked) {
+                drawClose(canvas, dx, dy + readoutPush - paged)
+            }
         } else {
             closeButton = null
         }
@@ -846,19 +879,52 @@ class RearDialView(context: Context) : View(context) {
         // time: this page does not scroll, it assembles in place as the readout leaves
         // over the top of it. Nested inside, every part of it was drawn a full panel
         // height above the screen and the page came up as a bare record on black.
-        if (!hidden && onlyAccount == null && paging > 0.001f) {
+        // THE WHOLE MEDIA PAGE HANDS OVER TO THE LOCK, not just the record.
+        //
+        // The record alone was the first attempt and it left the page looking broken: the
+        // elapsed and remaining times, the volume reading and the scrub arc are all placed
+        // AROUND the disc, so taking the disc away left them floating in the middle of an
+        // empty panel, arranged around a hole. This page IS the music player, and "instead
+        // of the art / music player, an unlock screen" applies to all of it.
+        //
+        // Faded on the lock's own drum so it leaves as the slider arrives. The layer only
+        // exists during those 200ms — at rest the alpha is exactly 1 or the page is not
+        // drawn at all — so the full-panel saveLayer is not a per-frame cost.
+        val pageAlpha = 1f - lockSwap(frameNowMs)
+        if (!hidden && onlyAccount == null && paging > 0.001f && pageAlpha > 0.004f) {
             canvas.save()
             // NOT pushed by the notice. Everything on this page is anchored to the
             // bottom of the panel and pushing it down puts the transport buttons off the
             // screen — which is what happened, and you cannot press what has left. The
             // record gives up the room instead.
             canvas.translate(dx, dy)
-            drawMediaPage(canvas, paging, dx, dy, push, geometry, volumeFraction)
+            fading(canvas, PANEL_BOUNDS, pageAlpha) {
+                drawMediaPage(canvas, paging, dx, dy, push, geometry, volumeFraction)
+            }
             canvas.restore()
-        } else if (paging <= 0.001f) {
+        } else if (paging <= 0.001f || pageAlpha <= 0.004f) {
             volumeBar = null
         }
         canvas.restore()   // the readout clip
+
+        // THE SLIDER IS PINNED, and drawn out here rather than in the slot it replaces.
+        //
+        // It belongs to the panel, not to a page, and two things it cannot be subject to
+        // decided this. The NOTICE PUSH: a notification slides the readout down by up to
+        // a quarter of the panel, and the slot sits 26 units off the bottom — so the one
+        // control that has to be reachable was pushed clean off a 572-unit display at
+        // exactly the moment something had woken the panel to be unlocked for. And
+        // PAGING: on the media page the slot is a panel-height away, so the slider was
+        // simply not on screen if you happened to be standing there when it locked.
+        //
+        // Fixed here, it covers the transport row on BOTH pages — the media page puts its
+        // buttons at cy 529 and the readout puts its row at 476..546, and the slider's
+        // band spans both — so wherever you were, the thing that was under your thumb is
+        // now the thing that asks you to swipe.
+        //
+        // Drawn before the notice and the charging cell, which are allowed over it: they
+        // are why the panel is awake, and the knob is at the left where neither reaches.
+        drawLockOverlay(canvas)
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
@@ -945,6 +1011,7 @@ class RearDialView(context: Context) : View(context) {
      */
     fun showCharging(percent: Int = batteryPercent()) {
         if (percent < 0) return
+        keepAwakeFor()
         chargePercent = percent
         chargeLevel = percent / 100f
         chargeAt = SystemClock.elapsedRealtime()
@@ -1509,6 +1576,73 @@ class RearDialView(context: Context) : View(context) {
      * looking — but WITHIN it the nearest centre wins outright, so the padding can be as
      * generous as the surface needs without one button eating another.
      */
+    /**
+     * The only gesture the panel answers while locked.
+     *
+     * The knob must be TAKEN HOLD OF and CARRIED. Landing anywhere else does nothing —
+     * not even begin — which is what stops the gesture degrading into "touch the left,
+     * then touch the right". A pocket produces touches; it does not produce a touch that
+     * starts in one named place and travels the width of the panel without lifting.
+     *
+     * Every branch returns true. The gesture is consumed whether or not it was the right
+     * one, so a stray press is absorbed here rather than falling through to whatever
+     * happens to be underneath.
+     */
+    private fun lockTouch(event: android.view.MotionEvent): Boolean {
+        val band = markRegion()
+        val h = band.height()
+        // Vertically forgiving, and it can afford to be: the slider is the only target
+        // on the panel, so there is nothing for a generous band to steal from. The X
+        // axis is where the discrimination happens.
+        val inBand = event.y >= band.top - LOCK_BAND_SLOP &&
+            event.y <= band.bottom + LOCK_BAND_SLOP
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                lockGrabbed = inBand && LockSlider.grabs(event.x, lockProgress, h)
+                if (lockGrabbed) {
+                    lockSpringAt = 0L
+                    invalidate()
+                }
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                if (lockGrabbed) {
+                    lockProgress = LockSlider.progressFor(event.x, h)
+                    invalidate()
+                }
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                if (lockGrabbed) {
+                    lockGrabbed = false
+                    if (LockSlider.unlocks(lockProgress)) {
+                        unlock()
+                    } else {
+                        // Let it fall back rather than snapping. See LockSlider.SPRING_MS.
+                        lockSpringFrom = lockProgress
+                        lockSpringAt = SystemClock.uptimeMillis()
+                        invalidate()
+                    }
+                }
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                // The system taking the gesture away is not a decision to unlock, however
+                // far the knob had got. It falls back like any unfinished drag.
+                if (lockGrabbed) {
+                    lockGrabbed = false
+                    lockSpringFrom = lockProgress
+                    lockSpringAt = SystemClock.uptimeMillis()
+                    invalidate()
+                }
+            }
+        }
+        return true
+    }
+
+    /** The artwork slot, which is also the band the slider is drawn in. */
+    private fun markRegion() = android.graphics.RectF(
+        BAR_LEFT, Panel.HEIGHT - MARK_BOTTOM - MARK_H,
+        BAR_RIGHT, (Panel.HEIGHT - MARK_BOTTOM).toFloat(),
+    )
+
     private fun mediaAt(x: Float, y: Float): String? {
         val strip = mediaStrip ?: return null
         if (!near(strip, x, y)) return null
@@ -1541,6 +1675,12 @@ class RearDialView(context: Context) : View(context) {
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (!interactive) return false
+        // LOCKED MEANS LOCKED. Every other target on this panel is skipped entirely —
+        // not tested and rejected, never reached — so there is no path by which a
+        // pocket can press play, change the volume or turn the page. The slider is the
+        // only thing with an answer, and it consumes the gesture either way so that
+        // nothing underneath sees it.
+        if (locked) return lockTouch(event)
         val onCamera = !ambient && near(cameraButton, event.x, event.y)
         // In ambient mode the whole panel is the way back, not just the button. The
         // mascot is walking and the button is a 16-unit disc on the back of a phone
@@ -1734,6 +1874,44 @@ class RearDialView(context: Context) : View(context) {
      * battery, by the same generator. It was hand-drawn from rectangles first, and sat
      * beside two traced icons looking exactly like what it was.
      */
+    /**
+     * Draw something at reduced opacity, through a layer.
+     *
+     * A layer rather than an alpha on the paint, because both of these are built from
+     * more than one colour: the close button is a filled disc with its cross knocked out
+     * in the BACKGROUND colour, and making that translucent would show the panel through
+     * the hole while the disc around it was still half there — the cross would stop being
+     * a hole and start being a grey X. Compositing the finished button and fading that
+     * keeps it a button the whole way out.
+     *
+     * The bounds are generous on purpose. They only decide how much of the canvas the
+     * layer covers, and both of these are small corner glyphs that the burn-in drift
+     * moves by a few units; a rect measured exactly would clip its own subject.
+     */
+    private inline fun fading(
+        canvas: Canvas,
+        bounds: android.graphics.RectF,
+        alpha: Float,
+        draw: () -> Unit,
+    ) {
+        if (alpha >= 0.999f) { draw(); return }
+        canvas.saveLayerAlpha(bounds, (255 * alpha).toInt().coerceIn(0, 255))
+        draw()
+        canvas.restore()
+    }
+
+    /** Room for the camera glyph, its margin and the drift. See [fading]. */
+    private fun cameraFadeBounds() = android.graphics.RectF(
+        Panel.WIDTH - FADE_PAD, Panel.HEIGHT - MARK_BOTTOM - MARK_H - FADE_PAD,
+        Panel.WIDTH.toFloat() + FADE_PAD, Panel.HEIGHT.toFloat() + FADE_PAD,
+    )
+
+    /** The same for the close button, in the opposite corner. */
+    private fun closeFadeBounds() = android.graphics.RectF(
+        CLOSE_CX - CLOSE_R - FADE_PAD, CLOSE_CY - CLOSE_R - FADE_PAD,
+        CLOSE_CX + CLOSE_R + FADE_PAD, CLOSE_CY + CLOSE_R + FADE_PAD,
+    )
+
     private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
         val h = CAMERA_H
         val w = h * PanelIcons.CAMERA.aspect
@@ -1895,6 +2073,10 @@ class RearDialView(context: Context) : View(context) {
         // The display's own state is the test, not a timestamp. What matters is whether
         // there was a screen to show it on, and the display knows that exactly.
         if (display?.state == android.view.Display.STATE_OFF) return
+
+        // Admitted, so it is worth keeping the display up for. After the drop check on
+        // purpose: something that will never be shown is not a reason to light anything.
+        keepAwakeFor()
 
         val next = Notice(app, pkg, title, text, moreTitle, moreText)
 
@@ -2659,6 +2841,176 @@ class RearDialView(context: Context) : View(context) {
     private var mutedHere = false
 
 
+
+    // -- the lock -------------------------------------------------------------------
+    //
+    // THE PANEL LOCKS WHEN IT LIT ITSELF. A notification or a charger now wakes the rear
+    // display, and the phone that happens to is very often in a pocket. Every control
+    // here is then under a thigh: the volume strip, the transport buttons, the page
+    // swipe. So a screen that turned itself on refuses to be used until somebody proves
+    // they meant it — see LockSlider for why the proof is a long drag and not a tap.
+    //
+    // Only when it lit ITSELF. If the display was already on, the panel was already
+    // there to be touched and nothing has changed; locking then would be the panel
+    // seizing up in front of somebody who was looking at it. ShizukuBridge.wake decides
+    // this, because it is the only place that sees the display state before the keyevent
+    // lands — by the time this process hears about the notification the screen is on
+    // either way, and the difference is gone.
+
+    /** Whether the panel is refusing input, and when the slider began arriving. */
+    private var locked = false
+    private var lockAt = 0L
+
+    /**
+     * When the lock was last given a reason, which is NOT when the slider arrived.
+     *
+     * Two clocks because two different things are being timed. [lockAt] drives the drum
+     * and must not be disturbed by a second notification, or the slider drops out and
+     * slides back every time somebody messages you. This one arms the expiry, and it
+     * must be reset by every fresh reason — otherwise the second notification of a burst
+     * inherits the first one's countdown and the panel puts the display out underneath a
+     * notice that has only just arrived.
+     */
+    private var lockArmedAt = 0L
+
+    /** How far the knob has been carried, 0..1, and where it is falling back from. */
+    private var lockProgress = 0f
+    private var lockSpringFrom = 0f
+    private var lockSpringAt = 0L
+
+    /** Whether the gesture in flight took hold of the knob. See LockSlider.grabs. */
+    private var lockGrabbed = false
+
+    /** Whether the display has already been asked to go out for this lock. */
+    private var lockExpiredSent = false
+
+    /** Told when the lock has nothing left to keep it up. Set by RearActivity. */
+    var onLockExpired: (() -> Unit)? = null
+
+    /**
+     * Told when the panel has something to show and needs the display kept up for it.
+     *
+     * Separate from the lock, and it has to be. The lock's expiry RELEASES the screen so
+     * MIUI can doze it, and for the few seconds between that release and the display
+     * actually going out the panel is still live — a notification arriving in that window
+     * was being shown onto a screen already on its way down, and then had the queued
+     * hand-back unlock the panel underneath it.
+     *
+     * So anything worth waking for says so directly, rather than the hold being inferred
+     * from the lock. A panel with a notice on it should be lit whether or not it happens
+     * to be locked.
+     */
+    var onNeedsScreen: (() -> Unit)? = null
+
+    /**
+     * Something arrived that is worth being seen: keep the display, and renew the lock.
+     *
+     * The renewal is only a renewal — it never LOCKS a panel that was not already locked.
+     * A notification arriving at a panel somebody is watching must not lock it, and that
+     * decision belongs to the wake, which is the only thing that can tell. See
+     * ShizukuBridge.wake.
+     */
+    private fun keepAwakeFor() {
+        onNeedsScreen?.invoke()
+        if (!locked) return
+        lockArmedAt = frameNowMs.takeIf { it != 0L } ?: SystemClock.uptimeMillis()
+        lockExpiredSent = false
+    }
+
+    /**
+     * Put the panel into lock mode.
+     *
+     * Idempotent while already locked, and deliberately so: a second notification
+     * arriving during the first one must not restart the drum, or the slider drops out
+     * and comes back every time somebody messages you.
+     */
+    fun lock() {
+        val now = frameNowMs.takeIf { it != 0L } ?: SystemClock.uptimeMillis()
+        // A fresh reason re-arms the expiry WHETHER OR NOT the panel was already locked,
+        // and that half is not idempotent on purpose. Everything else here is: a second
+        // notification must not restart the slider's arrival.
+        lockArmedAt = now
+        lockExpiredSent = false
+        if (locked) { invalidate(); return }
+        locked = true
+        lockAt = now
+        lockProgress = 0f
+        lockSpringAt = 0L
+        lockGrabbed = false
+        invalidate()
+    }
+
+    /**
+     * Let the panel be used again.
+     *
+     * The record and the media page come back on their own once this clears — they were
+     * never removed, only told there was nothing to show — so this hands back to the same
+     * animations that took them away. That is the whole reason lock mode is expressed as
+     * "there is no media" rather than as a separate screen: the way back is already
+     * written, and it is the way the panel already moves.
+     */
+    fun unlock() {
+        if (!locked) return
+        locked = false
+        lockAt = frameNowMs
+        lockProgress = 0f
+        lockSpringAt = 0L
+        lockGrabbed = false
+        lockExpiredSent = false
+        invalidate()
+    }
+
+    val isLocked: Boolean get() = locked
+
+    /**
+     * 0 while the slot holds what it normally would, 1 while the slider does.
+     *
+     * The SAME drum as the artwork and the controls swap on, at the same duration, by
+     * asking for it in the same terms. The instruction was that changing into lock mode
+     * should move the way changing between the artwork and the player moves, and the
+     * cheapest way to honour that exactly is to use the movement rather than to imitate
+     * its numbers.
+     */
+    private fun lockSwap(nowMs: Long): Float {
+        if (lockAt == 0L) return if (locked) 1f else 0f
+        val t = (nowMs - lockAt).toFloat() / MEDIA_MS
+        val to = if (locked) 1f else 0f
+        if (t >= 1f) return to
+        animating = true
+        val from = 1f - to
+        return from + (to - from) * Tween.easeInOut(t.coerceIn(0f, 1f))
+    }
+
+    /**
+     * Where the knob is now, easing back to rest if the last drag did not finish.
+     *
+     * A drag in flight is read straight from the finger; only the fall back is animated.
+     */
+    private fun lockKnob(nowMs: Long): Float {
+        if (lockGrabbed) return lockProgress
+        if (lockSpringAt == 0L) return lockProgress
+        val t = ((nowMs - lockSpringAt).toFloat() / LockSlider.SPRING_MS).coerceIn(0f, 1f)
+        if (t >= 1f) {
+            lockSpringAt = 0L
+            lockProgress = 0f
+            return 0f
+        }
+        animating = true
+        return lockSpringFrom * (1f - Tween.easeInOut(t))
+    }
+
+    /**
+     * Whether the lock still has a reason to be up.
+     *
+     * It goes when the things that woke the panel have gone — the notice strip fully
+     * retracted and the charging cell finished — because at that point there is nothing
+     * on screen worth keeping a pocket lit for. The strip has to be RETRACTED rather than
+     * merely empty: the queue drains a moment before the strip finishes sliding away, and
+     * putting the display out mid-movement would cut the last notification in half.
+     */
+    private fun lockSpent(nowReal: Long): Boolean =
+        notice == null && pending.isEmpty() && leaving == null &&
+            noticeSlideNow(nowReal) <= 0.001f && chargeAt == 0L
 
     /** 0 while the artwork holds the slot, 1 while the controls do. */
     private fun mediaSwap(nowMs: Long): Float {
@@ -3540,11 +3892,42 @@ class RearDialView(context: Context) : View(context) {
      * that are each too small to read.
      */
     private fun drawMark(canvas: Canvas, dx: Float, dy: Float) {
-        val region = android.graphics.RectF(
-            BAR_LEFT, Panel.HEIGHT - MARK_BOTTOM - MARK_H,
-            BAR_RIGHT, (Panel.HEIGHT - MARK_BOTTOM).toFloat(),
-        )
+        val region = markRegion()
 
+        // THE LOCK TAKES THE SLOT, on the same drum and over the same 200ms as the two
+        // things that normally share it. Whatever is in there leaves through the bottom
+        // and the slider arrives from the top — one movement, indistinguishable from the
+        // artwork handing over to the player, which is what was asked for.
+        val lock = lockSwap(frameNowMs)
+        if (lock >= 0.999f) {
+            mediaStrip = null
+            return
+        }
+        if (lock > 0.001f) {
+            // The occupant leaves through the bottom on the lock's drum. What replaces it
+            // is NOT drawn here — see drawLockOverlay for why the slider cannot live in
+            // this slot even though it takes its place.
+            canvas.save()
+            canvas.clipRect(mediaClip(region))
+            canvas.translate(0f, lock * mediaClip(region).height())
+            drawSlot(canvas, region, dx, dy)
+            canvas.restore()
+            // No strip while the slider is anywhere near the slot. The transport buttons
+            // register their targets as they draw, and a half-departed row that still
+            // answered to a press is exactly the kind of thing the lock exists to stop.
+            mediaStrip = null
+            return
+        }
+        drawSlot(canvas, region, dx, dy)
+    }
+
+    /** What the slot holds when the panel is not locked: the mark, or the player. */
+    private fun drawSlot(
+        canvas: Canvas,
+        region: android.graphics.RectF,
+        dx: Float,
+        dy: Float,
+    ) {
         val swap = mediaSwap(frameNowMs)
         if (swap <= 0.001f) {
             mediaStrip = null
@@ -3576,6 +3959,106 @@ class RearDialView(context: Context) : View(context) {
         drawMediaRow(canvas, region, swap >= 0.999f, dx, dy)
         canvas.restore()
         canvas.restore()
+    }
+
+    /**
+     * The slider, at its fixed place on the panel, arriving on the lock's drum.
+     *
+     * Same movement as the slot's occupant leaving — in from the top over the same 200ms
+     * — so the two read as one drum turning even though only one of them is in the slot.
+     * Clipped to its own band so it is not visible above the panel on the way in.
+     *
+     * No burn-in drift. The drift shifts what is painted and never the window, so a
+     * drifted slider would walk a few units away from the touch target that answers for
+     * it — and this one is only up for seconds at a time, which is no burn-in risk at all.
+     */
+    private fun drawLockOverlay(canvas: Canvas) {
+        val lock = lockSwap(frameNowMs)
+        if (lock <= 0.001f) return
+        val region = markRegion()
+        canvas.save()
+        canvas.clipRect(
+            0f, region.top, Panel.WIDTH.toFloat(), region.bottom + LOCK_BAND_SLOP,
+        )
+        canvas.translate(0f, -(1f - lock) * (region.height() + LOCK_BAND_SLOP))
+        drawLock(canvas, region, lockKnob(frameNowMs))
+        canvas.restore()
+    }
+
+    /**
+     * The unlock slider.
+     *
+     * Drawn in the panel's own vocabulary rather than in a system lockscreen's: a groove,
+     * a knob and a word, in the same greys and the same mono face as everything else. It
+     * is not pretending to be Android's lockscreen, because it is not one — the phone is
+     * not locked, this one surface is.
+     *
+     * The track is the FULL slot band and the knob is a disc inside it. That is what
+     * makes the target findable by thumb on the back of a phone: the groove is a physical
+     * hint about where to put a finger and which way to push, and it is the only thing on
+     * the panel at that moment.
+     */
+    private fun drawLock(
+        canvas: Canvas,
+        region: android.graphics.RectF,
+        progress: Float,
+    ) {
+        val h = region.height()
+        val r = h / 2f
+        scratch.set(LockSlider.left(), region.top, LockSlider.right(), region.bottom)
+
+        // The groove. Filled at the palette's track grey and edged a shade brighter, the
+        // same two tones the usage bars use — a channel cut into the panel rather than a
+        // control laid on top of it.
+        barTrack.color = Panel.Palette.TRACK
+        canvas.drawRoundRect(scratch, r, r, barTrack)
+        track.color = Panel.Palette.RULE
+        track.strokeWidth = 1.5f
+        canvas.drawRoundRect(scratch, r, r, track)
+
+        val knobR = LockSlider.thumbRadius(h)
+        val cx = LockSlider.thumbCx(progress, h)
+
+        // THE WORD FADES AS THE KNOB COVERS IT. It is an instruction, and an instruction
+        // being followed has stopped being needed — leaving it lit under a travelling
+        // knob is the panel still asking for something it is already getting.
+        val told = (1f - progress * 1.6f).coerceIn(0f, 1f)
+        if (told > 0.01f) {
+            extras.textAlign = Paint.Align.CENTER
+            extras.textSize = LOCK_TEXT
+            extras.color = (Panel.Palette.FG and 0x00FFFFFF) or
+                ((LOCK_TEXT_ALPHA * told).toInt().coerceIn(0, 255) shl 24)
+            // Centred on the track's own middle, not on the gap right of the knob. The
+            // knob sweeps over it and the word going under something is the point.
+            canvas.drawText(
+                LOCK_LABEL,
+                scratch.centerX() + knobR / 2f,
+                region.centerY() + LOCK_TEXT * 0.36f,
+                extras,
+            )
+            extras.textAlign = Paint.Align.LEFT
+        }
+
+        // The knob, in the panel's foreground so it is the brightest thing on the
+        // display — it is the only thing that will answer.
+        barFill.color = Panel.Palette.FG
+        canvas.drawCircle(cx, region.centerY(), knobR, barFill)
+
+        // A chevron pointing the way, knocked out of the knob in the background colour.
+        // Two strokes rather than a traced glyph: the icon set has no arrow, and an
+        // arrow is two lines — tracing one into PanelIcons to draw two lines would be
+        // ceremony. Rotates a quarter turn as it arrives, so the knob reads as having
+        // been turned rather than moved.
+        val a = LOCK_CHEV * 0.5f
+        arc.color = Panel.Palette.BG
+        arc.strokeWidth = LOCK_CHEV_W
+        arc.strokeCap = Paint.Cap.ROUND
+        canvas.save()
+        canvas.translate(cx, region.centerY())
+        canvas.drawLine(-a * 0.45f, -a, a * 0.5f, 0f, arc)
+        canvas.drawLine(a * 0.5f, 0f, -a * 0.45f, a, arc)
+        canvas.restore()
+        arc.strokeCap = Paint.Cap.BUTT
     }
 
     /**
@@ -3622,14 +4105,24 @@ class RearDialView(context: Context) : View(context) {
         // disc simply blinked out, which is the one exit a physical object never makes.
         val m = media ?: departing ?: return
         val swap = mediaSwap(frameNowMs)
-        if (swap <= 0.001f) return
+        // THE LOCK SENDS THE RECORD OUT THE SAME WAY THE MUSIC STOPPING DOES, down and
+        // off the bottom, and brings it back up when the lock lifts. Deliberately the
+        // same exit rather than a fade of its own: the disc is an object, and the one
+        // move it has already been given for leaving is the one it should use whatever
+        // the reason. That it comes back by simply reversing is why the instruction "the
+        // disc should spawn back with an animation" needed no new animation.
+        //
+        // Taken as the LARGER of the two departures so neither can undo the other — a
+        // track ending while the panel is locked must not slide the record back in.
+        val gone = maxOf(1f - swap, lockSwap(frameNowMs))
+        if (gone >= 0.999f) return
 
         val base = discAt(paging, notice)
         // Slides out of the bottom when the music stops. It arrived as an object and it
         // leaves as one, the way a record comes off a deck.
         val resting = MediaLayout.Disc(
             base.cx,
-            base.cy + (1f - swap) * (Panel.HEIGHT + base.radius),
+            base.cy + gone * (Panel.HEIGHT + base.radius),
             base.radius,
         )
 
@@ -4845,6 +5338,13 @@ class RearDialView(context: Context) : View(context) {
      * appears to have broken.
      */
     private fun mediaPageAvailable(): Boolean =
+        // NOT gated on the lock, though it was at first. Taking the page away walked the
+        // panel back to the readout, which is a page change nobody asked for — and worse,
+        // it is one the panel cannot undo: the saved page is restored once per process,
+        // so unlocking left you on the readout having been put there by a notification.
+        // The lock does not need it. Input is refused wherever you are standing and the
+        // slider is drawn over both pages, so the page you were on is simply still the
+        // page you are on when you get back.
         config.showMedia &&
             // The GATE, not `media`, so a skip does not take the page away and bring it
             // back underneath someone who is standing on it.
@@ -5641,6 +6141,50 @@ class RearDialView(context: Context) : View(context) {
          * distance reads as lag.
          */
         private const val MEDIA_MS = 200f
+
+        /**
+         * The lock's wording and type.
+         *
+         * Short enough to fit beside the knob at rest, and an instruction rather than a
+         * state — "LOCKED" would say what is wrong where this says what to do, and the
+         * panel already looks locked.
+         */
+        private const val LOCK_LABEL = "SWIPE TO UNLOCK"
+        private const val LOCK_TEXT = 19f
+
+        /** Dim. It is a hint under a knob, not a heading. */
+        private const val LOCK_TEXT_ALPHA = 150f
+
+        /** The chevron on the knob: how tall, and how heavy. */
+        private const val LOCK_CHEV = 20f
+        private const val LOCK_CHEV_W = 3f
+
+        /**
+         * How far above and below the slider's band a touch still counts.
+         *
+         * Wide, because it can be: while the panel is locked the slider is the only
+         * target on it, so there is nothing for a generous band to take a press from.
+         * The X axis carries the whole gesture and is not loosened.
+         */
+        private const val LOCK_BAND_SLOP = 60f
+
+        /** Slack around a faded corner glyph, covering its margin and the drift. */
+        private const val FADE_PAD = 60f
+
+        /** The whole panel, for a layer that covers it. Generous, to allow for the drift. */
+        private val PANEL_BOUNDS = android.graphics.RectF(
+            -FADE_PAD, -FADE_PAD, Panel.WIDTH + FADE_PAD, Panel.HEIGHT + FADE_PAD,
+        )
+
+        /**
+         * The least time a lock may last before it can put the display out.
+         *
+         * Covers the gap between the lock being armed and the notification it was armed
+         * for arriving — see the check in onDraw. Comfortably shorter than the shortest
+         * thing it can be waiting on (a notice holds for three seconds, the charging cell
+         * for five), so it never cuts anything short.
+         */
+        private const val LOCK_MIN_MS = 1_500L
 
         /**
          * The scrolling media line: how fast, how far apart the two copies run, and how

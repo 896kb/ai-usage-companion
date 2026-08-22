@@ -221,17 +221,46 @@ class ShizukuBridge(private val context: Context) {
      *
      * Costs nothing when the display is already on, which is most of the time.
      */
-    fun wake(reason: String = "") {
+    fun wake(reason: String = ""): Boolean {
         val display = rearDisplayId()
-        if (display < 0) return
+        if (display < 0) return false
         val svc = service
         if (svc == null) {
             Log.w(TAG, "wake($reason) with no service — display stays as it was")
-            return
+            return false
         }
+        // READ THE STATE BEFORE THE KEYEVENT, because afterwards there is nothing to
+        // read. This is the only moment anyone can tell the difference between a panel
+        // somebody is looking at and a panel that is about to light up in a pocket, and
+        // that difference is the whole basis for locking. A fifth of a second later, when
+        // the notification reaches the panel, both look identical.
+        val wasDark = darkNow(display)
         runCatching { svc.wake(display) }
-            .onSuccess { if (reason.isNotEmpty()) Log.i(TAG, "woke rear display for $reason") }
-            .onFailure { Log.w(TAG, "wake($reason) failed: ${it.message}") }
+            .onSuccess {
+                if (reason.isNotEmpty()) {
+                    Log.i(TAG, "woke rear display for $reason (was dark: $wasDark)")
+                }
+            }
+            .onFailure { Log.w(TAG, "wake($reason) failed: ${it.message}"); return false }
+        return wasDark
+    }
+
+    /**
+     * Whether the rear display is currently showing nothing.
+     *
+     * Anything that is not STATE_ON counts. The states this device actually reports are
+     * ON, OFF and the two DOZE flavours, and a dozing panel is as unwatched as a dark
+     * one — MIUI drops this display to DOZE_SUSPEND to save battery while the window
+     * carries on believing it is visible. Treating only OFF as dark would miss the case
+     * the user reported.
+     *
+     * An unknown display is NOT dark. Failing that way round means an unreadable state
+     * leaves the panel usable rather than locking somebody out of their own phone.
+     */
+    private fun darkNow(displayId: Int): Boolean {
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val state = dm.getDisplay(displayId)?.state ?: return false
+        return state != android.view.Display.STATE_ON
     }
 
     fun isCalibrating(): Boolean = calibrating

@@ -252,7 +252,14 @@ class UsagePollService : Service() {
             // keyevent has to be aimed at one display and that needs the privileged
             // service, which this process holds the binding for.
             if (intent?.action == Intent.ACTION_POWER_CONNECTED) {
-                Graph.of(this@UsagePollService).bridge.wake("the charger")
+                // Same reasoning as the notification path: only a panel that was dark
+                // gets locked. Plugging in a phone you are holding and watching the cell
+                // fill should not cost you a swipe.
+                if (Graph.of(this@UsagePollService).bridge.wake("the charger")) {
+                    sendBroadcast(
+                        Intent(RearActivity.ACTION_LOCK).setPackage(packageName),
+                    )
+                }
                 return
             }
             // A transport button on the back of the phone. Also not a placement problem,

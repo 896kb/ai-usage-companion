@@ -141,6 +141,16 @@ class RearActivity : Activity() {
         const val ACTION_CHARGE = "dev.kb896.aiusage.CHARGE"
         const val EXTRA_CHARGE_PERCENT = "percent"
 
+        /**
+         * The panel lit itself, so refuse input until somebody proves they meant it.
+         *
+         * Sent from the main process, which is the only one that can tell. The wake goes
+         * out through the privileged service and the display state is read just before
+         * the keyevent lands; by the time this process hears about the notification the
+         * screen is on either way and the difference has gone. See ShizukuBridge.wake.
+         */
+        const val ACTION_LOCK = "dev.kb896.aiusage.LOCK"
+
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -152,6 +162,15 @@ class RearActivity : Activity() {
          * stuck for long. Never raise this to paper over a placement bug — fix the bug.
          */
         const val STRAND_GRACE_MS = 4_000L
+
+        /**
+         * How long the panel waits after letting go of the display before putting itself
+         * back to normal.
+         *
+         * Past MIUI's own power-down, which onCreate measures at about five seconds, so
+         * the restore happens behind a dark screen rather than in front of somebody.
+         */
+        const val SLEEP_SETTLE_MS = 5_500L
     }
 
     private lateinit var dial: RearDialView
@@ -177,6 +196,7 @@ class RearActivity : Activity() {
                     intent.getIntExtra(EXTRA_CHARGE_PERCENT, -1)
                         .let { if (it in 0..100) it else -1 },
                 )
+                ACTION_LOCK -> lockPanel()
                 ACTION_NOTIFICATION -> dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_PKG).orEmpty(),
@@ -269,6 +289,14 @@ class RearActivity : Activity() {
                     .putExtra(EXTRA_MEDIA_COMMAND, command),
             )
         }
+        dial.onLockExpired = { onLockSpent() }
+        // Something worth seeing arrived. Take the display back — it may be part-way
+        // through being let go after an earlier lock ran out — and call off the hand-back
+        // that release queued, because the lock has just been given a fresh reason.
+        dial.onNeedsScreen = {
+            window.decorView.removeCallbacks(restorePanel)
+            holdScreen(true)
+        }
         setContentView(dial)
         // See MEDIA_SYNC: this process may have been created long after the media
         // session was, and there is no other way for it to find out.
@@ -282,11 +310,14 @@ class RearActivity : Activity() {
         // No-op until we are actually on the rear panel — see hideBars().
         hideBars()
 
+        (getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager)
+            .registerDisplayListener(displayListener, null)
+
         ContextCompat.registerReceiver(
             this, receiver,
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
-                addAction(ACTION_MEDIA); addAction(ACTION_CHARGE)
+                addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
             },
             ContextCompat.RECEIVER_EXPORTED,
         )
@@ -304,6 +335,94 @@ class RearActivity : Activity() {
             dial.config = decoded.config
             dial.state = decoded.state
             calibrationView.geometry = PanelGeometry.of(decoded.config.ringLayout)
+        }
+    }
+
+    /**
+     * Arm lock mode, and hold the display up while it lasts.
+     *
+     * The hold matters because of what put the panel here: MIUI powers the rear display
+     * down about five seconds after nothing is holding it, and the lock is armed at the
+     * exact moment the display has just been woken from precisely that. Without
+     * re-asserting it a lock raised by a notification could go dark before the
+     * notification finished arriving.
+     */
+    private fun lockPanel() {
+        // CALL OFF ANY RESTORE ALREADY IN FLIGHT. A lock that expired a moment ago has a
+        // hand-back queued for a few seconds' time, and a notification arriving inside
+        // that window would otherwise be shown for a second and then have the panel
+        // unlock itself underneath it — the restore firing for a lock that has since been
+        // renewed.
+        window.decorView.removeCallbacks(restorePanel)
+        holdScreen(true)
+        dial.lock()
+    }
+
+    /**
+     * PUT THE REAR DISPLAY OUT BY LETTING GO OF IT, not by sending it to sleep.
+     *
+     * A keyevent was the obvious way and it does not work: the panel holds
+     * FLAG_KEEP_SCREEN_ON, so KEYCODE_SLEEP aimed at this display is granted and then
+     * immediately undone by our own window. Measured — the display returned to
+     * "policy=BRIGHT" before the next reading.
+     *
+     * Releasing the flag needs no privilege and no service, and the mechanism is already
+     * documented in onCreate: without it MIUI powers this display down within about five
+     * seconds. The thing that was fighting the sleep is the thing that performs it.
+     *
+     * The flag is NOT re-asserted on a timer. It goes back on when the display is next
+     * genuinely lit — see the display listener — because re-adding it while the display
+     * is dark is a request for it to be on, which is the opposite of what was asked for.
+     */
+    private fun holdScreen(on: Boolean) {
+        if (on) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        holding = on
+    }
+
+    private var holding = true
+
+    /**
+     * The lock ran out with nobody swiping: let the display go, then put the panel back.
+     *
+     * The order is the instruction's — sleep first, and the artwork and the player come
+     * back after. The restore is delayed past MIUI's own power-down rather than run
+     * immediately, so the disc sliding back in and the media page returning happen behind
+     * a dark screen. What matters is not that the movement is seen; it is that the panel
+     * is not still showing a lock the next time it is.
+     *
+     * If someone lights the panel deliberately during those few seconds they will see the
+     * restore happen, which is correct — the lock has expired, and watching it hand back
+     * is better than being shown a slider that is no longer guarding anything.
+     */
+    private val restorePanel = Runnable { dial.unlock() }
+
+    private fun onLockSpent() {
+        holdScreen(false)
+        window.decorView.removeCallbacks(restorePanel)
+        window.decorView.postDelayed(restorePanel, SLEEP_SETTLE_MS)
+    }
+
+    /**
+     * Take the screen hold back the moment the display is genuinely lit again.
+     *
+     * This is what stops the sleep above from being permanent. The panel is meant to be
+     * always-on — the user asked for that explicitly and onCreate says so — and a flag
+     * dropped to allow one doze must not leave the panel following the system timeout
+     * forever after. Whatever lights the display next, a notification or a thumb, this
+     * puts the hold back.
+     */
+    private val displayListener = object :
+        android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId != display?.displayId) return
+            if (holding) return
+            if (display?.state == android.view.Display.STATE_ON) holdScreen(true)
         }
     }
 
@@ -460,6 +579,12 @@ class RearActivity : Activity() {
 
     override fun onDestroy() {
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
+        window.decorView.removeCallbacks(restorePanel)
+        runCatching {
+            (getSystemService(Context.DISPLAY_SERVICE)
+                as android.hardware.display.DisplayManager)
+                .unregisterDisplayListener(displayListener)
+        }
         super.onDestroy()
     }
 }
