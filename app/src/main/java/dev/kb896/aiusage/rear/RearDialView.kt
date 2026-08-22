@@ -165,6 +165,19 @@ class RearDialView(context: Context) : View(context) {
     private var notice: Notice? = null
     private var leaving: Notice? = null
 
+    /** Notices waiting their turn. See showNotification and [promoteNotices]. */
+    private val pending = ArrayDeque<Notice>()
+
+    /**
+     * Whether two notices say the same thing.
+     *
+     * A repeat is not news, and the system delivers one twice on every ranking change —
+     * so without this a single message could occupy two slots in the queue and be read
+     * out twice in a row.
+     */
+    private fun sameAs(a: Notice?, b: Notice): Boolean =
+        a != null && a.app == b.app && a.title == b.title && a.text == b.text
+
     /** When the CURRENT notice arrived, for its five seconds. */
     private var noticeAt = 0L
 
@@ -646,6 +659,14 @@ class RearDialView(context: Context) : View(context) {
         // change that already happened. The grip belongs to the control that only
         // previews, and that is the position.
         val mediaEngaged = listOf(engagement(Drag.SCRUB), 0f)
+        // Where the volume goes back to when unmuted. Eased on the same clock as the
+        // arc it sits under, so engaging mute is one movement — the reading falls to
+        // zero and the ghost of it stays where it was — rather than two.
+        val mediaGhost = listOf(
+            0f,
+            ease("media:mutedfrom", if (muted()) mutedFrom else 0f, VOLUME_EASE_MS,
+                 linear = true),
+        )
 
         if (!hidden) order.forEachIndexed { position, accountIndex ->
             val account = Account.entries.getOrNull(accountIndex) ?: return@forEachIndexed
@@ -670,6 +691,7 @@ class RearDialView(context: Context) : View(context) {
                     if (isVolume) MediaPage.VOLUME_ARC_SWEEP
                     else MediaPage.PLAYBACK_ARC_SWEEP,
                 engaged = mediaEngaged.getOrElse(at) { 0f },
+                ghostFraction = mediaGhost.getOrElse(at) { 0f },
             )
         }
 
@@ -813,6 +835,16 @@ class RearDialView(context: Context) : View(context) {
         mediaSweep: Float = 360f,
         /** How held this dial is, 0 to 1 — see [engagement]. */
         engaged: Float = 0f,
+        /**
+         * A dim arc drawn UNDER the reading, showing where it would be otherwise.
+         *
+         * For the volume while muted: the live arc is at zero, correctly, because that is
+         * what is coming out of the speaker — but zero on its own says nothing about
+         * whether unmuting returns you to a whisper or to full. The ghost is the same
+         * grey the playback dial wears under a finger, and for the same reason: it is a
+         * value that is not currently a fact about what you can hear.
+         */
+        ghostFraction: Float = 0f,
     ) {
         val status = state.statuses.firstOrNull { it.account == account }
         val kind = when (spec.window) {
@@ -914,6 +946,16 @@ class RearDialView(context: Context) : View(context) {
         // shape once the page lands.
         val startAngle = -90f + (mediaStart - -90f) * blend
         val fullSweep = 360f + (mediaSweep - 360f) * blend
+        // The ghost first, so the live reading is drawn over it rather than under.
+        val ghost = (ghostFraction.coerceIn(0f, 1f) * blend)
+        if (ghost > 0.001f) {
+            val was = arc.color
+            arc.color = Panel.Palette.DIM
+            arc.alpha = (255 * visible * blend).toInt().coerceIn(0, 255)
+            canvas.drawArc(scratch, startAngle, fullSweep * ghostFraction, false, arc)
+            arc.color = was
+            arc.alpha = (255 * visible).toInt()
+        }
         canvas.drawArc(scratch, startAngle, fullSweep * fraction, false, arc)
     }
 
@@ -1424,12 +1466,30 @@ class RearDialView(context: Context) : View(context) {
         moreText: String = "",
     ) {
         val now = SystemClock.elapsedRealtime()
-        // Only a REPLACEMENT turns the wheel. The first notice of a run arrives into an
-        // empty strip that is itself sliding in, and turning at the same time would have
-        // it enter twice over.
-        if (notice != null) { leaving = notice; wheelAt = now }
-        notice = Notice(app, pkg, title, text, moreTitle, moreText)
-        noticeAt = now
+        val next = Notice(app, pkg, title, text, moreTitle, moreText)
+
+        // QUEUED, not raced. Notifications arrive in bursts — a group syncing, a chat
+        // catching up — and replacing on arrival meant each one was on screen for
+        // however long the next took to turn up. Three of them inside a second is three
+        // wheel turns and nothing anybody could read, which looks like a fault rather
+        // than like three messages.
+        //
+        // So an arrival while one is showing goes to the back of the queue, and the
+        // promotion happens on the panel's own clock — see [promoteNotices]. The strip
+        // stays open across the whole burst and only the content turns over.
+        if (notice == null) {
+            // Nothing showing: straight up, and no wheel. The first notice of a run
+            // arrives into an empty strip that is itself sliding in, and turning at the
+            // same time would have it enter twice over.
+            notice = next
+            noticeAt = now
+        } else if (!sameAs(notice, next)) {
+            // BOUNDED. A queue that grows without limit turns a notification storm into
+            // minutes of strip long after the phone has gone quiet, and the oldest
+            // unshown message is the one least worth waiting for.
+            while (pending.size >= MAX_QUEUED) pending.removeFirst()
+            pending.addLast(next)
+        }
         invalidate()
     }
 
@@ -2026,8 +2086,21 @@ class RearDialView(context: Context) : View(context) {
      * ADJUST_TOGGLE_MUTE also means the phone agrees with the panel: mute set anywhere
      * else shows here, and mute set here shows everywhere else.
      */
+    /**
+     * The level a muted stream will come back to, 0..1, or 0 when not muted.
+     *
+     * Remembered here because it cannot be read back: a muted stream reports a volume of
+     * zero, so once mute is on there is nothing left to ask about what it was. Android
+     * keeps that number internally and restores it on unmute — this is the panel's copy
+     * of the same fact, kept so it can be SHOWN.
+     */
+    private var mutedFrom = 0f
+
     private fun toggleMute() {
         val a = audio ?: return
+        // Read BEFORE the toggle, and only when engaging it: after the call the stream
+        // reports zero, and on the way back out the live level is the answer again.
+        if (!muted()) mutedFrom = volumeLevel()
         runCatching {
             a.adjustStreamVolume(
                 android.media.AudioManager.STREAM_MUSIC,
@@ -2140,8 +2213,36 @@ class RearDialView(context: Context) : View(context) {
         return miniFrom + (miniTo - miniFrom) * Tween.easeInOut(t)
     }
 
+    /**
+     * Move the queue along, if the one on screen has had its turn.
+     *
+     * MIN_SHOW_MS is a floor on how long a notice is up, not a target: with nothing
+     * waiting, a notice still gets the full NOTICE_MS. It only shortens the wait when
+     * something is queued behind it, which is the case where holding the full five
+     * seconds each would put a burst of four notifications twenty seconds into the
+     * future — long enough that the last of them arrives as news about the past.
+     */
+    private fun promoteNotices(nowMs: Long) {
+        val showing = notice ?: return
+        val age = nowMs - noticeAt
+        if (pending.isNotEmpty()) {
+            if (age >= MIN_SHOW_MS) {
+                leaving = showing
+                wheelAt = nowMs
+                notice = pending.removeFirst()
+                noticeAt = nowMs
+            } else {
+                // The frame that ends the hold has to be asked for, or the next notice
+                // waits for something else to happen to invalidate the view.
+                animating = true
+            }
+        } else if (age > NOTICE_MS) {
+            notice = null
+        }
+    }
+
     private fun noticeSlide(nowMs: Long): Float {
-        if (notice != null && nowMs - noticeAt > NOTICE_MS) notice = null
+        promoteNotices(nowMs)
         if (leaving != null && nowMs - wheelAt > WHEEL_MS) leaving = null
 
         // Its own timing rather than the shared Tween, which runs at 1.8s. That is right
@@ -4817,6 +4918,18 @@ class RearDialView(context: Context) : View(context) {
 
         /** How long a notification holds the strip before it retracts. */
         private const val NOTICE_MS = 5_000L
+
+        /**
+         * The shortest a notice stays up when another is waiting behind it.
+         *
+         * Long enough to read a name and a line of text, which is all the strip carries.
+         * Below about this the burst becomes a flicker of half-read messages and the
+         * queue is worse than no queue at all.
+         */
+        private const val MIN_SHOW_MS = 3_000L
+
+        /** How many notices may wait. Beyond this the OLDEST unshown one is dropped. */
+        private const val MAX_QUEUED = 8
 
         /** How long one item takes to replace another on the wheel. */
         private const val WHEEL_MS = 300f
