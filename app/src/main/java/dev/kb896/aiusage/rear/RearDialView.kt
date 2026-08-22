@@ -165,6 +165,10 @@ class RearDialView(context: Context) : View(context) {
     private var notice: Notice? = null
     private var leaving: Notice? = null
 
+    /** The notice that has expired and is riding the strip off the panel. */
+    private var outgoing: Notice? = null
+    private var outgoingAt = 0L
+
     /** Notices waiting their turn. See showNotification and [promoteNotices]. */
     private val pending = ArrayDeque<Notice>()
 
@@ -1503,6 +1507,23 @@ class RearDialView(context: Context) : View(context) {
         moreText: String = "",
     ) {
         val now = SystemClock.elapsedRealtime()
+
+        // A NOTIFICATION THAT ARRIVES WHILE THE PANEL IS DARK IS NOT NEWS, IT IS HISTORY.
+        //
+        // The rear display sleeps; the broadcasts do not stop. Everything posted through
+        // the night was still being queued, and the first thing the panel did on waking
+        // was play back ten hours of other people's evenings — which is not a
+        // notification strip, it is a log.
+        //
+        // Dropped rather than shown late, and dropped HERE, before the queue: the queue's
+        // job is to pace things worth showing, and it cannot do that job well if it is
+        // also holding things that should never have been admitted. Nothing else about it
+        // changes — see promoteNotices.
+        //
+        // The display's own state is the test, not a timestamp. What matters is whether
+        // there was a screen to show it on, and the display knows that exactly.
+        if (display?.state == android.view.Display.STATE_OFF) return
+
         val next = Notice(app, pkg, title, text, moreTitle, moreText)
 
         // QUEUED, not raced. Notifications arrive in bursts — a group syncing, a chat
@@ -2370,6 +2391,10 @@ class RearDialView(context: Context) : View(context) {
      * future — long enough that the last of them arrives as news about the past.
      */
     private fun promoteNotices(nowMs: Long) {
+        // BEFORE the early return, because that is exactly when this matters: `outgoing`
+        // is only ever set once `notice` is null, so a cleanup below the guard would
+        // never run and the last notice's words would be held on the row for good.
+        if (outgoing != null && nowMs - outgoingAt > SLIDE_MS) outgoing = null
         val showing = notice ?: return
         val age = nowMs - noticeAt
         if (pending.isNotEmpty()) {
@@ -2384,6 +2409,17 @@ class RearDialView(context: Context) : View(context) {
                 animating = true
             }
         } else if (age > NOTICE_MS) {
+            // HANDED TO `outgoing` RATHER THAN DROPPED.
+            //
+            // The strip slides up when there is no notice, and it did that correctly —
+            // but the words vanished on the frame the clock ran out, so what left the
+            // screen was an empty card. The card was animating and its contents were not.
+            //
+            // The text now rides the strip out, exactly as the artwork rides the record
+            // out on a track change: the thing leaving keeps what it was showing until it
+            // has gone.
+            outgoing = showing
+            outgoingAt = nowMs
             notice = null
         }
     }
@@ -2553,7 +2589,10 @@ class RearDialView(context: Context) : View(context) {
         // Position only. Nothing fades: this is a window onto a drum, and a drum's rows
         // do not become transparent as they turn — they pass the edge and are gone.
         leaving?.let { drawNoticeRow(canvas, it, top + turn * NOTICE_H) }
-        notice?.let { drawNoticeRow(canvas, it, top - (1f - turn) * NOTICE_H) }
+        // `outgoing` stands in for a notice that has expired, so the words leave with the
+        // card rather than blinking out from under it. It is never both — a notice is
+        // either current or on its way out.
+        (notice ?: outgoing)?.let { drawNoticeRow(canvas, it, top - (1f - turn) * NOTICE_H) }
         canvas.restore()
     }
 
