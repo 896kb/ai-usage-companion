@@ -917,6 +917,23 @@ class RearDialView(context: Context) : View(context) {
     private var chargePercent = 0
 
     private val surface = LiquidSurface()
+    private val surge = ChargeSurge()
+
+    /** A colour pushed toward white, keeping its hue. RGB only; the caller sets alpha. */
+    private fun lighten(color: Int, amount: Float): Int {
+        val r = ((color shr 16) and 0xFF).let { it + ((255 - it) * amount).toInt() }
+        val g = ((color shr 8) and 0xFF).let { it + ((255 - it) * amount).toInt() }
+        val b = (color and 0xFF).let { it + ((255 - it) * amount).toInt() }
+        return (r shl 16) or (g shl 8) or b
+    }
+
+    /**
+     * The paint the discharges are drawn with. ADDITIVE, so overlapping flashes build up
+     * the way light does rather than the nearest one simply covering the others.
+     */
+    private val gleam = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        blendMode = android.graphics.BlendMode.PLUS
+    }
 
     /**
      * Show the charging cell, filling to the battery's present level.
@@ -934,6 +951,7 @@ class RearDialView(context: Context) : View(context) {
         chargeStepAt = 0L
         chargeTenth = -1
         surface.calm()
+        surge.clear()
         invalidate()
     }
 
@@ -951,6 +969,7 @@ class RearDialView(context: Context) : View(context) {
         if (ChargeOverlay.done(elapsed)) {
             chargeAt = 0L
             surface.calm()
+            surge.clear()
             return
         }
         animating = true
@@ -1079,6 +1098,57 @@ class RearDialView(context: Context) : View(context) {
         }
         canvas.drawPath(skin, noticePaint)
         noticePaint.style = Paint.Style.FILL
+
+        // ---- the surges ------------------------------------------------------------
+        //
+        // Charge going in, shown the way a cloud shows it: lit from inside, with the
+        // source itself never visible. A drawn bolt would be a bolt on top of a picture of
+        // water; a bright patch under the surface whose edges are lost in the body is the
+        // water having something happen in it.
+        //
+        // CLIPPED TO THE LIQUID, which is the whole of why it works. The glow stops
+        // exactly where the liquid does, so it lights the stuff rather than being painted
+        // over it — and above the surface there is nothing to light, correctly.
+        surge.update(elapsed, fill)
+        if (surge.size > 0) {
+            canvas.save()
+            canvas.clipPath(body)
+            surge.forEach { flash ->
+                val b = surge.brightness(flash, elapsed)
+                if (b <= 0.01f) return@forEach
+                // Placed in the LIQUID's frame — across the surface and down into the
+                // depth — so a flash stays where it is in the water while the water turns.
+                val u = (flash.u - 0.5f) * span
+                val d = level + flash.v * (depth / 2f - level).coerceAtLeast(1f)
+                val px = cx + acrossX * u + downX * d
+                val py = cy + acrossY * u + downY * d
+                val r = (right - left) * flash.size
+                // THE CORE IS NEARLY WHITE, not the liquid's own colour.
+                //
+                // Drawn in the tint it was invisible, and obviously so in hindsight:
+                // adding more of a colour to a body already made of it reads as slightly
+                // more liquid, not as light. Measured, the flashes were firing the whole
+                // time — one alight, brightness peaking around three quarters — and
+                // nothing could be seen. A discharge is white-hot at the middle and takes
+                // the colour of what it is shining through further out, so that is what
+                // the gradient does.
+                gleam.shader = android.graphics.RadialGradient(
+                    px, py, r,
+                    intArrayOf(
+                        lighten(tint, SURGE_WHITEN) or
+                            ((SURGE_CORE * b).toInt().coerceIn(0, 255) shl 24),
+                        (tint and 0x00FFFFFF) or
+                            ((SURGE_HALO * b).toInt().coerceIn(0, 255) shl 24),
+                        tint and 0x00FFFFFF,
+                    ),
+                    floatArrayOf(0f, 0.3f, 1f),
+                    android.graphics.Shader.TileMode.CLAMP,
+                )
+                canvas.drawCircle(px, py, r, gleam)
+            }
+            gleam.shader = null
+            canvas.restore()
+        }
         canvas.restore()
 
         // And the glass's clip, so the rim below is a full stroke rather than a half one
@@ -5532,6 +5602,13 @@ class RearDialView(context: Context) : View(context) {
 
         private const val CHARGE_SURFACE = 2.5f
         private const val CHARGE_MENISCUS = 0xDD
+
+        /** A discharge's brightest point, and the halo around it. */
+        private const val SURGE_CORE = 240f
+        private const val SURGE_HALO = 90f
+
+        /** How far the core is pushed toward white. */
+        private const val SURGE_WHITEN = 0.72f
         private const val CHARGE_RIM = 2f
 
         private const val NOTICE_MS = 5_000L
