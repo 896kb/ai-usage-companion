@@ -130,11 +130,18 @@ object GlassLuminance {
      * Returned as a multiplier on the shader's own bevel terms, so one is the look as
      * authored and the reaction is a departure from it in both directions.
      */
-    fun bevel(luminance: Float): Float =
-        (1f - BEVEL_RANGE * response(luminance)).coerceIn(0f, 1f + BEVEL_RANGE)
+    fun bevel(luminance: Float): Float {
+        // LINEAR, and this is the second time the squared curve has been the wrong one for
+        // something that is not a pane. It gave a multiplier of 1.14 over a backdrop at
+        // 0.3 — a fourteen per cent lift on an edge highlight, which is nothing you can
+        // see. The quiet middle is right for glass answering its room and wrong for
+        // anything whose job is to be legible.
+        val t = (luminance.coerceIn(0f, 1f) * 2f) - 1f
+        return (1f - BEVEL_RANGE * t).coerceIn(0f, 1f + BEVEL_RANGE)
+    }
 
     /** How far the glint moves either side of the authored look. */
-    private const val BEVEL_RANGE = 0.85f
+    private const val BEVEL_RANGE = 1.6f
 
     private fun blend(from: Int, to: Int, t: Float): Int =
         (from + (to - from) * t.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)

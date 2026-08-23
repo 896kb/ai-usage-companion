@@ -287,6 +287,8 @@ uniform float refractionHeight;
 uniform float lightAngle;
 uniform float bevel;
 
+const float SPECULAR = 0.55;
+
 float circleMap(float x) {
     return 1.0 - sqrt(1.0 - x * x);
 }
@@ -317,6 +319,18 @@ half4 main(float2 coord) {
     color.rgb *= 1.0 + 0.5 * bevel * intensity * bevelIntensity;
     bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
     color.rgb *= 1.0 + 0.5 * bevel * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
+
+    // AND A SPECULAR ON TOP, added rather than multiplied.
+    //
+    // The two terms above scale what is already there, which is why the reaction kept
+    // coming out invisible: over a bright backdrop the channels are near one and there is
+    // nothing left to multiply. A highlight that is ADDED lands the same either way, and a
+    // lit edge is what tells you a letter is a solid object rather than a smear of the
+    // wallpaper. Scaled by coverage so it stops at the glyph, and by the same bevel factor
+    // so it is part of the same reaction.
+    float spec = clamp(dot(normal, lightDir), 0.0, 1.0);
+    spec = pow(spec, 3.0) * intensity;
+    color.rgb += half3(SPECULAR * bevel * spec * v.a);
     return color;
 }"""
 
