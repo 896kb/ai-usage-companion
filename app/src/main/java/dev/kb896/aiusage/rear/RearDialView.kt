@@ -738,11 +738,16 @@ class RearDialView(context: Context) : View(context) {
 
         // Body. Glass is not clear, and a wholly clear pane on a panel that is largely
         // black is an invisible one — this is what a notification's text is read against.
-        panePaint.style = Paint.Style.FILL
-        panePaint.shader = null
-        panePaint.color = tint
-        if (shape != null) canvas.drawPath(shape, panePaint)
-        else canvas.drawRoundRect(rect, radius, radius, panePaint)
+        // A pane with no body draws none. Thumbs and buttons are held glass — see
+        // Glass.THUMB_TINT — and painting a transparent rectangle over the lens is not
+        // free on a display that redraws at 120Hz.
+        if (tint ushr 24 != 0) {
+            panePaint.style = Paint.Style.FILL
+            panePaint.shader = null
+            panePaint.color = tint
+            if (shape != null) canvas.drawPath(shape, panePaint)
+            else canvas.drawRoundRect(rect, radius, radius, panePaint)
+        }
         canvas.restore()
 
         if (!rim) return true
@@ -763,11 +768,10 @@ class RearDialView(context: Context) : View(context) {
         panePaint.shader = edge
         panePaint.alpha = if (held) (255 * Glass.AMBIENT_ALPHA).toInt() else 255
         panePaint.style = Paint.Style.STROKE
-        panePaint.strokeWidth = Glass.RIM_WIDTH
+        val rw = if (held) Glass.THUMB_RIM_WIDTH else Glass.RIM_WIDTH
+        panePaint.strokeWidth = rw
         canvas.drawRoundRect(
-            Glass.RIM_WIDTH / 2f, Glass.RIM_WIDTH / 2f,
-            w - Glass.RIM_WIDTH / 2f, h - Glass.RIM_WIDTH / 2f,
-            radius, radius, panePaint,
+            rw / 2f, rw / 2f, w - rw / 2f, h - rw / 2f, radius, radius, panePaint,
         )
         canvas.restore()
         panePaint.shader = null
@@ -792,11 +796,13 @@ class RearDialView(context: Context) : View(context) {
         rim: Boolean,
     ): Boolean {
         if (!canvas.isHardwareAccelerated) return false
-        panePaint.shader = null
-        panePaint.style = Paint.Style.FILL
-        panePaint.color = tint
-        if (shape != null) canvas.drawPath(shape, panePaint)
-        else canvas.drawRoundRect(rect, radius, radius, panePaint)
+        if (tint ushr 24 != 0) {
+            panePaint.shader = null
+            panePaint.style = Paint.Style.FILL
+            panePaint.color = tint
+            if (shape != null) canvas.drawPath(shape, panePaint)
+            else canvas.drawRoundRect(rect, radius, radius, panePaint)
+        }
         if (!rim) return true
 
         val edge = Glass.highlight
@@ -875,7 +881,9 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawGlassDisc(canvas: Canvas, cx: Float, cy: Float, r: Float): Boolean {
         discRect.set(cx - r, cy - r, cx + r, cy + r)
-        return drawGlassPane(canvas, discRect, r, Glass.DISC_TINT)
+        // HELD, like a thumb. A button and a held thumb are the same object here — a
+        // small piece of glass with something on it — so they are made the same way.
+        return drawGlassPane(canvas, discRect, r, Glass.DISC_TINT, held = true)
     }
 
     /**
@@ -6351,8 +6359,19 @@ class RearDialView(context: Context) : View(context) {
      * room for the progress bar would have quietly stretched both.
      */
     private fun mediaClip(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, mediaRight(config.theme), mark.bottom + MediaLayout.PROGRESS_TOTAL,
+        CONTENT_EDGE, mark.top, mediaRight(config.theme),
+        // ROOM FOR THE PLAY BAR'S THUMB. The clip used to stop at the progress bar's own
+        // bottom edge, which is right for a four-unit line and wrong for a thumb standing
+        // proud of it — the lower half was cut off against a panel that had twenty units
+        // of room left underneath. The bar is the last thing in this band, so extending
+        // the clip takes nothing from anything else.
+        mark.bottom + MediaLayout.PROGRESS_TOTAL +
+            if (config.theme.isGlass) mediaThumbOverhang() else 0f,
     )
+
+    /** How far the play bar's thumb stands below the bar it rides. */
+    private fun mediaThumbOverhang(): Float =
+        (MediaLayout.PROGRESS_H * MEDIA_THUMB - MediaLayout.PROGRESS_H) / 2f
 
     /**
      * Track and artist on the left, three transport glyphs on the right.
@@ -6398,7 +6417,16 @@ class RearDialView(context: Context) : View(context) {
         val textLeft =
             if (hasCover) band.left + band.height() + MediaLayout.COVER_GAP else band.left
 
-        val row = MediaLayout.of(textLeft, band.right, region.centerY(), config.theme)
+        // ROOM FOR THE DISCS. The row is laid out from its right edge leftwards, so the
+        // last glyph's own box ends exactly there — and under GLASS each glyph sits on a
+        // disc wider than the box it is in. The overhang is the difference between the
+        // disc's radius and half the glyph, and without allowing for it the NEXT button's
+        // disc is cut down its right-hand side by the row's clip.
+        val discRoom =
+            if (config.theme.isGlass) MediaLayout.GLYPH_H * (DISC_RADIUS - 0.5f) else 0f
+        val row = MediaLayout.of(
+            textLeft, band.right - discRoom, region.centerY(), config.theme,
+        )
         val gh = MediaLayout.GLYPH_H
         val (prev, play, next) = Triple(row.prev, row.play, row.next)
 

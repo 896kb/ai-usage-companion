@@ -278,60 +278,69 @@ half4 main(float2 coord) {
 
     // -- the numbers, in one place ----------------------------------------------------
 
-    // -- the lens ---------------------------------------------------------------------
+    // -- the lens, at the example's own numbers ---------------------------------------
     //
-    // ONE LENS FOR EVERY PANE, and dispersion on all of it. There were two sets of
-    // numbers at first — a plain refraction for the cards and the reference's pressed
-    // thumb for the thumbs — and keeping them apart was harder to reason about than it
-    // was worth: a panel made of one material should be described by one set of numbers,
-    // with the small things simply getting less of it.
-    //
-    // STATED AS FRACTIONS OF THE SHORT SIDE, THEN CAPPED. A fraction alone is right for a
-    // thumb twenty units tall and absurd for a notification card a hundred and thirty
-    // tall, where nearly two thirds of the short side of bending turns a lens into a
-    // fisheye. An absolute alone is the opposite problem: what reads as a bevel on a card
-    // swallows a thumb whole. The cap is where those two meet.
+    // Taken from the reference rather than tuned by eye, and the two components it draws
+    // these from agree closely enough to be one set. Its slider thumb, PRESSED, is
+    // lens(10dp, 14dp, chromaticAberration = true) on a 40x24dp thumb — 42% and 58% of
+    // its short side. Its tab bar's container is lens(24dp, 24dp). So: the same fractions
+    // for everything, capped where a container would otherwise take more than the
+    // reference gives one.
 
     /** How deep into a pane the bending reaches, as a fraction of its short side. */
     const val HEIGHT = 0.42f
 
-    /** And no deeper than this, in panel units, however large the pane. */
-    const val HEIGHT_MAX = 34f
+    /** And no deeper than the reference's container lens, in panel units. */
+    const val HEIGHT_MAX = 21f
 
     /** How far the backdrop is displaced at the edge, likewise as a fraction. */
     const val AMOUNT = 0.58f
 
-    /** And no further than this. */
-    const val AMOUNT_MAX = 26f
+    /** And no further than the same. */
+    const val AMOUNT_MAX = 21f
 
     /**
      * How much the edges split into colour.
      *
-     * ONE FIGURE FOR EVERY PANE, thumbs and buttons included. There were two for a while —
-     * the reference's full aberration on the small things and less on the large — and it
-     * was a distinction without a reason: a panel made of one material should split light
-     * the same way wherever you look at it, and a thumb that dispersed harder than the
-     * card beside it read as a different substance rather than a smaller piece.
+     * One, which is what `chromaticAberration = true` sets. It was 0.7 for a while on the
+     * reasoning that full aberration might read as a fault on a large pane; the reference
+     * does not think so, and it is the one that has been looked at.
      */
-    const val ABERRATION = 0.7f
+    const val ABERRATION = 1f
 
     /**
      * How much the bend follows the pane's centre rather than its nearest edge.
      *
-     * Zero is a pure edge lens. Above zero the whole pane behaves a little like a dome,
-     * which is what stops a long thin element — the slider is 486 units by 70 — from
-     * looking like two separate curved ends with a flat strip between them.
+     * ZERO, because the reference's `depthEffect` defaults to false and neither the
+     * slider nor the tab bar turns it on. It was 0.28 here on the theory that a long thin
+     * pane needs help not to look like two curved ends with a flat strip between them —
+     * which is a real effect, and not one the component this is modelled on accepts.
      */
-    const val DEPTH = 0.28f
+    const val DEPTH = 0f
 
-    /** Where the light comes from, in radians. Up and slightly left, as it always is. */
-    const val LIGHT_ANGLE = -2.2f
+    /**
+     * Where the light comes from, in radians.
+     *
+     * Forty-five degrees, which is what both of the reference's highlight styles use.
+     */
+    const val LIGHT_ANGLE = 0.7853982f
 
-    /** How tightly the rim gathers. Higher is a narrower, brighter edge. */
-    const val LIGHT_FALLOFF = 2.4f
+    /** How tightly the rim gathers. One, again the reference's own. */
+    const val LIGHT_FALLOFF = 1f
 
-    /** The rim's colour before it is modulated by the angle. */
-    const val LIGHT_COLOR = 0x59FFFFFF.toInt()
+    /** The flat rim's colour: Highlight.Default is white at a half. */
+    const val LIGHT_COLOR = 0x80FFFFFF.toInt()
+
+    /**
+     * How thick a rim is drawn, in panel units.
+     *
+     * The reference's Highlight is 0.5dp and its thumb takes two thirds of that. Both are
+     * hairlines; at this panel's scale that is about one unit.
+     */
+    const val RIM_WIDTH = 1.4f
+
+    /** A thumb's rim, thinner again — the reference divides its width by one and a half. */
+    const val THUMB_RIM_WIDTH = 0.9f
 
     /**
      * The pane's own tint, over the refracted backdrop.
@@ -345,17 +354,13 @@ half4 main(float2 coord) {
     // clear: what is behind a pane is bent, never softened. A blur is what a surface does
     // when you cannot see through it, and being able to see through it is the point.
 
-    /** How thick the lit rim is drawn, in panel units. */
-    const val RIM_WIDTH = 2f
-
     /**
-     * The tint behind a pressable glyph.
+     * The tint behind a pressable glyph: none, the same as a thumb's.
      *
-     * Lighter than a card's. A disc is small and mostly edge, so at the card's opacity it
-     * reads as a solid button with a glyph punched out of it rather than as a lens the
-     * glyph is sitting on.
+     * A button and a held thumb are the same object here — a small piece of glass with
+     * something on it — so they are made of the same nothing.
      */
-    const val DISC_TINT = 0x1FFFFFFF
+    const val DISC_TINT = 0x00000000
 
     /**
      * How much of a bar or a ring's own colour survives once it is glass.
@@ -370,12 +375,18 @@ half4 main(float2 coord) {
     const val SHEEN_WIDTH = 3f
 
     /**
-     * A slider thumb's body, brighter than a card's.
+     * A thumb's body: NONE.
      *
-     * A thumb is a small solid object sitting ON a reading, not a sheet lying over the
-     * panel — at a card's opacity it disappears into the fill it is meant to be riding.
+     * This is the reference's pressed state, and it is emphatic about it — the thumb's
+     * surface is drawn as `White.copy(alpha = 1 - pressProgress)`, so a thumb at rest is
+     * solid white and a thumb held is not tinted at all. Pressed, it is purely a lens
+     * with a rim: what you see through it IS the thumb.
+     *
+     * Which is also why the tint that was here read wrong. A white body at 55% turns the
+     * lens into a frosted lozenge — the one thing the reference stops doing the moment
+     * you touch it.
      */
-    const val THUMB_TINT = 0x8CFFFFFF.toInt()
+    const val THUMB_TINT = 0x00000000
 
     /**
      * How present the ambient rim is. The reference's Highlight.Ambient intensity.
