@@ -515,7 +515,6 @@ class RearDialView(context: Context) : View(context) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         pendingButtons.clear()
-        pendingTitleTex = null
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
             // POSITION, not just size. beginRecording says how big the display list is;
@@ -596,7 +595,7 @@ class RearDialView(context: Context) : View(context) {
         // node it is being recorded into — that is the cycle from before — but it can
         // sample the one behind, which is all it needs.
         var backdrop = sceneNode
-        backdrop = layered(backdrop) { c -> drawGlassTitle(c); drawPendingButtons(c) }
+        backdrop = layered(backdrop) { c -> drawPendingButtons(c) }
         backdrop = layered(backdrop) { c -> drawLockOverlay(c) }
         backdrop = layered(backdrop) {
             c -> drawNotice(c, noticeSlideHeld, SystemClock.elapsedRealtime())
@@ -1490,6 +1489,10 @@ class RearDialView(context: Context) : View(context) {
                     if (isVolume) MediaPage.VOLUME_ARC_SWEEP
                     else MediaPage.PLAYBACK_ARC_SWEEP,
                 engaged = mediaEngaged.getOrElse(at) { 0f },
+                // Only while the page is actually the media page: a volume gesture is
+                // impossible anywhere else, and a ring that swelled on the readout would
+                // be answering a touch that never happened.
+                thumbHeld = if (isVolume) engagement(Drag.VOLUME) * paging else 0f,
                 ghostFraction = mediaGhost.getOrElse(at) { 0f },
             )
         }
@@ -2003,6 +2006,17 @@ class RearDialView(context: Context) : View(context) {
         /** How held this dial is, 0 to 1 — see [engagement]. */
         engaged: Float = 0f,
         /**
+         * How held the ring's THUMB looks, which is not the same as [engaged].
+         *
+         * The two say different things and the volume dial wants one without the other.
+         * `engaged` greys and thickens the arc — "this reading is a proposal" — and the
+         * volume must never claim that, because it applies live and you can already hear
+         * it. Swelling the thumb says something else entirely: "yes, you have this",
+         * which is the one thing a control on the back of a phone cannot say any other
+         * way, since the finger driving it is somewhere nobody can see.
+         */
+        thumbHeld: Float = 0f,
+        /**
          * A dim arc drawn UNDER the reading, showing where it would be otherwise.
          *
          * For the volume while muted: the live arc is at zero, correctly, because that is
@@ -2124,7 +2138,7 @@ class RearDialView(context: Context) : View(context) {
             arc.alpha = (255 * visible).toInt()
         }
         if (config.theme.isGlass) {
-            drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc)
+            drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc, thumbHeld)
         } else {
             canvas.drawArc(scratch, startAngle, fullSweep * fraction, false, arc)
         }
@@ -2153,14 +2167,17 @@ class RearDialView(context: Context) : View(context) {
         fullSweep: Float,
         fraction: Float,
         paint: Paint,
+        held: Float,
     ) {
         val reading = paint.color
         val alpha = paint.alpha
         val stroke = paint.strokeWidth
         val f = fraction.coerceIn(0f, 1f)
+        // The same swell the unlock indicator gets, for the same reason — see thumbHeld.
+        val grow = 1f + (LockSlider.PRESSED_SCALE - 1f) * held.coerceIn(0f, 1f)
 
         // The layer covers the ring plus its stroke and the thumb standing proud of it.
-        val pad = stroke / 2f + stroke * RING_THUMB
+        val pad = stroke / 2f + stroke * RING_THUMB * LockSlider.PRESSED_SCALE
         arcBounds.set(
             oval.left - pad, oval.top - pad, oval.right + pad, oval.bottom + pad,
         )
@@ -2188,7 +2205,7 @@ class RearDialView(context: Context) : View(context) {
         val r = (oval.width() / 2f)
         val cx = oval.centerX() + (Math.cos(angle) * r).toFloat()
         val cy = oval.centerY() + (Math.sin(angle) * r).toFloat()
-        val tr = stroke * RING_THUMB / 2f
+        val tr = stroke * RING_THUMB * grow / 2f
         discRect.set(cx - tr, cy - tr, cx + tr, cy + tr)
         if (!drawGlassPane(
                 canvas, discRect, tr, Glass.THUMB_TINT,
@@ -4556,96 +4573,14 @@ class RearDialView(context: Context) : View(context) {
         // maker's mark follows, so the masthead and the artwork share one axis instead
         // of each being centred on something different.
         //
-        // UNDER GLASS THE MASTHEAD IS NOT PAINTED, IT IS A LENS SHAPED LIKE ITSELF. The
-        // panel behind shows through the letterforms, bent at the strokes and lit down
-        // one side — heavy glass type rather than type drawn on glass. Deferred to the
-        // overlay pass for the reason the buttons are: what it bends is the scene, and
-        // the scene is being recorded while this runs.
-        if (config.theme.isGlass) {
-            val tex = titleSdf.of(config.title, title, Glass.TEXT_SPREAD)
-            if (tex != null) {
-                val pad = titleSdf.padding
-                val left = (BAR_LEFT + BAR_RIGHT) / 2f - tex.width / 2f
-                val top = TITLE_BASELINE + title.fontMetrics.top - pad
-                discRect.set(left, top, left + tex.width, top + tex.height)
-                canvas.getMatrix().mapRect(pendingRect, discRect)
-                pendingTitle.set(pendingRect)
-                pendingTitleTex = tex
-                return
-            }
-        }
-        pendingTitleTex = null
+        // PAINTED IN BOTH THEMES. It was briefly a lens shaped like its own letterforms
+        // under GLASS — the panel showing through the type, bevelled at the strokes —
+        // which worked and was not wanted: a masthead is the one thing on this panel that
+        // has to be read at a glance from across a room, and a lens over a dark panel is
+        // dark. Glass is for the things you look past; this is a thing you look at.
         title.color = colorFor("title", config.titleColor)
         canvas.drawText(config.title, (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
     }
-
-    private val titleSdf = SdfText()
-    private val pendingTitle = android.graphics.RectF()
-    private var pendingTitleTex: android.graphics.Bitmap? = null
-    private var titleTexShader: android.graphics.BitmapShader? = null
-    private var titleTexFor: android.graphics.Bitmap? = null
-
-    /**
-     * The masthead, drawn as glass over whatever the panel had put there.
-     *
-     * The texture is sampled by the shader rather than drawn, so what lands on the canvas
-     * is the BACKDROP seen through the letters. A wash goes over the top afterwards
-     * because a lens over a black panel is black, and a title nobody can read is not a
-     * title — the reference lays white at a quarter over its clock for the same reason.
-     */
-    private fun drawGlassTitle(canvas: Canvas) {
-        val tex = pendingTitleTex ?: return
-        val recorder = canvas as? android.graphics.RecordingCanvas ?: return
-        if (!paneBackdrop.hasDisplayList()) return
-        val rect = pendingTitle
-        if (rect.width() < 1f || rect.height() < 1f) return
-
-        if (titleTexFor !== tex) {
-            titleTexShader = android.graphics.BitmapShader(
-                tex, android.graphics.Shader.TileMode.CLAMP,
-                android.graphics.Shader.TileMode.CLAMP,
-            )
-            titleTexFor = tex
-        }
-
-        val node = nextNode()
-        node.setRenderEffect(null)
-        node.setPosition(
-            Math.round(rect.left), Math.round(rect.top),
-            Math.round(rect.right), Math.round(rect.bottom),
-        )
-        val into = node.beginRecording()
-        try {
-            into.translate(-rect.left, -rect.top)
-            into.drawRenderNode(paneBackdrop)
-        } finally {
-            node.endRecording()
-        }
-
-        val shader = Glass.sdfText
-        shader.setInputBuffer("sdfTex", titleTexShader!!)
-        shader.setFloatUniform("size", rect.width(), rect.height())
-        shader.setFloatUniform("sdfTexSize", tex.width.toFloat(), tex.height.toFloat())
-        shader.setFloatUniform("refractionHeight", Glass.TEXT_REFRACTION)
-        shader.setFloatUniform("lightAngle", Glass.TEXT_LIGHT)
-        node.setRenderEffect(
-            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
-        )
-        recorder.drawRenderNode(node)
-
-        // The wash, clipped to the letters by drawing it through the same texture.
-        panePaint.shader = titleTexShader
-        panePaint.style = Paint.Style.FILL
-        panePaint.color = Glass.TEXT_WASH
-        titleWash.setScale(rect.width() / tex.width, rect.height() / tex.height)
-        titleWash.postTranslate(rect.left, rect.top)
-        titleTexShader!!.setLocalMatrix(titleWash)
-        canvas.drawRect(rect, panePaint)
-        titleTexShader!!.setLocalMatrix(null)
-        panePaint.shader = null
-    }
-
-    private val titleWash = android.graphics.Matrix()
 
 
     /**
@@ -4656,6 +4591,24 @@ class RearDialView(context: Context) : View(context) {
      * verbatim: the third window's name is whatever the live response resolved
      * (`scope.model.display_name`), never a hardcoded model name.
      */
+    /**
+     * A label in the theme's own case.
+     *
+     * ORIGINAL SHOUTS ON PURPOSE AND GLASS DOES NOT. Small caps in a pixel face are how a
+     * terminal readout labels a column: the letters are the same height as the digits
+     * beside them and the row scans as one line. Outfit has real lowercase with ascenders
+     * and descenders, and setting it in caps throws that away — the words come out as
+     * even grey blocks with nothing to tell them apart at a glance, which is exactly what
+     * capitals are for and exactly wrong for a proportional face.
+     *
+     * Only the first letter, so "ALL 5H" reads "All 5h". The units go down with the rest
+     * of it: a lone capital H in a lowercase word is a different word.
+     */
+    private fun cased(text: String): String {
+        if (!config.theme.isGlass || text.isEmpty()) return text
+        return text[0].uppercaseChar() + text.substring(1).lowercase()
+    }
+
     /** Account indices in the configured display order. */
     private fun orderedAccounts(): List<Int> = config.orderedAccounts(Account.entries.size)
 
@@ -4730,7 +4683,7 @@ class RearDialView(context: Context) : View(context) {
             // panel that faces outward from the back of the phone.
             status?.planTier?.let {
                 planTag.color = if (status.health == Health.OK) accentOf(account) else Panel.Palette.DIM
-                canvas.drawText(it, right, y, planTag)
+                canvas.drawText(cased(it), right, y, planTag)
             }
             val tagX = left + heading.measureText(labelOf(account)) + 14f
             // Kept alongside the dimming: grey alone says "something is wrong" without
@@ -4748,7 +4701,7 @@ class RearDialView(context: Context) : View(context) {
                 // the bar. Previously they were permanently DIM, which read as
                 // "disabled" even on a healthy account.
                 label.color = if (status?.health == Health.OK) accentOf(account) else Panel.Palette.DIM
-                canvas.drawText(w.label, left, y + barH - 4f, label)
+                canvas.drawText(cased(w.label), left, y + barH - 4f, label)
                 val barLeft = BAR_LEFT
                 val barRight = BAR_RIGHT
                 // UNDER GLASS A BAR IS A SLIDER, and the glass is the THUMB.

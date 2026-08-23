@@ -265,59 +265,6 @@ half4 main(float2 coord) {
 }"""
 
     /**
-     * Glass in the shape of something, rather than in the shape of a rectangle.
-     *
-     * The panes elsewhere are rounded rectangles and know their edges from arithmetic.
-     * This one is handed a TEXTURE that says, per pixel, how deep inside the shape it is
-     * and which way the surface faces — so the shape can be anything, and here it is the
-     * title's letterforms. The type is not painted at all: what you see is the panel
-     * behind it, bent at the strokes and lit down one side.
-     *
-     * From AndroidLiquidGlass's catalog (its lock screen draws a clock this way), under
-     * the same Apache 2.0 licence as the shaders above.
-     */
-    private const val SDF_TEXT = """
-uniform shader content;
-uniform shader sdfTex;
-
-uniform float2 size;
-uniform float2 sdfTexSize;
-uniform float refractionHeight;
-uniform float lightAngle;
-
-float circleMap(float x) {
-    return 1.0 - sqrt(1.0 - x * x);
-}
-
-half4 main(float2 coord) {
-    half2 p = coord / size * sdfTexSize;
-    if (p.x < 0.0 || p.y < 0.0 || p.x >= sdfTexSize.x || p.y >= sdfTexSize.y) {
-        return half4(0.0);
-    }
-    half4 v = sdfTex.eval(p);
-    float sd = v.r * 2.0 - 1.0;
-    v.a = smoothstep(0.5, 1.0, v.a);
-    if (v.a <= 0.0) {
-        return half4(0.0);
-    }
-    if (v.a < 1.0) {
-        sd = 0.0;
-    }
-    float2 normal = normalize(v.gb * 2.0 - 1.0);
-
-    float intensity = circleMap(1.0 - min(1.0, -sd * 1.5));
-    float2 refractedCoord = coord - intensity * refractionHeight * normal;
-
-    half4 color = content.eval(refractedCoord) * v.a;
-    float2 lightDir = float2(cos(lightAngle * 3.1415926 / 180.0), sin(lightAngle * 3.1415926 / 180.0));
-    float bevelIntensity = clamp(dot(normal, lightDir), 0.0, 1.0);
-    color.rgb *= 1.0 + 0.5 * intensity * bevelIntensity;
-    bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
-    color.rgb *= 1.0 + 0.5 * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
-    return color;
-}"""
-
-    /**
      * Compiled once and reused.
      *
      * A RuntimeShader is a compile; doing it per frame per pane would put a shader
@@ -328,7 +275,6 @@ half4 main(float2 coord) {
     val dispersion: RuntimeShader by lazy { RuntimeShader(DISPERSION) }
     val highlight: RuntimeShader by lazy { RuntimeShader(HIGHLIGHT) }
     val ambient: RuntimeShader by lazy { RuntimeShader(AMBIENT) }
-    val sdfText: RuntimeShader by lazy { RuntimeShader(SDF_TEXT) }
 
     // -- the numbers, in one place ----------------------------------------------------
 
@@ -371,7 +317,7 @@ half4 main(float2 coord) {
      * hard black-and-white edge is a rainbow rather than a bevel. The readings lie over
      * flat colour and never show it.
      */
-    const val BUTTON_ABERRATION = 0.65f
+    const val BUTTON_ABERRATION = 0.3f
 
     /**
      * How much the bend follows the pane's centre rather than its nearest edge.
@@ -471,29 +417,4 @@ half4 main(float2 coord) {
      */
     const val CHARGE_TINT = 0x1AFFFFFF
 
-    // -- glass type --------------------------------------------------------------------
-
-    /**
-     * How far into a stroke the bevel reaches, in panel units.
-     *
-     * The whole effect lives in this number. Too small and the letters are a window with
-     * no thickness; too large and every stroke is bevel with no clear middle, which on
-     * type at forty units is unreadable. About a fifth of the cap height.
-     */
-    const val TEXT_SPREAD = 9f
-
-    /** How far the backdrop is displaced under a stroke. */
-    const val TEXT_REFRACTION = 14f
-
-    /** Where the light is, in degrees. The same forty-five as everything else here. */
-    const val TEXT_LIGHT = 45f
-
-    /**
-     * A wash over the letters, so type on a dark panel is still type.
-     *
-     * The reference lays white at a quarter over its clock for the same reason: a lens
-     * over black is black, and a title nobody can read is not a title. This is the least
-     * that keeps it legible while leaving the bend visible.
-     */
-    const val TEXT_WASH = 0x40FFFFFF
 }
