@@ -114,6 +114,29 @@ object GlassLuminance {
             blend(base and 0xFF, toward, mix)
     }
 
+    /**
+     * A tint for a pane that has NONE of its own, taken purely from its backdrop.
+     *
+     * The buttons are clear glass on purpose — no tint at all, so what you see through
+     * them is the panel and nothing else. That is right over most of this panel and wrong
+     * at the extremes: over black there is nothing to see through them and the disc
+     * vanishes, over a bright photograph they are a hole with a rim.
+     *
+     * So instead of giving them a tint, this gives them one only where they need it. The
+     * squared response is exactly right here, unlike everywhere it has been wrong today:
+     * it returns nothing at all over a middling backdrop, which keeps the glass clear in
+     * the case that matters, and comes on only as the panel runs to one end or the other.
+     */
+    fun clearTint(luminance: Float, strength: Float = CLEAR_STRENGTH): Int {
+        val r = response(luminance)
+        val toward = if (r > 0f) 0xFF else 0x00
+        val a = (Math.abs(r) * strength * 255f).toInt().coerceIn(0, 255)
+        return (a shl 24) or (toward shl 16) or (toward shl 8) or toward
+    }
+
+    /** How far a clear pane is ever tinted, at the very ends of the range. */
+    private const val CLEAR_STRENGTH = 0.34f
+
     private fun blend(from: Int, to: Int, t: Float): Int =
         (from + (to - from) * t.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)
 

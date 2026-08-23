@@ -217,6 +217,24 @@ class RearDialView(context: Context) : View(context) {
         small.recycle()
     }
 
+    /**
+     * The tint for a CLEAR pane at [rect] — one with no colour of its own.
+     *
+     * Distinct from [reactive], which adjusts a tint a pane already has. These have none
+     * on purpose, so there is nothing to adjust; what they get instead is a tint only
+     * where clear glass stops working, which is at the two ends and not in the middle.
+     */
+    private fun clearReactive(rect: android.graphics.RectF): Int {
+        if (!config.theme.isGlass) return Glass.DISC_TINT
+        refreshLuminance()
+        return GlassLuminance.clearTint(
+            GlassLuminance.average(
+                lumCells, rect.left, rect.top, rect.right, rect.bottom,
+                Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+            ),
+        )
+    }
+
     /** [base], adjusted for how bright the panel is behind [rect]. */
     private fun reactive(base: Int, rect: android.graphics.RectF): Int {
         if (!config.theme.isGlass) return base
@@ -1539,14 +1557,23 @@ class RearDialView(context: Context) : View(context) {
             canvas.clipRect(b.clip)
             val fading = b.alpha < 0.999f
             if (fading) canvas.saveLayerAlpha(b.rect, (255 * b.alpha).toInt())
+            // THE TINT COMES FROM THE BACKDROP rather than from the button. A disc with
+            // no tint of its own is clear glass, which is what these are meant to be and
+            // what they stop being at the ends of the range: over black there is nothing
+            // to see through them and the disc disappears, over a bright photograph they
+            // are a hole with a rim. See GlassLuminance.clearTint, which gives them
+            // nothing at all in the middle, where they already work.
             drawGlassPane(
-                canvas, b.rect, b.rect.height() / 2f, Glass.DISC_TINT, held = true,
+                canvas, b.rect, b.rect.height() / 2f, clearReactive(b.rect), held = true,
                 aberration = Glass.BUTTON_ABERRATION,
             )
             if (fading) canvas.restore()
             canvas.restore()
         }
     }
+
+    /** Each wave's journey out of the cone, this frame. See the speaker. */
+    private val waveOut = FloatArray(WAVE_MAX)
 
     private val discRect = android.graphics.RectF()
     private val barRect = android.graphics.RectF()
@@ -6344,11 +6371,55 @@ class RearDialView(context: Context) : View(context) {
         // it has got to. The glyph's natural direction is +x, which is the angle's own
         // direction, so the rotation IS the angle.
         canvas.rotate(head, hx, hy)
-        drawIcon(
-            canvas, speaker,
-            hx - speakerW / 2f - (mh - speakerW) / 2f, hy - mh / 2f, mh,
-            smooth = true,
-        )
+
+        // THE WAVES ARE WORKED OUT FIRST, because the button is sized from them.
+        //
+        // Each has its own leg — see the loop below — and the disc swells with the sum of
+        // them, so a wave leaving the cone pushes the glass out as it goes. Reading them
+        // here rather than in the loop is what lets one number serve both: `ease` is
+        // driven by the frame clock and returns the same value twice in a frame, but
+        // asking it twice for the same thing is the kind of coupling that quietly stops
+        // being true when somebody changes the easing.
+        for (i in 1..WAVE_MAX) {
+            waveOut[i - 1] = ease("vol:wave:" + i, if (i <= waves) 1f else 0f, WAVE_MS)
+        }
+        // HOW FAR THE SOUND HAS GOT, measured from the cone's mouth. Not how MANY waves
+        // there are — the outermost one is what the bubble has to contain, and a wave is
+        // still travelling for the whole of its leg.
+        var reach = 0f
+        for (i in 1..WAVE_MAX) {
+            val out = waveOut[i - 1]
+            if (out > 0.01f) reach = maxOf(reach, (WAVE_FIRST + WAVE_STEP * (i - 1)) * out)
+        }
+        // The far edge of that wave, from the disc's centre: the mouth is offset from the
+        // centre by half the cone, and the arc is a stroke with width of its own.
+        val soundEdge = speakerW / 2f + reach * mh +
+            mh * WAVE_STROKE / 2f + mh * SPEAKER_WAVE_MARGIN
+
+        // A BUTTON, because it is one. It mutes when you tap it, and everything else on
+        // this panel that does something when tapped sits on a disc of glass. This was the
+        // last control still drawn as a bare mark, which read as a label for the ring
+        // rather than as a thing to press.
+        //
+        // Centred on the orbit point, which is where drawIcon's square cell lands anyway,
+        // so the two agree without being told to. The disc is a circle turned about its own
+        // centre, so the rotation the speaker rides makes no difference to its shape.
+        // SIZED TO HOLD THE SOUND. A fixed swell was the first attempt and it was the
+        // wrong quantity: at one wave the disc had grown by a third and the wave had
+        // travelled further than that, so the thing the bubble was meant to be showing
+        // was outside it. Sized from the wave's own reach it cannot happen — the glass
+        // is always big enough for what is inside it, and it grows because the sound does.
+        //
+        // Never smaller than the glyph's own cell, so a muted speaker is a button the same
+        // size as every other button rather than a shrunken one.
+        val discH = maxOf(mh, soundEdge / DISC_RADIUS)
+        glassButton(canvas, hx, hy, mh, discH = discH) { c ->
+            drawIcon(
+                c, speaker,
+                hx - speakerW / 2f - (mh - speakerW) / 2f, hy - mh / 2f, mh,
+                smooth = true,
+            )
+        }
         // The waves, concentric on the cone's mouth and clipped to a wedge, so they read
         // as sound leaving the speaker rather than as rings around it.
         run {
@@ -6366,7 +6437,7 @@ class RearDialView(context: Context) : View(context) {
                 // Each has its own leg, so going from one wave to three sends two out
                 // together from where they belong rather than as one group. Turning down
                 // runs the same journey backwards, into the cone.
-                val out = ease("vol:wave:" + i, if (i <= waves) 1f else 0f, WAVE_MS)
+                val out = waveOut[i - 1]
                 if (out <= 0.01f) continue
                 // Radius from the cone's mouth outward. Alpha with it, so a wave that has
                 // barely left is not a hard dot sitting on the speaker's lip.
@@ -7856,6 +7927,9 @@ class RearDialView(context: Context) : View(context) {
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
+
+        /** Air between the outermost wave and the glass holding it. */
+        private const val SPEAKER_WAVE_MARGIN = 0.12f
 
         /**
          * How long the record takes to swing from one side of its shake to the other.
