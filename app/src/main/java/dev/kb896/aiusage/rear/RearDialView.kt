@@ -512,6 +512,7 @@ class RearDialView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
+        pendingButtons.clear()
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
             // POSITION, not just size. beginRecording says how big the display list is;
@@ -571,10 +572,66 @@ class RearDialView(context: Context) : View(context) {
      * scene and is therefore something the panes can bend, which is the point.
      */
     private fun drawOverlays(canvas: Canvas) {
-        drawLockOverlay(canvas)
-        drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
-        drawCharge(canvas)
+        val recorder = canvas as? android.graphics.RecordingCanvas
+        if (recorder == null || !config.theme.isGlass || !sceneNode.hasDisplayList()) {
+            drawPendingButtons(canvas)
+            drawLockOverlay(canvas)
+            drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
+            drawCharge(canvas)
+            return
+        }
+
+        // PANES STACK, RATHER THAN EACH REPLACING WHAT IS UNDER IT.
+        //
+        // Every pane bends a backdrop, and if that backdrop is always the bare scene then
+        // a pane drawn over another shows the scene where the first one is — which erases
+        // it exactly where they overlap. Not a limitation of the effect: a limitation of
+        // handing every pane the same backdrop.
+        //
+        // So the backdrop accumulates. Each overlay is recorded into a node holding
+        // everything before it, and the next one bends THAT. A pane can never sample the
+        // node it is being recorded into — that is the cycle from before — but it can
+        // sample the one behind, which is all it needs.
+        var backdrop = sceneNode
+        backdrop = layered(backdrop) { c -> drawPendingButtons(c) }
+        backdrop = layered(backdrop) { c -> drawLockOverlay(c) }
+        backdrop = layered(backdrop) {
+            c -> drawNotice(c, noticeSlideHeld, SystemClock.elapsedRealtime())
+        }
+        backdrop = layered(backdrop) { c -> drawCharge(c) }
+        recorder.drawRenderNode(backdrop)
+        paneBackdrop = sceneNode
     }
+
+    /**
+     * Draw one overlay over everything so far, and hand back the result as the next
+     * backdrop.
+     *
+     * The node holds the previous backdrop and then the overlay on top, so what comes
+     * next bends both. [paneBackdrop] is what drawGlassPane samples by default, and it
+     * points at the PREVIOUS node while this one is being recorded — never at this one.
+     */
+    private inline fun layered(
+        backdrop: android.graphics.RenderNode,
+        body: (Canvas) -> Unit,
+    ): android.graphics.RenderNode {
+        val out = nextNode()
+        out.setRenderEffect(null)
+        out.setPosition(0, 0, width, height)
+        val into = out.beginRecording(width, height)
+        paneBackdrop = backdrop
+        try {
+            into.drawRenderNode(backdrop)
+            body(into)
+        } finally {
+            paneBackdrop = sceneNode
+            out.endRecording()
+        }
+        return out
+    }
+
+    /** What a pane bends when it is not given something of its own. */
+    private var paneBackdrop = sceneNode
 
     /** The strip's slide, taken during the scene pass so the second pass cannot re-advance it. */
     private var noticeSlideHeld = 0f
@@ -629,7 +686,7 @@ class RearDialView(context: Context) : View(context) {
          * the scene recording, so it can never sample the scene, but it can perfectly well
          * sample a node holding its own track.
          */
-        source: android.graphics.RenderNode = sceneNode,
+        source: android.graphics.RenderNode = paneBackdrop,
         /**
          * The HELD look, for thumbs.
          *
@@ -856,6 +913,16 @@ class RearDialView(context: Context) : View(context) {
     private inline fun localBackdrop(
         canvas: Canvas,
         bounds: android.graphics.RectF,
+        /**
+         * Whether the layer is also drawn where it was recorded.
+         *
+         * Usually yes — a track publishes itself and appears. The exception is the tabs'
+         * trick, which the unlock slider borrows: a second copy of the content in the
+         * accent colour, kept INVISIBLE and used only as the indicator's backdrop, so
+         * that what the indicator passes over is revealed in that colour and nothing
+         * else changes.
+         */
+        visible: Boolean = true,
         body: (Canvas) -> Unit,
     ): android.graphics.RenderNode? {
         val recorder = canvas as? android.graphics.RecordingCanvas ?: return null
@@ -876,7 +943,7 @@ class RearDialView(context: Context) : View(context) {
         } finally {
             backdropNode.endRecording()
         }
-        recorder.drawRenderNode(backdropNode)
+        if (visible) recorder.drawRenderNode(backdropNode)
         return backdropNode
     }
 
@@ -940,17 +1007,47 @@ class RearDialView(context: Context) : View(context) {
             return
         }
         val r = discH * DISC_RADIUS
+
+        // THE GLYPH GOES DOWN NOW; THE GLASS GOES OVER IT LATER.
+        //
+        // Giving the button a layer holding only its glyph was not enough, and the reason
+        // is worth keeping: the lens bends a band around the pane's EDGE, and around a
+        // 27-unit disc that band is the outer 21 — which for a glyph-only layer is empty.
+        // Bending nothing shows nothing, so the button had a lens with stronger settings
+        // than any thumb and looked like it had none at all.
+        //
+        // What a button needs to bend is what a button is sitting ON. That is the scene,
+        // and the scene is being recorded right now — so the glyph is drawn here, its
+        // place is noted, and the lens is laid over it once the scene is finished and can
+        // be sampled. The mark ends up UNDER the glass, which is where a mark on a button
+        // belongs, and the panel behind it bends round the rim.
+        glyph(canvas)
         discRect.set(cx - r, cy - r, cx + r, cy + r)
-        val layer = localBackdrop(canvas, discRect) { into -> glyph(into) }
-        if (layer == null) {
-            glyph(canvas)
-            return
-        }
-        // HELD, like a thumb: the same lens, the same aberration, the same ambient rim.
-        // A button and a held thumb are the same object made the same way.
-        drawGlassPane(
-            canvas, discRect, r, Glass.DISC_TINT, source = layer, held = true,
+        canvas.getMatrix().mapRect(pendingRect, discRect)
+        pendingButtons.add(
+            android.graphics.RectF(pendingRect.left, pendingRect.top,
+                pendingRect.right, pendingRect.bottom),
         )
+    }
+
+    /**
+     * Buttons whose glass is still to be laid over them, in panel coordinates.
+     *
+     * Noted during the scene and drawn in the overlay pass — see glassButton. Mapped
+     * through the canvas's own matrix rather than reconstructed from the offsets in play,
+     * because those are scattered across half a dozen locals (the drift, the page scroll,
+     * the notice push) and a copy of that sum is a copy that will drift from it.
+     */
+    private val pendingButtons = ArrayList<android.graphics.RectF>(8)
+    private val pendingRect = android.graphics.RectF()
+
+    /** Lay the glass over every button noted during the scene. */
+    private fun drawPendingButtons(canvas: Canvas) {
+        for (rect in pendingButtons) {
+            drawGlassPane(
+                canvas, rect, rect.height() / 2f, Glass.DISC_TINT, held = true,
+            )
+        }
     }
 
     private val discRect = android.graphics.RectF()
@@ -2227,26 +2324,28 @@ class RearDialView(context: Context) : View(context) {
             event.y <= band.bottom + LOCK_BAND_SLOP
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
-                lockGrabbed = inBand && LockSlider.grabs(event.x, lockProgress)
+                lockGrabbed = inBand && LockSlider.grabs(event.x, lockProgress, h)
                 if (lockGrabbed) {
                     // Where the gesture started, so the indicator moves WITH the finger
                     // rather than jumping to centre itself under it on the first move.
                     lockGrabX = event.x
                     lockGrabFrom = lockProgress
                     lockSpringAt = 0L
+                    pressLock(true)
                     invalidate()
                 }
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 if (lockGrabbed) {
                     lockProgress =
-                        LockSlider.progressFrom(lockGrabFrom, event.x - lockGrabX)
+                        LockSlider.progressFrom(lockGrabFrom, event.x - lockGrabX, h)
                     invalidate()
                 }
             }
             android.view.MotionEvent.ACTION_UP -> {
                 if (lockGrabbed) {
                     lockGrabbed = false
+                    pressLock(false)
                     if (LockSlider.unlocks(lockProgress)) {
                         unlock()
                     } else {
@@ -2262,6 +2361,7 @@ class RearDialView(context: Context) : View(context) {
                 // far the knob had got. It falls back like any unfinished drag.
                 if (lockGrabbed) {
                     lockGrabbed = false
+                    pressLock(false)
                     lockSpringFrom = lockProgress
                     lockSpringAt = SystemClock.uptimeMillis()
                     invalidate()
@@ -4856,22 +4956,13 @@ class RearDialView(context: Context) : View(context) {
         val h = region.height()
         val r = h / 2f
         scratch.set(LockSlider.left(), region.top, LockSlider.right(), region.bottom)
+        val glass = config.theme.isGlass
 
-        // The container, and then the indicator inside it — the reference's tab bar, with
-        // two stops instead of a row of them. Both are glass; the container's own surface
-        // stays visible all the way round the indicator, which is what makes the
-        // indicator read as being INSIDE something rather than laid on top of it.
-        //
-        // Published as a layer, so the indicator lenses the container it is riding rather
-        // than the panel underneath. Same reason the sliders do it — and here it is the
-        // difference between a thumb with a bevel and a thumb you can see the track
-        // through.
-        val layer = if (config.theme.isGlass) {
-            localBackdrop(canvas, scratch) { into ->
-                if (!drawGlassPane(into, scratch, r, Glass.TINT)) {
-                    barTrack.color = Panel.Palette.TRACK
-                    into.drawRoundRect(scratch, r, r, barTrack)
-                }
+        // The container.
+        if (glass) {
+            if (!drawGlassPane(canvas, scratch, r, Glass.TINT)) {
+                barTrack.color = Panel.Palette.TRACK
+                canvas.drawRoundRect(scratch, r, r, barTrack)
             }
         } else {
             // Filled at the palette's track grey and edged a shade brighter, the same two
@@ -4882,35 +4973,48 @@ class RearDialView(context: Context) : View(context) {
             track.color = Panel.Palette.RULE
             track.strokeWidth = 1.5f
             canvas.drawRoundRect(scratch, r, r, track)
+        }
+
+        // The instruction, in the container's own quiet grey.
+        drawLockLabel(canvas, region, Panel.Palette.FG, LOCK_TEXT_ALPHA)
+
+        // AND A SECOND COPY OF IT, IN THE ACCENT, INVISIBLE — with the panel behind it.
+        //
+        // This is the tab bar's own trick. Its tabs are drawn twice: once normally, and
+        // once tinted and at zero alpha, and the indicator's backdrop is the tinted copy.
+        // So a tab the indicator is over shows through it in the accent while every other
+        // tab stays plain — the indicator does not paint anything, it REVEALS.
+        //
+        // The panel goes in underneath because this is an overlay: the scene is finished
+        // and can be sampled, so the indicator bends the readout as well as the words.
+        val layer = if (glass) {
+            localBackdrop(canvas, scratch, visible = false) { into ->
+                (into as? android.graphics.RecordingCanvas)?.drawRenderNode(paneBackdrop)
+                // The container's own body, so the indicator bends the track it is
+                // riding rather than showing the panel straight through it.
+                panePaint.shader = null
+                panePaint.style = Paint.Style.FILL
+                panePaint.color = Glass.TINT
+                into.drawRoundRect(scratch, r, r, panePaint)
+                drawLockLabel(into, region, LOCK_REVEAL, 255f)
+            }
+        } else {
             null
         }
 
-        val tw = LockSlider.thumbWidth()
-        val th = LockSlider.thumbHeight(h)
-        val tl = LockSlider.thumbLeft(progress)
+        // The indicator, swelling while it is held — the reference's pressedScale. The
+        // finger is on the BACK of the phone and covers nothing, so there is no contact
+        // patch to see; the control growing is the only acknowledgement available.
+        val press = lockPress(frameNowMs)
+        val grow = 1f + (LockSlider.PRESSED_SCALE - 1f) * press
+        val tw = LockSlider.thumbWidth(h) * grow
+        val th = LockSlider.thumbHeight(h) * grow
+        val cx = LockSlider.thumbLeft(progress, h) + LockSlider.thumbWidth(h) / 2f
+        val cy = region.centerY()
+        lockThumb.set(cx - tw / 2f, cy - th / 2f, cx + tw / 2f, cy + th / 2f)
         val tr = th / 2f
-        lockThumb.set(tl, region.top + LockSlider.PAD, tl + tw, region.bottom - LockSlider.PAD)
 
-        // THE WORD SITS IN THE HALF THE INDICATOR IS HEADING FOR, and is covered as it
-        // arrives. It is an instruction, and an instruction being followed has stopped
-        // being needed — one still lit under a thumb that is on top of it is the panel
-        // asking for something it is already getting.
-        val told = (1f - progress * 1.6f).coerceIn(0f, 1f)
-        if (told > 0.01f) {
-            extras.textAlign = Paint.Align.CENTER
-            extras.textSize = typed(LOCK_TEXT)
-            extras.color = (Panel.Palette.FG and 0x00FFFFFF) or
-                ((LOCK_TEXT_ALPHA * told).toInt().coerceIn(0, 255) shl 24)
-            canvas.drawText(
-                LOCK_LABEL,
-                LockSlider.right() - LockSlider.PAD - tw / 2f,
-                region.centerY() + LOCK_TEXT * 0.36f,
-                extras,
-            )
-            extras.textAlign = Paint.Align.LEFT
-        }
-
-        val paned = config.theme.isGlass && drawGlassPane(
+        val paned = glass && drawGlassPane(
             canvas, lockThumb, tr, Glass.THUMB_TINT,
             source = layer ?: sceneNode, held = true,
         )
@@ -4921,11 +5025,9 @@ class RearDialView(context: Context) : View(context) {
             canvas.drawRoundRect(lockThumb, tr, tr, barFill)
         }
 
-        // A chevron pointing the way, on the indicator. Two strokes rather than a traced
-        // glyph: the icon set has no arrow, and an arrow is two lines.
-        val a = LOCK_CHEV * 0.5f
-        val cx = lockThumb.centerX()
-        val cy = region.centerY()
+        // A chevron pointing the way. Two strokes rather than a traced glyph: the icon
+        // set has no arrow, and an arrow is two lines.
+        val a = LOCK_CHEV * 0.5f * grow
         arc.color = if (paned) Panel.Palette.FG else Panel.Palette.BG
         arc.strokeWidth = LOCK_CHEV_W
         arc.strokeCap = Paint.Cap.ROUND
@@ -4936,6 +5038,53 @@ class RearDialView(context: Context) : View(context) {
         canvas.restore()
         arc.strokeCap = Paint.Cap.BUTT
     }
+
+    /**
+     * The instruction, centred in the track.
+     *
+     * Drawn twice per frame at two colours — see drawLock — so it is one function rather
+     * than one function and a copy of it that will drift.
+     */
+    private fun drawLockLabel(
+        canvas: Canvas,
+        region: android.graphics.RectF,
+        colour: Int,
+        alpha: Float,
+    ) {
+        val was = extras.textAlign
+        extras.textAlign = Paint.Align.CENTER
+        extras.textSize = typed(LOCK_TEXT)
+        extras.color =
+            (colour and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24)
+        canvas.drawText(
+            LOCK_LABEL,
+            (LockSlider.left() + LockSlider.right()) / 2f,
+            region.centerY() + LOCK_TEXT * 0.36f,
+            extras,
+        )
+        extras.textAlign = was
+    }
+
+    /** How far the indicator has swollen, 0 to 1, easing both ways. */
+    private fun lockPress(nowMs: Long): Float {
+        if (lockPressAt == 0L) return lockPressTo
+        val t = (nowMs - lockPressAt).toFloat() / LockSlider.PRESS_MS
+        if (t >= 1f) return lockPressTo
+        animating = true
+        return lockPressFrom + (lockPressTo - lockPressFrom) * Tween.easeInOut(t.coerceIn(0f, 1f))
+    }
+
+    private fun pressLock(down: Boolean) {
+        val to = if (down) 1f else 0f
+        if (to == lockPressTo) return
+        lockPressFrom = lockPress(SystemClock.uptimeMillis())
+        lockPressTo = to
+        lockPressAt = SystemClock.uptimeMillis()
+    }
+
+    private var lockPressFrom = 0f
+    private var lockPressTo = 0f
+    private var lockPressAt = 0L
 
     private val lockThumb = android.graphics.RectF()
     private val noticeShape = android.graphics.Path()
@@ -6533,10 +6682,18 @@ class RearDialView(context: Context) : View(context) {
         // of the top as play drops off the bottom. It is the same gesture as the row
         // arriving, one size down, so a track being paused and the controls appearing
         // read as the same machine.
-        canvas.save()
-        canvas.clipRect(play, region.top, play + gh, region.bottom)
-        drawPlayPause(canvas, play, row.glyphTop, gh, tint)
-        canvas.restore()
+        //
+        // On a disc like the two beside it. It was the only one of the three without,
+        // because it is drawn apart from them — the drum needs its own clip — and taking
+        // it out of the row cost it the button it sits on.
+        glassButton(
+            canvas, play + gh * Glyphs.aspect(PanelIcons.PAUSE, config.theme) / 2f, discCy, gh,
+        ) { c ->
+            c.save()
+            c.clipRect(play, region.top, play + gh, region.bottom)
+            drawPlayPause(c, play, row.glyphTop, gh, tint)
+            c.restore()
+        }
 
         val hasArtist = m.artist.isNotBlank()
         var baseline = MediaLayout.firstBaseline(region.centerY(), hasArtist)
@@ -7133,6 +7290,15 @@ class RearDialView(context: Context) : View(context) {
          * The X axis carries the whole gesture and is not loosened.
          */
         private const val LOCK_BAND_SLOP = 60f
+
+        /**
+         * The colour the instruction is revealed in under the indicator.
+         *
+         * Blue for now, to see the mechanism working. It is the reference's own dark
+         * accent, which is as good a placeholder as any and will be a setting if it
+         * stays.
+         */
+        private const val LOCK_REVEAL = 0xFF0091FF.toInt()
 
         /** Slack around a faded corner glyph, covering its margin and the drift. */
         private const val FADE_PAD = 60f

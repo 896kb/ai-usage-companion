@@ -37,25 +37,43 @@ class LockSliderTest {
 
     // -- the indicator ----------------------------------------------------------------
 
-    /** Two stops, so the indicator is half the track and its travel is its own width. */
-    @Test fun `the indicator is half the track`() {
+    /**
+     * The indicator keeps the reference SLIDER's proportion, not a tab's.
+     *
+     * Half the track was the literal reading of "a tab bar with two stops" and it made a
+     * slab — at that size the thing being dragged is most of the instrument, so it is not
+     * being carried across anything.
+     */
+    @Test fun `the indicator is a small object with a long way to go`() {
         val span = LockSlider.right() - LockSlider.left() - LockSlider.PAD * 2f
-        assertEquals(span / 2f, LockSlider.thumbWidth(), 0.01f)
-        assertEquals(LockSlider.thumbWidth(), LockSlider.travel(), 0.01f)
+        assertEquals(
+            LockSlider.thumbHeight(h) * LockSlider.THUMB_ASPECT,
+            LockSlider.thumbWidth(h), 0.01f,
+        )
+        assertTrue("the indicator is most of its own track",
+            LockSlider.thumbWidth(h) < span / 2f)
+        assertTrue("there is barely anywhere to carry it",
+            LockSlider.travel(h) > LockSlider.thumbWidth(h))
     }
 
     /** It stays inside the container at both stops — that is what the padding is for. */
     @Test fun `it sits inside the container at rest and arrived`() {
-        assertEquals(LockSlider.left() + LockSlider.PAD, LockSlider.thumbLeft(0f), 0.01f)
+        assertEquals(LockSlider.left() + LockSlider.PAD, LockSlider.thumbLeft(0f, h), 0.01f)
         assertEquals(
             LockSlider.right() - LockSlider.PAD,
-            LockSlider.thumbLeft(1f) + LockSlider.thumbWidth(), 0.01f,
+            LockSlider.thumbLeft(1f, h) + LockSlider.thumbWidth(h), 0.01f,
         )
     }
 
+    /** Held, it swells — the only acknowledgement a control on the back of a phone has. */
+    @Test fun `it grows when it is held`() {
+        assertTrue("a held indicator should be bigger", LockSlider.PRESSED_SCALE > 1f)
+        assertTrue("but not a different object", LockSlider.PRESSED_SCALE < 2f)
+    }
+
     @Test fun `progress past the ends is still progress`() {
-        assertEquals(LockSlider.thumbLeft(0f), LockSlider.thumbLeft(-3f), 0.01f)
-        assertEquals(LockSlider.thumbLeft(1f), LockSlider.thumbLeft(9f), 0.01f)
+        assertEquals(LockSlider.thumbLeft(0f, h), LockSlider.thumbLeft(-3f, h), 0.01f)
+        assertEquals(LockSlider.thumbLeft(1f, h), LockSlider.thumbLeft(9f, h), 0.01f)
     }
 
     // -- taking hold ------------------------------------------------------------------
@@ -67,21 +85,21 @@ class LockSliderTest {
     @Test fun `a touch at the far end does not take hold`() {
         assertFalse(
             "a tap on the right grabbed the indicator",
-            LockSlider.grabs(LockSlider.right() - 4f, 0f),
+            LockSlider.grabs(LockSlider.right() - 4f, 0f, h),
         )
     }
 
     @Test fun `a touch on the resting indicator takes hold`() {
-        assertTrue(LockSlider.grabs(LockSlider.thumbLeft(0f) + 10f, 0f))
-        assertTrue(LockSlider.grabs(LockSlider.thumbLeft(0f) + LockSlider.thumbWidth() / 2f, 0f))
+        assertTrue(LockSlider.grabs(LockSlider.thumbLeft(0f, h) + 10f, 0f, h))
+        assertTrue(LockSlider.grabs(LockSlider.thumbLeft(0f, h) + LockSlider.thumbWidth(h) / 2f, 0f, h))
     }
 
     /** The grab region travels with it, or a drag could not be resumed mid-track. */
     @Test fun `the grab region follows the indicator`() {
-        val midOfArrived = LockSlider.thumbLeft(1f) + LockSlider.thumbWidth() / 2f
-        assertTrue(LockSlider.grabs(midOfArrived, 1f))
+        val midOfArrived = LockSlider.thumbLeft(1f, h) + LockSlider.thumbWidth(h) / 2f
+        assertTrue(LockSlider.grabs(midOfArrived, 1f, h))
         assertFalse("the resting position still answers once it has moved",
-            LockSlider.grabs(LockSlider.left() + 2f, 1f))
+            LockSlider.grabs(LockSlider.left() + 2f, 1f, h))
     }
 
     // -- the drag ---------------------------------------------------------------------
@@ -91,18 +109,18 @@ class LockSliderTest {
      * instead of jumping to centre itself under it on the first move.
      */
     @Test fun `it moves with the finger, not to it`() {
-        assertEquals(0f, LockSlider.progressFrom(0f, 0f), 0.001f)
-        assertEquals(0.5f, LockSlider.progressFrom(0f, LockSlider.travel() / 2f), 0.001f)
-        assertEquals(1f, LockSlider.progressFrom(0f, LockSlider.travel()), 0.001f)
+        assertEquals(0f, LockSlider.progressFrom(0f, 0f, h), 0.001f)
+        assertEquals(0.5f, LockSlider.progressFrom(0f, LockSlider.travel(h) / 2f, h), 0.001f)
+        assertEquals(1f, LockSlider.progressFrom(0f, LockSlider.travel(h), h), 0.001f)
     }
 
     @Test fun `a drag resumed from halfway carries on from there`() {
-        assertEquals(0.75f, LockSlider.progressFrom(0.5f, LockSlider.travel() / 4f), 0.001f)
+        assertEquals(0.75f, LockSlider.progressFrom(0.5f, LockSlider.travel(h) / 4f, h), 0.001f)
     }
 
     @Test fun `dragging back the way it came is allowed, and clamped`() {
-        assertEquals(0f, LockSlider.progressFrom(0.5f, -LockSlider.travel()), 0.001f)
-        assertEquals(1f, LockSlider.progressFrom(0.5f, LockSlider.travel() * 4f), 0.001f)
+        assertEquals(0f, LockSlider.progressFrom(0.5f, -LockSlider.travel(h), h), 0.001f)
+        assertEquals(1f, LockSlider.progressFrom(0.5f, LockSlider.travel(h) * 4f, h), 0.001f)
     }
 
     // -- committing -------------------------------------------------------------------
@@ -131,21 +149,21 @@ class LockSliderTest {
 
     /** Take hold where it rests, carry it across, let go at the end. */
     @Test fun `an indicator carried the whole way across unlocks`() {
-        val grabAt = LockSlider.thumbLeft(0f) + LockSlider.thumbWidth() / 2f
-        assertTrue("could not take hold", LockSlider.grabs(grabAt, 0f))
-        val progress = LockSlider.progressFrom(0f, LockSlider.travel())
+        val grabAt = LockSlider.thumbLeft(0f, h) + LockSlider.thumbWidth(h) / 2f
+        assertTrue("could not take hold", LockSlider.grabs(grabAt, 0f, h))
+        val progress = LockSlider.progressFrom(0f, LockSlider.travel(h), h)
         assertTrue("a full swipe did not unlock", LockSlider.unlocks(progress))
     }
 
     @Test fun `one that stops halfway does not`() {
-        assertFalse(LockSlider.unlocks(LockSlider.progressFrom(0f, LockSlider.travel() / 2f)))
+        assertFalse(LockSlider.unlocks(LockSlider.progressFrom(0f, LockSlider.travel(h) / 2f, h)))
     }
 
     /** The travel is long — that is what makes this deliberate rather than lucky. */
     @Test fun `the travel is a real distance`() {
         val usable = Panel.WIDTH - Panel.CUTOUT_RIGHT.toFloat()
-        assertTrue("the travel is only ${LockSlider.travel()} of $usable",
-            LockSlider.travel() > usable * 0.3f)
+        assertTrue("the travel is only ${LockSlider.travel(h)} of $usable",
+            LockSlider.travel(h) > usable * 0.3f)
     }
 
     /** The indicator has room inside the container on every side. */

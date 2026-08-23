@@ -19,10 +19,14 @@ import dev.kb896.aiusage.Panel
  *
  * BUILT AS A TWO-STOP TAB BAR, which is where the shape comes from. The reference's
  * bottom tabs are a capsule container with a padded capsule indicator that slides between
- * positions; this is that component with two positions — where the thumb rests and where
- * it has to arrive. So the thumb is half the track rather than a small knob, which suits
- * the gesture: a wide slab pushed across is a deliberate act, and a small knob at the end
- * of a long empty groove looks like something to flick.
+ * positions; this is that component with two positions — where the indicator rests and
+ * where it has to arrive.
+ *
+ * The indicator keeps the reference SLIDER's proportions rather than a tab's, though. A
+ * tab's indicator is the track divided by however many tabs there are, which with two
+ * stops is half the instrument — and a thing that large being dragged is not being
+ * carried ACROSS anything. A small object with a long way to go is what makes the gesture
+ * read as a journey, and the journey is the whole point of asking for it.
  */
 object LockSlider {
 
@@ -58,20 +62,25 @@ object LockSlider {
     fun thumbHeight(bandHeight: Float): Float = bandHeight - PAD * 2f
 
     /**
-     * The indicator's width: half the track's usable span, because there are two stops.
+     * The indicator's width.
      *
-     * Two stops rather than a scale of them, and that is the whole difference from a tab
-     * bar: this control has one journey with a beginning and an end, not a row of places
-     * to be. Half the track each.
+     * The reference thumb's own proportion — 40 by 24 — rather than half the track. Half
+     * was the literal reading of "a tab bar with two stops" and it made a slab: at that
+     * size the thing being dragged is most of the instrument, so there is no sense of
+     * carrying something ACROSS anything. A small object with a long way to go is what
+     * makes the gesture read as a journey.
      */
-    fun thumbWidth(): Float = (right() - left() - PAD * 2f) / 2f
+    const val THUMB_ASPECT = 40f / 24f
+
+    fun thumbWidth(bandHeight: Float): Float = thumbHeight(bandHeight) * THUMB_ASPECT
+
+    /** How far the indicator travels: the track, less its own width and the padding. */
+    fun travel(bandHeight: Float): Float =
+        right() - left() - PAD * 2f - thumbWidth(bandHeight)
 
     /** The indicator's left edge for a given progress, 0 at rest and 1 arrived. */
-    fun thumbLeft(progress: Float): Float =
-        left() + PAD + thumbWidth() * progress.coerceIn(0f, 1f)
-
-    /** How far the indicator travels, which is exactly its own width. */
-    fun travel(): Float = thumbWidth()
+    fun thumbLeft(progress: Float, bandHeight: Float): Float =
+        left() + PAD + travel(bandHeight) * progress.coerceIn(0f, 1f)
 
     /**
      * Whether a touch at [x] counts as taking hold of the indicator.
@@ -80,9 +89,9 @@ object LockSlider {
      * has to be picked up where it is. Otherwise the gesture degrades into "touch the
      * left half, then touch the right", which is two taps, and cloth manages two taps.
      */
-    fun grabs(x: Float, progress: Float): Boolean {
-        val l = thumbLeft(progress)
-        return x >= l - GRAB_SLOP && x <= l + thumbWidth() + GRAB_SLOP
+    fun grabs(x: Float, progress: Float, bandHeight: Float): Boolean {
+        val l = thumbLeft(progress, bandHeight)
+        return x >= l - GRAB_SLOP && x <= l + thumbWidth(bandHeight) + GRAB_SLOP
     }
 
     /**
@@ -92,8 +101,8 @@ object LockSlider {
      * indicator does not jump to centre itself under the thumb on the first move. The
      * caller passes the progress the gesture started at and the distance travelled.
      */
-    fun progressFrom(startProgress: Float, dx: Float): Float {
-        val t = travel()
+    fun progressFrom(startProgress: Float, dx: Float, bandHeight: Float): Float {
+        val t = travel(bandHeight)
         if (t <= 0.0001f) return 0f
         return (startProgress + dx / t).coerceIn(0f, 1f)
     }
@@ -121,4 +130,17 @@ object LockSlider {
      * enough — which is the truth, and is also the instruction.
      */
     const val SPRING_MS = 260f
+
+    /**
+     * How much bigger the indicator gets while it is held.
+     *
+     * The reference's own pressedScale. A control that swells under the finger is the
+     * only acknowledgement available here — the finger is on the BACK of the phone and
+     * covers nothing, so there is no contact patch to see and nothing else to say "yes,
+     * you have this".
+     */
+    const val PRESSED_SCALE = 1.5f
+
+    /** How quickly it swells and settles again. Fast: this is a response, not a move. */
+    const val PRESS_MS = 140f
 }
