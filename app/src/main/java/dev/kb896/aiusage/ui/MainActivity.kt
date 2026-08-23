@@ -121,6 +121,7 @@ class MainActivity : ComponentActivity() {
         bindSettings()
         buildSettingsRows()
         bindArt()
+        bindBackdrop()
         bindDiagnostics()
         bindAdvancedToggle()
         bindGeometrySliders()
@@ -452,6 +453,26 @@ class MainActivity : ComponentActivity() {
      * redraws forever and cannot depend on another app still being installed and still
      * willing.
      */
+    /**
+     * The background picture. A picker of its own, into a file of its own.
+     *
+     * Sharing the artwork's launcher and telling them apart by a flag was the shorter
+     * way and the wrong one: the result arrives on a separate trip through the activity
+     * lifecycle, and a flag set before the picker opens is a flag that has to survive the
+     * process being killed while somebody browses their gallery.
+     */
+    private val pickBackdrop = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val path = ArtImport.store(this, uri, ArtImport.Slot.BACKGROUND)
+        if (path == null) {
+            toast("Could not read that image")
+            return@registerForActivityResult
+        }
+        cropBackdrop(path)
+    }
+
     private val pickArt = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -805,6 +826,68 @@ class MainActivity : ComponentActivity() {
                 refreshPreview()
                 toast("Artwork set")
             })
+    }
+
+    /**
+     * Crop a picture into the whole panel, rather than into the art strip.
+     *
+     * The same view and the same maths as the artwork — only the region's shape differs,
+     * and it differs a lot: 4:1 against the panel's 1.58:1. Showing one and landing in
+     * the other is exactly what this view exists to prevent.
+     */
+    private fun cropBackdrop(path: String, reuseTransform: Boolean = false) {
+        val bitmap = android.graphics.BitmapFactory.decodeFile(path)
+        if (bitmap == null) {
+            toast("Could not read that image")
+            return
+        }
+        val store = ConfigStore(this)
+        val existing = store.load().backdrop
+        val view = ArtCropView(this).apply {
+            regionAspect = ArtCropView.PANEL_ASPECT
+            setImage(
+                bitmap,
+                if (reuseTransform) existing.panX else 0f,
+                if (reuseTransform) existing.panY else 0f,
+                if (reuseTransform) existing.zoom else 1f,
+            )
+        }
+        Modal.show(Modal.builder(this)
+            .setTitle("Drag to move, pinch to zoom")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Use it") { _, _ ->
+                val config = store.load().copy(backdrop = ArtConfig(
+                    imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom))
+                store.save(config)
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+                refreshPreview()
+                toast("Background set")
+            })
+    }
+
+    private fun bindBackdrop() {
+        val pick = findViewById<Button>(R.id.backdrop_pick)
+        pick.setOnClickListener { pickBackdrop.launch("image/*") }
+        // Long-press re-crops what is already there, without going back through the
+        // picker to choose the same file again — the same affordance the artwork has.
+        pick.setOnLongClickListener {
+            val path = ConfigStore(this).load().backdrop.imagePath
+            if (path == null) toast("No image chosen yet")
+            else cropBackdrop(path, reuseTransform = true)
+            true
+        }
+        findViewById<Button>(R.id.backdrop_clear).setOnClickListener {
+            val store = ConfigStore(this)
+            val config = store.load().copy(backdrop = ArtConfig())
+            store.save(config)
+            // The file goes too. It is a megabyte of somebody's photograph that nothing
+            // will ever read again, and leaving it would make "remove" a lie about disk.
+            ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            refreshPreview()
+            toast("Background removed")
+        }
     }
 
     private fun bindArt() {

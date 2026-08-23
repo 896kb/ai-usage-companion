@@ -30,6 +30,20 @@ class ArtCropView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
 
+    /**
+     * The shape of the region being cropped into.
+     *
+     * Settable because the same cropper now serves two regions that are nothing like each
+     * other — a 4:1 strip for the maker's mark and the whole 1.58:1 panel for a
+     * background. Showing one shape while the picture lands in the other is the exact
+     * mistake this view exists to prevent.
+     */
+    var regionAspect: Float = REGION_ASPECT
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val shade = Paint().apply { color = 0xB0000000.toInt() }
     private val frame = Paint().apply {
@@ -59,7 +73,7 @@ class ArtCropView @JvmOverloads constructor(
     /** The region, centred in this view, at the panel's own aspect. */
     private fun region(): RectF {
         val w = width * 0.86f
-        val h = w / REGION_ASPECT
+        val h = w / regionAspect
         val left = (width - w) / 2f
         val top = (height - h) / 2f
         return RectF(left, top, left + w, top + h)
@@ -123,8 +137,15 @@ class ArtCropView @JvmOverloads constructor(
         canvas.drawRect(box, frame)
     }
 
-    private companion object {
+    /**
+     * Not private any more: the region's shape is now the caller's to choose, so the two
+     * shapes it may be have to be nameable from outside.
+     */
+    companion object {
         /** The art region's shape: 278 by 70 panel units. */
         const val REGION_ASPECT = 278f / 70f
+
+        /** The whole panel, for a picture that goes behind all of it. */
+        const val PANEL_ASPECT = 904f / 572f
     }
 }

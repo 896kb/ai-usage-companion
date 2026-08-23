@@ -133,8 +133,6 @@ class RearDialView(context: Context) : View(context) {
     /** Filtered, unlike the mascot: a user's photo is not pixel art and nearest-neighbour
      *  scaling of one looks like a mistake rather than a style. */
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private var artKey: String? = null
-    private var artBitmap: android.graphics.Bitmap? = null
 
     /** No anti-aliasing: the mascot is pixel art, and crisp edges are the look. */
     private val mascotPaint = Paint()
@@ -1156,6 +1154,8 @@ class RearDialView(context: Context) : View(context) {
             )
             val hue = colorFor("bg", config.background or (0xFF shl 24))
             canvas.drawColor((hue and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24))
+            // Over the ground colour and under everything else.
+            drawBackdropImage(canvas)
         }
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
@@ -6940,36 +6940,68 @@ class RearDialView(context: Context) : View(context) {
      * that renders nothing at all because an image went missing would look like the
      * panel had broken.
      */
-    private fun customArt(): android.graphics.Bitmap? {
-        val path = config.art.imagePath ?: return null
+    private fun customArt(): android.graphics.Bitmap? = artCache.of(config.art.imagePath)
 
-        // Keyed on the file's IDENTITY, not just its name.
-        //
-        // There is one art slot, so choosing a new image overwrites panel-art.png and
-        // the path never changes. Caching on the path alone therefore pins the first
-        // image forever in any process that lives long enough — which the panel does not
-        // (:rear is destroyed and recreated constantly, re-decoding by accident) but the
-        // app's preview does. The bug was invisible on the back and permanent on the
-        // front, until an app restart.
-        val file = java.io.File(path)
-        val key = "$path:${file.lastModified()}:${file.length()}"
-        if (key != artKey) {
-            artKey = key
-            // Decode FIRST, then release the old one — and only if the new one arrived.
-            // Recycling up front would destroy a working image whenever a decode failed,
-            // and would free a bitmap a draw in flight might still be holding.
-            val decoded = try {
-                android.graphics.BitmapFactory.decodeFile(path)
-            } catch (_: Exception) {
-                null
+    /**
+     * A decoded picture, kept until the file behind it changes.
+     *
+     * There are two of these now — the maker's mark and the panel's backdrop — and they
+     * are the same problem twice: decode once, notice when the file is replaced, and
+     * never hold two copies of the same image. Keyed on the path AND the file's stamp,
+     * because both live at a fixed filename and choosing a new picture overwrites it, so
+     * the path alone would never look like it had changed.
+     */
+    private class CachedImage {
+        private var key: String? = null
+        private var bitmap: android.graphics.Bitmap? = null
+
+        fun of(path: String?): android.graphics.Bitmap? {
+            if (path == null) return null
+            val file = java.io.File(path)
+            val id = path + ":" + file.lastModified() + ":" + file.length()
+            if (id != key) {
+                key = id
+                val decoded = try {
+                    android.graphics.BitmapFactory.decodeFile(path)
+                } catch (_: Exception) {
+                    null
+                }
+                // A file that will not decode leaves what was there. A panel that went
+                // blank because an image went missing would look like the panel broke.
+                if (decoded != null) {
+                    bitmap?.recycle()
+                    bitmap = decoded
+                }
             }
-            if (decoded != null) {
-                artBitmap?.recycle()
-                artBitmap = decoded
-            }
+            return bitmap
         }
-        return artBitmap
     }
+
+    private val artCache = CachedImage()
+    private val backdropCache = CachedImage()
+
+    /**
+     * The user's own picture behind the whole readout.
+     *
+     * CLIPPED TO THE PANEL and drawn straight after the ground colour, so everything else
+     * sits over it — this is a backdrop, not a layer the readout has to compete with.
+     * Under GLASS it is also the best thing that has ever been behind a pane: the lenses
+     * have had almost nothing but flat black to bend until now.
+     */
+    private fun drawBackdropImage(canvas: Canvas) {
+        val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
+        panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        val dest = ArtPlacement.destination(
+            panelRect, bitmap.width, bitmap.height,
+            config.backdrop.panX, config.backdrop.panY, config.backdrop.zoom,
+        )
+        canvas.save()
+        canvas.clipRect(panelRect)
+        canvas.drawBitmap(bitmap, null, dest, artPaint)
+        canvas.restore()
+    }
+
+    private val panelRect = android.graphics.RectF()
 
     /**
      * Draws [bitmap] inside [region], panned and zoomed, and CLIPPED to it.

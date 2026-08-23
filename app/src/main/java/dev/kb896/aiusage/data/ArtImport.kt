@@ -21,14 +21,22 @@ import java.io.File
  */
 object ArtImport {
 
-    /** Filename in the app's files dir. One slot: choosing a new image replaces it. */
-    private const val NAME = "panel-art.png"
+    /**
+     * Which picture this is. Each has a file of its own and choosing a new one replaces
+     * only that slot — a background and a maker's mark are unrelated decisions, and
+     * sharing a filename would make setting one silently destroy the other.
+     */
+    enum class Slot(val file: String) {
+        ART("panel-art.png"),
+        BACKGROUND("panel-background.png"),
+    }
 
     /**
      * Longest edge kept, in pixels.
      *
      * The art region is about 278x70 panel units and zoom goes to 4x, so 1024 is already
-     * generous — beyond it there is no visible detail to gain, only memory to lose.
+     * generous — beyond it there is no visible detail to gain, only memory to lose. A
+     * background covers the whole 904-unit panel, which is still well inside it.
      */
     private const val MAX_EDGE = 1024
 
@@ -37,9 +45,9 @@ object ArtImport {
      *   read or decoded. Null must leave any existing art alone: a failed pick should not
      *   also destroy what was already there.
      */
-    fun store(context: Context, uri: Uri): String? {
+    fun store(context: Context, uri: Uri, slot: Slot = Slot.ART): String? {
         val bitmap = decodeScaled(context, uri) ?: return null
-        val file = File(context.filesDir, NAME)
+        val file = File(context.filesDir, slot.file)
         return try {
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             file.absolutePath
@@ -50,8 +58,8 @@ object ArtImport {
         }
     }
 
-    fun clear(context: Context) {
-        File(context.filesDir, NAME).delete()
+    fun clear(context: Context, slot: Slot = Slot.ART) {
+        File(context.filesDir, slot.file).delete()
     }
 
     /**

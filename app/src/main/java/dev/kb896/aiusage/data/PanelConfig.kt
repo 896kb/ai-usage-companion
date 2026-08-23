@@ -307,6 +307,15 @@ data class PanelConfig(
      *  small and sit alone in a corner, and dim made them read as disabled. */
     val extrasColor: Int = Panel.Palette.WORK,
     val art: ArtConfig = ArtConfig(),
+    /**
+     * A picture behind the whole readout, cropped the same way the art is.
+     *
+     * The same shape of setting as [art] and deliberately the same type: both are "an
+     * image, panned and zoomed into a region", and the region differing does not make
+     * them different ideas. Null path means the flat [background] colour, which is what
+     * every panel had before this existed.
+     */
+    val backdrop: ArtConfig = ArtConfig(),
     /** Appearance per account, by index. Short lists are fine — a missing entry is
      *  the same as an entry of all-nulls: use the built-ins. */
     val accounts: List<AccountStyle> = listOf(AccountStyle(), AccountStyle()),

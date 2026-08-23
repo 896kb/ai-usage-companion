@@ -236,6 +236,30 @@
             android:text="Choose an image"
             android:textSize="13sp" />
 
+        <TextView
+            android:id="@+id/backdrop_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="BACKGROUND"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/backdrop_pick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Choose an image"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/backdrop_clear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Remove background"
+            android:textSize="13sp" />
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
