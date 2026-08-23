@@ -202,4 +202,33 @@ half4 main(float2 coord) {
 
     /** How thick the lit rim is drawn, in panel units. */
     const val RIM_WIDTH = 2f
+
+    /**
+     * The tint behind a pressable glyph.
+     *
+     * Lighter than a card's. A disc is small and mostly edge, so at the card's opacity it
+     * reads as a solid button with a glyph punched out of it rather than as a lens the
+     * glyph is sitting on.
+     */
+    const val DISC_TINT = 0x1FFFFFFF
+
+    /**
+     * How much of a bar or a ring's own colour survives once it is glass.
+     *
+     * A reading has to stay readable. Glass that took the accent down to a whisper would
+     * be a panel that looked better and told you less, which is the wrong trade for the
+     * one thing on here that is actually information.
+     */
+    const val READING_ALPHA = 0xD8
+
+    /** How wide the sheen along a ring's outer edge is drawn, in panel units. */
+    const val SHEEN_WIDTH = 3f
+
+    /**
+     * A slider thumb's body, brighter than a card's.
+     *
+     * A thumb is a small solid object sitting ON a reading, not a sheet lying over the
+     * panel — at a card's opacity it disappears into the fill it is meant to be riding.
+     */
+    const val THUMB_TINT = 0x8CFFFFFF.toInt()
 }
