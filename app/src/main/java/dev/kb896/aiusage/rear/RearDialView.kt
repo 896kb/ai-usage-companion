@@ -119,6 +119,72 @@ class RearDialView(context: Context) : View(context) {
 
     private val recordRect = android.graphics.RectF()
 
+    /**
+     * How bright the panel's own backdrop is, in twenty-five cells. See GlassLuminance.
+     *
+     * Rebuilt only when the backdrop changes, which for a background image and a ground
+     * colour means almost never. The reference reads its backdrop back from a layer every
+     * frame; this panel is always on and a per-frame pixel readback would stall the render
+     * thread on the GPU for the sake of a number that has not moved since yesterday.
+     */
+    private val lumCells = FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE)
+    private var lumKey: String? = null
+
+    private fun refreshLuminance() {
+        val path = config.backdrop.imagePath
+        val key = (path ?: "-") + "|" + config.background + "|" +
+            config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom
+        if (key == lumKey) return
+        lumKey = key
+
+        // THE PANEL'S BACKDROP, not the file's contents. The image is panned and zoomed
+        // into place, so averaging the bitmap would describe a picture nobody is looking
+        // at. Drawing it the way the panel draws it, into a five-by-five, gives the same
+        // answer the reference gets from reading its own layer back.
+        val small = android.graphics.Bitmap.createBitmap(
+            GlassLuminance.SIDE, GlassLuminance.SIDE,
+            android.graphics.Bitmap.Config.ARGB_8888,
+        )
+        val into = Canvas(small)
+        into.drawColor(config.background or (0xFF shl 24))
+        val bmp = if (path != null) backdropCache.of(path) else null
+        if (bmp != null) {
+            into.scale(
+                GlassLuminance.SIDE / Panel.WIDTH.toFloat(),
+                GlassLuminance.SIDE / Panel.HEIGHT.toFloat(),
+            )
+            panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+            into.drawBitmap(
+                bmp, null,
+                ArtPlacement.destination(
+                    panelRect, bmp.width, bmp.height,
+                    config.backdrop.panX, config.backdrop.panY, config.backdrop.zoom,
+                ),
+                artPaint,
+            )
+        }
+        for (y in 0 until GlassLuminance.SIDE) {
+            for (x in 0 until GlassLuminance.SIDE) {
+                lumCells[y * GlassLuminance.SIDE + x] =
+                    GlassLuminance.of(small.getPixel(x, y))
+            }
+        }
+        small.recycle()
+    }
+
+    /** [base], adjusted for how bright the panel is behind [rect]. */
+    private fun reactive(base: Int, rect: android.graphics.RectF): Int {
+        if (!config.theme.isGlass) return base
+        refreshLuminance()
+        return GlassLuminance.reactive(
+            base,
+            GlassLuminance.average(
+                lumCells, rect.left, rect.top, rect.right, rect.bottom,
+                Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+            ),
+        )
+    }
+
     /** The battery glyph in panel coordinates, so the charge can be clipped to it. */
     private val batteryMatrix = android.graphics.Matrix()
     private val batteryPath = android.graphics.Path()
@@ -1958,8 +2024,15 @@ class RearDialView(context: Context) : View(context) {
         // one is a vessel whose contents are the point, and a lit outline around a glass
         // of moving liquid is a second thing competing with the first. The liquid's own
         // surface and the refraction at the walls say where the glass is.
+        // THE CARD'S OWN DIM. The cell used to carry a much fainter tint of its own, set
+        // when the panel behind it was black and a heavier one would have muted the
+        // liquid. It does not mute it — the liquid is drawn over this, at its own alpha —
+        // and two glass surfaces on one panel at two different weights read as two
+        // materials. One dim, reacting to the same backdrop, in both places.
         val paned = config.theme.isGlass &&
-            drawGlassPane(canvas, chargeRect, r, Glass.CHARGE_TINT, rim = false)
+            drawGlassPane(
+                canvas, chargeRect, r, reactive(glassNoticeTint(), chargeRect), rim = false,
+            )
 
         canvas.save()
         canvas.clipPath(glass)
@@ -4418,7 +4491,7 @@ class RearDialView(context: Context) : View(context) {
             canvas.clipRect(
                 0f, cardBottom + GLASS_NOTICE_GAP, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
             )
-            if (!drawGlassPane(canvas, mini, r, glassNoticeTint(), held = true)) {
+            if (!drawGlassPane(canvas, mini, r, reactive(glassNoticeTint(), mini), held = true)) {
                 noticePaint.style = Paint.Style.FILL
                 noticePaint.color = glassNoticeTint()
                 canvas.drawRoundRect(mini, r, r, noticePaint)
@@ -5758,12 +5831,21 @@ class RearDialView(context: Context) : View(context) {
                 disc.cx - disc.radius, disc.cy - disc.radius,
                 disc.cx + disc.radius, disc.cy + disc.radius,
             )
-            // AT THE BODY'S OWN ALPHA, which the drawn disc also used. A record on this
-            // panel has never been fully opaque: the background shows faintly through it,
-            // and with a picture behind the readout that is the difference between a
-            // record sitting on the panel and a hole punched in it. A photograph at full
-            // strength would be the hole.
-            artPaint.alpha = VINYL_BODY_ALPHA
+            // SOLID ON THE MEDIA PAGE, SHEER ON THE READOUT, and travelling between the
+            // two with the scroll.
+            //
+            // The two pages want opposite things from it. On the readout the record is
+            // behind six bars and two rings, and a solid disc there is a hole punched in
+            // the panel — the background has to carry through it or the readout looks
+            // like it is sitting on a coaster. On the media page the record IS the page,
+            // and a sheer one looks like a picture of a record rather than the thing.
+            //
+            // `paging` is already the scroll between them, 0 at the readout and 1 at the
+            // media page, so the disc thickens as it arrives. Riding the existing value
+            // rather than tweening a second one means it cannot disagree with the scroll.
+            artPaint.alpha = (
+                VINYL_BODY_ALPHA + (255 - VINYL_BODY_ALPHA) * paging.coerceIn(0f, 1f)
+            ).toInt()
             canvas.drawBitmap(record, null, recordRect, artPaint)
             artPaint.alpha = 255
         } else {
