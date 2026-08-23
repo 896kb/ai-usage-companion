@@ -277,25 +277,18 @@ class RearDialView(context: Context) : View(context) {
             node.endRecording()
         }
 
-        // The figure is content ON the glass rather than glass itself, so it goes the
-        // opposite way from the panes: darker over a bright panel, lighter over a dark
-        // one. See GlassLuminance.contentTint.
-        refreshLuminance()
-        val tint = GlassLuminance.contentTint(
-            paint.color,
-            GlassLuminance.average(
-                lumCells, sdfRect.left, sdfRect.top, sdfRect.right, sdfRect.bottom,
-                Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
-            ),
-        )
-
-        // KEYED ON THE FIELD AND THE TINT, which is to say on the number and the backdrop.
-        // Neither moves between frames, and building a RenderEffect per frame is precisely
-        // the churn that filled the native heap the last time — a small Java object in
-        // front of a large native allocation is the one shape the collector will not
-        // hurry over. Bounded here by the charge lasting seconds rather than forever, but
-        // bounded is not the same as free.
-        val effectKey = sdfKey + "|" + tint
+        // NO TINT ON IT, which is worth stating because it was tried both ways. The figure
+        // was pulled toward the liquid's colour, on the reasoning that it is the liquid's
+        // number and the two should read as one instrument. They did — and it stopped
+        // reading as glass, which is the more important of the two things it has to be.
+        // Glass has no colour of its own; everything it shows is the panel behind it, and
+        // the moment you give it a hue it becomes coloured type with a bevel.
+        //
+        // KEYED ON THE FIELD, which is to say on the number. It does not move between
+        // frames, and building a RenderEffect per frame is precisely the churn that filled
+        // the native heap the last time — a small Java object in front of a large native
+        // allocation is the one shape the collector will not hurry over.
+        val effectKey = sdfKey
         if (effectKey != sdfEffectKey) {
             sdfEffectKey = effectKey
             val shader = Glass.sdf
@@ -311,7 +304,6 @@ class RearDialView(context: Context) : View(context) {
             shader.setFloatUniform("sdfTexSize", w, h)
             shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
             shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
-            shader.setColorUniform("tint", tint)
             sdfEffect =
                 android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         }

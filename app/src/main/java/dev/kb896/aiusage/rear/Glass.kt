@@ -285,7 +285,6 @@ uniform float2 size;
 uniform float2 sdfTexSize;
 uniform float refractionHeight;
 uniform float lightAngle;
-layout(color) uniform half4 tint;
 
 float circleMap(float x) {
     return 1.0 - sqrt(1.0 - x * x);
@@ -314,10 +313,6 @@ half4 main(float2 coord) {
     color.rgb *= 1.0 + 0.5 * intensity * bevelIntensity;
     bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
     color.rgb *= 1.0 + 0.5 * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
-    // Pulled toward legibility. Premultiplied like the rest of this, so the tint is scaled
-    // by the glyph's own coverage before it is mixed in — otherwise it paints over the
-    // transparent margin as well and the words gain a rectangle.
-    color.rgb = mix(color.rgb, tint.rgb * v.a, tint.a);
     return color;
 }"""
 
