@@ -32,10 +32,9 @@ object PanelType {
         cache.getOrPut(theme) {
             when (theme) {
                 PanelTheme.ORIGINAL -> res.getFont(R.font.departure_mono)
-                // MEDIUM, not Regular. Outfit ships as a variable font and its Regular is
-                // light for a panel read at arm's length on a small strip — the readout is
-                // glanced at, not studied. Typeface.create with a weight picks the
-                // instance from the variable axis; it is not a synthetic bold.
+                // Cut from the variable weight axis rather than synthesised — Outfit
+                // ships every weight from Thin to Black in one file, and Typeface.create
+                // with a weight picks the real instance instead of smearing the outline.
                 PanelTheme.GLASS ->
                     Typeface.create(res.getFont(R.font.outfit), GLASS_WEIGHT, false)
             }
@@ -60,8 +59,8 @@ object PanelType {
     /** How much taller Outfit has to be set to match Departure Mono's presence. */
     const val GLASS_SCALE = 1.12f
 
-    /** Where on the variable axis GLASS is cut. 500 is Medium. */
-    const val GLASS_WEIGHT = 500
+    /** Where on the variable axis GLASS is cut. 400 is Regular. */
+    const val GLASS_WEIGHT = 400
 
     /**
      * Whether the theme's face is monospaced.

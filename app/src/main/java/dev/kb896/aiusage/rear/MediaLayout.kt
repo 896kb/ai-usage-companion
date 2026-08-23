@@ -1,5 +1,7 @@
 package dev.kb896.aiusage.rear
 
+import dev.kb896.aiusage.data.PanelTheme
+
 /**
  * Where the media row's parts go along the panel's bottom band.
  *
@@ -95,6 +97,15 @@ object MediaLayout {
         val next: Float,
         val glyphTop: Float,
         val textWidth: Float,
+        /**
+         * Which theme's glyph widths this row was measured with.
+         *
+         * Carried rather than looked up, because a row is built once and then asked
+         * about its centres later — and a row measured under one theme that answered
+         * about its hit targets under another would put the boundary between two
+         * buttons somewhere neither of them is.
+         */
+        val theme: PanelTheme = PanelTheme.ORIGINAL,
     ) {
         /**
          * Each glyph's horizontal centre, in the order the buttons are drawn.
@@ -114,24 +125,31 @@ object MediaLayout {
          */
         val centres: List<Float>
             get() = listOf(
-                prev + GLYPH_H * PanelIcons.PREV.aspect / 2f,
-                play + GLYPH_H * PanelIcons.PAUSE.aspect / 2f,
-                next + GLYPH_H * PanelIcons.NEXT.aspect / 2f,
+                prev + GLYPH_H * Glyphs.aspect(PanelIcons.PREV, theme) / 2f,
+                play + GLYPH_H * Glyphs.aspect(PanelIcons.PAUSE, theme) / 2f,
+                next + GLYPH_H * Glyphs.aspect(PanelIcons.NEXT, theme) / 2f,
             )
     }
 
-    fun of(left: Float, right: Float, centreY: Float): Row {
-        // Each glyph is placed by its own width, not by a shared cell. They are traced
-        // from a proportional-ish set — play is 16 wide where pause is 13 — and a fixed
-        // cell would leave the gaps visibly uneven at 24 units.
-        val next = right - GLYPH_H * PanelIcons.NEXT.aspect
-        val play = next - GAP - GLYPH_H * PanelIcons.PAUSE.aspect
-        val prev = play - GAP - GLYPH_H * PanelIcons.PREV.aspect
+    fun of(
+        left: Float,
+        right: Float,
+        centreY: Float,
+        theme: PanelTheme = PanelTheme.ORIGINAL,
+    ): Row {
+        // Each glyph is placed by its own width, not by a shared cell. Under ORIGINAL
+        // they are traced from a proportional-ish set — play is 16 wide where pause is
+        // 13 — and a fixed cell would leave the gaps visibly uneven at 24 units. Under
+        // GLASS they are all square, and this arithmetic simply comes out even.
+        val next = right - GLYPH_H * Glyphs.aspect(PanelIcons.NEXT, theme)
+        val play = next - GAP - GLYPH_H * Glyphs.aspect(PanelIcons.PAUSE, theme)
+        val prev = play - GAP - GLYPH_H * Glyphs.aspect(PanelIcons.PREV, theme)
         return Row(
             prev = prev,
             play = play,
             next = next,
             glyphTop = centreY - GLYPH_H / 2f,
+            theme = theme,
             textWidth = prev - GAP - left,
         )
     }

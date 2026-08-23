@@ -1958,7 +1958,7 @@ class RearDialView(context: Context) : View(context) {
 
     private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
         val h = CAMERA_H
-        val w = h * PanelIcons.CAMERA.aspect
+        val w = h * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
         // Vertically centred on the bottom artwork, and then inset from the right edge
         // by exactly the gap that centring leaves BELOW it.
         //
@@ -3561,7 +3561,7 @@ class RearDialView(context: Context) : View(context) {
                     drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
                     // The fill follows the GLYPH inside the cell, not the cell itself,
                     // or it would spill into the padding the square adds either side.
-                    val glyphW = EXTRA_ICON_H * PanelIcons.BATTERY.aspect
+                    val glyphW = EXTRA_ICON_H * Glyphs.aspect(PanelIcons.BATTERY, config.theme)
                     val glyphX = iconX + (EXTRA_ICON_H - glyphW) / 2f
                     val inset = EXTRA_ICON_H * 0.16f
                     val top = iconY + inset
@@ -3620,8 +3620,44 @@ class RearDialView(context: Context) : View(context) {
          */
         smooth: Boolean = false,
     ) {
-        val w = h * icon.aspect
+        val w = h * Glyphs.aspect(icon, config.theme)
         val left = x + (h - w) / 2f          // centred in the cell, not left-aligned in it
+
+        // THE GLASS SET, if this theme has one for this glyph.
+        val outline = if (config.theme.isGlass) GlassIcons.of(icon) else null
+        if (outline != null) {
+            // ALWAYS anti-aliased, which is the opposite of the rule below and right for
+            // the same reason. The traced glyphs are pixel rows and want hard edges; these
+            // are curves, and a curve without smoothing is a staircase at any angle.
+            iconPaint.isAntiAlias = true
+            iconPaint.color = extras.color
+            iconPaint.strokeCap = Paint.Cap.ROUND
+            iconPaint.strokeJoin = Paint.Join.ROUND
+            // Lucide's stroke is stated in ITS units, so it scales with the glyph and a
+            // clock in the corner has the same weight as a transport button twice its
+            // size. Scaling the canvas instead would scale the stroke too, which sounds
+            // equivalent and is not: the panel draws these at several sizes and the
+            // weight has to stay put, not grow with the box.
+            val k = h / GlassIcons.VIEWPORT
+            iconPaint.strokeWidth = GlassIcons.STROKE * k
+            // SOLID is filled AND stroked. Filled alone loses the bar beside the skip
+            // triangles — those are open lines in the source and a fill of a line is
+            // nothing — and stroked alone leaves the transport as outlines, where the
+            // rule on this panel has always been that the things meant to be pressed are
+            // solid shapes. Both together is a solid glyph with the outline's own
+            // rounded corners.
+            iconPaint.style =
+                if (outline.ink == GlassIcons.Ink.SOLID) Paint.Style.FILL_AND_STROKE
+                else Paint.Style.STROKE
+            canvas.save()
+            canvas.translate(left, y)
+            canvas.scale(k, k)
+            canvas.drawPath(outline.path, iconPaint)
+            canvas.restore()
+            iconPaint.style = Paint.Style.FILL
+            return
+        }
+
         iconPaint.isAntiAlias = smooth
         iconPaint.color = extras.color
         for (r in icon.rects) {
@@ -4526,9 +4562,9 @@ class RearDialView(context: Context) : View(context) {
         // different arrangement of the same three things.
         val gh = MediaPage.TRANSPORT_H
         val widths = listOf(
-            gh * PanelIcons.PREV.aspect,
-            gh * PanelIcons.PAUSE.aspect,
-            gh * PanelIcons.NEXT.aspect,
+            gh * Glyphs.aspect(PanelIcons.PREV, config.theme),
+            gh * Glyphs.aspect(PanelIcons.PAUSE, config.theme),
+            gh * Glyphs.aspect(PanelIcons.NEXT, config.theme),
         )
         val total = widths.sum() + MediaPage.TRANSPORT_GAP * 2f
         var x = cx - total / 2f
@@ -5564,7 +5600,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun mediaRegion(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, MEDIA_RIGHT, mark.bottom,
+        CONTENT_EDGE, mark.top, mediaRight(config.theme), mark.bottom,
     )
 
     /**
@@ -5575,7 +5611,7 @@ class RearDialView(context: Context) : View(context) {
      * room for the progress bar would have quietly stretched both.
      */
     private fun mediaClip(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, MEDIA_RIGHT, mark.bottom + MediaLayout.PROGRESS_TOTAL,
+        CONTENT_EDGE, mark.top, mediaRight(config.theme), mark.bottom + MediaLayout.PROGRESS_TOTAL,
     )
 
     /**
@@ -5622,7 +5658,7 @@ class RearDialView(context: Context) : View(context) {
         val textLeft =
             if (hasCover) band.left + band.height() + MediaLayout.COVER_GAP else band.left
 
-        val row = MediaLayout.of(textLeft, band.right, region.centerY())
+        val row = MediaLayout.of(textLeft, band.right, region.centerY(), config.theme)
         val gh = MediaLayout.GLYPH_H
         val (prev, play, next) = Triple(row.prev, row.play, row.next)
 
@@ -6129,10 +6165,10 @@ class RearDialView(context: Context) : View(context) {
          * the two cannot drift apart. Held whether or not the camera is drawn — a row
          * whose width depended on another switch would resize when that was toggled.
          */
-        private val MEDIA_RIGHT: Float = run {
+        private fun mediaRight(theme: dev.kb896.aiusage.data.PanelTheme): Float {
             val bottom = (Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f) + CAMERA_H / 2f
             val right = Panel.WIDTH - (Panel.HEIGHT - bottom)
-            right - CAMERA_H * PanelIcons.CAMERA.aspect - MEDIA_CAMERA_GAP
+            return right - CAMERA_H * Glyphs.aspect(PanelIcons.CAMERA, theme) - MEDIA_CAMERA_GAP
         }
 
         /**
