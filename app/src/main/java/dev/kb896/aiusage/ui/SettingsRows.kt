@@ -377,13 +377,17 @@ object SettingsRows {
             // font sweep in applyPalette can ever reach them. They came out in the
             // platform sans on a screen that is otherwise entirely monospaced, which is
             // exactly the mismatch that made them look pasted in.
-            val mono = context.resources.getFont(R.font.departure_mono)
+            // The theme's face. A Spinner inflates from a SYSTEM layout, so applyPalette's
+            // sweep never reaches these rows and they have to be styled here.
+            val mono = UiType.of(context)
+            val axes = UiType.variation(context)
             adapter = object : ArrayAdapter<String>(
                 context, android.R.layout.simple_spinner_dropdown_item, options
             ) {
                 private fun style(view: View, dropdown: Boolean): View {
                     (view as? TextView)?.apply {
                         typeface = mono
+                        fontVariationSettings = axes
                         textSize = 14f
                         setTextColor(Panel.Palette.FG)
                         // The open list draws over whatever is behind it, so it needs its

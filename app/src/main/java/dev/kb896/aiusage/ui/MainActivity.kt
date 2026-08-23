@@ -153,7 +153,11 @@ class MainActivity : ComponentActivity() {
 
     private fun applyPalette() {
         findViewById<View>(R.id.root_host).setBackgroundColor(Panel.Palette.BG)
-        val mono = resources.getFont(R.font.departure_mono)
+        // THE THEME'S FACE, not the panel's original one. This screen describes the panel,
+        // and describing it in a face the panel does not use is the same mistake as a
+        // preview drawn in the wrong colours.
+        val face = UiType.of(this)
+        val axes = UiType.variation(this)
 
         // Every TextView in the tree, found by walking it rather than by listing them.
         //
@@ -163,7 +167,12 @@ class MainActivity : ComponentActivity() {
         // A sweep cannot be forgotten.
         fun applyFont(view: View) {
             when (view) {
-                is TextView -> view.typeface = mono
+                is TextView -> {
+                    view.typeface = face
+                    // Cleared as well as set, or a view keeps a weight request for a face
+                    // that has no axes to answer it.
+                    view.fontVariationSettings = axes
+                }
                 is ViewGroup -> for (i in 0 until view.childCount) applyFont(view.getChildAt(i))
             }
         }
@@ -492,6 +501,24 @@ class MainActivity : ComponentActivity() {
         }
 
         val config = store.load()
+
+        // FIRST, because it is the only setting that changes what every other setting
+        // looks like. A theme decides the face, the glyphs and whether surfaces refract —
+        // see PanelTheme — so finding it at the bottom of a list of colours would be
+        // finding out afterwards that half of them meant something else.
+        SettingsRows.choice(
+            container,
+            "Theme",
+            dev.kb896.aiusage.data.PanelTheme.entries.map { it.name },
+            config.theme.ordinal,
+        ) { i ->
+            write { it.copy(theme = dev.kb896.aiusage.data.PanelTheme.entries[i]) }
+            // The front screen is themed too, and it is already on screen. Everything
+            // else here redraws through the preview; this has to re-run the sweep that
+            // sets the face on views that were built under the previous theme.
+            applyPalette()
+            buildSettingsRows()
+        }
 
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
         // two accounts, not a taxonomy — someone else has a client and a side project,

@@ -4343,14 +4343,25 @@ class RearDialView(context: Context) : View(context) {
         val r = h / 2f
         scratch.set(LockSlider.left(), region.top, LockSlider.right(), region.bottom)
 
-        // The groove. Filled at the palette's track grey and edged a shade brighter, the
-        // same two tones the usage bars use — a channel cut into the panel rather than a
-        // control laid on top of it.
-        barTrack.color = Panel.Palette.TRACK
-        canvas.drawRoundRect(scratch, r, r, barTrack)
-        track.color = Panel.Palette.RULE
-        track.strokeWidth = 1.5f
-        canvas.drawRoundRect(scratch, r, r, track)
+        // The groove.
+        //
+        // Under GLASS it is a pane, and this is the element that shows the refraction best
+        // on this panel: it is 486 units of glass lying across the bars and the record,
+        // which is the only place there is much behind anything. Falls back to the channel
+        // below whenever there is no scene to bend — a slider nobody can see is worse than
+        // one drawn flat.
+        val pane = config.theme.isGlass &&
+            drawGlassPane(canvas, scratch, r, Glass.TINT)
+        if (!pane) {
+            // Filled at the palette's track grey and edged a shade brighter, the same two
+            // tones the usage bars use — a channel cut into the panel rather than a
+            // control laid on top of it.
+            barTrack.color = Panel.Palette.TRACK
+            canvas.drawRoundRect(scratch, r, r, barTrack)
+            track.color = Panel.Palette.RULE
+            track.strokeWidth = 1.5f
+            canvas.drawRoundRect(scratch, r, r, track)
+        }
 
         val knobR = LockSlider.thumbRadius(h)
         val cx = LockSlider.thumbCx(progress, h)
