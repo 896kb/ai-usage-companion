@@ -309,15 +309,20 @@ half4 main(float2 coord) {
     const val ABERRATION = 1f
 
     /**
-     * How hard a BUTTON splits light, which is a little less.
+     * How hard a BUTTON splits light: not at all.
      *
-     * Not a second opinion about the material — the same reason a bar and a card share
-     * one figure still holds. It is about what is behind them: a button sits over the
-     * record, which is the highest-contrast thing on this panel, and full dispersion on a
-     * hard black-and-white edge is a rainbow rather than a bevel. The readings lie over
-     * flat colour and never show it.
+     * Not a second opinion about the material — the reason a bar and a card share one
+     * figure still holds. It is about what is behind them. A button sits over the record,
+     * which is the highest-contrast thing on this panel, and dispersion is only ever as
+     * visible as the edge it is splitting: what reads as a bevel over flat colour reads
+     * as a rainbow over a black-and-white sleeve. Came down from 1 through 0.65 and 0.3
+     * on the way to finding that out.
+     *
+     * Zero also costs less than a small number. The dispersion shader takes seven samples
+     * of the backdrop to build one pixel, and at zero they all land in the same place —
+     * so a button asks for the plain lens instead, which takes one. See drawGlassPane.
      */
-    const val BUTTON_ABERRATION = 0.3f
+    const val BUTTON_ABERRATION = 0f
 
     /**
      * How much the bend follows the pane's centre rather than its nearest edge.

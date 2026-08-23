@@ -753,10 +753,15 @@ class RearDialView(context: Context) : View(context) {
         }
 
         val short = minOf(w, h)
-        // ONE LENS, EVERY PANE, dispersion included — see Glass. Sized as a fraction of
-        // the short side and then capped, because a fraction alone is right for a
-        // twenty-unit thumb and a fisheye on a card six times that.
-        val shader = Glass.dispersion
+        // ONE LENS, EVERY PANE — see Glass. Sized as a fraction of the short side and
+        // then capped, because a fraction alone is right for a twenty-unit thumb and a
+        // fisheye on a card six times that.
+        //
+        // THE PLAIN LENS WHEN NOTHING IS BEING SPLIT. The dispersion shader takes seven
+        // samples of the backdrop per pixel and, with the aberration at zero, they all
+        // land on the same coordinate — the same answer for seven times the sampling, on
+        // an always-on display that redraws at 120Hz whenever anything moves.
+        val shader = if (aberration > 0f) Glass.dispersion else Glass.refraction
         shader.setFloatUniform("size", w, h)
         shader.setFloatUniform("offset", 0f, 0f)
         shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
@@ -769,7 +774,7 @@ class RearDialView(context: Context) : View(context) {
             "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
         )
         shader.setFloatUniform("depthEffect", Glass.DEPTH)
-        shader.setFloatUniform("chromaticAberration", aberration)
+        if (aberration > 0f) shader.setFloatUniform("chromaticAberration", aberration)
 
         // Blur FIRST, then bend. createChainEffect applies its second argument first, so
         // this reads backwards and is the right way round: bending a sharp backdrop
@@ -4895,7 +4900,10 @@ class RearDialView(context: Context) : View(context) {
                     // Span is the bar minus the figure's own width, so the far end of the
                     // jump lands ON the bar's right edge rather than past it.
                     span = (bar.right - bar.left - w).coerceAtLeast(0f),
-                    top = bar.top - h,
+                    // On the track, not on the row — the same correction the standing
+                    // figures needed. This branch has its own placement, so fixing one
+                    // left the walker hovering.
+                    top = mascotFloor(bar.top) - h,
                     h = h,
                     paint = mascotPaint,
                     rise = ROW_PITCH,
@@ -6809,6 +6817,10 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(MediaLayout.TEXT_SIZE)
         extras.color = tint
+        // LIGHTER THAN THE PANEL, and put back afterwards. See PanelType.mediaVariation:
+        // this is the one string here that is somebody else's writing rather than a label
+        // this app chose, and at the readings' weight it competes with them.
+        extras.fontVariationSettings = PanelType.mediaVariation(config.theme)
         rolling(
             canvas, "row:title", m.title, textLeft, baseline,
             android.graphics.RectF(
@@ -6823,6 +6835,8 @@ class RearDialView(context: Context) : View(context) {
             // the two lines is the track is the only thing this row has to say at a
             // glance, and a second hue would make that a question about the palette.
             extras.color = (tint and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
+            // The artist goes with the title. Left at the panel's weight it would come
+            // out bolder than the name of the track above it.
             rolling(
                 canvas, "row:artist", m.artist, textLeft, baseline,
                 android.graphics.RectF(
@@ -6833,6 +6847,10 @@ class RearDialView(context: Context) : View(context) {
             )
         }
         extras.textSize = typed(18f)
+        // Back to the panel's weight. `extras` is shared with the clock, the battery and
+        // half the media page, and a paint left lighter than it was found is a setting
+        // that leaks into whatever draws next.
+        extras.fontVariationSettings = PanelType.variation(config.theme)
 
         // Targets only once the row has ARRIVED. A button that can be pressed while it
         // is still sliding is a button in a place it is about to leave, and the whole

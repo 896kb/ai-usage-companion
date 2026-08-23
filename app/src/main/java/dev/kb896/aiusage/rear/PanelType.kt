@@ -66,6 +66,20 @@ object PanelType {
     /** ExtraBold. See [titleVariation]. */
     const val GLASS_TITLE_WEIGHT = 800
 
+    /**
+     * What a track's name and artist are set in, which is lighter than the panel.
+     *
+     * The only text here that is somebody ELSE'S — a title as its author wrote it, not a
+     * label this app chose — and it is the one string that is genuinely prose. Set at the
+     * panel's weight it competes with the readings for a glance it does not deserve: the
+     * numbers are why the panel is on.
+     */
+    fun mediaVariation(theme: PanelTheme): String? =
+        if (theme == PanelTheme.GLASS) "'wght' $GLASS_MEDIA_WEIGHT" else null
+
+    /** Regular. See [mediaVariation]. */
+    const val GLASS_MEDIA_WEIGHT = 400
+
     private val cache = HashMap<PanelTheme, Typeface>(2)
 
     /**
@@ -85,8 +99,15 @@ object PanelType {
     /** How much taller Outfit has to be set to match Departure Mono's presence. */
     const val GLASS_SCALE = 1.12f
 
-    /** Where on the variable axis GLASS is cut. 400 is Regular. */
-    const val GLASS_WEIGHT = 400
+    /**
+     * Where on the variable axis the panel's body is cut. 600 is SemiBold.
+     *
+     * Heavier than a page of prose would be set, because this is not one. The panel is
+     * read at arm's length, on the back of a phone, in a glance — and every string on it
+     * is a label or a number rather than a sentence. Regular held up at the sizes the
+     * masthead uses and went thin everywhere else.
+     */
+    const val GLASS_WEIGHT = 600
 
     /**
      * Whether the theme's face is monospaced.
