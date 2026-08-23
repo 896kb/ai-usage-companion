@@ -6393,8 +6393,13 @@ class RearDialView(context: Context) : View(context) {
         }
         // The far edge of that wave, from the disc's centre: the mouth is offset from the
         // centre by half the cone, and the arc is a stroke with width of its own.
-        val soundEdge = speakerW / 2f + reach * mh +
-            mh * WAVE_STROKE / 2f + mh * SPEAKER_WAVE_MARGIN
+        // ROOM AROUND IT, not just room for it. Sized to exactly contain the outermost
+        // wave, the glass met the sound at its edge — correct, and it read as a bubble
+        // straining to hold something rather than one with sound in it. The cushion is
+        // proportional so it opens up as the waves travel, with a flat margin under it so
+        // a single wave near the cone is not left touching the rim either.
+        val soundEdge = (speakerW / 2f + reach * mh + mh * WAVE_STROKE / 2f) *
+            SPEAKER_WAVE_ROOM + mh * SPEAKER_WAVE_MARGIN
 
         // A BUTTON, because it is one. It mutes when you tap it, and everything else on
         // this panel that does something when tapped sits on a disc of glass. This was the
@@ -7930,6 +7935,9 @@ class RearDialView(context: Context) : View(context) {
 
         /** Air between the outermost wave and the glass holding it. */
         private const val SPEAKER_WAVE_MARGIN = 0.12f
+
+        /** And the same again as a proportion, so the bubble opens out with the sound. */
+        private const val SPEAKER_WAVE_ROOM = 1.25f
 
         /**
          * How long the record takes to swing from one side of its shake to the other.
