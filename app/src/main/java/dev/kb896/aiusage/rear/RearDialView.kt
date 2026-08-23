@@ -692,43 +692,39 @@ class RearDialView(context: Context) : View(context) {
         }
 
         val short = minOf(w, h)
-        val shader = if (held) Glass.dispersion else Glass.refraction
+        // ONE LENS, EVERY PANE, dispersion included — see Glass. Sized as a fraction of
+        // the short side and then capped, because a fraction alone is right for a
+        // twenty-unit thumb and a fisheye on a card six times that.
+        val shader = Glass.dispersion
         shader.setFloatUniform("size", w, h)
         shader.setFloatUniform("offset", 0f, 0f)
         shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-        // Depth as a fraction of the SHORT side, so a tall notice card and a long thin
-        // slider are made of the same material rather than the same number of units.
         shader.setFloatUniform(
-            "refractionHeight",
-            short * if (held) Glass.THUMB_HEIGHT else Glass.REFRACTION_HEIGHT,
+            "refractionHeight", minOf(short * Glass.HEIGHT, Glass.HEIGHT_MAX),
         )
         // Negative: the library negates the amount on the way in, and the sign is which
         // way the backdrop is pushed. Positive here turns a lens into a pinch.
         shader.setFloatUniform(
-            "refractionAmount",
-            if (held) -short * Glass.THUMB_AMOUNT else Glass.REFRACTION_AMOUNT,
+            "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
         )
         shader.setFloatUniform("depthEffect", Glass.DEPTH)
-        if (held) shader.setFloatUniform("chromaticAberration", Glass.THUMB_ABERRATION)
+        shader.setFloatUniform("chromaticAberration", Glass.ABERRATION)
 
         // Blur FIRST, then bend. createChainEffect applies its second argument first, so
         // this reads backwards and is the right way round: bending a sharp backdrop
         // smears whatever it lands on into a streak, where bending a soft one is a lens.
-        // NO BLUR WHEN HELD. The reference fades its blur out as the press comes on —
-        // blur(8dp * (1 - progress)) — because a blur is what an object at rest does to
-        // what is behind it and a lens is what a held one does. Both at once is a
-        // smudge with a bevel.
-        val blur = android.graphics.RenderEffect.createBlurEffect(
-            Glass.BLUR, Glass.BLUR, android.graphics.Shader.TileMode.CLAMP,
-        )
+        // CLEAR GLASS, NEVER FROSTED. There was a blur under the lens at first, which is
+        // what the reference does to a thumb at REST — and it is the wrong half of that
+        // component to have copied. A blur is what a surface does when you cannot see
+        // through it; this panel's whole appeal is that you can, and the readout bending
+        // through a notification card is worth more than the card looking soft. The
+        // reference itself fades the blur out the moment its thumb is held, which is the
+        // state everything here is drawn in.
+        //
+        // It also costs nothing to remove: the blur was a second full-size pass over
+        // every pane, on a display that redraws at 120Hz while anything is moving.
         val lens = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-        paneNode.setRenderEffect(
-            when {
-                held -> lens
-                refract -> android.graphics.RenderEffect.createChainEffect(lens, blur)
-                else -> blur
-            },
-        )
+        paneNode.setRenderEffect(if (refract) lens else null)
 
         canvas.save()
         if (shape != null) {
@@ -1529,8 +1525,12 @@ class RearDialView(context: Context) : View(context) {
         // inside rather than floating over whatever the panel was drawing; a pane does
         // that job better, because it is what a vessel actually does to what is behind it.
         val chargeRect = android.graphics.RectF(left, top, right, bottom)
+        // NO RIM ON THE CELL. Every other pane wants an edge to say where it ends; this
+        // one is a vessel whose contents are the point, and a lit outline around a glass
+        // of moving liquid is a second thing competing with the first. The liquid's own
+        // surface and the refraction at the walls say where the glass is.
         val paned = config.theme.isGlass &&
-            drawGlassPane(canvas, chargeRect, r, Glass.CHARGE_TINT)
+            drawGlassPane(canvas, chargeRect, r, Glass.CHARGE_TINT, rim = false)
 
         canvas.save()
         canvas.clipPath(glass)
@@ -1702,11 +1702,19 @@ class RearDialView(context: Context) : View(context) {
 
         // The rim, drawn after the clip is lifted so it is a full stroke rather than a
         // half one clipped down its own centre line.
-        vinylPaint.style = Paint.Style.STROKE
-        vinylPaint.strokeWidth = CHARGE_RIM
-        vinylPaint.color = (tint and 0x00FFFFFF) or (CHARGE_RIM_ALPHA shl 24)
-        canvas.drawRoundRect(left, top, right, bottom, r, r, vinylPaint)
-        vinylPaint.style = Paint.Style.FILL
+        //
+        // NOT UNDER GLASS. This is the cell's painted outline, in the battery's own
+        // colour, and it is what ORIGINAL uses to say where the glass is. A pane says
+        // that by refracting, so the outline becomes a second answer to a question
+        // already answered — a green line around a piece of glass, which is the one thing
+        // a piece of glass does not have.
+        if (!paned) {
+            vinylPaint.style = Paint.Style.STROKE
+            vinylPaint.strokeWidth = CHARGE_RIM
+            vinylPaint.color = (tint and 0x00FFFFFF) or (CHARGE_RIM_ALPHA shl 24)
+            canvas.drawRoundRect(left, top, right, bottom, r, r, vinylPaint)
+            vinylPaint.style = Paint.Style.FILL
+        }
 
         // The figure, in the middle of the glass. Over the liquid rather than inside it:
         // a number that the liquid rose past and half-covered would be unreadable at
@@ -2149,15 +2157,20 @@ class RearDialView(context: Context) : View(context) {
             event.y <= band.bottom + LOCK_BAND_SLOP
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
-                lockGrabbed = inBand && LockSlider.grabs(event.x, lockProgress, h)
+                lockGrabbed = inBand && LockSlider.grabs(event.x, lockProgress)
                 if (lockGrabbed) {
+                    // Where the gesture started, so the indicator moves WITH the finger
+                    // rather than jumping to centre itself under it on the first move.
+                    lockGrabX = event.x
+                    lockGrabFrom = lockProgress
                     lockSpringAt = 0L
                     invalidate()
                 }
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 if (lockGrabbed) {
-                    lockProgress = LockSlider.progressFor(event.x, h)
+                    lockProgress =
+                        LockSlider.progressFrom(lockGrabFrom, event.x - lockGrabX)
                     invalidate()
                 }
             }
@@ -3430,8 +3443,12 @@ class RearDialView(context: Context) : View(context) {
     private var lockSpringFrom = 0f
     private var lockSpringAt = 0L
 
-    /** Whether the gesture in flight took hold of the knob. See LockSlider.grabs. */
+    /** Whether the gesture in flight took hold of the indicator. See LockSlider.grabs. */
     private var lockGrabbed = false
+
+    /** Where that gesture started, and from what progress. See progressFrom. */
+    private var lockGrabX = 0f
+    private var lockGrabFrom = 0f
 
     /** Whether the display has already been asked to go out for this lock. */
     private var lockExpiredSent = false
@@ -4752,16 +4769,23 @@ class RearDialView(context: Context) : View(context) {
         val r = h / 2f
         scratch.set(LockSlider.left(), region.top, LockSlider.right(), region.bottom)
 
-        // The groove.
+        // The container, and then the indicator inside it — the reference's tab bar, with
+        // two stops instead of a row of them. Both are glass; the container's own surface
+        // stays visible all the way round the indicator, which is what makes the
+        // indicator read as being INSIDE something rather than laid on top of it.
         //
-        // Under GLASS it is a pane, and this is the element that shows the refraction best
-        // on this panel: it is 486 units of glass lying across the bars and the record,
-        // which is the only place there is much behind anything. Falls back to the channel
-        // below whenever there is no scene to bend — a slider nobody can see is worse than
-        // one drawn flat.
-        val pane = config.theme.isGlass &&
-            drawGlassPane(canvas, scratch, r, Glass.TINT)
-        if (!pane) {
+        // Published as a layer, so the indicator lenses the container it is riding rather
+        // than the panel underneath. Same reason the sliders do it — and here it is the
+        // difference between a thumb with a bevel and a thumb you can see the track
+        // through.
+        val layer = if (config.theme.isGlass) {
+            localBackdrop(canvas, scratch) { into ->
+                if (!drawGlassPane(into, scratch, r, Glass.TINT)) {
+                    barTrack.color = Panel.Palette.TRACK
+                    into.drawRoundRect(scratch, r, r, barTrack)
+                }
+            }
+        } else {
             // Filled at the palette's track grey and edged a shade brighter, the same two
             // tones the usage bars use — a channel cut into the panel rather than a
             // control laid on top of it.
@@ -4770,52 +4794,62 @@ class RearDialView(context: Context) : View(context) {
             track.color = Panel.Palette.RULE
             track.strokeWidth = 1.5f
             canvas.drawRoundRect(scratch, r, r, track)
+            null
         }
 
-        val knobR = LockSlider.thumbRadius(h)
-        val cx = LockSlider.thumbCx(progress, h)
+        val tw = LockSlider.thumbWidth()
+        val th = LockSlider.thumbHeight(h)
+        val tl = LockSlider.thumbLeft(progress)
+        val tr = th / 2f
+        lockThumb.set(tl, region.top + LockSlider.PAD, tl + tw, region.bottom - LockSlider.PAD)
 
-        // THE WORD FADES AS THE KNOB COVERS IT. It is an instruction, and an instruction
-        // being followed has stopped being needed — leaving it lit under a travelling
-        // knob is the panel still asking for something it is already getting.
+        // THE WORD SITS IN THE HALF THE INDICATOR IS HEADING FOR, and is covered as it
+        // arrives. It is an instruction, and an instruction being followed has stopped
+        // being needed — one still lit under a thumb that is on top of it is the panel
+        // asking for something it is already getting.
         val told = (1f - progress * 1.6f).coerceIn(0f, 1f)
         if (told > 0.01f) {
             extras.textAlign = Paint.Align.CENTER
             extras.textSize = typed(LOCK_TEXT)
             extras.color = (Panel.Palette.FG and 0x00FFFFFF) or
                 ((LOCK_TEXT_ALPHA * told).toInt().coerceIn(0, 255) shl 24)
-            // Centred on the track's own middle, not on the gap right of the knob. The
-            // knob sweeps over it and the word going under something is the point.
             canvas.drawText(
                 LOCK_LABEL,
-                scratch.centerX() + knobR / 2f,
+                LockSlider.right() - LockSlider.PAD - tw / 2f,
                 region.centerY() + LOCK_TEXT * 0.36f,
                 extras,
             )
             extras.textAlign = Paint.Align.LEFT
         }
 
-        // The knob, in the panel's foreground so it is the brightest thing on the
-        // display — it is the only thing that will answer.
-        barFill.color = Panel.Palette.FG
-        canvas.drawCircle(cx, region.centerY(), knobR, barFill)
+        val paned = config.theme.isGlass && drawGlassPane(
+            canvas, lockThumb, tr, Glass.THUMB_TINT,
+            source = layer ?: sceneNode, held = true,
+        )
+        if (!paned) {
+            // The indicator, in the panel's foreground so it is the brightest thing on
+            // the display — it is the only thing that will answer.
+            barFill.color = Panel.Palette.FG
+            canvas.drawRoundRect(lockThumb, tr, tr, barFill)
+        }
 
-        // A chevron pointing the way, knocked out of the knob in the background colour.
-        // Two strokes rather than a traced glyph: the icon set has no arrow, and an
-        // arrow is two lines — tracing one into PanelIcons to draw two lines would be
-        // ceremony. Rotates a quarter turn as it arrives, so the knob reads as having
-        // been turned rather than moved.
+        // A chevron pointing the way, on the indicator. Two strokes rather than a traced
+        // glyph: the icon set has no arrow, and an arrow is two lines.
         val a = LOCK_CHEV * 0.5f
-        arc.color = Panel.Palette.BG
+        val cx = lockThumb.centerX()
+        val cy = region.centerY()
+        arc.color = if (paned) Panel.Palette.FG else Panel.Palette.BG
         arc.strokeWidth = LOCK_CHEV_W
         arc.strokeCap = Paint.Cap.ROUND
         canvas.save()
-        canvas.translate(cx, region.centerY())
+        canvas.translate(cx, cy)
         canvas.drawLine(-a * 0.45f, -a, a * 0.5f, 0f, arc)
         canvas.drawLine(a * 0.5f, 0f, -a * 0.45f, a, arc)
         canvas.restore()
         arc.strokeCap = Paint.Cap.BUTT
     }
+
+    private val lockThumb = android.graphics.RectF()
 
     /**
      * The band the media row occupies: the artwork slot, plus the corner the close

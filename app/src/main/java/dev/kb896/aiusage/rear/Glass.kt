@@ -278,17 +278,42 @@ half4 main(float2 coord) {
 
     // -- the numbers, in one place ----------------------------------------------------
 
-    /**
-     * How deep into the pane the bending reaches, as a fraction of the SHORT side.
-     *
-     * A fraction rather than a fixed depth so a notification card and a slider knob look
-     * like the same material. Too large and the whole pane is lens with no clear middle,
-     * which reads as a fisheye; too small and the edge is a hairline.
-     */
-    const val REFRACTION_HEIGHT = 0.42f
+    // -- the lens ---------------------------------------------------------------------
+    //
+    // ONE LENS FOR EVERY PANE, and dispersion on all of it. There were two sets of
+    // numbers at first — a plain refraction for the cards and the reference's pressed
+    // thumb for the thumbs — and keeping them apart was harder to reason about than it
+    // was worth: a panel made of one material should be described by one set of numbers,
+    // with the small things simply getting less of it.
+    //
+    // STATED AS FRACTIONS OF THE SHORT SIDE, THEN CAPPED. A fraction alone is right for a
+    // thumb twenty units tall and absurd for a notification card a hundred and thirty
+    // tall, where nearly two thirds of the short side of bending turns a lens into a
+    // fisheye. An absolute alone is the opposite problem: what reads as a bevel on a card
+    // swallows a thumb whole. The cap is where those two meet.
 
-    /** How far the backdrop is displaced at the very edge, in panel units. */
-    const val REFRACTION_AMOUNT = -14f
+    /** How deep into a pane the bending reaches, as a fraction of its short side. */
+    const val HEIGHT = 0.42f
+
+    /** And no deeper than this, in panel units, however large the pane. */
+    const val HEIGHT_MAX = 34f
+
+    /** How far the backdrop is displaced at the edge, likewise as a fraction. */
+    const val AMOUNT = 0.58f
+
+    /** And no further than this. */
+    const val AMOUNT_MAX = 26f
+
+    /**
+     * How much the edges split into colour.
+     *
+     * ONE FIGURE FOR EVERY PANE, thumbs and buttons included. There were two for a while —
+     * the reference's full aberration on the small things and less on the large — and it
+     * was a distinction without a reason: a panel made of one material should split light
+     * the same way wherever you look at it, and a thumb that dispersed harder than the
+     * card beside it read as a different substance rather than a smaller piece.
+     */
+    const val ABERRATION = 0.7f
 
     /**
      * How much the bend follows the pane's centre rather than its nearest edge.
@@ -316,8 +341,9 @@ half4 main(float2 coord) {
      */
     const val TINT = 0x26FFFFFF
 
-    /** How far the backdrop is blurred before it is bent, in panel units. */
-    const val BLUR = 6f
+    // NO BLUR CONSTANT, and that is deliberate rather than an omission. The glass here is
+    // clear: what is behind a pane is bent, never softened. A blur is what a surface does
+    // when you cannot see through it, and being able to see through it is the point.
 
     /** How thick the lit rim is drawn, in panel units. */
     const val RIM_WIDTH = 2f
@@ -351,23 +377,13 @@ half4 main(float2 coord) {
      */
     const val THUMB_TINT = 0x8CFFFFFF.toInt()
 
-    // -- the held look ----------------------------------------------------------------
-    //
-    // The reference's thumb, pressed: no blur at all, the lens fully on with chromatic
-    // aberration, and an ambient rim. Its numbers are 10dp of refraction height and 14dp
-    // of amount on a 40x24 thumb, which is 42% and 58% of the thumb's height — stated
-    // that way here so a thumb of any size is made of the same glass.
-
-    /** How deep the lens reaches into a thumb, as a fraction of its short side. */
-    const val THUMB_HEIGHT = 0.42f
-
-    /** How far the backdrop is displaced at a thumb's edge, likewise. */
-    const val THUMB_AMOUNT = 0.58f
-
-    /** How strongly a thumb's edges split into colour. One is the reference's own. */
-    const val THUMB_ABERRATION = 1f
-
-    /** How present the ambient rim is. The reference's Highlight.Ambient intensity. */
+    /**
+     * How present the ambient rim is. The reference's Highlight.Ambient intensity.
+     *
+     * Thumbs wear the ambient rim — lit on one side, shaded on the other, no colour of
+     * its own — where the larger panes take the flat white edge. That is the difference
+     * between a bevelled object and a sheet of glass, and a thumb is an object.
+     */
     const val AMBIENT_ALPHA = 0.38f
 
     /**
