@@ -100,6 +100,30 @@ class RearDialView(context: Context) : View(context) {
     private val barFill = Paint()
     private val ray = resources.getDrawable(R.drawable.acrnm_ray, null)
 
+    /**
+     * The record, decoded once.
+     *
+     * Not scaled on the way in: inScaled would resample it for the device's density, and
+     * this is drawn to a radius the panel works out for itself rather than to anything
+     * measured in dp. The file is cropped to the disc, so the bitmap's edge IS the
+     * record's edge and it can be drawn straight into the disc's own square.
+     */
+    private val recordArt: android.graphics.Bitmap? by lazy {
+        runCatching {
+            android.graphics.BitmapFactory.decodeResource(
+                resources, R.drawable.vinyl_record,
+                android.graphics.BitmapFactory.Options().apply { inScaled = false },
+            )
+        }.getOrNull()
+    }
+
+    private val recordRect = android.graphics.RectF()
+
+    /** The battery glyph in panel coordinates, so the charge can be clipped to it. */
+    private val batteryMatrix = android.graphics.Matrix()
+    private val batteryPath = android.graphics.Path()
+    private val batteryBounds = android.graphics.RectF()
+
     /** Masthead type. Green rather than accent-coloured — see drawTitle. */
     private val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 40f; typeface = label.typeface; color = Panel.Palette.WORK
@@ -4642,17 +4666,64 @@ class RearDialView(context: Context) : View(context) {
                 } else {
                     // Outline, then filled from the bottom to the actual charge — a full
                     // battery drawn at 12% is only ever right once.
-                    drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
-                    // The fill follows the GLYPH inside the cell, not the cell itself,
-                    // or it would spill into the padding the square adds either side.
-                    val glyphW = EXTRA_ICON_H * Glyphs.aspect(PanelIcons.BATTERY, config.theme)
-                    val glyphX = iconX + (EXTRA_ICON_H - glyphW) / 2f
-                    val inset = EXTRA_ICON_H * 0.16f
-                    val top = iconY + inset
-                    val bottom = iconY + EXTRA_ICON_H - inset
-                    val fillTop = bottom - (bottom - top) * (level / 100f)
-                    canvas.drawRect(glyphX + inset * 0.6f, fillTop,
-                        glyphX + glyphW - inset * 0.6f, bottom, extras)
+                    val shell =
+                        if (config.theme.isGlass) GlassIcons.of(PanelIcons.BATTERY) else null
+                    if (shell != null) {
+                        // ---- the glass set's battery -------------------------------
+                        //
+                        // TWO THINGS WERE WRONG HERE and they compounded into one fat
+                        // smear. Material's battery_full is a SOLID silhouette, so
+                        // drawing it and then painting the charge over it in the same
+                        // colour said nothing — the glyph was already full. And the
+                        // charge was measured against Glyphs.aspect, which under GLASS is
+                        // the CELL's aspect of 1 rather than the glyph's ink width of
+                        // about 0.42, so the bar came out more than twice the width of
+                        // the battery it was supposed to be inside.
+                        //
+                        // Clipping to the glyph settles both. The charge cannot leave the
+                        // battery whatever the aspect says, and it takes the battery's own
+                        // shape on the way — rounded corners, terminal and all.
+                        val k = EXTRA_ICON_H / GlassIcons.VIEWPORT
+                        batteryMatrix.setTranslate(iconX, iconY)
+                        batteryMatrix.preScale(k, k)
+                        batteryMatrix.preTranslate(0f, -GlassIcons.ORIGIN_Y)
+                        shell.path.transform(batteryMatrix, batteryPath)
+                        // The glyph's OWN extent, so empty is empty and full is full. A
+                        // fixed inset off the cell would leave a lit sliver at nothing and
+                        // stop short at everything.
+                        batteryPath.computeBounds(batteryBounds, true)
+
+                        // The empty shell, held back so the charge reads against it. The
+                        // set is a filled one and a hairline outline among filled glyphs
+                        // looks like a different icon set; a dimmer solid does not.
+                        val was = extras.alpha
+                        extras.alpha = was * BATTERY_SHELL_ALPHA / 255
+                        drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
+                        extras.alpha = was
+
+                        val fillTop = batteryBounds.bottom -
+                            batteryBounds.height() * (level / 100f)
+                        canvas.save()
+                        canvas.clipPath(batteryPath)
+                        canvas.drawRect(
+                            batteryBounds.left, fillTop,
+                            batteryBounds.right, batteryBounds.bottom, extras,
+                        )
+                        canvas.restore()
+                    } else {
+                        drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
+                        // The fill follows the GLYPH inside the cell, not the cell itself,
+                        // or it would spill into the padding the square adds either side.
+                        val glyphW =
+                            EXTRA_ICON_H * Glyphs.aspect(PanelIcons.BATTERY, config.theme)
+                        val glyphX = iconX + (EXTRA_ICON_H - glyphW) / 2f
+                        val inset = EXTRA_ICON_H * 0.16f
+                        val top = iconY + inset
+                        val bottom = iconY + EXTRA_ICON_H - inset
+                        val fillTop = bottom - (bottom - top) * (level / 100f)
+                        canvas.drawRect(glyphX + inset * 0.6f, fillTop,
+                            glyphX + glyphW - inset * 0.6f, bottom, extras)
+                    }
                 }
             }
         }
@@ -5667,50 +5738,42 @@ class RearDialView(context: Context) : View(context) {
             return
         }
 
-        // BLACK, not a tint wash. The first attempt built the disc out of the row's own
-        // colour at low alpha and it came out as a pale blue circle with rings on it —
-        // a radar sweep. A record is black; what you actually see of one is the light
-        // its grooves catch, which is what everything below this line is.
-        vinylPaint.style = Paint.Style.FILL
-        vinylPaint.color = (0x000000 or (VINYL_BODY_ALPHA shl 24))
-        canvas.drawCircle(disc.cx, disc.cy, disc.radius, vinylPaint)
-
-        vinylPaint.style = Paint.Style.STROKE
-
-        // The grooves. Fine, many, and banded: every few rings is brighter, which is
-        // where one track ends and the next begins on a real pressing. Evenly spaced
-        // identical rings read as a target rather than as a surface.
-        val steps = MediaLayout.VINYL_GROOVES
-        vinylPaint.strokeWidth = VINYL_GROOVE_W
-        for (i in 0 until steps) {
-            val f = MediaLayout.VINYL_GROOVE_INNER +
-                (MediaLayout.VINYL_GROOVE_OUTER - MediaLayout.VINYL_GROOVE_INNER) *
-                (i.toFloat() / (steps - 1))
-            vinylPaint.color = shade(
-                if (i % VINYL_BAND_EVERY == 0) VINYL_BAND_ALPHA else VINYL_GROOVE_ALPHA,
+        // ---- the record itself, which is a photograph of one -----------------------
+        //
+        // It used to be constructed: a black circle, thirty-four concentric strokes for
+        // the grooves, a rim and two sheen arcs. That drew a diagram of a record, and it
+        // is the honest limit of the approach — the things that actually say "vinyl" are
+        // the way light runs in bands across the grooves, the sheen falling off toward
+        // the rim, the faint unevenness of a pressing. A stack of circles at graded
+        // alphas can gesture at those; it cannot claim them.
+        //
+        // THE DISC IS NOT TURNED, which is the decision the sheen used to make on its own
+        // and for the same reason. This image has a fixed highlight lying across it the
+        // way a record under a lamp does, and spinning the disc would spin the lamp with
+        // it. What turns is the label, which is where a record's rotation is legible
+        // anyway — the grooves are a featureless black ring whichever way round they are.
+        val record = recordArt
+        if (record != null) {
+            recordRect.set(
+                disc.cx - disc.radius, disc.cy - disc.radius,
+                disc.cx + disc.radius, disc.cy + disc.radius,
             )
-            canvas.drawCircle(disc.cx, disc.cy, disc.radius * f, vinylPaint)
+            // AT THE BODY'S OWN ALPHA, which the drawn disc also used. A record on this
+            // panel has never been fully opaque: the background shows faintly through it,
+            // and with a picture behind the readout that is the difference between a
+            // record sitting on the panel and a hole punched in it. A photograph at full
+            // strength would be the hole.
+            artPaint.alpha = VINYL_BODY_ALPHA
+            canvas.drawBitmap(record, null, recordRect, artPaint)
+            artPaint.alpha = 255
+        } else {
+            // The image ships with the build, so this is not a state that should arise —
+            // but a media page with no record on it would look like the panel broke,
+            // where a plain black disc just looks like a plain black disc.
+            vinylPaint.style = Paint.Style.FILL
+            vinylPaint.color = (0x000000 or (VINYL_BODY_ALPHA shl 24))
+            canvas.drawCircle(disc.cx, disc.cy, disc.radius, vinylPaint)
         }
-
-        // The rim, where the disc ends. A record has a raised lip and it is the brightest
-        // line on the whole thing — without it the grooves just fade out and the disc has
-        // no edge.
-        vinylPaint.strokeWidth = VINYL_RIM_W
-        vinylPaint.color = shade(VINYL_RIM_ALPHA)
-        canvas.drawCircle(disc.cx, disc.cy, disc.radius * VINYL_RIM_AT, vinylPaint)
-
-        // A sheen: two broad arcs of reflected light across the grooves. STATIC, while
-        // everything else about the label turns — a reflection belongs to the room, not
-        // to the record, and one that rotated with it would look painted on.
-        vinylPaint.strokeWidth = disc.radius * VINYL_SHEEN_W
-        vinylPaint.color = shade(VINYL_SHEEN_ALPHA)
-        val sheen = android.graphics.RectF(
-            disc.cx - disc.radius * VINYL_SHEEN_AT, disc.cy - disc.radius * VINYL_SHEEN_AT,
-            disc.cx + disc.radius * VINYL_SHEEN_AT, disc.cy + disc.radius * VINYL_SHEEN_AT,
-        )
-        canvas.drawArc(sheen, VINYL_SHEEN_FROM, VINYL_SHEEN_SWEEP, false, vinylPaint)
-        canvas.drawArc(
-            sheen, VINYL_SHEEN_FROM + 180f, VINYL_SHEEN_SWEEP, false, vinylPaint)
 
         // The label, which is where the cover finally goes and the only part that turns.
         val label = disc.radius * MediaLayout.VINYL_LABEL
@@ -5731,10 +5794,7 @@ class RearDialView(context: Context) : View(context) {
         // bitmap turned about their shared centre covers it at every angle.
         canvas.rotate(vinylAngle(sleeve), disc.cx, disc.cy)
         if (cover != null) {
-            // Held back from full strength. The transport buttons are drawn over this and
-            // a busy cover at full opacity is the one thing on the panel that can make
-            // them hard to find.
-            artPaint.alpha = VINYL_COVER_ALPHA
+            artPaint.alpha = 255
             canvas.drawBitmap(
                 cover, null,
                 ArtPlacement.destination(face, cover.width, cover.height, 0f, 0f, 1f),
@@ -7871,28 +7931,15 @@ class RearDialView(context: Context) : View(context) {
          * highlights from whatever colour the media row was set to.
          */
         private const val VINYL_BODY_ALPHA = 0xC4
-        private const val VINYL_GROOVE_W = 0.9f
-        private const val VINYL_GROOVE_ALPHA = 0x1E
 
-        /** Every Nth groove is brighter — where one track ends and the next starts. */
-        private const val VINYL_BAND_EVERY = 6
-        private const val VINYL_BAND_ALPHA = 0x3C
 
         /** The lip at the edge of the disc, the brightest line on it. */
         private const val VINYL_RIM_W = 1.6f
-        private const val VINYL_RIM_AT = 0.985f
-        private const val VINYL_RIM_ALPHA = 0x5A
 
-        /** Reflected light across the grooves. Static — a reflection is the room's, not
-         *  the record's. */
-        private const val VINYL_SHEEN_W = 0.30f
-        private const val VINYL_SHEEN_AT = 0.66f
-        private const val VINYL_SHEEN_FROM = 205f
-        private const val VINYL_SHEEN_SWEEP = 52f
-        private const val VINYL_SHEEN_ALPHA = 0x0E
 
         /** The cover on the label, held back so the buttons over it stay findable. */
-        private const val VINYL_COVER_ALPHA = 0xCC
+        /** How far the empty part of the battery is held back. See the battery block. */
+        private const val BATTERY_SHELL_ALPHA = 0x59
 
         /** The hairline around a square cover. Without it a dark sleeve on a black panel
          *  has no corners and therefore no size. */

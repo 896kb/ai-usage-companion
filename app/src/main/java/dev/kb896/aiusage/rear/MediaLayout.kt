@@ -179,17 +179,7 @@ object MediaLayout {
     /** Where the label ends and the grooves begin, as fractions of the radius. */
     const val VINYL_LABEL = 0.30f
     const val VINYL_SPINDLE = 0.035f
-    const val VINYL_GROOVE_INNER = 0.36f
-    const val VINYL_GROOVE_OUTER = 0.97f
 
-    /**
-     * How many groove rings are drawn.
-     *
-     * They are concentric, so they do NOT show the rotation — which is correct, and is
-     * why the label has to carry it. A real record's grooves look identical at every
-     * angle too.
-     */
-    const val VINYL_GROOVES = 34
 
     /** Centre and radius of the disc on a panel of this size. */
     class Disc(val cx: Float, val cy: Float, val radius: Float)

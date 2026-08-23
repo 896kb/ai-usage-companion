@@ -243,10 +243,11 @@ class MediaLayoutTest {
             disc.cy - disc.radius * MediaLayout.VINYL_LABEL > 0f)
     }
 
-    @Test fun `the grooves sit outside the label and inside the edge`() {
-        assertTrue("grooves run under the label",
-            MediaLayout.VINYL_GROOVE_INNER > MediaLayout.VINYL_LABEL)
-        assertTrue("grooves run off the disc", MediaLayout.VINYL_GROOVE_OUTER < 1f)
+    /**
+     * The grooves are part of the record's image now, so there is no groove geometry left
+     * to check — but the spindle and the label are still drawn, and still have to agree.
+     */
+    @Test fun `the spindle sits inside the label`() {
         assertTrue("the spindle is bigger than the label",
             MediaLayout.VINYL_SPINDLE < MediaLayout.VINYL_LABEL)
     }
