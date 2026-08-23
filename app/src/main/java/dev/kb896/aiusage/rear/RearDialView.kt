@@ -263,20 +263,55 @@ class RearDialView(context: Context) : View(context) {
      * initialisers, which run before any config exists, so ORIGINAL's numbers are already
      * in place and would otherwise stay there under a face that needs different ones.
      */
+    /**
+     * The panel's face at a given weight, built once and kept.
+     *
+     * SETTING A WEIGHT IS NOT A CHEAP ASSIGNMENT. Paint.fontVariationSettings builds a
+     * whole new Typeface from the variable font's tables, and it only short-circuits when
+     * the string is unchanged. The media row set the body to 400 for a track title and
+     * back to 600 afterwards, every frame, so it never once hit that short-circuit —
+     * measured at 11ms of a 27ms frame, which is most of why the panel dragged whenever
+     * there was media on it at all, playing or paused.
+     *
+     * There are three weights in the whole design. Building them once and swapping the
+     * finished faces makes the per-frame cost a map lookup, and it stops handing the
+     * native heap a fresh Typeface a hundred times a second while it is at it.
+     *
+     * A null [settings] is ORIGINAL, whose face has no axes to vary.
+     */
+    private fun varied(settings: String?): android.graphics.Typeface? {
+        val base = baseFace ?: return null
+        if (settings == null) return base
+        return faceCache.getOrPut(settings) {
+            // Resolved THROUGH a paint, because building a varied Typeface directly is not
+            // public API — but asking a paint for the weight and then taking the face it
+            // ended up with is exactly the same object, and this happens three times in
+            // the life of the view rather than three times a frame.
+            val probe = Paint()
+            probe.typeface = base
+            probe.fontVariationSettings = settings
+            probe.typeface ?: base
+        }
+    }
+
+    private var baseFace: android.graphics.Typeface? = null
+    private val faceCache = HashMap<String, android.graphics.Typeface>()
+
     private fun applyTheme(theme: dev.kb896.aiusage.data.PanelTheme) {
         if (theme == themeApplied) return
         themeApplied = theme
         typeScale = PanelType.scale(theme)
-        val face = PanelType.of(resources, theme)
+        baseFace = PanelType.of(resources, theme)
+        // The faces from the last theme are for the last theme's file. See varied.
+        faceCache.clear()
         val axes = PanelType.variation(theme)
         for (p in listOf(label, heading, value, title, timeTag, cascadePaint, extras, planTag)) {
-            p.typeface = face
             // Cleared as well as set: switching back to ORIGINAL has to take the axis off
             // again, or a paint carries a weight request for a face that has no axes.
-            p.fontVariationSettings = axes
+            p.typeface = varied(axes)
         }
         // The masthead is heavier than the body — see PanelType.titleVariation.
-        title.fontVariationSettings = PanelType.titleVariation(theme)
+        title.typeface = varied(PanelType.titleVariation(theme))
         label.textSize = typed(18f)
         heading.textSize = typed(22.5f)
         value.textSize = typed(21f)
@@ -7032,7 +7067,7 @@ class RearDialView(context: Context) : View(context) {
         // LIGHTER THAN THE PANEL, and put back afterwards. See PanelType.mediaVariation:
         // this is the one string here that is somebody else's writing rather than a label
         // this app chose, and at the readings' weight it competes with them.
-        extras.fontVariationSettings = PanelType.mediaVariation(config.theme)
+        extras.typeface = varied(PanelType.mediaVariation(config.theme))
         rolling(
             canvas, "row:title", m.title, textLeft, baseline,
             android.graphics.RectF(
@@ -7062,7 +7097,7 @@ class RearDialView(context: Context) : View(context) {
         // Back to the panel's weight. `extras` is shared with the clock, the battery and
         // half the media page, and a paint left lighter than it was found is a setting
         // that leaks into whatever draws next.
-        extras.fontVariationSettings = PanelType.variation(config.theme)
+        extras.typeface = varied(PanelType.variation(config.theme))
 
         // Targets only once the row has ARRIVED. A button that can be pressed while it
         // is still sliding is a button in a place it is about to leave, and the whole
