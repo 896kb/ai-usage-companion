@@ -49,6 +49,7 @@ class RearDialView(context: Context) : View(context) {
     var config: PanelConfig = PanelConfig.DEFAULT
         set(value) {
             field = value
+            applyTheme(value.theme)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -232,6 +233,55 @@ class RearDialView(context: Context) : View(context) {
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
         textAlign = Paint.Align.RIGHT
+    }
+
+    // -- type ------------------------------------------------------------------------
+
+    /**
+     * A size in ORIGINAL's terms, corrected for whichever face is actually set.
+     *
+     * EVERY SIZE ON THIS PANEL IS STATED ONCE, in the theme the panel was measured in,
+     * and the other theme is a correction to it. The alternative — a second set of forty
+     * numbers — is two layouts that drift apart the moment either is adjusted, and only
+     * one of them is ever in front of you to notice.
+     *
+     * Not applied to sizes that were MEASURED rather than chosen. The lyric fitter and
+     * the charging figure both compute a size from the room available, using the face
+     * that is actually set; correcting those again would be correcting twice.
+     */
+    private fun typed(size: Float): Float = size * typeScale
+
+    private var typeScale = 1f
+    private var themeApplied: dev.kb896.aiusage.data.PanelTheme? = null
+
+    /**
+     * Point every paint at the theme's face.
+     *
+     * Done on the config setter rather than per frame, because a typeface is a heavy
+     * object to hand to eight paints sixty times a second, and it only ever changes when
+     * somebody chooses a different theme.
+     *
+     * The base sizes are re-applied here as well as the face. They were set in the field
+     * initialisers, which run before any config exists, so ORIGINAL's numbers are already
+     * in place and would otherwise stay there under a face that needs different ones.
+     */
+    private fun applyTheme(theme: dev.kb896.aiusage.data.PanelTheme) {
+        if (theme == themeApplied) return
+        themeApplied = theme
+        typeScale = PanelType.scale(theme)
+        val face = PanelType.of(resources, theme)
+        for (p in listOf(label, heading, value, title, timeTag, cascadePaint, extras, planTag)) {
+            p.typeface = face
+        }
+        label.textSize = typed(18f)
+        heading.textSize = typed(22.5f)
+        value.textSize = typed(21f)
+        title.textSize = typed(40f)
+        timeTag.textSize = typed(18f)
+        cascadePaint.textSize = typed(CASCADE_TEXT)
+        extras.textSize = typed(18f)
+        planTag.textSize = typed(18f)
+        invalidate()
     }
 
     /**
@@ -1251,7 +1301,7 @@ class RearDialView(context: Context) : View(context) {
             (left + right) / 2f, (top + bottom) / 2f + size * 0.36f, extras,
         )
         extras.textAlign = was
-        extras.textSize = 18f
+        extras.textSize = typed(18f)
     }
 
     /**
@@ -4027,7 +4077,7 @@ class RearDialView(context: Context) : View(context) {
         val told = (1f - progress * 1.6f).coerceIn(0f, 1f)
         if (told > 0.01f) {
             extras.textAlign = Paint.Align.CENTER
-            extras.textSize = LOCK_TEXT
+            extras.textSize = typed(LOCK_TEXT)
             extras.color = (Panel.Palette.FG and 0x00FFFFFF) or
                 ((LOCK_TEXT_ALPHA * told).toInt().coerceIn(0, 255) shl 24)
             // Centred on the track's own middle, not on the gap right of the knob. The
@@ -4441,7 +4491,7 @@ class RearDialView(context: Context) : View(context) {
         // The raw text goes to `rolling`, not a shortened copy: it compares strings to
         // notice a change, and two different long titles cut to the same width are the
         // same string.
-        extras.textSize = MediaPage.TITLE_SIZE
+        extras.textSize = typed(MediaPage.TITLE_SIZE)
         extras.color = shade(tint, 0xFF)
         var runs = extras.measureText(m.title) > PAGE_TEXT_WIDTH
         extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
@@ -4453,7 +4503,7 @@ class RearDialView(context: Context) : View(context) {
             width = PAGE_TEXT_WIDTH,
         )
         if (m.artist.isNotBlank()) {
-            extras.textSize = MediaPage.ARTIST_SIZE
+            extras.textSize = typed(MediaPage.ARTIST_SIZE)
             extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
             runs = extras.measureText(m.artist) > PAGE_TEXT_WIDTH
             extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
@@ -4467,7 +4517,7 @@ class RearDialView(context: Context) : View(context) {
             )
         }
         extras.textAlign = Paint.Align.LEFT
-        extras.textSize = 18f
+        extras.textSize = typed(18f)
 
         // ---- the transport row, centred ---------------------------------------
         //
@@ -4745,7 +4795,7 @@ class RearDialView(context: Context) : View(context) {
         // The labels, curved inside their rings. Remaining time rather than elapsed:
         // elapsed is already the arc's own length, and a number that repeats the shape
         // beside it is a number saying nothing.
-        extras.textSize = MediaPage.LABEL_SIZE
+        extras.textSize = typed(MediaPage.LABEL_SIZE)
         extras.textAlign = Paint.Align.CENTER
         extras.color = (tint and 0x00FFFFFF) or
             ((MediaLayout.ARTIST_ALPHA * paging).toInt().coerceIn(0, 255) shl 24)
@@ -4790,7 +4840,7 @@ class RearDialView(context: Context) : View(context) {
             rings.work, centreDeg = 135f, outward = false,
         )
         extras.textAlign = Paint.Align.LEFT
-        extras.textSize = 18f
+        extras.textSize = typed(18f)
     }
 
     /**
@@ -5596,7 +5646,7 @@ class RearDialView(context: Context) : View(context) {
         // news and should be seen changing. `rolling` hands each line to the marquee when
         // it does not fit, so a long title both turns over and then scrolls.
         extras.textAlign = Paint.Align.LEFT
-        extras.textSize = MediaLayout.TEXT_SIZE
+        extras.textSize = typed(MediaLayout.TEXT_SIZE)
         extras.color = tint
         rolling(
             canvas, "row:title", m.title, textLeft, baseline,
@@ -5621,7 +5671,7 @@ class RearDialView(context: Context) : View(context) {
                 width = row.textWidth,
             )
         }
-        extras.textSize = 18f
+        extras.textSize = typed(18f)
 
         // Targets only once the row has ARRIVED. A button that can be pressed while it
         // is still sliding is a button in a place it is about to leave, and the whole

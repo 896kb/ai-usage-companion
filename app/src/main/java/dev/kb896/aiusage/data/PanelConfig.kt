@@ -151,6 +151,16 @@ data class ArtConfig(
  */
 @Serializable
 data class PanelConfig(
+    /**
+     * The whole app's look. See PanelTheme — it decides the face, the glyphs and whether
+     * surfaces refract, and those are not separable settings.
+     *
+     * FIRST FIELD, and default ORIGINAL. A panel that has never heard of themes decodes
+     * to exactly what it drew before, which is the property that matters: this arrives in
+     * the same payload as everything else, and a stored config written by an older build
+     * must not come back looking like somebody else's phone.
+     */
+    val theme: PanelTheme = PanelTheme.ORIGINAL,
     val title: String = "CLAUDE USAGE",
     val background: Int = Panel.Palette.BG,
     /**
