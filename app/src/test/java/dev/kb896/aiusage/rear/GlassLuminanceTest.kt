@@ -122,23 +122,6 @@ class GlassLuminanceTest {
         }
     }
 
-    // -- the glint ----------------------------------------------------------------------
-
-    /** A dark panel makes the edges catch more light; a bright one calms them. */
-    @Test fun `the bevel answers the backdrop`() {
-        assertTrue("should glint harder in the dark", GlassLuminance.bevel(0f) > 1f)
-        assertTrue("should settle in the light", GlassLuminance.bevel(1f) < 1f)
-        assertEquals("a neutral backdrop is the authored look",
-            1f, GlassLuminance.bevel(0.5f), 0.001f)
-    }
-
-    @Test fun `the glint never inverts`() {
-        for (i in 0..20) {
-            assertTrue("a negative bevel would light it from inside",
-                GlassLuminance.bevel(i / 20f) >= 0f)
-        }
-    }
-
     @Test fun `every channel stays in range`() {
         for (c in listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0x40123456)) {
             for (i in 0..10) {

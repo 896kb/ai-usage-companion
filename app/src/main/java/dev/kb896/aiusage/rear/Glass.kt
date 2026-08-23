@@ -285,9 +285,6 @@ uniform float2 size;
 uniform float2 sdfTexSize;
 uniform float refractionHeight;
 uniform float lightAngle;
-uniform float bevel;
-
-const float SPECULAR = 0.55;
 
 float circleMap(float x) {
     return 1.0 - sqrt(1.0 - x * x);
@@ -300,39 +297,22 @@ half4 main(float2 coord) {
     }
     half4 v = sdfTex.eval(p);
     float sd = v.r * 2.0 - 1.0;
-    // THE COVERAGE IS KEPT AS IT WAS MEASURED. The reference squares it up with
-    // smoothstep(0.5, 1.0) and flattens the distance wherever coverage is partial, which
-    // is right for a texture baked far larger than it is drawn — every edge pixel there is
-    // either in or out. Built at the size it is drawn, that threshold throws away the
-    // whole of the antialiasing and hands back a staircase, and zeroing the distance along
-    // the edge takes the bevel off exactly where the bevel lives.
+    v.a = smoothstep(0.5, 1.0, v.a);
     if (v.a <= 0.0) {
         return half4(0.0);
+    }
+    if (v.a < 1.0) {
+        sd = 0.0;
     }
     float2 normal = normalize(v.gb * 2.0 - 1.0);
     float intensity = circleMap(1.0 - min(1.0, -sd * 1.5));
     float2 refractedCoord = coord - intensity * refractionHeight * normal;
     half4 color = content.eval(refractedCoord) * v.a;
     float2 lightDir = float2(cos(lightAngle * 3.1415926 / 180.0), sin(lightAngle * 3.1415926 / 180.0));
-    // The two bevel terms, scaled together by how dark it is behind the figure. See
-    // GlassLuminance.bevel: this is the reaction, and it is a reaction of LIGHT rather
-    // than of colour, which is the only kind a piece of glass can have.
     float bevelIntensity = clamp(dot(normal, lightDir), 0.0, 1.0);
-    color.rgb *= 1.0 + 0.5 * bevel * intensity * bevelIntensity;
+    color.rgb *= 1.0 + 0.5 * intensity * bevelIntensity;
     bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
-    color.rgb *= 1.0 + 0.5 * bevel * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
-
-    // AND A SPECULAR ON TOP, added rather than multiplied.
-    //
-    // The two terms above scale what is already there, which is why the reaction kept
-    // coming out invisible: over a bright backdrop the channels are near one and there is
-    // nothing left to multiply. A highlight that is ADDED lands the same either way, and a
-    // lit edge is what tells you a letter is a solid object rather than a smear of the
-    // wallpaper. Scaled by coverage so it stops at the glyph, and by the same bevel factor
-    // so it is part of the same reaction.
-    float spec = clamp(dot(normal, lightDir), 0.0, 1.0);
-    spec = pow(spec, 3.0) * intensity;
-    color.rgb += half3(SPECULAR * bevel * spec * v.a);
+    color.rgb *= 1.0 + 0.5 * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
     return color;
 }"""
 
