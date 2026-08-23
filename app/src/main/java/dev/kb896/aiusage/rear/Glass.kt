@@ -363,6 +363,17 @@ half4 main(float2 coord) {
     const val ABERRATION = 1f
 
     /**
+     * How hard a BUTTON splits light, which is a little less.
+     *
+     * Not a second opinion about the material — the same reason a bar and a card share
+     * one figure still holds. It is about what is behind them: a button sits over the
+     * record, which is the highest-contrast thing on this panel, and full dispersion on a
+     * hard black-and-white edge is a rainbow rather than a bevel. The readings lie over
+     * flat colour and never show it.
+     */
+    const val BUTTON_ABERRATION = 0.65f
+
+    /**
      * How much the bend follows the pane's centre rather than its nearest edge.
      *
      * ZERO, because the reference's `depthEffect` defaults to false and neither the

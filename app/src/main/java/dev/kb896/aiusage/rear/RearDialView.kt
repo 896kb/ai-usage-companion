@@ -277,6 +277,8 @@ class RearDialView(context: Context) : View(context) {
             // again, or a paint carries a weight request for a face that has no axes.
             p.fontVariationSettings = axes
         }
+        // The masthead is heavier than the body — see PanelType.titleVariation.
+        title.fontVariationSettings = PanelType.titleVariation(theme)
         label.textSize = typed(18f)
         heading.textSize = typed(22.5f)
         value.textSize = typed(21f)
@@ -699,6 +701,8 @@ class RearDialView(context: Context) : View(context) {
          * solid state is simply what the control is.
          */
         held: Boolean = false,
+        /** How hard this pane splits light. See Glass.ABERRATION. */
+        aberration: Float = Glass.ABERRATION,
     ): Boolean {
         val w = rect.width()
         val h = rect.height()
@@ -766,7 +770,7 @@ class RearDialView(context: Context) : View(context) {
             "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
         )
         shader.setFloatUniform("depthEffect", Glass.DEPTH)
-        shader.setFloatUniform("chromaticAberration", Glass.ABERRATION)
+        shader.setFloatUniform("chromaticAberration", aberration)
 
         // Blur FIRST, then bend. createChainEffect applies its second argument first, so
         // this reads backwards and is the right way round: bending a sharp backdrop
@@ -1084,6 +1088,7 @@ class RearDialView(context: Context) : View(context) {
             if (fading) canvas.saveLayerAlpha(b.rect, (255 * b.alpha).toInt())
             drawGlassPane(
                 canvas, b.rect, b.rect.height() / 2f, Glass.DISC_TINT, held = true,
+                aberration = Glass.BUTTON_ABERRATION,
             )
             if (fading) canvas.restore()
             canvas.restore()
@@ -2210,8 +2215,15 @@ class RearDialView(context: Context) : View(context) {
         // account would make them look like part of that account's block, and would ask
         // the eye to ignore two thirds of what it is being shown.
         if (onlyAccount == null) drawTitle(canvas)
-        drawBars(canvas)
+        // MASCOTS FIRST, so the readings are drawn over them. Under GLASS a thumb stands
+        // proud of its track and can reach a mascot's feet; with the figures on top, a
+        // reading passed BEHIND the thing standing on it, which is the wrong way round —
+        // the mascot is standing on the instrument, not holding it.
+        //
+        // Harmless in ORIGINAL, where a mascot's feet meet the bar's top edge exactly and
+        // the two never overlap at all.
         drawMascots(canvas)
+        drawBars(canvas)
         if (onlyAccount == null) drawMark(canvas, dx, dy)
     }
 
@@ -4655,7 +4667,7 @@ class RearDialView(context: Context) : View(context) {
         // Layout metrics scale with the type. These were originally tuned for 12/15/14pt
         // text; when the sizes went to 18/22.5/21 the rows kept their old pitch and
         // crowded. Keep them proportional to the fonts rather than as loose literals.
-        val barH = 20f
+        val barH = BAR_ROW_H
         val rowPitch = ROW_PITCH
         val headingAdvance = 30f
 
@@ -4894,6 +4906,14 @@ class RearDialView(context: Context) : View(context) {
         MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }?.scale ?: 1f
     }
 
+    /** The surface a mascot stands on: the top of whatever the reading is drawn in. */
+    private fun mascotFloor(top: Float): Float =
+        if (config.theme.isGlass) {
+            top + BAR_ROW_H * (1f - SLIDER_TRACK) / 2f
+        } else {
+            top
+        }
+
     private fun drawMascots(canvas: Canvas) {
         val now = System.currentTimeMillis()
         for ((index, entry) in sessionBars.entries.withIndex()) {
@@ -4946,7 +4966,11 @@ class RearDialView(context: Context) : View(context) {
             val at = MASCOT_STOPS.getOrElse(index) { MASCOT_STOPS.last() }
             val x = (bar.left + at * (bar.right - bar.left) - w / 2f)
                 .coerceIn(bar.left, bar.right - w)
-            val top = bar.top - h
+            // ON THE TRACK, which under GLASS is not the row. The bar fills its whole row
+            // in ORIGINAL, so standing on the row's top edge stands on the bar; the glass
+            // slider's track is a third of that height and centred, so the same line left
+            // the figures hovering a few units above the thing they are standing on.
+            val top = mascotFloor(bar.top) - h
             // Per-clip frame time: the confetti burst reads as frantic at the pace that
             // suits a walk or a lift, so it keeps the original 125ms while the rest run
             // at 83ms.
@@ -7718,6 +7742,9 @@ class RearDialView(context: Context) : View(context) {
          * a single lozenge and stop reading as three things.
          */
         private const val DISC_RADIUS = 0.72f
+
+        /** How tall one reading's row is. Shared with the mascots, which stand on it. */
+        private const val BAR_ROW_H = 20f
 
         // -- the glass bars, built as sliders -------------------------------------------
         //

@@ -52,6 +52,20 @@ object PanelType {
     fun variation(theme: PanelTheme): String? =
         if (theme == PanelTheme.GLASS) "'wght' $GLASS_WEIGHT" else null
 
+    /**
+     * The masthead's own weight, which is not the panel's.
+     *
+     * Heavier, because under GLASS the title is not painted — it is a lens shaped like
+     * the letters, and a lens needs a stroke wide enough to have an inside. At the body
+     * weight the bevel from each edge meets in the middle of every stem and the whole
+     * word is edge, which reads as a smear rather than as type.
+     */
+    fun titleVariation(theme: PanelTheme): String? =
+        if (theme == PanelTheme.GLASS) "'wght' $GLASS_TITLE_WEIGHT" else null
+
+    /** ExtraBold. See [titleVariation]. */
+    const val GLASS_TITLE_WEIGHT = 800
+
     private val cache = HashMap<PanelTheme, Typeface>(2)
 
     /**
