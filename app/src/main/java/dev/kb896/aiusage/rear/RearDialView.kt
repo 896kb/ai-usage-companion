@@ -2067,19 +2067,27 @@ class RearDialView(context: Context) : View(context) {
 
         // The meniscus. A liquid's surface catches the light, and a brighter line along
         // it is most of what separates "filled shape" from "something with a top".
-        noticePaint.style = Paint.Style.STROKE
-        noticePaint.strokeWidth = CHARGE_SURFACE
-        noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_MENISCUS shl 24)
-        val skin = android.graphics.Path()
-        for (i in 0 until surface.size) {
-            val u = (i / (surface.size - 1f) - 0.5f) * span
-            val d = level + surface.heightAt(i)
-            val px = cx + acrossX * u + downX * d
-            val py = cy + acrossY * u + downY * d
-            if (i == 0) skin.moveTo(px, py) else skin.lineTo(px, py)
+        //
+        // NOT UNDER GLASS, where the liquid magnifies. The lit line was standing in for a
+        // surface, and the magnification IS one: what is behind the cell steps as it
+        // crosses the level, which is the same statement made by the thing itself rather
+        // than by a line drawn where the thing would be. Kept together they read as two
+        // tops — a drawn edge sitting a hair off the optical one that the lens produces.
+        if (!config.theme.isGlass) {
+            noticePaint.style = Paint.Style.STROKE
+            noticePaint.strokeWidth = CHARGE_SURFACE
+            noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_MENISCUS shl 24)
+            val skin = android.graphics.Path()
+            for (i in 0 until surface.size) {
+                val u = (i / (surface.size - 1f) - 0.5f) * span
+                val d = level + surface.heightAt(i)
+                val px = cx + acrossX * u + downX * d
+                val py = cy + acrossY * u + downY * d
+                if (i == 0) skin.moveTo(px, py) else skin.lineTo(px, py)
+            }
+            canvas.drawPath(skin, noticePaint)
+            noticePaint.style = Paint.Style.FILL
         }
-        canvas.drawPath(skin, noticePaint)
-        noticePaint.style = Paint.Style.FILL
 
         // ---- the surges ------------------------------------------------------------
         //
