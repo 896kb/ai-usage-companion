@@ -495,7 +495,166 @@ class RearDialView(context: Context) : View(context) {
         super.onDetachedFromWindow()
     }
 
+    /**
+     * A frame, in two passes when the panes need something to refract.
+     *
+     * GLASS BENDS WHAT IS BEHIND IT, so the panes have to be handed the panel behind them
+     * as something they can sample — and a Canvas cannot be read back. So the scene is
+     * recorded into a RenderNode first, drawn, and then the overlays are drawn over it
+     * with that node as their backdrop. It is not an extra rasterisation: hardware
+     * rendering builds a display list for this view either way, and this is one more of
+     * the same kind.
+     *
+     * ORIGINAL takes the single-pass path unchanged. So does anything drawing into a
+     * software canvas, where there are no render nodes at all — a preview bitmap on the
+     * front screen, for one.
+     */
     override fun onDraw(canvas: Canvas) {
+        val recorder = canvas as? android.graphics.RecordingCanvas
+        if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
+            // POSITION, not just size. beginRecording says how big the display list is;
+            // setPosition says where it goes. Without it the node has empty bounds and
+            // draws nothing at all — the panel came up as two notification cards floating
+            // on black, with the readout recorded perfectly and placed nowhere.
+            sceneNode.setPosition(0, 0, width, height)
+            val scene = sceneNode.beginRecording(width, height)
+            try {
+                drawFrame(scene, overlays = false)
+            } finally {
+                sceneNode.endRecording()
+            }
+            recorder.drawRenderNode(sceneNode)
+            drawOverlays(canvas)
+            return
+        }
+        drawFrame(canvas, overlays = true)
+    }
+
+    /** The panel behind the panes, so they have something to bend. */
+    private val sceneNode = android.graphics.RenderNode("panel")
+
+    /** One pane's worth of that scene, with the lens on it. */
+    private val paneNode = android.graphics.RenderNode("glass")
+
+    /**
+     * The three things drawn over the panel rather than in it.
+     *
+     * Held out of the scene deliberately: they are the glass, and glass cannot be part of
+     * what it refracts. Everything else — including the ambient mascot — stays in the
+     * scene and is therefore something the panes can bend, which is the point.
+     */
+    private fun drawOverlays(canvas: Canvas) {
+        drawLockOverlay(canvas)
+        drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
+        drawCharge(canvas)
+    }
+
+    /** The strip's slide, taken during the scene pass so the second pass cannot re-advance it. */
+    private var noticeSlideHeld = 0f
+
+    /**
+     * Draw a rounded rectangle as a piece of glass over the panel.
+     *
+     * Returns false when it cannot — no scene to sample, or a canvas with no render nodes
+     * — so the caller can fall back to drawing the element flat rather than to drawing
+     * nothing at all. Every pane on this panel is something the user needs to see.
+     *
+     * WHAT ACTUALLY HAPPENS, in order: the scene is drawn into a node the size of the
+     * pane and shifted so the pane's own top-left is that node's origin; the node is given
+     * a blur and then the refraction, so the bending acts on softened content rather than
+     * on hard edges; and the result is drawn clipped to the pane's shape. Then a tint for
+     * body and a lit rim for an edge, because a lens over a mostly-black panel is
+     * otherwise invisible — see Glass.
+     */
+    private fun drawGlassPane(
+        canvas: Canvas,
+        rect: android.graphics.RectF,
+        radius: Float,
+        tint: Int = Glass.TINT,
+    ): Boolean {
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return false
+        if (!sceneNode.hasDisplayList()) return false
+        val w = rect.width()
+        val h = rect.height()
+        if (w < 1f || h < 1f) return false
+
+        paneNode.setPosition(
+            Math.round(rect.left), Math.round(rect.top),
+            Math.round(rect.right), Math.round(rect.bottom),
+        )
+        val pane = paneNode.beginRecording()
+        try {
+            // The scene, shifted so that the pane's top-left is this node's origin — which
+            // is the coordinate space the shader works in.
+            pane.translate(-rect.left, -rect.top)
+            pane.drawRenderNode(sceneNode)
+        } finally {
+            paneNode.endRecording()
+        }
+
+        val shader = Glass.refraction
+        shader.setFloatUniform("size", w, h)
+        shader.setFloatUniform("offset", 0f, 0f)
+        shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+        // Depth as a fraction of the SHORT side, so a tall notice card and a long thin
+        // slider are made of the same material rather than the same number of units.
+        shader.setFloatUniform("refractionHeight", minOf(w, h) * Glass.REFRACTION_HEIGHT)
+        shader.setFloatUniform("refractionAmount", Glass.REFRACTION_AMOUNT)
+        shader.setFloatUniform("depthEffect", Glass.DEPTH)
+
+        // Blur FIRST, then bend. createChainEffect applies its second argument first, so
+        // this reads backwards and is the right way round: bending a sharp backdrop
+        // smears whatever it lands on into a streak, where bending a soft one is a lens.
+        paneNode.setRenderEffect(
+            android.graphics.RenderEffect.createChainEffect(
+                android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
+                android.graphics.RenderEffect.createBlurEffect(
+                    Glass.BLUR, Glass.BLUR, android.graphics.Shader.TileMode.CLAMP,
+                ),
+            ),
+        )
+
+        canvas.save()
+        paneClip.rewind()
+        paneClip.addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW)
+        canvas.clipPath(paneClip)
+        recorder.drawRenderNode(paneNode)
+
+        // Body. Glass is not clear, and a wholly clear pane on a panel that is largely
+        // black is an invisible one — this is what a notification's text is read against.
+        panePaint.style = Paint.Style.FILL
+        panePaint.shader = null
+        panePaint.color = tint
+        canvas.drawRoundRect(rect, radius, radius, panePaint)
+        canvas.restore()
+
+        // The lit rim, over the top and outside the clip so it is not cut in half by it.
+        val rim = Glass.highlight
+        rim.setFloatUniform("size", w, h)
+        rim.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+        rim.setColorUniform("color", Glass.LIGHT_COLOR)
+        rim.setFloatUniform("angle", Glass.LIGHT_ANGLE)
+        rim.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
+        canvas.save()
+        canvas.translate(rect.left, rect.top)
+        panePaint.shader = rim
+        panePaint.style = Paint.Style.STROKE
+        panePaint.strokeWidth = Glass.RIM_WIDTH
+        canvas.drawRoundRect(
+            Glass.RIM_WIDTH / 2f, Glass.RIM_WIDTH / 2f,
+            w - Glass.RIM_WIDTH / 2f, h - Glass.RIM_WIDTH / 2f,
+            radius, radius, panePaint,
+        )
+        canvas.restore()
+        panePaint.shader = null
+        panePaint.style = Paint.Style.FILL
+        return true
+    }
+
+    private val paneClip = android.graphics.Path()
+    private val panePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun drawFrame(canvas: Canvas, overlays: Boolean) {
         // Absolute time, not a per-frame delta. A duration-based tween needs to know
         // how far through its leg it is, and asking the clock directly makes it immune
         // to the thing that used to need clamping: the idle redraw is every 15s, and an
@@ -592,7 +751,8 @@ class RearDialView(context: Context) : View(context) {
         // How far a notification strip has pushed the canvas side down. Computed here
         // rather than where it is used, because the record behind the readout rides the
         // same offset and is drawn first.
-        val push = noticeHeight(nowReal) * noticeSlide(nowReal)
+        noticeSlideHeld = noticeSlide(nowReal)
+        val push = noticeHeight(nowReal) * noticeSlideHeld
 
         // THE LOCK OUTLIVES WHAT RAISED IT BY EXACTLY NOTHING. Checked after the slide
         // has been advanced for this frame, so "the strip has retracted" is this frame's
@@ -972,11 +1132,11 @@ class RearDialView(context: Context) : View(context) {
         //
         // Drawn before the notice and the charging cell, which are allowed over it: they
         // are why the panel is awake, and the knob is at the left where neither reaches.
-        drawLockOverlay(canvas)
+        if (overlays) drawLockOverlay(canvas)
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
-        drawNotice(canvas, noticeSlide(nowReal), nowReal)
+        if (overlays) drawNotice(canvas, noticeSlideHeld, nowReal)
 
         // The mascot is outside the readout's clip because it belongs to the other side
         // of the ripple. The BUTTON is not — it is part of the readout and is swept away
@@ -1010,7 +1170,7 @@ class RearDialView(context: Context) : View(context) {
         // the charger going in is a fact about the phone rather than about whichever page
         // you happen to be looking at, so it appears where it appears and the panel
         // carries on underneath.
-        drawCharge(canvas)
+        if (overlays) drawCharge(canvas)
 
         // Next frame only while something is still moving. When everything has settled
         // this stops entirely and the view falls back to the 15s idle tick — an
@@ -3242,6 +3402,10 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNotice(canvas: Canvas, slide: Float, nowMs: Long) {
         if (slide <= 0.001f) return
+        if (config.theme.isGlass) {
+            drawGlassNotice(canvas, slide, nowMs)
+            return
+        }
         val total = noticeHeight(nowMs)
         val top = -total + total * slide
         val turn = wheelTurn(nowMs)
@@ -3375,6 +3539,97 @@ class RearDialView(context: Context) : View(context) {
         (notice ?: outgoing)?.let { drawNoticeRow(canvas, it, top - (1f - turn) * NOTICE_H) }
         canvas.restore()
     }
+
+    /**
+     * The same notification, as glass: two cards that float rather than one shape with a
+     * shoulder.
+     *
+     * ORIGINAL's strip runs off the top and right of the panel and its second card is
+     * TUCKED behind the first, sharing an edge — one assembly, stepped, anchored to the
+     * screen. That is right for a readout drawn to the display's own corners, and wrong
+     * for glass: a pane is an object with all four edges, and an object cannot be half
+     * under another object of the same material and still read as either.
+     *
+     * So both cards are inset from every edge and fully rounded, and the group card sits
+     * BELOW the headline with air between them rather than behind it. It is narrower as
+     * well as shorter — inset further on both sides — because that is what says it is
+     * subordinate to the card above rather than a second one of equal standing.
+     */
+    private fun drawGlassNotice(canvas: Canvas, slide: Float, nowMs: Long) {
+        val total = noticeHeight(nowMs)
+        val top = -total + total * slide
+        val turn = wheelTurn(nowMs)
+        val m = miniSlide(nowMs)
+        val r = GLASS_NOTICE_RADIUS
+
+        val cardTop = top + GLASS_NOTICE_MARGIN
+        val cardBottom = top + NOTICE_H
+        val right = Panel.WIDTH - GLASS_NOTICE_MARGIN
+
+        // ---- the group card, below and narrower ------------------------------------
+        //
+        // Drawn FIRST and slid out from under the headline, which keeps ORIGINAL's one
+        // good idea: a card that grows in place reads as something inflating, where one
+        // that emerges reads as something arriving. It simply emerges into open panel
+        // here instead of staying tucked.
+        if (m > 0.001f) {
+            val miniH = CASCADE_H - GLASS_MINI_SHRINK
+            val miniTop = cardBottom + GLASS_NOTICE_GAP - (1f - m) * (miniH + GLASS_NOTICE_GAP)
+            val mini = android.graphics.RectF(
+                NOTICE_LEFT + GLASS_MINI_INSET, miniTop,
+                right - GLASS_MINI_INSET, miniTop + miniH,
+            )
+            canvas.save()
+            // Clipped to the gap below the headline, so it is not seen crossing the card
+            // above on its way out.
+            canvas.clipRect(
+                0f, cardBottom + GLASS_NOTICE_GAP, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+            )
+            if (!drawGlassPane(canvas, mini, r, glassNoticeTint())) {
+                noticePaint.style = Paint.Style.FILL
+                noticePaint.color = glassNoticeTint()
+                canvas.drawRoundRect(mini, r, r, noticePaint)
+            }
+            canvas.save()
+            canvas.clipRect(mini)
+            val rowTop = mini.top + (miniH - CASCADE_H) / 2f
+            leaving?.takeIf { it.hasMore }
+                ?.let { drawMiniRow(canvas, it, rowTop + turn * CASCADE_H, CASCADE_H) }
+            notice?.takeIf { it.hasMore }
+                ?.let { drawMiniRow(canvas, it, rowTop - (1f - turn) * CASCADE_H, CASCADE_H) }
+            canvas.restore()
+            canvas.restore()
+        }
+
+        // ---- the headline, over it -------------------------------------------------
+        val card = android.graphics.RectF(NOTICE_LEFT, cardTop, right, cardBottom)
+        if (!drawGlassPane(canvas, card, r, glassNoticeTint())) {
+            noticePaint.style = Paint.Style.FILL
+            noticePaint.color = glassNoticeTint()
+            canvas.drawRoundRect(card, r, r, noticePaint)
+        }
+        canvas.save()
+        canvas.clipRect(card)
+        // The drum still turns inside the card. Position only, nothing fades — see the
+        // note in drawNotice.
+        val rowShift = (card.height() - NOTICE_H) / 2f
+        leaving?.let { drawNoticeRow(canvas, it, cardTop + rowShift + turn * NOTICE_H) }
+        (notice ?: outgoing)?.let {
+            drawNoticeRow(canvas, it, cardTop + rowShift - (1f - turn) * NOTICE_H)
+        }
+        canvas.restore()
+    }
+
+    /**
+     * The glass card's own tint.
+     *
+     * The user's notification colour at a fraction of its opacity, rather than Glass.TINT:
+     * the ground colour is a setting somebody chose, and a theme that ignored it would be
+     * a theme that took a preference away.
+     */
+    private fun glassNoticeTint(): Int =
+        (colorFor("notice:bg", config.notificationGround or (0xFF shl 24)) and 0x00FFFFFF) or
+            (GLASS_NOTICE_ALPHA shl 24)
 
     /**
      * The display's own corner radius, asked of the display rather than assumed.
@@ -6521,6 +6776,37 @@ class RearDialView(context: Context) : View(context) {
          * the whole screen is proportionally four times too round on it.
          */
         private const val CORNER_DIVISOR = 3f
+
+        // -- the glass notification ---------------------------------------------------
+
+        /**
+         * How far a glass card is held off the panel's edges.
+         *
+         * ORIGINAL's strip runs off the top and right and lets the display's own rounding
+         * finish it. A pane cannot: it is an object, and an object with two edges missing
+         * is a shape stuck to the screen.
+         */
+        private const val GLASS_NOTICE_MARGIN = 14f
+
+        /** The air between the headline and the group card below it. */
+        private const val GLASS_NOTICE_GAP = 8f
+
+        /** How much narrower the group card is, each side. Subordinate, not second. */
+        private const val GLASS_MINI_INSET = 22f
+
+        /** And how much shorter, so the two are not the same card twice. */
+        private const val GLASS_MINI_SHRINK = 14f
+
+        /** Rounded like a pane rather than like the display. */
+        private const val GLASS_NOTICE_RADIUS = 22f
+
+        /**
+         * How opaque a glass card's ground is.
+         *
+         * Enough to read type against, little enough that the refraction underneath still
+         * carries — an opaque pane is a card, and the whole point is that it is glass.
+         */
+        private const val GLASS_NOTICE_ALPHA = 0xB0
 
         private const val EXTRA_ICON_H = 20f
 

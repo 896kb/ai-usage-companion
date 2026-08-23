@@ -199,4 +199,7 @@ half4 main(float2 coord) {
 
     /** How far the backdrop is blurred before it is bent, in panel units. */
     const val BLUR = 6f
+
+    /** How thick the lit rim is drawn, in panel units. */
+    const val RIM_WIDTH = 2f
 }
