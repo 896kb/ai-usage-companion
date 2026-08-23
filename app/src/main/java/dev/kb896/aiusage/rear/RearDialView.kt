@@ -7855,20 +7855,26 @@ class RearDialView(context: Context) : View(context) {
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
 
-        /** How long the record takes to swing from one side of its shake to the other. */
-        private const val VINYL_WOBBLE_MS = 200f
+        /**
+         * How long the record takes to swing from one side of its shake to the other.
+         *
+         * Half a second, which is slow enough to read as weight rather than as vibration.
+         * At a fifth of a second the disc buzzed: the eye tracks the motion instead of the
+         * record, and a turntable's play is a slow lean, not a shiver.
+         */
+        private const val VINYL_WOBBLE_MS = 500f
 
         /**
          * How far it goes, per step. See vinylWobble.
          *
-         * Under a degree and a half, which is a great deal less than it sounds like it
-         * should be. Three to five degrees was the first attempt and it read as a record
-         * being shaken rather than one being played: at this diameter five degrees moves
-         * the rim by a visible centimetre. A deck's tremble is the kind of thing you only
-         * notice when it stops.
+         * A third of a degree at most, which is far less than it sounds like it should be
+         * and took three goes to believe. Five degrees read as a record being shaken; one
+         * still read as a record being nudged. At this diameter even a third of a degree
+         * moves the rim by a couple of units, and that is the whole budget — a deck's play
+         * is the kind of thing you only notice once it stops.
          */
-        private const val VINYL_WOBBLE_MIN = 0.5f
-        private const val VINYL_WOBBLE_MAX = 1.2f
+        private const val VINYL_WOBBLE_MIN = 0.12f
+        private const val VINYL_WOBBLE_MAX = 0.34f
 
         /** How many distinct pane shapes to keep lenses for. See lensFor. */
         private const val LENS_CACHE_MAX = 96
