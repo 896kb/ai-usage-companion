@@ -1000,6 +1000,15 @@ class RearDialView(context: Context) : View(context) {
          * targets should be a row of the same target.
          */
         discH: Float = glyphH,
+        /**
+         * How present the button is, for a page that is still arriving.
+         *
+         * The glass is drawn later than the glyph — see below — so it does not inherit
+         * whatever the caller was fading. Without this the disc appeared at full strength
+         * the instant the media page began to scroll in, while the mark inside it faded
+         * up underneath: a button that arrives before its own icon.
+         */
+        alpha: Float = 1f,
         glyph: (Canvas) -> Unit,
     ) {
         if (!config.theme.isGlass) {
@@ -1022,13 +1031,37 @@ class RearDialView(context: Context) : View(context) {
         // be sampled. The mark ends up UNDER the glass, which is where a mark on a button
         // belongs, and the panel behind it bends round the rim.
         glyph(canvas)
+        if (alpha <= 0.004f) return
         discRect.set(cx - r, cy - r, cx + r, cy + r)
-        canvas.getMatrix().mapRect(pendingRect, discRect)
+        val m = canvas.getMatrix()
+        m.mapRect(pendingRect, discRect)
+        // THE CLIP TRAVELS WITH IT TOO. The readout's media row turns on a drum and is
+        // clipped to the band it has emerged into; drawn later and unclipped, a disc
+        // stood clear of a row that was still half under its own edge.
+        val bounds = android.graphics.Rect()
+        val clip = android.graphics.RectF()
+        if (canvas.getClipBounds(bounds)) {
+            clip.set(bounds)
+            m.mapRect(clip)
+        } else {
+            clip.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        }
         pendingButtons.add(
-            android.graphics.RectF(pendingRect.left, pendingRect.top,
-                pendingRect.right, pendingRect.bottom),
+            PendingButton(
+                android.graphics.RectF(pendingRect.left, pendingRect.top,
+                    pendingRect.right, pendingRect.bottom),
+                clip,
+                alpha,
+            ),
         )
     }
+
+    /** A button whose glyph is down and whose glass is not yet. See glassButton. */
+    private class PendingButton(
+        val rect: android.graphics.RectF,
+        val clip: android.graphics.RectF,
+        val alpha: Float,
+    )
 
     /**
      * Buttons whose glass is still to be laid over them, in panel coordinates.
@@ -1038,15 +1071,21 @@ class RearDialView(context: Context) : View(context) {
      * because those are scattered across half a dozen locals (the drift, the page scroll,
      * the notice push) and a copy of that sum is a copy that will drift from it.
      */
-    private val pendingButtons = ArrayList<android.graphics.RectF>(8)
+    private val pendingButtons = ArrayList<PendingButton>(8)
     private val pendingRect = android.graphics.RectF()
 
     /** Lay the glass over every button noted during the scene. */
     private fun drawPendingButtons(canvas: Canvas) {
-        for (rect in pendingButtons) {
+        for (b in pendingButtons) {
+            canvas.save()
+            canvas.clipRect(b.clip)
+            val fading = b.alpha < 0.999f
+            if (fading) canvas.saveLayerAlpha(b.rect, (255 * b.alpha).toInt())
             drawGlassPane(
-                canvas, rect, rect.height() / 2f, Glass.DISC_TINT, held = true,
+                canvas, b.rect, b.rect.height() / 2f, Glass.DISC_TINT, held = true,
             )
+            if (fading) canvas.restore()
+            canvas.restore()
         }
     }
 
@@ -5530,7 +5569,7 @@ class RearDialView(context: Context) : View(context) {
 
         extras.color = shade(tint, 0xFF)
         val prevX = x
-        glassButton(canvas, x + widths[0] / 2f, top + gh / 2f, gh) { c ->
+        glassButton(canvas, x + widths[0] / 2f, top + gh / 2f, gh, alpha = paging) { c ->
             extras.color = shade(tint, 0xFF)
             drawIcon(c, PanelIcons.PREV, prevX, top, gh)
         }
@@ -5539,7 +5578,7 @@ class RearDialView(context: Context) : View(context) {
 
         // The play/pause drum again, one size up. Same clip-and-slide as the row's.
         val playX = x
-        glassButton(canvas, x + widths[1] / 2f, top + gh / 2f, gh) { c ->
+        glassButton(canvas, x + widths[1] / 2f, top + gh / 2f, gh, alpha = paging) { c ->
             c.save()
             c.clipRect(playX, top - gh, playX + gh, top + gh * 2f)
             drawPlayPause(c, playX, top, gh, shade(tint, 0xFF))
@@ -5549,7 +5588,7 @@ class RearDialView(context: Context) : View(context) {
         x += widths[1] + MediaPage.TRANSPORT_GAP
 
         val nextX = x
-        glassButton(canvas, x + widths[2] / 2f, top + gh / 2f, gh) { c ->
+        glassButton(canvas, x + widths[2] / 2f, top + gh / 2f, gh, alpha = paging) { c ->
             extras.color = shade(tint, 0xFF)
             drawIcon(c, PanelIcons.NEXT, nextX, top, gh)
         }
