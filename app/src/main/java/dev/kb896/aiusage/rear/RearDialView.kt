@@ -513,6 +513,7 @@ class RearDialView(context: Context) : View(context) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         pendingButtons.clear()
+        pendingTitleTex = null
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
             // POSITION, not just size. beginRecording says how big the display list is;
@@ -593,7 +594,7 @@ class RearDialView(context: Context) : View(context) {
         // node it is being recorded into — that is the cycle from before — but it can
         // sample the one behind, which is all it needs.
         var backdrop = sceneNode
-        backdrop = layered(backdrop) { c -> drawPendingButtons(c) }
+        backdrop = layered(backdrop) { c -> drawGlassTitle(c); drawPendingButtons(c) }
         backdrop = layered(backdrop) { c -> drawLockOverlay(c) }
         backdrop = layered(backdrop) {
             c -> drawNotice(c, noticeSlideHeld, SystemClock.elapsedRealtime())
@@ -4542,9 +4543,97 @@ class RearDialView(context: Context) : View(context) {
         // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
         // maker's mark follows, so the masthead and the artwork share one axis instead
         // of each being centred on something different.
+        //
+        // UNDER GLASS THE MASTHEAD IS NOT PAINTED, IT IS A LENS SHAPED LIKE ITSELF. The
+        // panel behind shows through the letterforms, bent at the strokes and lit down
+        // one side — heavy glass type rather than type drawn on glass. Deferred to the
+        // overlay pass for the reason the buttons are: what it bends is the scene, and
+        // the scene is being recorded while this runs.
+        if (config.theme.isGlass) {
+            val tex = titleSdf.of(config.title, title, Glass.TEXT_SPREAD)
+            if (tex != null) {
+                val pad = titleSdf.padding
+                val left = (BAR_LEFT + BAR_RIGHT) / 2f - tex.width / 2f
+                val top = TITLE_BASELINE + title.fontMetrics.top - pad
+                discRect.set(left, top, left + tex.width, top + tex.height)
+                canvas.getMatrix().mapRect(pendingRect, discRect)
+                pendingTitle.set(pendingRect)
+                pendingTitleTex = tex
+                return
+            }
+        }
+        pendingTitleTex = null
         title.color = colorFor("title", config.titleColor)
         canvas.drawText(config.title, (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
     }
+
+    private val titleSdf = SdfText()
+    private val pendingTitle = android.graphics.RectF()
+    private var pendingTitleTex: android.graphics.Bitmap? = null
+    private var titleTexShader: android.graphics.BitmapShader? = null
+    private var titleTexFor: android.graphics.Bitmap? = null
+
+    /**
+     * The masthead, drawn as glass over whatever the panel had put there.
+     *
+     * The texture is sampled by the shader rather than drawn, so what lands on the canvas
+     * is the BACKDROP seen through the letters. A wash goes over the top afterwards
+     * because a lens over a black panel is black, and a title nobody can read is not a
+     * title — the reference lays white at a quarter over its clock for the same reason.
+     */
+    private fun drawGlassTitle(canvas: Canvas) {
+        val tex = pendingTitleTex ?: return
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return
+        if (!paneBackdrop.hasDisplayList()) return
+        val rect = pendingTitle
+        if (rect.width() < 1f || rect.height() < 1f) return
+
+        if (titleTexFor !== tex) {
+            titleTexShader = android.graphics.BitmapShader(
+                tex, android.graphics.Shader.TileMode.CLAMP,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+            titleTexFor = tex
+        }
+
+        val node = nextNode()
+        node.setRenderEffect(null)
+        node.setPosition(
+            Math.round(rect.left), Math.round(rect.top),
+            Math.round(rect.right), Math.round(rect.bottom),
+        )
+        val into = node.beginRecording()
+        try {
+            into.translate(-rect.left, -rect.top)
+            into.drawRenderNode(paneBackdrop)
+        } finally {
+            node.endRecording()
+        }
+
+        val shader = Glass.sdfText
+        shader.setInputBuffer("sdfTex", titleTexShader!!)
+        shader.setFloatUniform("size", rect.width(), rect.height())
+        shader.setFloatUniform("sdfTexSize", tex.width.toFloat(), tex.height.toFloat())
+        shader.setFloatUniform("refractionHeight", Glass.TEXT_REFRACTION)
+        shader.setFloatUniform("lightAngle", Glass.TEXT_LIGHT)
+        node.setRenderEffect(
+            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
+        )
+        recorder.drawRenderNode(node)
+
+        // The wash, clipped to the letters by drawing it through the same texture.
+        panePaint.shader = titleTexShader
+        panePaint.style = Paint.Style.FILL
+        panePaint.color = Glass.TEXT_WASH
+        titleWash.setScale(rect.width() / tex.width, rect.height() / tex.height)
+        titleWash.postTranslate(rect.left, rect.top)
+        titleTexShader!!.setLocalMatrix(titleWash)
+        canvas.drawRect(rect, panePaint)
+        titleTexShader!!.setLocalMatrix(null)
+        panePaint.shader = null
+    }
+
+    private val titleWash = android.graphics.Matrix()
 
 
     /**
