@@ -300,12 +300,14 @@ half4 main(float2 coord) {
     }
     half4 v = sdfTex.eval(p);
     float sd = v.r * 2.0 - 1.0;
-    v.a = smoothstep(0.5, 1.0, v.a);
+    // THE COVERAGE IS KEPT AS IT WAS MEASURED. The reference squares it up with
+    // smoothstep(0.5, 1.0) and flattens the distance wherever coverage is partial, which
+    // is right for a texture baked far larger than it is drawn — every edge pixel there is
+    // either in or out. Built at the size it is drawn, that threshold throws away the
+    // whole of the antialiasing and hands back a staircase, and zeroing the distance along
+    // the edge takes the bevel off exactly where the bevel lives.
     if (v.a <= 0.0) {
         return half4(0.0);
-    }
-    if (v.a < 1.0) {
-        sd = 0.0;
     }
     float2 normal = normalize(v.gb * 2.0 - 1.0);
     float intensity = circleMap(1.0 - min(1.0, -sd * 1.5));

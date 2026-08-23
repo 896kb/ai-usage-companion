@@ -255,11 +255,12 @@ class RearDialView(context: Context) : View(context) {
         if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return false
 
         val field = sdfFor(text, paint) ?: return false
-        // The field was measured with a margin all round for the spread to live in, so the
-        // rect it is drawn into is the text's box grown by the same amount.
+        // The field is measured larger than it is drawn — see sdfFor — so the rect it goes
+        // into is the texture brought back down to panel units. The margin all round, for
+        // the spread to live in, comes down with it.
         val pad = SdfText.SPREAD
-        val w = field.width.toFloat()
-        val h = field.height.toFloat()
+        val w = field.width.toFloat() / SDF_OVERSAMPLE
+        val h = field.height.toFloat() / SDF_OVERSAMPLE
         val left = rightAt - w + pad
         val top = centreY - h / 2f
         sdfRect.set(left, top, left + w, top + h)
@@ -309,10 +310,16 @@ class RearDialView(context: Context) : View(context) {
                     field,
                     android.graphics.Shader.TileMode.CLAMP,
                     android.graphics.Shader.TileMode.CLAMP,
-                ),
+                ).apply {
+                    // SAMPLED SMOOTHLY, which setInputBuffer does not do for you. Left at
+                    // nearest, a field read back at a fraction of the size it was measured
+                    // shows its own texels — the letters came out with staircased edges
+                    // and the bevel banded across them.
+                    filterMode = android.graphics.BitmapShader.FILTER_MODE_LINEAR
+                },
             )
             shader.setFloatUniform("size", w, h)
-            shader.setFloatUniform("sdfTexSize", w, h)
+            shader.setFloatUniform("sdfTexSize", field.width.toFloat(), field.height.toFloat())
             shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
             shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
             shader.setFloatUniform("bevel", bevel)
@@ -335,9 +342,23 @@ class RearDialView(context: Context) : View(context) {
         if (key == sdfKey) return sdfBitmap
         sdfKey = key
 
-        val pad = SdfText.SPREAD
-        val w = (paint.measureText(text) + pad * 2f).toInt()
-        val m = paint.fontMetrics
+        // MEASURED BIGGER THAN IT IS DRAWN. A field built at the size it will appear has
+        // one texel per pixel, and every one of those texels is visible: the letterforms
+        // came out with staircased edges and the bevel stepped across them in bands. Built
+        // at twice the size and read back down, the sampler has something to interpolate
+        // between and the edges come back smooth.
+        //
+        // Twice rather than four times because the measuring is the expensive part of this
+        // and it scales with the area. Two is four times the work; four would be sixteen,
+        // per value, on the frame the number changes.
+        val stamp = Paint(paint)
+        stamp.color = android.graphics.Color.WHITE
+        stamp.textAlign = Paint.Align.LEFT
+        stamp.textSize = paint.textSize * SDF_OVERSAMPLE
+
+        val pad = SdfText.SPREAD * SDF_OVERSAMPLE
+        val w = (stamp.measureText(text) + pad * 2f).toInt()
+        val m = stamp.fontMetrics
         val h = (m.descent - m.ascent + pad * 2f).toInt()
         if (w <= 0 || h <= 0) return null
 
@@ -346,9 +367,6 @@ class RearDialView(context: Context) : View(context) {
         val ink = android.graphics.Bitmap.createBitmap(
             w, h, android.graphics.Bitmap.Config.ARGB_8888,
         )
-        val stamp = Paint(paint)
-        stamp.color = android.graphics.Color.WHITE
-        stamp.textAlign = Paint.Align.LEFT
         Canvas(ink).drawText(text, pad, pad - m.ascent, stamp)
 
         val pixels = IntArray(w * h)
@@ -356,7 +374,7 @@ class RearDialView(context: Context) : View(context) {
         ink.recycle()
         val coverage = FloatArray(w * h) { (pixels[it] ushr 24) / 255f }
 
-        val packed = SdfText.pack(coverage, w, h)
+        val packed = SdfText.pack(coverage, w, h, SdfText.SPREAD * SDF_OVERSAMPLE)
         sdfBitmap?.recycle()
         sdfBitmap = android.graphics.Bitmap.createBitmap(
             packed, w, h, android.graphics.Bitmap.Config.ARGB_8888,
@@ -7868,6 +7886,9 @@ class RearDialView(context: Context) : View(context) {
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
+
+        /** How much larger than life the charge figure's distance field is measured. */
+        private const val SDF_OVERSAMPLE = 2f
 
         /**
          * How long the record takes to swing from one side of its shake to the other.
