@@ -122,6 +122,34 @@ class GlassLuminanceTest {
         }
     }
 
+    // -- the content tint -------------------------------------------------------------
+
+    /** The figure is the liquid's number, so it carries the liquid's colour. */
+    @Test fun `content keeps the colour it was given`() {
+        val green = 0xFF33DD55.toInt()
+        val out = GlassLuminance.contentTint(green, 0.5f)      // a neutral backdrop
+        assertEquals("red", 0x33, (out shr 16) and 0xFF)
+        assertEquals("green", 0xDD, (out shr 8) and 0xFF)
+        assertEquals("blue", 0x55, out and 0xFF)
+    }
+
+    @Test fun `a dark backdrop lifts that colour and a bright one drops it`() {
+        val green = 0xFF33DD55.toInt()
+        val overDark = GlassLuminance.contentTint(green, 0f)
+        val overLight = GlassLuminance.contentTint(green, 1f)
+        assertTrue("should lift over dark", ((overDark shr 16) and 0xFF) > 0x33)
+        assertTrue("should drop over light", ((overLight shr 16) and 0xFF) < 0x33)
+    }
+
+    /** Mixed the whole way it would stop refracting and become a solid number. */
+    @Test fun `it never takes the figure the whole way`() {
+        for (i in 0..10) {
+            val a = GlassLuminance.contentTint(0xFF112233.toInt(), i / 10f) ushr 24
+            assertTrue("content went solid", a < 255)
+            assertTrue("content vanished", a > 0)
+        }
+    }
+
     @Test fun `every channel stays in range`() {
         for (c in listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0x40123456)) {
             for (i in 0..10) {

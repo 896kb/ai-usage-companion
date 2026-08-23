@@ -77,6 +77,28 @@ object ChargeOverlay {
         }
     }
 
+    /**
+     * How big the figure is, on the cell's own schedule.
+     *
+     * It grows in as the cell slides on and shrinks away as it leaves, on exactly the
+     * timings the slide uses — the two are one object arriving, and the figure is anchored
+     * against the cell's edge, so it reads as being carried in rather than as appearing
+     * beside something that arrived without it.
+     *
+     * Scaled rather than faded. A number that fades in is a number that was already there
+     * and became visible; one that grows was brought.
+     */
+    fun figureScale(elapsedMs: Float): Float {
+        val exitAt = TOTAL_MS - SLIDE_MS
+        return when {
+            elapsedMs <= 0f -> 0f
+            elapsedMs < SLIDE_MS -> Tween.easeInOut(elapsedMs / SLIDE_MS)
+            elapsedMs < exitAt -> 1f
+            elapsedMs < TOTAL_MS -> 1f - Tween.easeInOut((elapsedMs - exitAt) / SLIDE_MS)
+            else -> 0f
+        }
+    }
+
     /** Whether the whole appearance is over and nothing need be drawn. */
     fun done(elapsedMs: Float): Boolean = elapsedMs >= TOTAL_MS
 

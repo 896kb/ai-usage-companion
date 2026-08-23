@@ -115,25 +115,46 @@ object GlassLuminance {
     }
 
     /**
-     * What CONTENT on the glass should be pulled toward, to stay legible.
+     * The colour CONTENT on the glass should take: [base], lit for its backdrop.
      *
-     * The opposite way from [reactive], and deliberately so — this is the reference's own
-     * split. The glass follows its backdrop, because that is what glass does; the thing
-     * written on the glass has to be readable against it, so it goes the other way. Over a
-     * bright panel the figure darkens, over a dark one it lightens.
+     * TWO JOBS IN ONE COLOUR, because the shader mixes toward exactly one. The first is
+     * identity — the charging figure is the liquid's number and takes the liquid's colour,
+     * so the two read as one instrument rather than as a reading beside a picture. The
+     * second is legibility, which is the reference's own split: glass follows what is
+     * behind it, but the thing written ON the glass has to stay readable against it, so it
+     * goes the other way. Over a bright panel the figure darkens, over a dark one it lifts.
      *
-     * Returned as a colour to blend toward, with the strength of the pull in its alpha, so
-     * a middling backdrop leaves the type alone entirely.
+     * The strength of the mix rides in the alpha. Never the whole way: taken to one the
+     * figure stops refracting anything and becomes a solid number.
      */
-    fun contentTint(luminance: Float): Int {
-        val r = response(luminance)
-        val toward = if (r > 0f) 0x00 else 0xFF
-        val amount = (Math.abs(r) * CONTENT_PULL).coerceIn(0f, 1f)
-        return ((amount * 255f).toInt() shl 24) or (toward shl 16) or (toward shl 8) or toward
+    fun contentTint(base: Int, luminance: Float): Int {
+        // LINEAR, unlike [response], and that is a correction rather than an
+        // inconsistency. The squared curve exists to keep GLASS quiet over a middling
+        // backdrop, where a pane that lurched about would look nervous. Content has the
+        // opposite duty, and readability has no quiet middle. Measured on the panel, the
+        // squared curve gave a pull of a tenth over a backdrop at 0.28 — right in
+        // direction and invisible in fact.
+        val t = (luminance.coerceIn(0f, 1f) * 2f) - 1f
+        val toward = if (t > 0f) 0x00 else 0xFF
+        val lit = Math.abs(t) * CONTENT_LIFT
+        return ((CONTENT_PULL * 255f).toInt() shl 24) or
+            (blend((base shr 16) and 0xFF, toward, lit) shl 16) or
+            (blend((base shr 8) and 0xFF, toward, lit) shl 8) or
+            blend(base and 0xFF, toward, lit)
     }
 
-    /** How far content is ever pulled from its own colour. Not the whole way: it is glass. */
-    private const val CONTENT_PULL = 0.55f
+    /** How far the backdrop lightens or darkens that colour. */
+    private const val CONTENT_LIFT = 0.55f
+
+    /**
+     * How far content is ever pulled from its own colour.
+     *
+     * Most of the way, but never all of it. The reference flips its content colour
+     * outright — black over light, white over dark — which is right for a label and wrong
+     * for a figure made of glass: taken the whole way it stops refracting anything and
+     * becomes a solid number.
+     */
+    private const val CONTENT_PULL = 0.85f
 
     private fun blend(from: Int, to: Int, t: Float): Int =
         (from + (to - from) * t.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)

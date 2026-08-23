@@ -282,6 +282,7 @@ class RearDialView(context: Context) : View(context) {
         // one. See GlassLuminance.contentTint.
         refreshLuminance()
         val tint = GlassLuminance.contentTint(
+            paint.color,
             GlassLuminance.average(
                 lumCells, sdfRect.left, sdfRect.top, sdfRect.right, sdfRect.bottom,
                 Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
@@ -2454,11 +2455,20 @@ class RearDialView(context: Context) : View(context) {
         // MADE OF GLASS, if there is a panel behind it to bend. Type is nearly all edge,
         // so it takes a distance field of its own rather than the rounded-rect arithmetic
         // every pane here uses — see SdfText.
-        if (!glassFigure || !drawSdfText(canvas, text, figurePaint, figureRight, figureY)) {
-            val m = figurePaint.fontMetrics
-            canvas.drawText(
-                text, figureRight, figureY - (m.ascent + m.descent) / 2f, figurePaint,
-            )
+        // GROWN FROM THE CELL'S EDGE, which is where it is anchored anyway: the figure's
+        // right edge is a fixed gap from the cell, and the cell's own slide is already in
+        // that number, so scaling about that point makes the two arrive as one object.
+        val grow = ChargeOverlay.figureScale(elapsed)
+        if (grow > 0.01f) {
+            canvas.save()
+            canvas.scale(grow, grow, figureRight, figureY)
+            if (!glassFigure || !drawSdfText(canvas, text, figurePaint, figureRight, figureY)) {
+                val m = figurePaint.fontMetrics
+                canvas.drawText(
+                    text, figureRight, figureY - (m.ascent + m.descent) / 2f, figurePaint,
+                )
+            }
+            canvas.restore()
         }
         figurePaint.textAlign = was
         extras.textSize = typed(18f)
