@@ -902,15 +902,55 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * A glass disc behind a target, sized from the glyph that sits on it.
+     * A target as a piece of glass with its glyph inside it.
      *
-     * A no-op outside GLASS, so the call sites read the same in both themes rather than
-     * each carrying its own check. The radius is the glyph's height times a little over
-     * a half, which leaves a ring of glass around the mark instead of a collar on it.
+     * THE GLYPH IS THE BUTTON'S BACKDROP, which is what makes a button and a thumb the
+     * same object. A thumb lenses the track it rides; a button has no track, and for a
+     * while that meant it had nothing to bend and came out as a bare rim — the one pane
+     * on the panel with no lens in it, which is exactly what it looked like.
+     *
+     * Everything drawn inside the scene has this problem: the scene is being recorded, so
+     * it cannot also be sampled. The answer is the same one the sliders use — give the
+     * element a layer of its own — and for a button the obvious layer is the mark it
+     * holds. The glyph goes into the node, the pane goes over it, and the lens bends the
+     * glyph's edges the way it bends a track's. The middle passes straight through, so
+     * the mark stays legible; only the outer ring distorts, which is where a real piece
+     * of glass distorts too.
+     *
+     * Outside GLASS the glyph is simply drawn, so call sites read the same in both.
      */
-    private fun actionDisc(canvas: Canvas, cx: Float, cy: Float, glyphH: Float) {
-        if (!config.theme.isGlass) return
-        drawGlassDisc(canvas, cx, cy, glyphH * DISC_RADIUS)
+    private inline fun glassButton(
+        canvas: Canvas,
+        cx: Float,
+        cy: Float,
+        glyphH: Float,
+        /**
+         * The disc's own size, when it should not follow the glyph inside it.
+         *
+         * The camera is a 30-unit mark beside 38-unit transport marks, and sizing every
+         * disc from its own glyph made it a visibly smaller button in a row of buttons —
+         * which reads as a lesser control rather than as a smaller picture. A row of
+         * targets should be a row of the same target.
+         */
+        discH: Float = glyphH,
+        glyph: (Canvas) -> Unit,
+    ) {
+        if (!config.theme.isGlass) {
+            glyph(canvas)
+            return
+        }
+        val r = discH * DISC_RADIUS
+        discRect.set(cx - r, cy - r, cx + r, cy + r)
+        val layer = localBackdrop(canvas, discRect) { into -> glyph(into) }
+        if (layer == null) {
+            glyph(canvas)
+            return
+        }
+        // HELD, like a thumb: the same lens, the same aberration, the same ambient rim.
+        // A button and a held thumb are the same object made the same way.
+        drawGlassPane(
+            canvas, discRect, r, Glass.DISC_TINT, source = layer, held = true,
+        )
     }
 
     private val discRect = android.graphics.RectF()
@@ -1093,7 +1133,14 @@ class RearDialView(context: Context) : View(context) {
         // notification — a strip of the first page visible behind a card on the second.
         //
         // On the media page the notice makes room a different way. See drawMediaPage.
-        val readoutPush = push * (1f - paging)
+        // A NOTICE DOES NOT MOVE THE PANEL UNDER GLASS. Pushing the readout down is what
+        // an opaque strip has to do — it is taking the room, so the room has to come from
+        // somewhere. A pane takes nothing: you can see through it, so the readout can stay
+        // where it is and simply be behind something. Which is also the better answer to
+        // the thing the push was working around, because the panel no longer rearranges
+        // itself every time somebody sends a message.
+        val panelPush = if (config.theme.isGlass) 0f else push
+        val readoutPush = panelPush * (1f - paging)
         if (pager.animating()) animating = true
 
         // The rings do NOT translate, and that is a deliberate exception to the
@@ -1153,7 +1200,7 @@ class RearDialView(context: Context) : View(context) {
             // once it has become the media page's record — where the notice shrinks it
             // instead of moving it.
             canvas.translate(dx, dy + readoutPush)
-            drawVinyl(canvas, paging, push, geometry)
+            drawVinyl(canvas, paging, panelPush, geometry)
             canvas.restore()
         }
 
@@ -1372,7 +1419,7 @@ class RearDialView(context: Context) : View(context) {
             // screen — which is what happened, and you cannot press what has left. The
             // record gives up the room instead.
             canvas.translate(dx, dy)
-            drawMediaPage(canvas, paging, dx, dy, push, geometry, volumeFraction)
+            drawMediaPage(canvas, paging, dx, dy, panelPush, geometry, volumeFraction)
             canvas.restore()
         } else if (paging <= 0.001f) {
             volumeBar = null
@@ -2514,16 +2561,17 @@ class RearDialView(context: Context) : View(context) {
         val bottom = centreY + h / 2f
         val margin = Panel.HEIGHT - bottom
         val right = Panel.WIDTH - margin
-        extras.color = colorFor("camera", config.cameraTint)
-        actionDisc(canvas, right - w / 2f, bottom - h / 2f, h)
         // Positioned by its own left edge rather than by a square cell: drawIcon centres
         // within a cell of side h, which is right for the clock and battery sitting in a
-        // column and wrong for something pinned to the panel's right margin.
-        // drawIcon centres its glyph in a square cell of side h, which is right for the
-        // clock and battery stacked in a column and wrong for something pinned to the
-        // panel's right margin. Undo the centring so the glyph's own right edge lands on
-        // CONTENT_RIGHT, where every other right-aligned thing on the panel ends.
-        drawIcon(canvas, PanelIcons.CAMERA, right - w - (h - w) / 2f, bottom - h, h)
+        // column and wrong for something pinned to the panel's right margin. Undo the
+        // centring so the glyph's own right edge lands on CONTENT_RIGHT, where every
+        // other right-aligned thing on the panel ends.
+        glassButton(
+            canvas, right - w / 2f, bottom - h / 2f, h, discH = MediaLayout.GLYPH_H,
+        ) { c ->
+            extras.color = colorFor("camera", config.cameraTint)
+            drawIcon(c, PanelIcons.CAMERA, right - w - (h - w) / 2f, bottom - h, h)
+        }
 
         // Recorded WITHOUT the burn-in drift the canvas is currently translated by.
         // Touches arrive in the view's own coordinates, which the drift never moves — it
@@ -3972,7 +4020,7 @@ class RearDialView(context: Context) : View(context) {
             canvas.clipRect(
                 0f, cardBottom + GLASS_NOTICE_GAP, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
             )
-            if (!drawGlassPane(canvas, mini, r, glassNoticeTint())) {
+            if (!drawGlassPane(canvas, mini, r, glassNoticeTint(), held = true)) {
                 noticePaint.style = Paint.Style.FILL
                 noticePaint.color = glassNoticeTint()
                 canvas.drawRoundRect(mini, r, r, noticePaint)
@@ -4003,7 +4051,10 @@ class RearDialView(context: Context) : View(context) {
             floatArrayOf(r, r, tr, tr, r, r, r, r),
             android.graphics.Path.Direction.CW,
         )
-        if (!drawGlassPane(canvas, card, r, glassNoticeTint(), shape = noticeShape)) {
+        if (!drawGlassPane(
+                canvas, card, r, glassNoticeTint(), shape = noticeShape, held = true,
+            )
+        ) {
             noticePaint.style = Paint.Style.FILL
             noticePaint.color = glassNoticeTint()
             canvas.drawPath(noticeShape, noticePaint)
@@ -5329,22 +5380,30 @@ class RearDialView(context: Context) : View(context) {
         }
 
         extras.color = shade(tint, 0xFF)
-        actionDisc(canvas, x + widths[0] / 2f, top + gh / 2f, gh)
-        drawIcon(canvas, PanelIcons.PREV, x, top, gh)
+        val prevX = x
+        glassButton(canvas, x + widths[0] / 2f, top + gh / 2f, gh) { c ->
+            extras.color = shade(tint, 0xFF)
+            drawIcon(c, PanelIcons.PREV, prevX, top, gh)
+        }
         centres += x + widths[0] / 2f
         x += widths[0] + MediaPage.TRANSPORT_GAP
 
         // The play/pause drum again, one size up. Same clip-and-slide as the row's.
-        actionDisc(canvas, x + widths[1] / 2f, top + gh / 2f, gh)
-        canvas.save()
-        canvas.clipRect(x, top - gh, x + gh, top + gh * 2f)
-        drawPlayPause(canvas, x, top, gh, shade(tint, 0xFF))
-        canvas.restore()
+        val playX = x
+        glassButton(canvas, x + widths[1] / 2f, top + gh / 2f, gh) { c ->
+            c.save()
+            c.clipRect(playX, top - gh, playX + gh, top + gh * 2f)
+            drawPlayPause(c, playX, top, gh, shade(tint, 0xFF))
+            c.restore()
+        }
         centres += x + widths[1] / 2f
         x += widths[1] + MediaPage.TRANSPORT_GAP
 
-        actionDisc(canvas, x + widths[2] / 2f, top + gh / 2f, gh)
-        drawIcon(canvas, PanelIcons.NEXT, x, top, gh)
+        val nextX = x
+        glassButton(canvas, x + widths[2] / 2f, top + gh / 2f, gh) { c ->
+            extras.color = shade(tint, 0xFF)
+            drawIcon(c, PanelIcons.NEXT, nextX, top, gh)
+        }
         centres += x + widths[2] / 2f
         canvas.restore()
 
@@ -6463,11 +6522,12 @@ class RearDialView(context: Context) : View(context) {
 
         extras.color = tint
         val discCy = row.glyphTop + gh / 2f
-        actionDisc(canvas, prev + gh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f, discCy, gh)
-        actionDisc(canvas, next + gh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f, discCy, gh)
-        actionDisc(canvas, play + gh * Glyphs.aspect(PanelIcons.PAUSE, config.theme) / 2f, discCy, gh)
-        drawIcon(canvas, PanelIcons.PREV, prev, row.glyphTop, gh)
-        drawIcon(canvas, PanelIcons.NEXT, next, row.glyphTop, gh)
+        glassButton(
+            canvas, prev + gh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f, discCy, gh,
+        ) { c -> extras.color = tint; drawIcon(c, PanelIcons.PREV, prev, row.glyphTop, gh) }
+        glassButton(
+            canvas, next + gh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f, discCy, gh,
+        ) { c -> extras.color = tint; drawIcon(c, PanelIcons.NEXT, next, row.glyphTop, gh) }
 
         // The middle glyph is its own little drum, clipped to one cell: pause rises out
         // of the top as play drops off the bottom. It is the same gesture as the row
