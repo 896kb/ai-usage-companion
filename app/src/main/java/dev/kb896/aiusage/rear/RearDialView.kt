@@ -277,42 +277,50 @@ class RearDialView(context: Context) : View(context) {
             node.endRecording()
         }
 
-        val shader = Glass.sdf
-        shader.setInputBuffer(
-            "sdfTex",
-            android.graphics.BitmapShader(
-                field,
-                android.graphics.Shader.TileMode.CLAMP,
-                android.graphics.Shader.TileMode.CLAMP,
-            ),
-        )
-        shader.setFloatUniform("size", w, h)
-        shader.setFloatUniform("sdfTexSize", w, h)
-        shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
-        shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
         // The figure is content ON the glass rather than glass itself, so it goes the
         // opposite way from the panes: darker over a bright panel, lighter over a dark
         // one. See GlassLuminance.contentTint.
         refreshLuminance()
-        shader.setColorUniform(
-            "tint",
-            GlassLuminance.contentTint(
-                GlassLuminance.average(
-                    lumCells, sdfRect.left, sdfRect.top, sdfRect.right, sdfRect.bottom,
-                    Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
-                ),
+        val tint = GlassLuminance.contentTint(
+            GlassLuminance.average(
+                lumCells, sdfRect.left, sdfRect.top, sdfRect.right, sdfRect.bottom,
+                Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
             ),
         )
-        // NOT CACHED, unlike the pane lenses: this one carries a different texture every
-        // time the number moves, so there is nothing stable to key it on. It is built once
-        // per value rather than once per frame, which is the same bargain by a different
-        // route.
-        node.setRenderEffect(
-            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
-        )
+
+        // KEYED ON THE FIELD AND THE TINT, which is to say on the number and the backdrop.
+        // Neither moves between frames, and building a RenderEffect per frame is precisely
+        // the churn that filled the native heap the last time — a small Java object in
+        // front of a large native allocation is the one shape the collector will not
+        // hurry over. Bounded here by the charge lasting seconds rather than forever, but
+        // bounded is not the same as free.
+        val effectKey = sdfKey + "|" + tint
+        if (effectKey != sdfEffectKey) {
+            sdfEffectKey = effectKey
+            val shader = Glass.sdf
+            shader.setInputBuffer(
+                "sdfTex",
+                android.graphics.BitmapShader(
+                    field,
+                    android.graphics.Shader.TileMode.CLAMP,
+                    android.graphics.Shader.TileMode.CLAMP,
+                ),
+            )
+            shader.setFloatUniform("size", w, h)
+            shader.setFloatUniform("sdfTexSize", w, h)
+            shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
+            shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
+            shader.setColorUniform("tint", tint)
+            sdfEffect =
+                android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+        }
+        node.setRenderEffect(sdfEffect)
         recorder.drawRenderNode(node)
         return true
     }
+
+    private var sdfEffectKey: String? = null
+    private var sdfEffect: android.graphics.RenderEffect? = null
 
     private val sdfRect = android.graphics.RectF()
 
