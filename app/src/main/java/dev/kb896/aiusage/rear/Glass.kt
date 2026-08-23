@@ -265,6 +265,63 @@ half4 main(float2 coord) {
 }"""
 
     /**
+     * Type made of glass, bent through a distance field rather than a rounded rectangle.
+     *
+     * The reference's own SdfShader, and the one effect here that cannot work off a shape
+     * this file knows how to describe. Every other pane is a rounded rectangle and gets
+     * its distance field from arithmetic; letterforms have no closed form, so the field is
+     * measured into a texture beforehand — see SdfText — and this reads it back.
+     *
+     * The texture's channels: red is the signed distance about a half, green and blue are
+     * the surface normal on the same mapping, alpha is the glyph's own coverage. That last
+     * one is what keeps this from drawing a rectangle of bent light: everything outside a
+     * letter returns nothing at all.
+     */
+    private val SDF_TEXT = """
+uniform shader content;
+uniform shader sdfTex;
+
+uniform float2 size;
+uniform float2 sdfTexSize;
+uniform float refractionHeight;
+uniform float lightAngle;
+layout(color) uniform half4 tint;
+
+float circleMap(float x) {
+    return 1.0 - sqrt(1.0 - x * x);
+}
+
+half4 main(float2 coord) {
+    half2 p = coord / size * sdfTexSize;
+    if (p.x < 0.0 || p.y < 0.0 || p.x >= sdfTexSize.x || p.y >= sdfTexSize.y) {
+        return half4(0.0);
+    }
+    half4 v = sdfTex.eval(p);
+    float sd = v.r * 2.0 - 1.0;
+    v.a = smoothstep(0.5, 1.0, v.a);
+    if (v.a <= 0.0) {
+        return half4(0.0);
+    }
+    if (v.a < 1.0) {
+        sd = 0.0;
+    }
+    float2 normal = normalize(v.gb * 2.0 - 1.0);
+    float intensity = circleMap(1.0 - min(1.0, -sd * 1.5));
+    float2 refractedCoord = coord - intensity * refractionHeight * normal;
+    half4 color = content.eval(refractedCoord) * v.a;
+    float2 lightDir = float2(cos(lightAngle * 3.1415926 / 180.0), sin(lightAngle * 3.1415926 / 180.0));
+    float bevelIntensity = clamp(dot(normal, lightDir), 0.0, 1.0);
+    color.rgb *= 1.0 + 0.5 * intensity * bevelIntensity;
+    bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
+    color.rgb *= 1.0 + 0.5 * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
+    // Pulled toward legibility. Premultiplied like the rest of this, so the tint is scaled
+    // by the glyph's own coverage before it is mixed in — otherwise it paints over the
+    // transparent margin as well and the words gain a rectangle.
+    color.rgb = mix(color.rgb, tint.rgb * v.a, tint.a);
+    return color;
+}"""
+
+    /**
      * A body of liquid, which is a lens whatever it is sitting in.
      *
      * NOT AN EDGE EFFECT, which is what makes it a different shader rather than another
@@ -297,6 +354,7 @@ half4 main(float2 coord) {
      * compiler on the draw path of an always-on display. Uniforms are set per use, which
      * is cheap, so one instance of each serves every pane.
      */
+    val sdf: RuntimeShader by lazy { RuntimeShader(SDF_TEXT) }
     val magnifier: RuntimeShader by lazy { RuntimeShader(MAGNIFIER) }
     val refraction: RuntimeShader by lazy { RuntimeShader(REFRACTION) }
     val dispersion: RuntimeShader by lazy { RuntimeShader(DISPERSION) }
@@ -323,6 +381,18 @@ half4 main(float2 coord) {
      * Push it further and the cell stops being a glass of liquid and starts being a
      * porthole with a different picture in it.
      */
+    /**
+     * How far the charge figure bends what is behind it, in panel units.
+     *
+     * Larger than a pane's, and it has to be: a pane bends a band around its edge and the
+     * eye reads the whole rectangle as glass, where a letterform is nearly ALL edge. Bent
+     * as gently as a card it reads as slightly smudged type rather than as glass.
+     */
+    const val SDF_REFRACTION = 26f
+
+    /** Where the light is, for the bevel. The same 45 degrees everything else here uses. */
+    const val SDF_LIGHT_ANGLE = 45f
+
     const val LIQUID_ZOOM = 1.25f
 
     /** How deep into a pane the bending reaches, as a fraction of its short side. */

@@ -114,6 +114,27 @@ object GlassLuminance {
             blend(base and 0xFF, toward, mix)
     }
 
+    /**
+     * What CONTENT on the glass should be pulled toward, to stay legible.
+     *
+     * The opposite way from [reactive], and deliberately so — this is the reference's own
+     * split. The glass follows its backdrop, because that is what glass does; the thing
+     * written on the glass has to be readable against it, so it goes the other way. Over a
+     * bright panel the figure darkens, over a dark one it lightens.
+     *
+     * Returned as a colour to blend toward, with the strength of the pull in its alpha, so
+     * a middling backdrop leaves the type alone entirely.
+     */
+    fun contentTint(luminance: Float): Int {
+        val r = response(luminance)
+        val toward = if (r > 0f) 0x00 else 0xFF
+        val amount = (Math.abs(r) * CONTENT_PULL).coerceIn(0f, 1f)
+        return ((amount * 255f).toInt() shl 24) or (toward shl 16) or (toward shl 8) or toward
+    }
+
+    /** How far content is ever pulled from its own colour. Not the whole way: it is glass. */
+    private const val CONTENT_PULL = 0.55f
+
     private fun blend(from: Int, to: Int, t: Float): Int =
         (from + (to - from) * t.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)
 

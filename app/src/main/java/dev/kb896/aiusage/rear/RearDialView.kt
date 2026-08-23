@@ -120,6 +120,51 @@ class RearDialView(context: Context) : View(context) {
     private val recordRect = android.graphics.RectF()
 
     /**
+     * The shake of a running deck, in degrees.
+     *
+     * A record on a turntable is never quite still and never quite regular: the platter
+     * has play in it, the stylus drags, and the whole thing trembles a fraction of a degree
+     * either way. This panel's disc does not spin — its highlight is fixed, and turning it
+     * would turn the lamp with it — so a small shake is the only thing left that can say
+     * the deck is running rather than parked.
+     *
+     * Every step reverses: the disc travels back through where it started and past it, by
+     * a fresh amount each time. That is what keeps it from reading as a pendulum. A fixed
+     * magnitude, or a magnitude that did not alternate, gives a rocking motion the eye
+     * locks onto within a second and then cannot stop watching.
+     */
+    private fun vinylWobble(m: Media): Float {
+        val now = frameNowMs
+        if (wobbleAt == 0L) {
+            wobbleAt = now
+            wobbleTo = nextWobble(-1f)
+        }
+        var t = (now - wobbleAt).toFloat() / VINYL_WOBBLE_MS
+        if (t >= 1f) {
+            wobbleFrom = wobbleTo
+            // Stopped, it comes to rest square rather than stopping wherever it was.
+            wobbleTo = if (m.playing) nextWobble(wobbleFrom) else 0f
+            wobbleAt = now
+            t = 0f
+        }
+        val moving = m.playing ||
+            Math.abs(wobbleFrom) > 0.01f || Math.abs(wobbleTo) > 0.01f
+        if (moving) animating = true
+        return wobbleFrom + (wobbleTo - wobbleFrom) * Tween.easeInOut(t.coerceIn(0f, 1f))
+    }
+
+    /** The other way from [from], by a fresh amount. See vinylWobble. */
+    private fun nextWobble(from: Float): Float {
+        val mag = VINYL_WOBBLE_MIN +
+            Math.random().toFloat() * (VINYL_WOBBLE_MAX - VINYL_WOBBLE_MIN)
+        return if (from > 0f) -mag else mag
+    }
+
+    private var wobbleAt = 0L
+    private var wobbleFrom = 0f
+    private var wobbleTo = 0f
+
+    /**
      * How bright the panel's own backdrop is, in twenty-five cells. See GlassLuminance.
      *
      * Rebuilt only when the backdrop changes, which for a background image and a ground
@@ -184,6 +229,130 @@ class RearDialView(context: Context) : View(context) {
             ),
         )
     }
+
+    /**
+     * The charge figure, as a piece of glass.
+     *
+     * Draws [text] with its right edge at [rightAt] and its middle on [centreY], bending
+     * the panel through the letterforms themselves. Returns false when there is nothing to
+     * bend — a software canvas, or mid-scene — and the caller should just draw the type.
+     *
+     * The field is measured on the CPU (see SdfText) and cached against the string, so a
+     * figure counting from nothing to sixty-two measures sixty-two fields over three
+     * seconds and none at all once it settles. It is the one thing here that costs real
+     * work per value rather than per frame, which is why it is worth saying that a
+     * percentage only has a hundred values.
+     */
+    private fun drawSdfText(
+        canvas: Canvas,
+        text: String,
+        paint: Paint,
+        rightAt: Float,
+        centreY: Float,
+    ): Boolean {
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return false
+        val source = paneBackdrop
+        if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return false
+
+        val field = sdfFor(text, paint) ?: return false
+        // The field was measured with a margin all round for the spread to live in, so the
+        // rect it is drawn into is the text's box grown by the same amount.
+        val pad = SdfText.SPREAD
+        val w = field.width.toFloat()
+        val h = field.height.toFloat()
+        val left = rightAt - w + pad
+        val top = centreY - h / 2f
+        sdfRect.set(left, top, left + w, top + h)
+
+        val node = nextNode()
+        node.setPosition(
+            Math.round(sdfRect.left), Math.round(sdfRect.top),
+            Math.round(sdfRect.right), Math.round(sdfRect.bottom),
+        )
+        val into = node.beginRecording()
+        try {
+            into.translate(-sdfRect.left, -sdfRect.top)
+            into.drawRenderNode(source)
+        } finally {
+            node.endRecording()
+        }
+
+        val shader = Glass.sdf
+        shader.setInputBuffer(
+            "sdfTex",
+            android.graphics.BitmapShader(
+                field,
+                android.graphics.Shader.TileMode.CLAMP,
+                android.graphics.Shader.TileMode.CLAMP,
+            ),
+        )
+        shader.setFloatUniform("size", w, h)
+        shader.setFloatUniform("sdfTexSize", w, h)
+        shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
+        shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
+        // The figure is content ON the glass rather than glass itself, so it goes the
+        // opposite way from the panes: darker over a bright panel, lighter over a dark
+        // one. See GlassLuminance.contentTint.
+        refreshLuminance()
+        shader.setColorUniform(
+            "tint",
+            GlassLuminance.contentTint(
+                GlassLuminance.average(
+                    lumCells, sdfRect.left, sdfRect.top, sdfRect.right, sdfRect.bottom,
+                    Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+                ),
+            ),
+        )
+        // NOT CACHED, unlike the pane lenses: this one carries a different texture every
+        // time the number moves, so there is nothing stable to key it on. It is built once
+        // per value rather than once per frame, which is the same bargain by a different
+        // route.
+        node.setRenderEffect(
+            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
+        )
+        recorder.drawRenderNode(node)
+        return true
+    }
+
+    private val sdfRect = android.graphics.RectF()
+
+    /** The measured field for [text] at [paint]'s size and weight, kept until it changes. */
+    private fun sdfFor(text: String, paint: Paint): android.graphics.Bitmap? {
+        val key = text + "|" + paint.textSize + "|" + paint.fontVariationSettings
+        if (key == sdfKey) return sdfBitmap
+        sdfKey = key
+
+        val pad = SdfText.SPREAD
+        val w = (paint.measureText(text) + pad * 2f).toInt()
+        val m = paint.fontMetrics
+        val h = (m.descent - m.ascent + pad * 2f).toInt()
+        if (w <= 0 || h <= 0) return null
+
+        // The glyphs on their own, in white on nothing: only the coverage matters, and the
+        // field is measured from that.
+        val ink = android.graphics.Bitmap.createBitmap(
+            w, h, android.graphics.Bitmap.Config.ARGB_8888,
+        )
+        val stamp = Paint(paint)
+        stamp.color = android.graphics.Color.WHITE
+        stamp.textAlign = Paint.Align.LEFT
+        Canvas(ink).drawText(text, pad, pad - m.ascent, stamp)
+
+        val pixels = IntArray(w * h)
+        ink.getPixels(pixels, 0, w, 0, 0, w, h)
+        ink.recycle()
+        val coverage = FloatArray(w * h) { (pixels[it] ushr 24) / 255f }
+
+        val packed = SdfText.pack(coverage, w, h)
+        sdfBitmap?.recycle()
+        sdfBitmap = android.graphics.Bitmap.createBitmap(
+            packed, w, h, android.graphics.Bitmap.Config.ARGB_8888,
+        )
+        return sdfBitmap
+    }
+
+    private var sdfKey: String? = null
+    private var sdfBitmap: android.graphics.Bitmap? = null
 
     /** The battery glyph in panel coordinates, so the charge can be clipped to it. */
     private val batteryMatrix = android.graphics.Matrix()
@@ -341,6 +510,17 @@ class RearDialView(context: Context) : View(context) {
     /** Whichever of the two is drawing. See extrasMedia. */
     private var extras = extrasBody
 
+    /**
+     * The charging figure, at the heaviest weight Outfit has.
+     *
+     * Its own paint for the same reason the media row has one — a weight lives on the
+     * paint, and telling a shared paint about 900 and back again every frame is what cost
+     * eleven milliseconds the last time. Nine hundred because this is one number the size
+     * of a fist, and glass needs something to be made OF: a light weight leaves too little
+     * ink for the field to bevel and the letters come out as wire.
+     */
+    private val chargeFigure = Paint(Paint.ANTI_ALIAS_FLAG)
+
     private val planTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 18f; typeface = label.typeface
         textAlign = Paint.Align.RIGHT
@@ -392,6 +572,8 @@ class RearDialView(context: Context) : View(context) {
         }
         // Each weight told once, here, and never again — see extrasMedia.
         extrasMedia.fontVariationSettings = PanelType.mediaVariation(theme)
+        chargeFigure.typeface = face
+        chargeFigure.fontVariationSettings = PanelType.heaviestVariation(theme)
         // The masthead is heavier than the body — see PanelType.titleVariation.
         title.fontVariationSettings = PanelType.titleVariation(theme)
         label.textSize = typed(18f)
@@ -1987,8 +2169,8 @@ class RearDialView(context: Context) : View(context) {
 
         val w = ChargeOverlay.width(Panel.WIDTH.toFloat())
         val off = ChargeOverlay.offset(elapsed, w)
-        val left = Panel.WIDTH - w + off + ChargeOverlay.MARGIN
-        val right = Panel.WIDTH + off - ChargeOverlay.MARGIN
+        val left = Panel.WIDTH - w + off + ChargeOverlay.MARGIN - ChargeOverlay.RIGHT_INSET
+        val right = Panel.WIDTH + off - ChargeOverlay.MARGIN - ChargeOverlay.RIGHT_INSET
         val top = ChargeOverlay.MARGIN
         val bottom = Panel.HEIGHT - ChargeOverlay.MARGIN
         // THE SCREEN'S OWN RADIUS, carried inward.
@@ -2233,26 +2415,44 @@ class RearDialView(context: Context) : View(context) {
             vinylPaint.style = Paint.Style.FILL
         }
 
-        // The figure, in the middle of the glass. Over the liquid rather than inside it:
-        // a number that the liquid rose past and half-covered would be unreadable at
-        // exactly the moment it became interesting.
-        val size = (right - left) * ChargeOverlay.TEXT_SIZE
-        extras.textSize = size
-        val was = extras.textAlign
-        extras.textAlign = Paint.Align.CENTER
-        extras.color = tint
-        // THE FIGURE CLIMBS WITH THE LIQUID.
+        // ---- the figure ------------------------------------------------------------
         //
-        // It used to show the final number from the first frame, which makes the reading
-        // and the picture disagree for three seconds — the water says a fifth full and
-        // the text says sixty-two per cent. Counted from the same fill fraction the
-        // surface is drawn at, so the two cannot drift apart: they are the same number
-        // twice, and it arrives exactly as the level settles.
-        canvas.drawText(
-            Math.round(fill * 100f).toString() + "%",
-            (left + right) / 2f, (top + bottom) / 2f + size * 0.36f, extras,
-        )
-        extras.textAlign = was
+        // BESIDE THE CELL AND RIDING THE SURFACE, rather than centred in the glass.
+        //
+        // It sat in the middle of the cell, which put a number over a column of moving
+        // liquid — legible, because it was drawn over the top, but placed somewhere that
+        // had nothing to do with the reading. Set beside the cell at the height of the
+        // water it becomes a label ON the level: the two say the same thing in the same
+        // place, and the figure rises as the cell fills.
+        //
+        // The height comes from the surface's own midpoint, so it follows the liquid
+        // exactly — including when the phone is turned and the level tilts.
+        val text = Math.round(fill * 100f).toString() + "%"
+        val figureRight = left - ChargeOverlay.FIGURE_GAP
+        // Clamped to the cell's own span. An empty cell puts the surface at the very top
+        // and a full one at the very bottom, and a figure centred on either would hang
+        // half off the panel — which is where the reading matters most.
+        val figureHalf = (right - left) * ChargeOverlay.TEXT_SIZE * 0.5f
+        val figureY = (cy + downY * level)
+            .coerceIn(top + figureHalf, bottom - figureHalf)
+
+        val glassFigure = config.theme.isGlass
+        val figurePaint = if (glassFigure) chargeFigure else extras
+        figurePaint.textSize = (right - left) * ChargeOverlay.TEXT_SIZE
+        val was = figurePaint.textAlign
+        figurePaint.textAlign = Paint.Align.RIGHT
+        figurePaint.color = tint
+
+        // MADE OF GLASS, if there is a panel behind it to bend. Type is nearly all edge,
+        // so it takes a distance field of its own rather than the rounded-rect arithmetic
+        // every pane here uses — see SdfText.
+        if (!glassFigure || !drawSdfText(canvas, text, figurePaint, figureRight, figureY)) {
+            val m = figurePaint.fontMetrics
+            canvas.drawText(
+                text, figureRight, figureY - (m.ascent + m.descent) / 2f, figurePaint,
+            )
+        }
+        figurePaint.textAlign = was
         extras.textSize = typed(18f)
     }
 
@@ -5846,7 +6046,14 @@ class RearDialView(context: Context) : View(context) {
             artPaint.alpha = (
                 VINYL_BODY_ALPHA + (255 - VINYL_BODY_ALPHA) * paging.coerceIn(0f, 1f)
             ).toInt()
+            // THE DISC ONLY, never the label. A record's grooves are featureless and its
+            // artwork is not: a few degrees of shake reads as a running deck on the black,
+            // and as a picture being jogged on the label. The two are drawn separately
+            // here anyway, so the wobble simply stops at the edge of the disc.
+            canvas.save()
+            canvas.rotate(vinylWobble(sleeve), disc.cx, disc.cy)
             canvas.drawBitmap(record, null, recordRect, artPaint)
+            canvas.restore()
             artPaint.alpha = 255
         } else {
             // The image ships with the build, so this is not a state that should arise —
@@ -7639,6 +7846,21 @@ class RearDialView(context: Context) : View(context) {
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
+
+        /** How long the record takes to swing from one side of its shake to the other. */
+        private const val VINYL_WOBBLE_MS = 200f
+
+        /**
+         * How far it goes, per step. See vinylWobble.
+         *
+         * Under a degree and a half, which is a great deal less than it sounds like it
+         * should be. Three to five degrees was the first attempt and it read as a record
+         * being shaken rather than one being played: at this diameter five degrees moves
+         * the rim by a visible centimetre. A deck's tremble is the kind of thing you only
+         * notice when it stops.
+         */
+        private const val VINYL_WOBBLE_MIN = 0.5f
+        private const val VINYL_WOBBLE_MAX = 1.2f
 
         /** How many distinct pane shapes to keep lenses for. See lensFor. */
         private const val LENS_CACHE_MAX = 96

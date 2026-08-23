@@ -74,6 +74,17 @@ object PanelType {
      * panel's weight it competes with the readings for a glance it does not deserve: the
      * numbers are why the panel is on.
      */
+    /**
+     * The heaviest weight the face carries, for the charging figure.
+     *
+     * Nine hundred is Outfit's top stop. Anything asking for more is clamped to it by the
+     * font itself, so this is the end of the axis rather than a number chosen from taste.
+     */
+    fun heaviestVariation(theme: PanelTheme): String? =
+        if (theme == PanelTheme.GLASS) "'wght' $GLASS_HEAVIEST" else null
+
+    private const val GLASS_HEAVIEST = 900
+
     fun mediaVariation(theme: PanelTheme): String? =
         if (theme == PanelTheme.GLASS) "'wght' $GLASS_MEDIA_WEIGHT" else null
 

@@ -22,6 +22,19 @@ object ChargeOverlay {
     /** How far in from the panel's edges the glass sits. */
     const val MARGIN = 16f
 
+    /**
+     * Extra room between the cell and the right edge of the panel.
+     *
+     * On top of [MARGIN], and shifting the whole cell rather than narrowing it — a cell
+     * made thinner to create a gap is a thinner cell, and the liquid in it is the reading.
+     * The display's corner curls away exactly here, which is why sixteen units of margin
+     * measured flush to the eye: the glass is already gone before the gap begins.
+     */
+    const val RIGHT_INSET = 15f
+
+    /** How far the figure sits from the cell it is labelling. */
+    const val FIGURE_GAP = 22f
+
     /** The least curve a glass may have before it reads as a box. */
     const val MIN_CORNER = 14f
 
@@ -174,13 +187,17 @@ object ChargeOverlay {
     const val SLOSH = 3.5f
 
     /**
-     * The percentage's type size, as a fraction of the cell's WIDTH.
+     * The figure's size, against the cell's width.
      *
-     * Off the width, not the height, which is the mistake it was: a thirteenth of a
-     * 540-tall glass is seventy units, and three monospaced characters at seventy units
-     * are a hundred and thirty-five wide in a glass that is ninety-seven. The figure ran
-     * out of both sides of the thing it was meant to be inside. What constrains a line of
-     * text here is the narrow dimension, so that is the one it is measured against.
+     * Measured off the width rather than the height, which was the original mistake and
+     * still holds: a thirteenth of a 540-tall glass is seventy units, and three characters
+     * at seventy are wider than the cell they were then inside.
+     *
+     * MUCH larger now that it is no longer inside it. The old third-of-the-width was the
+     * biggest a figure could be and still sit within the glass; standing beside the cell
+     * it has the whole panel to be big in, and it should be — it is the one number the
+     * charging animation exists to say, and at thirty units it was smaller than the row of
+     * readings it interrupts.
      */
-    const val TEXT_SIZE = 0.30f
+    const val TEXT_SIZE = 0.88f
 }
