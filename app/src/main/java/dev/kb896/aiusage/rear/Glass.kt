@@ -265,12 +265,39 @@ half4 main(float2 coord) {
 }"""
 
     /**
+     * A body of liquid, which is a lens whatever it is sitting in.
+     *
+     * NOT AN EDGE EFFECT, which is what makes it a different shader rather than another
+     * setting on the refraction one. That shader bends a band around a pane's border and
+     * hands the middle straight through, because that is what a sheet of glass does. A
+     * VOLUME of something does the opposite: the middle is where the most of it is, so
+     * the middle is where it magnifies most, and there is no border to bend at — the
+     * meniscus is a real boundary and wants a hard edge, not a gradient.
+     *
+     * So: sample toward the centre. Every coordinate is pulled in by the zoom, which
+     * spreads what was behind the middle of the glass across the whole of it. There is no
+     * risk of sampling outside the source, either, because pulling coordinates INWARD
+     * from a rectangle can only ever land inside it.
+     */
+    private val MAGNIFIER = """
+uniform shader content;
+
+uniform float2 size;
+uniform float zoom;
+
+half4 main(float2 coord) {
+    float2 mid = size * 0.5;
+    return content.eval(mid + (coord - mid) / zoom);
+}"""
+
+    /**
      * Compiled once and reused.
      *
      * A RuntimeShader is a compile; doing it per frame per pane would put a shader
      * compiler on the draw path of an always-on display. Uniforms are set per use, which
      * is cheap, so one instance of each serves every pane.
      */
+    val magnifier: RuntimeShader by lazy { RuntimeShader(MAGNIFIER) }
     val refraction: RuntimeShader by lazy { RuntimeShader(REFRACTION) }
     val dispersion: RuntimeShader by lazy { RuntimeShader(DISPERSION) }
     val highlight: RuntimeShader by lazy { RuntimeShader(HIGHLIGHT) }
@@ -286,6 +313,17 @@ half4 main(float2 coord) {
     // its short side. Its tab bar's container is lens(24dp, 24dp). So: the same fractions
     // for everything, capped where a container would otherwise take more than the
     // reference gives one.
+
+    /**
+     * How much the charging cell's liquid magnifies what is behind it.
+     *
+     * Small. A quarter again is enough for the readout to visibly step as it crosses the
+     * meniscus, which is the whole tell — the eye reads "there is something in there"
+     * from the discontinuity at the surface rather than from the magnification itself.
+     * Push it further and the cell stops being a glass of liquid and starts being a
+     * porthole with a different picture in it.
+     */
+    const val LIQUID_ZOOM = 1.25f
 
     /** How deep into a pane the bending reaches, as a fraction of its short side. */
     const val HEIGHT = 0.42f

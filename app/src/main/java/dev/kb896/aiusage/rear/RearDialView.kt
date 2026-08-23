@@ -592,16 +592,49 @@ class RearDialView(context: Context) : View(context) {
         // everything before it, and the next one bends THAT. A pane can never sample the
         // node it is being recorded into — that is the cycle from before — but it can
         // sample the one behind, which is all it needs.
+        // ONLY WHAT IS ACTUALLY THERE, and only what actually has something stacked on
+        // top of it. The chain used to be built unconditionally, four layers deep, every
+        // frame — so a panel showing nothing but its transport buttons still recorded
+        // three full-panel nodes for a lock, a notice and a charger that were not on
+        // screen. That is not free: a pane's shader resolves its backdrop through every
+        // layer above the one it samples, so depth is multiplied by the fifteen panes
+        // that sample it. Most frames need no chain at all.
+        val active = overlayGroups
+        active.clear()
+        if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
+        if (lockSwap(frameNowMs) > 0.001f) active.add(GROUP_LOCK)
+        if (noticeSlideHeld > 0.001f) active.add(GROUP_NOTICE)
+        if (chargeAt != 0L) active.add(GROUP_CHARGE)
+        if (active.isEmpty()) return
+
+        // Every group but the last goes into a layer, because something is going to be
+        // drawn over it and has to be able to bend it. The last one has nothing above it,
+        // so it draws straight onto the canvas over the scene that is already there.
         var backdrop = sceneNode
-        backdrop = layered(backdrop) { c -> drawPendingButtons(c) }
-        backdrop = layered(backdrop) { c -> drawLockOverlay(c) }
-        backdrop = layered(backdrop) {
-            c -> drawNotice(c, noticeSlideHeld, SystemClock.elapsedRealtime())
+        for (i in 0 until active.size - 1) {
+            val group = active[i]
+            backdrop = layered(backdrop) { c -> drawOverlayGroup(group, c) }
         }
-        backdrop = layered(backdrop) { c -> drawCharge(c) }
-        recorder.drawRenderNode(backdrop)
-        paneBackdrop = sceneNode
+        if (backdrop !== sceneNode) recorder.drawRenderNode(backdrop)
+        paneBackdrop = backdrop
+        try {
+            drawOverlayGroup(active[active.size - 1], canvas)
+        } finally {
+            paneBackdrop = sceneNode
+        }
     }
+
+    private fun drawOverlayGroup(group: Int, canvas: Canvas) {
+        when (group) {
+            GROUP_BUTTONS -> drawPendingButtons(canvas)
+            GROUP_LOCK -> drawLockOverlay(canvas)
+            GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
+            else -> drawCharge(canvas)
+        }
+    }
+
+    /** Which overlays have something to draw this frame, in the order they stack. */
+    private val overlayGroups = ArrayList<Int>(4)
 
     /**
      * Draw one overlay over everything so far, and hand back the result as the next
@@ -759,20 +792,6 @@ class RearDialView(context: Context) : View(context) {
         // samples of the backdrop per pixel and, with the aberration at zero, they all
         // land on the same coordinate — the same answer for seven times the sampling, on
         // an always-on display that redraws at 120Hz whenever anything moves.
-        val shader = if (aberration > 0f) Glass.dispersion else Glass.refraction
-        shader.setFloatUniform("size", w, h)
-        shader.setFloatUniform("offset", 0f, 0f)
-        shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-        shader.setFloatUniform(
-            "refractionHeight", minOf(short * Glass.HEIGHT, Glass.HEIGHT_MAX),
-        )
-        // Negative: the library negates the amount on the way in, and the sign is which
-        // way the backdrop is pushed. Positive here turns a lens into a pinch.
-        shader.setFloatUniform(
-            "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
-        )
-        shader.setFloatUniform("depthEffect", Glass.DEPTH)
-        if (aberration > 0f) shader.setFloatUniform("chromaticAberration", aberration)
 
         // Blur FIRST, then bend. createChainEffect applies its second argument first, so
         // this reads backwards and is the right way round: bending a sharp backdrop
@@ -787,8 +806,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // It also costs nothing to remove: the blur was a second full-size pass over
         // every pane, on a display that redraws at 120Hz while anything is moving.
-        val lens = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-        paneNode.setRenderEffect(if (refract) lens else null)
+        paneNode.setRenderEffect(if (refract) lensFor(w, h, radius, aberration) else null)
 
         canvas.save()
         if (shape != null) {
@@ -905,6 +923,139 @@ class RearDialView(context: Context) : View(context) {
         panePaint.style = Paint.Style.FILL
         return true
     }
+
+    /**
+     * The lens for a pane of this shape, built once and kept.
+     *
+     * THIS WAS THE LEAK. RenderEffect.createRuntimeShaderEffect was called per pane per
+     * frame — fifteen panes at up to 120Hz, so getting on for two thousand a second. Each
+     * one is a tiny Java object in front of a large native allocation, which is the worst
+     * shape an object can have: the collector sees almost nothing worth collecting and
+     * lets them accumulate, so the native heap climbed by roughly a hundred megabytes
+     * every fifteen seconds and the phone got hot holding them.
+     *
+     * It was never necessary. Every uniform the lens takes — size, corner radii,
+     * refraction height and amount, aberration — is a function of the pane's SHAPE. None
+     * of them is a function of where it is. A bar's thumb is the same lens at every
+     * reading; it simply gets drawn somewhere else. So one effect per distinct shape is
+     * all this ever needed, and in a steady frame every lookup is a hit.
+     *
+     * Quantised to whole units because a lens a fraction of a unit wider is the same lens
+     * to look at, and because a swelling thumb would otherwise mint a new one per frame
+     * of its own animation — which is the leak again, wearing a hat.
+     */
+    private fun lensFor(
+        w: Float,
+        h: Float,
+        radius: Float,
+        aberration: Float,
+    ): android.graphics.RenderEffect {
+        val key = (Math.round(w).toLong() shl 40) or
+            (Math.round(h).toLong() shl 24) or
+            (Math.round(radius).toLong() shl 8) or
+            Math.round(aberration * 8f).toLong().coerceIn(0L, 255L)
+        lensCache[key]?.let { return it }
+
+        val short = minOf(w, h)
+        // ONE LENS, EVERY PANE — see Glass. Sized as a fraction of the short side and
+        // then capped, because a fraction alone is right for a twenty-unit thumb and a
+        // fisheye on a card six times that.
+        //
+        // THE PLAIN LENS WHEN NOTHING IS BEING SPLIT. The dispersion shader takes seven
+        // samples of the backdrop per pixel and, with the aberration at zero, they all
+        // land on the same coordinate — the same answer for seven times the sampling, on
+        // an always-on display that redraws at 120Hz whenever anything moves.
+        val shader = if (aberration > 0f) Glass.dispersion else Glass.refraction
+        shader.setFloatUniform("size", w, h)
+        shader.setFloatUniform("offset", 0f, 0f)
+        shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+        shader.setFloatUniform(
+            "refractionHeight", minOf(short * Glass.HEIGHT, Glass.HEIGHT_MAX),
+        )
+        // Negative: the library negates the amount on the way in, and the sign is which
+        // way the backdrop is pushed. Positive here turns a lens into a pinch.
+        shader.setFloatUniform(
+            "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
+        )
+        shader.setFloatUniform("depthEffect", Glass.DEPTH)
+        if (aberration > 0f) shader.setFloatUniform("chromaticAberration", aberration)
+
+        val lens = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+        // A CEILING, and a blunt one. The panel has a few dozen distinct pane shapes in
+        // normal use; anything past that is a control mid-animation minting shapes it
+        // will not ask for again, and holding those is the same mistake in slow motion.
+        if (lensCache.size >= LENS_CACHE_MAX) lensCache.clear()
+        lensCache[key] = lens
+        return lens
+    }
+
+    private val lensCache = HashMap<Long, android.graphics.RenderEffect>()
+
+    /**
+     * Magnify the panel through a body of liquid, clipped to the liquid's own shape.
+     *
+     * The charging cell is a glass with something IN it, and the one thing this panel
+     * could never say was which part of the cell was full — the liquid was a tint, and a
+     * tint is a colour rather than a substance. A volume of liquid is a lens: what is
+     * behind it steps as it crosses the surface. That step is the tell, and it costs one
+     * pane to say.
+     *
+     * [shape] is the liquid, surface and all, so the magnification ends exactly at the
+     * meniscus rather than at the cell's edge — which is the difference between a glass
+     * with liquid in it and a glass someone put a lens behind.
+     */
+    private fun drawMagnified(
+        canvas: Canvas,
+        rect: android.graphics.RectF,
+        shape: android.graphics.Path,
+        zoom: Float,
+    ): Boolean {
+        val w = rect.width()
+        val h = rect.height()
+        if (w < 1f || h < 1f) return false
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return false
+        val source = paneBackdrop
+        // The same cycle guard the panes have: a node inside the scene recording cannot
+        // sample the scene. See drawGlassPane.
+        if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return false
+
+        val node = nextNode()
+        node.setPosition(
+            Math.round(rect.left), Math.round(rect.top),
+            Math.round(rect.right), Math.round(rect.bottom),
+        )
+        val into = node.beginRecording()
+        try {
+            into.translate(-rect.left, -rect.top)
+            into.drawRenderNode(source)
+        } finally {
+            node.endRecording()
+        }
+        node.setRenderEffect(magnifierFor(w, h, zoom))
+
+        canvas.save()
+        canvas.clipPath(shape)
+        recorder.drawRenderNode(node)
+        canvas.restore()
+        return true
+    }
+
+    /** The magnifier for a vessel this shape, kept for the same reason lenses are. */
+    private fun magnifierFor(w: Float, h: Float, zoom: Float): android.graphics.RenderEffect {
+        val key = (Math.round(w).toLong() shl 40) or
+            (Math.round(h).toLong() shl 24) or
+            Math.round(zoom * 64f).toLong().coerceIn(0L, 65535L)
+        magnifierCache[key]?.let { return it }
+        val shader = Glass.magnifier
+        shader.setFloatUniform("size", w, h)
+        shader.setFloatUniform("zoom", zoom)
+        val effect = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+        if (magnifierCache.size >= LENS_CACHE_MAX) magnifierCache.clear()
+        magnifierCache[key] = effect
+        return effect
+    }
+
+    private val magnifierCache = HashMap<Long, android.graphics.RenderEffect>()
 
     /**
      * Draw something into a node of its own, and hand the node back to be lensed.
@@ -1636,6 +1787,13 @@ class RearDialView(context: Context) : View(context) {
         // Next frame only while something is still moving. When everything has settled
         // this stops entirely and the view falls back to the 15s idle tick — an
         // always-on panel must not hold a 60fps loop for a display that is not changing.
+        //
+        // TWO SPEEDS, because not everything that moves moves at the same rate. A tween,
+        // a spinning record and a dragged dial all want the next vsync. The mascots want
+        // twelve frames a second, which is their own frame rate — asking for a vsync on
+        // their behalf ran the whole panel at 120Hz to advance a twelve-frame walk cycle,
+        // and since there is always a mascot the panel never idled at all. Measured
+        // before this: 81% of a core on a static readout.
         if (animating) postInvalidateOnAnimation()
     }
 
@@ -1835,6 +1993,13 @@ class RearDialView(context: Context) : View(context) {
         body.lineTo(cx + acrossX * span / 2f + downX * depth, cy + acrossY * span / 2f + downY * depth)
         body.lineTo(cx - acrossX * span / 2f + downX * depth, cy - acrossY * span / 2f + downY * depth)
         body.close()
+
+        // WHAT THE LIQUID DOES TO WHAT IS BEHIND IT, before the liquid's own colour goes
+        // over the top. The tint is translucent, so the magnified panel reads THROUGH it
+        // — which is the right order: the readout is behind the liquid, not floating on
+        // it. Only when the cell is really made of glass; without a pane there is no
+        // backdrop to magnify and the tint alone is what the cell has always been.
+        if (paned) drawMagnified(canvas, chargeRect, body, Glass.LIQUID_ZOOM)
 
         noticePaint.style = Paint.Style.FILL
         noticePaint.shader = null
@@ -5040,10 +5205,20 @@ class RearDialView(context: Context) : View(context) {
         if (lock <= 0.001f) return
         val region = markRegion()
         canvas.save()
-        canvas.clipRect(
-            0f, region.top, Panel.WIDTH.toFloat(), region.bottom + LOCK_BAND_SLOP,
-        )
-        canvas.translate(0f, -(1f - lock) * (region.height() + LOCK_BAND_SLOP))
+        // THE BAND IS FOR THE ARRIVAL, AND NOTHING ELSE. It clips the slider to the slot
+        // while it slides down into it, which is the whole reason it exists — but it was
+        // left in place afterwards, and a held knob swells to one and a half times the
+        // slot's height. Half of that swell is above the band, so the thing that grows to
+        // say "yes, you have this" had its top sheared off at the moment it grew.
+        //
+        // Once it has arrived there is nothing to slide and the translate is zero, so the
+        // band has no work left to do.
+        if (lock < 0.999f) {
+            canvas.clipRect(
+                0f, region.top, Panel.WIDTH.toFloat(), region.bottom + LOCK_BAND_SLOP,
+            )
+            canvas.translate(0f, -(1f - lock) * (region.height() + LOCK_BAND_SLOP))
+        }
         drawLock(canvas, region, lockKnob(frameNowMs))
         canvas.restore()
     }
@@ -5177,6 +5352,31 @@ class RearDialView(context: Context) : View(context) {
         )
         extras.textAlign = was
     }
+
+    /**
+     * How far the media page's title block moves up to clear the unlock slider.
+     *
+     * MEASURED, not a constant, because both ends of it move: the slider sits in the mark
+     * band, whose height is derived from the bar span, and the artist's descent depends on
+     * the face and the theme's scale. A number typed in here would be right for one of
+     * those and quietly wrong for the next.
+     *
+     * Scaled by the lock's own swap so the block rises as the slider arrives and settles
+     * back as it leaves — the same movement, not a jump on either side of it.
+     */
+    private fun lockLift(): Float {
+        val swap = lockSwap(frameNowMs)
+        if (swap <= 0.001f) return 0f
+        val was = extras.textSize
+        extras.textSize = typed(MediaPage.ARTIST_SIZE)
+        val below = MediaPage.ARTIST_BASELINE + extras.fontMetrics.descent
+        extras.textSize = was
+        val room = markRegion().top - LOCK_TEXT_CLEARANCE
+        return swap * kotlin.math.max(0f, below - room)
+    }
+
+    /** How much air the title block keeps above the slider once it has moved. */
+    private val LOCK_TEXT_CLEARANCE = 4f
 
     /** How far the indicator has swollen, 0 to 1, easing both ways. */
     private fun lockPress(nowMs: Long): Float {
@@ -5581,6 +5781,18 @@ class RearDialView(context: Context) : View(context) {
         // The raw text goes to `rolling`, not a shortened copy: it compares strings to
         // notice a change, and two different long titles cut to the same width are the
         // same string.
+        // OUT OF THE SLIDER'S WAY, if it is here. The unlock slider is pinned to the
+        // mark band so a notification cannot push it off the panel, and on this page the
+        // artist line ends three units inside that band — enough for the glass to sit on
+        // its descenders and for the whole line to read as slightly sunk.
+        //
+        // The block lifts rather than the slider moving, because the slider's position is
+        // the one thing on the panel that must not depend on which page is showing: a
+        // thumb reaching for it in a pocket has to find it in the same place every time.
+        val lift = lockLift()
+        val titleBase = MediaPage.TITLE_BASELINE - lift
+        val artistBase = MediaPage.ARTIST_BASELINE - lift
+
         extras.textSize = typed(MediaPage.TITLE_SIZE)
         extras.color = shade(tint, 0xFF)
         var runs = extras.measureText(m.title) > PAGE_TEXT_WIDTH
@@ -5588,8 +5800,8 @@ class RearDialView(context: Context) : View(context) {
         rolling(
             canvas, "page:title", m.title,
             if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
-            MediaPage.TITLE_BASELINE,
-            lineBand(cx, MediaPage.TITLE_BASELINE, PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
+            titleBase,
+            lineBand(cx, titleBase, PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
             width = PAGE_TEXT_WIDTH,
         )
         if (m.artist.isNotBlank()) {
@@ -5600,8 +5812,8 @@ class RearDialView(context: Context) : View(context) {
             rolling(
                 canvas, "page:artist", m.artist,
                 if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
-                MediaPage.ARTIST_BASELINE,
-                lineBand(cx, MediaPage.ARTIST_BASELINE, PAGE_TEXT_WIDTH,
+                artistBase,
+                lineBand(cx, artistBase, PAGE_TEXT_WIDTH,
                     MediaPage.ARTIST_SIZE),
                 width = PAGE_TEXT_WIDTH,
             )
@@ -7244,6 +7456,16 @@ class RearDialView(context: Context) : View(context) {
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
+
+        /** How many distinct pane shapes to keep lenses for. See lensFor. */
+        private const val LENS_CACHE_MAX = 96
+
+
+        /** The overlay groups, in the order they stack over the panel. See drawOverlays. */
+        private const val GROUP_BUTTONS = 0
+        private const val GROUP_LOCK = 1
+        private const val GROUP_NOTICE = 2
+        private const val GROUP_CHARGE = 3
 
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
