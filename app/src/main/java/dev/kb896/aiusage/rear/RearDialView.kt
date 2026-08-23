@@ -281,14 +281,25 @@ class RearDialView(context: Context) : View(context) {
         // was pulled toward the liquid's colour, on the reasoning that it is the liquid's
         // number and the two should read as one instrument. They did — and it stopped
         // reading as glass, which is the more important of the two things it has to be.
-        // Glass has no colour of its own; everything it shows is the panel behind it, and
-        // the moment you give it a hue it becomes coloured type with a bevel.
         //
-        // KEYED ON THE FIELD, which is to say on the number. It does not move between
-        // frames, and building a RenderEffect per frame is precisely the churn that filled
-        // the native heap the last time — a small Java object in front of a large native
-        // allocation is the one shape the collector will not hurry over.
-        val effectKey = sdfKey
+        // It still answers its backdrop, but in light rather than in colour: the bevel
+        // along each letter's edge glints harder over a dark panel and settles over a
+        // bright one. See GlassLuminance.bevel.
+        refreshLuminance()
+        val bevel = GlassLuminance.bevel(
+            GlassLuminance.average(
+                lumCells, sdfRect.left, sdfRect.top, sdfRect.right, sdfRect.bottom,
+                Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+            ),
+        )
+
+        // KEYED ON THE FIELD AND THE GLINT, which is to say on the number and where it has
+        // risen to. Neither moves between frames, and building a RenderEffect per frame is
+        // precisely the churn that filled the native heap the last time — a small Java
+        // object in front of a large native allocation is the one shape the collector will
+        // not hurry over. Quantised, or a figure creeping up the cell would mint one a
+        // frame and be the leak again.
+        val effectKey = sdfKey + "|" + Math.round(bevel * 20f)
         if (effectKey != sdfEffectKey) {
             sdfEffectKey = effectKey
             val shader = Glass.sdf
@@ -304,6 +315,7 @@ class RearDialView(context: Context) : View(context) {
             shader.setFloatUniform("sdfTexSize", w, h)
             shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
             shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
+            shader.setFloatUniform("bevel", bevel)
             sdfEffect =
                 android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         }

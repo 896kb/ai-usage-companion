@@ -114,6 +114,28 @@ object GlassLuminance {
             blend(base and 0xFF, toward, mix)
     }
 
+    /**
+     * How hard a glass EDGE should catch the light, over a backdrop this bright.
+     *
+     * The colourless way to react, and the only one left for a shape cut out of glass. A
+     * pane can answer its backdrop with its tint because a pane is a surface; a letterform
+     * is nearly all edge and has no surface to speak of, and giving it a tint turns it into
+     * coloured type with a bevel — which is exactly what it looked like.
+     *
+     * What it does have is a bevel, and a bevel is not a colour: it is how sharply the
+     * edge picks up the light, and real glass does more of it in a dark room. So over a
+     * dark panel the letterforms glint harder and the figure reads; over a bright one they
+     * settle down and stop competing with what is already there.
+     *
+     * Returned as a multiplier on the shader's own bevel terms, so one is the look as
+     * authored and the reaction is a departure from it in both directions.
+     */
+    fun bevel(luminance: Float): Float =
+        (1f - BEVEL_RANGE * response(luminance)).coerceIn(0f, 1f + BEVEL_RANGE)
+
+    /** How far the glint moves either side of the authored look. */
+    private const val BEVEL_RANGE = 0.85f
+
     private fun blend(from: Int, to: Int, t: Float): Int =
         (from + (to - from) * t.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)
 

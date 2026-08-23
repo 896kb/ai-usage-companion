@@ -285,6 +285,7 @@ uniform float2 size;
 uniform float2 sdfTexSize;
 uniform float refractionHeight;
 uniform float lightAngle;
+uniform float bevel;
 
 float circleMap(float x) {
     return 1.0 - sqrt(1.0 - x * x);
@@ -309,10 +310,13 @@ half4 main(float2 coord) {
     float2 refractedCoord = coord - intensity * refractionHeight * normal;
     half4 color = content.eval(refractedCoord) * v.a;
     float2 lightDir = float2(cos(lightAngle * 3.1415926 / 180.0), sin(lightAngle * 3.1415926 / 180.0));
+    // The two bevel terms, scaled together by how dark it is behind the figure. See
+    // GlassLuminance.bevel: this is the reaction, and it is a reaction of LIGHT rather
+    // than of colour, which is the only kind a piece of glass can have.
     float bevelIntensity = clamp(dot(normal, lightDir), 0.0, 1.0);
-    color.rgb *= 1.0 + 0.5 * intensity * bevelIntensity;
+    color.rgb *= 1.0 + 0.5 * bevel * intensity * bevelIntensity;
     bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
-    color.rgb *= 1.0 + 0.5 * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
+    color.rgb *= 1.0 + 0.5 * bevel * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
     return color;
 }"""
 
