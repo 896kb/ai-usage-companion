@@ -3562,9 +3562,10 @@ class RearDialView(context: Context) : View(context) {
         val m = miniSlide(nowMs)
         val r = GLASS_NOTICE_RADIUS
 
-        val cardTop = top + GLASS_NOTICE_MARGIN
+        val margin = GlassCard.margin(cornerRadius(), GLASS_NOTICE_RADIUS)
+        val cardTop = top + margin
         val cardBottom = top + NOTICE_H
-        val right = Panel.WIDTH - GLASS_NOTICE_MARGIN
+        val right = Panel.WIDTH - margin
 
         // ---- the group card, below and narrower ------------------------------------
         //
@@ -6779,14 +6780,6 @@ class RearDialView(context: Context) : View(context) {
 
         // -- the glass notification ---------------------------------------------------
 
-        /**
-         * How far a glass card is held off the panel's edges.
-         *
-         * ORIGINAL's strip runs off the top and right and lets the display's own rounding
-         * finish it. A pane cannot: it is an object, and an object with two edges missing
-         * is a shape stuck to the screen.
-         */
-        private const val GLASS_NOTICE_MARGIN = 14f
 
         /** The air between the headline and the group card below it. */
         private const val GLASS_NOTICE_GAP = 8f
