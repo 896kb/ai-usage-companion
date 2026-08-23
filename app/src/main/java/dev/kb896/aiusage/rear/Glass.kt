@@ -369,4 +369,13 @@ half4 main(float2 coord) {
 
     /** How present the ambient rim is. The reference's Highlight.Ambient intensity. */
     const val AMBIENT_ALPHA = 0.38f
+
+    /**
+     * The charging cell's own body.
+     *
+     * Fainter than a card's, because this pane has something in it. A tint heavy enough
+     * to read type against would also be heavy enough to mute the liquid, and the liquid
+     * is the whole of what the cell is for.
+     */
+    const val CHARGE_TINT = 0x1AFFFFFF
 }

@@ -520,9 +520,11 @@ class RearDialView(context: Context) : View(context) {
             // on black, with the readout recorded perfectly and placed nowhere.
             sceneNode.setPosition(0, 0, width, height)
             val scene = sceneNode.beginRecording(width, height)
+            recordingScene = true
             try {
                 drawFrame(scene, overlays = false)
             } finally {
+                recordingScene = false
                 sceneNode.endRecording()
             }
             recorder.drawRenderNode(sceneNode)
@@ -550,6 +552,9 @@ class RearDialView(context: Context) : View(context) {
      */
     private val nodePool = ArrayList<android.graphics.RenderNode>(16)
     private var nodesUsed = 0
+
+    /** Whether the scene is mid-recording, and therefore not something to sample. */
+    private var recordingScene = false
 
     private fun nextNode(): android.graphics.RenderNode {
         if (nodesUsed == nodePool.size) {
@@ -653,8 +658,21 @@ class RearDialView(context: Context) : View(context) {
         // black gives you black. The refraction is worth having where there is something
         // to bend, and that is exactly where it happens: the notification cards and the
         // unlock slider, both overlays, both lying over the readout and the record.
+        // A NODE INSIDE THE SCENE CANNOT SAMPLE THE SCENE. That is a cycle — the node is
+        // in the scene's display list and the scene would be in its — and the renderer
+        // does not detect it: it walks the tree to prepare it and recurses until the
+        // stack goes. Measured as a SIGSEGV on the RenderThread with five hundred frames
+        // of prepareTreeImpl, which is not an obvious way for a missing fallback to
+        // present itself.
+        //
+        // The in-scene elements each pass a layer of their own and fall back to the scene
+        // when they have none. That fallback is the trap, so it is caught here rather
+        // than at four call sites: no layer means no lens, and no lens is a look this
+        // already has.
         val recorder = canvas as? android.graphics.RecordingCanvas
-        if (recorder == null || !source.hasDisplayList()) {
+        if (recorder == null || !source.hasDisplayList() ||
+            (source === sceneNode && recordingScene)
+        ) {
             return drawUnbackedGlass(canvas, rect, radius, tint, shape, rim)
         }
 
@@ -826,6 +844,10 @@ class RearDialView(context: Context) : View(context) {
         val recorder = canvas as? android.graphics.RecordingCanvas ?: return null
         if (bounds.width() < 1f || bounds.height() < 1f) return null
         val backdropNode = nextNode()
+        // Cleared, because this node may have been a PANE last frame and a render effect
+        // outlives the recording. A track drawn through a leftover refraction is a track
+        // that bends for no reason.
+        backdropNode.setRenderEffect(null)
         backdropNode.setPosition(
             Math.round(bounds.left), Math.round(bounds.top),
             Math.round(bounds.right), Math.round(bounds.bottom),
@@ -1495,14 +1517,32 @@ class RearDialView(context: Context) : View(context) {
             addRoundRect(left, top, right, bottom, r, r, android.graphics.Path.Direction.CW)
         }
 
+        // THE CELL IS A GLASS, so under GLASS it is made of glass.
+        //
+        // This is the one element on the panel where the material was never in question —
+        // it has been "a glass with liquid in it" since it was built, and it was only
+        // painted flat because there was no lens to hand. It is also an overlay, drawn
+        // after the scene, so it gets the real thing: the readout and the record bend
+        // through the empty part of the cell above the liquid line.
+        //
+        // The ground goes with it. That was there so the liquid had something to sit
+        // inside rather than floating over whatever the panel was drawing; a pane does
+        // that job better, because it is what a vessel actually does to what is behind it.
+        val chargeRect = android.graphics.RectF(left, top, right, bottom)
+        val paned = config.theme.isGlass &&
+            drawGlassPane(canvas, chargeRect, r, Glass.CHARGE_TINT)
+
         canvas.save()
         canvas.clipPath(glass)
-        // The glass's own ground, so the liquid has something to be inside rather than
-        // floating over whatever the panel was drawing there.
-        noticePaint.style = Paint.Style.FILL
-        noticePaint.shader = null
-        noticePaint.color = (config.background and 0x00FFFFFF) or (CHARGE_GROUND_ALPHA shl 24)
-        canvas.drawRect(left, top, right, bottom, noticePaint)
+        if (!paned) {
+            // The glass's own ground, so the liquid has something to be inside rather than
+            // floating over whatever the panel was drawing there.
+            noticePaint.style = Paint.Style.FILL
+            noticePaint.shader = null
+            noticePaint.color =
+                (config.background and 0x00FFFFFF) or (CHARGE_GROUND_ALPHA shl 24)
+            canvas.drawRect(left, top, right, bottom, noticePaint)
+        }
 
         // ---- the liquid, as a SURFACE ----------------------------------------------
         //
@@ -6161,14 +6201,49 @@ class RearDialView(context: Context) : View(context) {
         // of its own would make it a third colour on a row that has two.
         noticePaint.style = Paint.Style.FILL
         noticePaint.color = (tint and 0x00FFFFFF) or (MEDIA_TRACK_ALPHA shl 24)
-        canvas.drawRect(band.left, top, band.right, bottom, noticePaint)
+        val end = band.left + (band.right - band.left) * fraction
 
-        noticePaint.color = tint
-        noticePaint.alpha = 255
-        canvas.drawRect(
-            band.left, top, band.left + (band.right - band.left) * fraction, bottom,
-            noticePaint,
-        )
+        if (config.theme.isGlass) {
+            // THE PLAY BAR IS THE SAME INSTRUMENT AS THE OTHERS, at the one size it has.
+            // Capsule ends and a thumb, published as its own layer for the thumb to bend
+            // — see the bars. It is four units tall, so the thumb is what carries it: at
+            // this size a track is a hairline and a hairline has no reading in it.
+            val r = (bottom - top) / 2f
+            trackRect.set(band.left, top, band.right, bottom)
+            val layer = localBackdrop(canvas, trackRect) { into ->
+                into.drawRoundRect(trackRect, r, r, noticePaint)
+                if (end > band.left + 0.5f) {
+                    noticePaint.color = tint
+                    noticePaint.alpha = 255
+                    barRect.set(band.left, top, end, bottom)
+                    into.drawRoundRect(barRect, r, r, noticePaint)
+                }
+            }
+            if (layer == null) {
+                canvas.drawRoundRect(trackRect, r, r, noticePaint)
+                noticePaint.color = tint
+                noticePaint.alpha = 255
+                barRect.set(band.left, top, end, bottom)
+                canvas.drawRoundRect(barRect, r, r, noticePaint)
+            }
+            val th = (bottom - top) * MEDIA_THUMB
+            val tw = th * SLIDER_THUMB_W / SLIDER_THUMB_H
+            val span = band.right - band.left
+            val cx = (band.left + tw / 2f) + (span - tw) * fraction.coerceIn(0f, 1f)
+            val cy = (top + bottom) / 2f
+            barRect.set(cx - tw / 2f, cy - th / 2f, cx + tw / 2f, cy + th / 2f)
+            drawGlassPane(
+                canvas, barRect, th / 2f, Glass.THUMB_TINT,
+                source = layer ?: sceneNode, held = true,
+            )
+            noticePaint.color = tint
+            noticePaint.alpha = 255
+        } else {
+            canvas.drawRect(band.left, top, band.right, bottom, noticePaint)
+            noticePaint.color = tint
+            noticePaint.alpha = 255
+            canvas.drawRect(band.left, top, end, bottom, noticePaint)
+        }
         // While something is playing this has to keep redrawing, or it advances only when
         // the player next happens to say something.
         if (m.playing) animating = true
@@ -7222,6 +7297,15 @@ class RearDialView(context: Context) : View(context) {
 
         /** How present the ring's unfilled track is. Muted, like the reference's. */
         private const val RING_TRACK_ALPHA = 0.36f
+
+        /**
+         * The play bar's thumb, as a multiple of its track height.
+         *
+         * Much larger than the bars' multiple, because the track it rides is much
+         * thinner — four units against twenty. The thumb is what makes a four-unit line
+         * into a control you can read a position off.
+         */
+        private const val MEDIA_THUMB = 4.5f
 
         private const val EXTRA_ICON_H = 20f
 
