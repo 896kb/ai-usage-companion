@@ -270,8 +270,12 @@ class RearDialView(context: Context) : View(context) {
         themeApplied = theme
         typeScale = PanelType.scale(theme)
         val face = PanelType.of(resources, theme)
+        val axes = PanelType.variation(theme)
         for (p in listOf(label, heading, value, title, timeTag, cascadePaint, extras, planTag)) {
             p.typeface = face
+            // Cleared as well as set: switching back to ORIGINAL has to take the axis off
+            // again, or a paint carries a weight request for a face that has no axes.
+            p.fontVariationSettings = axes
         }
         label.textSize = typed(18f)
         heading.textSize = typed(22.5f)
@@ -3631,30 +3635,18 @@ class RearDialView(context: Context) : View(context) {
             // are curves, and a curve without smoothing is a staircase at any angle.
             iconPaint.isAntiAlias = true
             iconPaint.color = extras.color
-            iconPaint.strokeCap = Paint.Cap.ROUND
-            iconPaint.strokeJoin = Paint.Join.ROUND
-            // Lucide's stroke is stated in ITS units, so it scales with the glyph and a
-            // clock in the corner has the same weight as a transport button twice its
-            // size. Scaling the canvas instead would scale the stroke too, which sounds
-            // equivalent and is not: the panel draws these at several sizes and the
-            // weight has to stay put, not grow with the box.
+            iconPaint.style = Paint.Style.FILL
+            // Material draws on a 960-unit box whose Y axis runs from -960 to 0, so the
+            // glyph has to be brought down by a full box before it is anywhere near the
+            // cell it was asked for. Done here rather than in the generated data, which
+            // stays exactly as the source has it so regenerating stays a copy.
             val k = h / GlassIcons.VIEWPORT
-            iconPaint.strokeWidth = GlassIcons.STROKE * k
-            // SOLID is filled AND stroked. Filled alone loses the bar beside the skip
-            // triangles — those are open lines in the source and a fill of a line is
-            // nothing — and stroked alone leaves the transport as outlines, where the
-            // rule on this panel has always been that the things meant to be pressed are
-            // solid shapes. Both together is a solid glyph with the outline's own
-            // rounded corners.
-            iconPaint.style =
-                if (outline.ink == GlassIcons.Ink.SOLID) Paint.Style.FILL_AND_STROKE
-                else Paint.Style.STROKE
             canvas.save()
             canvas.translate(left, y)
             canvas.scale(k, k)
+            canvas.translate(0f, -GlassIcons.ORIGIN_Y)
             canvas.drawPath(outline.path, iconPaint)
             canvas.restore()
-            iconPaint.style = Paint.Style.FILL
             return
         }
 

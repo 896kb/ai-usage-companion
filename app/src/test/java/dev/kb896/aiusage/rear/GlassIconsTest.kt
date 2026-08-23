@@ -23,7 +23,7 @@ class GlassIconsTest {
     }
 
     /**
-     * The path data has to survive the trip from Lucide's SVG. It is generated, so what
+     * The path data has to survive the trip from Material's SVG. It is generated, so what
      * is worth checking is not the shapes but that nothing arrived empty or truncated —
      * a path that fails to parse draws nothing at all, silently.
      */
@@ -49,7 +49,7 @@ class GlassIconsTest {
         for (icon in used) {
             assertEquals("ORIGINAL should get the traced proportions",
                 icon.aspect, Glyphs.aspect(icon, PanelTheme.ORIGINAL), 0.00001f)
-            assertEquals("GLASS should get Lucide's square grid",
+            assertEquals("GLASS should get Material's square grid",
                 GlassIcons.ASPECT, Glyphs.aspect(icon, PanelTheme.GLASS), 0.00001f)
         }
     }
@@ -70,26 +70,13 @@ class GlassIconsTest {
             PanelIcons.CAMERA.aspect > 1.05f)
     }
 
-    // -- ink -------------------------------------------------------------------------
-
-    /** The transport stays solid; it is the only thing here meant to be pressed. */
-    @Test fun `the things you press are solid and the labels are line work`() {
-        for (icon in listOf(PanelIcons.PLAY, PanelIcons.PAUSE, PanelIcons.PREV,
-            PanelIcons.NEXT, PanelIcons.VOLUME_OFF)) {
-            assertEquals("a target glyph is a hairline",
-                GlassIcons.Ink.SOLID, GlassIcons.of(icon)!!.ink)
-        }
-        for (icon in listOf(PanelIcons.CLOCK, PanelIcons.CALENDAR, PanelIcons.BATTERY,
-            PanelIcons.CHARGING, PanelIcons.CAMERA)) {
-            assertEquals("a label glyph is filled in",
-                GlassIcons.Ink.LINE, GlassIcons.of(icon)!!.ink)
-        }
-    }
-
-    /** Weight is in the icon's own units, so a glyph reads the same at any size. */
-    @Test fun `the stroke is stated on Lucide's grid`() {
-        assertEquals(24f, GlassIcons.VIEWPORT, 0f)
-        assertTrue("too fine to see", GlassIcons.STROKE > 1f)
-        assertTrue("too heavy to read", GlassIcons.STROKE < 4f)
+    /**
+     * Material's grid hangs BELOW the origin — its Y runs from -960 to 0 — so a glyph
+     * drawn without moving it down a full box lands entirely off the top of its cell.
+     * Invisible, and invisible in a way that looks like the theme simply not working.
+     */
+    @Test fun `the grid is the one the renderer compensates for`() {
+        assertEquals(960f, GlassIcons.VIEWPORT, 0f)
+        assertEquals(-960f, GlassIcons.ORIGIN_Y, 0f)
     }
 }

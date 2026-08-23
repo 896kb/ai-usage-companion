@@ -32,13 +32,25 @@ object PanelType {
         cache.getOrPut(theme) {
             when (theme) {
                 PanelTheme.ORIGINAL -> res.getFont(R.font.departure_mono)
-                // Cut from the variable weight axis rather than synthesised — Outfit
-                // ships every weight from Thin to Black in one file, and Typeface.create
-                // with a weight picks the real instance instead of smearing the outline.
-                PanelTheme.GLASS ->
-                    Typeface.create(res.getFont(R.font.outfit), GLASS_WEIGHT, false)
+                PanelTheme.GLASS -> res.getFont(R.font.outfit)
             }
         }
+
+    /**
+     * The variation axes to set on a paint, or null if the face has none.
+     *
+     * THIS IS NOT WHAT Typeface.create DOES, and the difference is the whole reason this
+     * exists. `Typeface.create(face, 400, false)` picks a weight from a FAMILY — several
+     * files, one per weight — and a variable font is one file with an axis. Handed one,
+     * it has nothing to choose between and returns the face's default instance, which
+     * for Outfit[wght] is Thin. The panel came up drawn in hairlines and the request for
+     * Regular had quietly done nothing.
+     *
+     * Set on the Paint rather than baked into the Typeface because that is where the API
+     * for it is: Paint.setFontVariationSettings drives the axis directly.
+     */
+    fun variation(theme: PanelTheme): String? =
+        if (theme == PanelTheme.GLASS) "'wght' $GLASS_WEIGHT" else null
 
     private val cache = HashMap<PanelTheme, Typeface>(2)
 
