@@ -271,18 +271,6 @@ data class PanelConfig(
     val mediaColor: Int? = null,
     val mediaArt: MediaArt = MediaArt.SQUARE,
 
-    /**
-     * The record's own colour: its grooves, its rim and its label edge.
-     *
-     * Separate from [mediaColor], which is the row's type and buttons. They were one
-     * colour and that was wrong in an obvious way once the disc got big: the row is text
-     * you read and the record is an object behind it, and a single value meant making
-     * the grooves visible and making the title legible were the same decision.
-     *
-     * Null inherits the row's colour, so a panel nobody has fiddled with still looks
-     * like one thing.
-     */
-    val vinylColor: Int? = null,
 
     /**
      * Synced lyrics, curved around the record on the media page.
@@ -329,7 +317,6 @@ data class PanelConfig(
     val cameraTint: Int get() = cameraColor ?: extrasColor
     val notificationTint: Int get() = notificationColor ?: extrasColor
     val mediaTint: Int get() = mediaColor ?: extrasColor
-    val vinylTint: Int get() = vinylColor ?: mediaTint
     val notificationGround: Int get() = notificationBg ?: background
 
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }

@@ -5628,7 +5628,10 @@ class RearDialView(context: Context) : View(context) {
         paging: Float,
     ) {
 
-        val ink = colorFor("vinyl", config.vinylTint)
+        // The record takes the media colour like everything else on the row. It used to
+        // have a colour of its own, which is a setting that existed because the record was
+        // DRAWN — and a drawn record is a shape that has to be told what colour to be.
+        val ink = colorFor("media", config.mediaTint)
         // Full strength throughout: the slide is what says it is leaving, and a record
         // that faded as it slid would read as two things happening to one object.
         fun shade(alpha: Int) = (ink and 0x00FFFFFF) or (alpha shl 24)

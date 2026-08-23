@@ -639,13 +639,6 @@ class MainActivity : ComponentActivity() {
             ) { i ->
                 write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
             }
-            // Only under VINYL: there is no record to colour otherwise, and a control
-            // that does nothing is worse than one that is absent.
-            if (config.mediaArt == dev.kb896.aiusage.data.MediaArt.VINYL) {
-                SettingsRows.colorRow(container, "  ↳ record", config.vinylTint) { c ->
-                    write { it.copy(vinylColor = c) }
-                }
-            }
             // Its own row and its own warning, because it is the only setting in this app
             // that sends anything anywhere. The note is not a disclaimer — it is the
             // information needed to make the choice, so it sits with the switch rather
