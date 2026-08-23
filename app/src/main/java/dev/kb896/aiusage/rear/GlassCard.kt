@@ -40,6 +40,23 @@ object GlassCard {
     }
 
     /**
+     * The radius a card's corner needs to sit CONCENTRIC with the screen's.
+     *
+     * The better answer to the same problem [margin] solves, and the one to reach for
+     * when the corner in question is near the display's. Pushing a card inward until its
+     * own small corner clears the cut works, but it leaves a card that is further from
+     * one edge than the others for a reason nobody can see. Give the corner a radius of
+     * screen-minus-inset instead and the two arcs share a centre exactly — the card's
+     * edge then runs parallel to the display's the whole way round the corner, at a
+     * constant inset, which is what the eye reads as "fitted" rather than "placed".
+     *
+     * Never smaller than the card's own corners: a screen barely rounded at all would
+     * otherwise give a corner sharper than the three next to it.
+     */
+    fun innerRadius(screen: Float, inset: Float, own: Float): Float =
+        (screen - inset).coerceAtLeast(own)
+
+    /**
      * The margin a card would have if the screen were square.
      *
      * Still not zero: a card flush against the edge is a strip, and the whole point of a

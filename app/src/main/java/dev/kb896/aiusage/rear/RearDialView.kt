@@ -763,17 +763,32 @@ class RearDialView(context: Context) : View(context) {
         if (!held) edge.setColorUniform("color", Glass.LIGHT_COLOR)
         edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
         edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
-        canvas.save()
-        canvas.translate(rect.left, rect.top)
         panePaint.shader = edge
         panePaint.alpha = if (held) (255 * Glass.AMBIENT_ALPHA).toInt() else 255
         panePaint.style = Paint.Style.STROKE
         val rw = if (held) Glass.THUMB_RIM_WIDTH else Glass.RIM_WIDTH
         panePaint.strokeWidth = rw
-        canvas.drawRoundRect(
-            rw / 2f, rw / 2f, w - rw / 2f, h - rw / 2f, radius, radius, panePaint,
-        )
-        canvas.restore()
+        if (shape != null) {
+            // Stroked round the shape itself, so a pane with a corner of its own — the
+            // notification card's, which follows the display's curve — is edged where it
+            // actually is rather than round the rounded rectangle it is not.
+            //
+            // THE SHADER MOVES, NOT THE CANVAS. The rim is computed in the pane's own
+            // space (0..w, 0..h) while the path is in the panel's, so translating the
+            // canvas would move both and change nothing. A local matrix on the shader
+            // offsets one without the other.
+            rimShift.setTranslate(rect.left, rect.top)
+            edge.setLocalMatrix(rimShift)
+            canvas.drawPath(shape, panePaint)
+            edge.setLocalMatrix(null)
+        } else {
+            canvas.save()
+            canvas.translate(rect.left, rect.top)
+            canvas.drawRoundRect(
+                rw / 2f, rw / 2f, w - rw / 2f, h - rw / 2f, radius, radius, panePaint,
+            )
+            canvas.restore()
+        }
         panePaint.shader = null
         panePaint.alpha = 255
         panePaint.style = Paint.Style.FILL
@@ -3931,7 +3946,9 @@ class RearDialView(context: Context) : View(context) {
         val m = miniSlide(nowMs)
         val r = GLASS_NOTICE_RADIUS
 
-        val margin = GlassCard.margin(cornerRadius(), GLASS_NOTICE_RADIUS)
+        // The design's own margin, not one inflated to clear the display's cut. The card's
+        // top-right corner follows that curve instead, which is what the inset buys.
+        val margin = GlassCard.MIN
         val cardTop = top + margin
         val cardBottom = top + NOTICE_H
         val right = Panel.WIDTH - margin
@@ -3972,11 +3989,24 @@ class RearDialView(context: Context) : View(context) {
         }
 
         // ---- the headline, over it -------------------------------------------------
+        //
+        // ITS TOP-RIGHT CORNER FOLLOWS THE DISPLAY'S. That corner is the only one of the
+        // four sitting next to the screen's own curve, and a small radius beside a large
+        // one reads as a card that has been dropped there. Given screen-minus-inset the
+        // two arcs share a centre exactly, so the card's edge runs parallel to the
+        // display's the whole way round at a constant margin — see GlassCard.
         val card = android.graphics.RectF(NOTICE_LEFT, cardTop, right, cardBottom)
-        if (!drawGlassPane(canvas, card, r, glassNoticeTint())) {
+        val tr = GlassCard.innerRadius(cornerRadius(), margin, r)
+        noticeShape.rewind()
+        noticeShape.addRoundRect(
+            card,
+            floatArrayOf(r, r, tr, tr, r, r, r, r),
+            android.graphics.Path.Direction.CW,
+        )
+        if (!drawGlassPane(canvas, card, r, glassNoticeTint(), shape = noticeShape)) {
             noticePaint.style = Paint.Style.FILL
             noticePaint.color = glassNoticeTint()
-            canvas.drawRoundRect(card, r, r, noticePaint)
+            canvas.drawPath(noticeShape, noticePaint)
         }
         canvas.save()
         canvas.clipRect(card)
@@ -4510,15 +4540,14 @@ class RearDialView(context: Context) : View(context) {
                         }
                     }
 
-                    // The thumb, riding the reading's end.
-                    //
-                    // KEPT INSIDE THE TRACK at both extremes, the way the reference pins
-                    // it: a thumb centred on the value hangs half off the panel at zero
-                    // and again at full, and a control that leaves its own track reads as
-                    // broken rather than as finished.
+                    // The thumb, CENTRED ON THE READING — see SliderThumb. It used to
+                    // be packed inside the track, which quietly compresses the whole
+                    // travel: the centre then only went from half a thumb in to half a
+                    // thumb short, so a bar at nothing showed its thumb already advanced
+                    // and one at everything showed it stopping short.
                     val tw = barH * SLIDER_THUMB_W
                     val th = barH * SLIDER_THUMB_H
-                    val cx = (barLeft + tw / 2f) + (span - tw) * f
+                    val cx = barLeft + SliderThumb.centre(span, tw, f)
                     val cy = y + barH / 2f
                     barRect.set(cx - tw / 2f, cy - th / 2f, cx + tw / 2f, cy + th / 2f)
                     if (!drawGlassPane(
@@ -4858,6 +4887,8 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private val lockThumb = android.graphics.RectF()
+    private val noticeShape = android.graphics.Path()
+    private val rimShift = android.graphics.Matrix()
 
     /**
      * The band the media row occupies: the artwork slot, plus the corner the close
@@ -6271,7 +6302,7 @@ class RearDialView(context: Context) : View(context) {
             val th = (bottom - top) * MEDIA_THUMB
             val tw = th * SLIDER_THUMB_W / SLIDER_THUMB_H
             val span = band.right - band.left
-            val cx = (band.left + tw / 2f) + (span - tw) * fraction.coerceIn(0f, 1f)
+            val cx = band.left + SliderThumb.centre(span, tw, fraction)
             val cy = (top + bottom) / 2f
             barRect.set(cx - tw / 2f, cy - th / 2f, cx + tw / 2f, cy + th / 2f)
             drawGlassPane(
