@@ -118,6 +118,123 @@ half4 main(float2 coord) {
 }"""
 
     /**
+     * The lens again, split into colours.
+     *
+     * THE HELD LOOK. In the reference component a thumb at rest is blurred and barely
+     * lensed; pressed and held, the blur goes to nothing and the lens comes fully on WITH
+     * chromatic aberration — the edges split into red through purple the way a real
+     * bevelled edge does. That is the state worth borrowing here, because these thumbs are
+     * never actually held: they are readings, and a reading that permanently looked like
+     * it was mid-gesture would be a lie, while one that permanently looks like the most
+     * solid state of the control is just what the control is.
+     *
+     * The bands are sampled at fractions of one displacement rather than as a real
+     * spectrum, which is the whole trick: seven taps, weighted so they sum back to white
+     * in the middle and separate only where the displacement is large — at the edges.
+     */
+    private const val DISPERSION = """
+uniform shader content;
+
+uniform float2 size;
+uniform float2 offset;
+uniform float4 cornerRadii;
+uniform float refractionHeight;
+uniform float refractionAmount;
+uniform float depthEffect;
+uniform float chromaticAberration;
+
+$SDF
+
+float circleMap(float x) {
+    return 1.0 - sqrt(1.0 - x * x);
+}
+
+half4 main(float2 coord) {
+    float2 halfSize = size * 0.5;
+    float2 centeredCoord = (coord + offset) - halfSize;
+    float radius = radiusAt(coord, cornerRadii);
+
+    float sd = sdRoundedRect(centeredCoord, halfSize, radius);
+    if (-sd >= refractionHeight) {
+        return content.eval(coord);
+    }
+    sd = min(sd, 0.0);
+
+    float d = circleMap(1.0 - -sd / refractionHeight) * refractionAmount;
+    float gradRadius = min(radius * 1.5, min(halfSize.x, halfSize.y));
+    float2 grad = normalize(gradSdRoundedRect(centeredCoord, halfSize, gradRadius) + depthEffect * normalize(centeredCoord));
+
+    float2 refractedCoord = coord + d * grad;
+    float dispersionIntensity = chromaticAberration * ((centeredCoord.x * centeredCoord.y) / (halfSize.x * halfSize.y));
+    float2 dispersedCoord = d * grad * dispersionIntensity;
+
+    half4 color = half4(0.0);
+
+    half4 red = content.eval(refractedCoord + dispersedCoord);
+    color.r += red.r / 3.5;
+    color.a += red.a / 7.0;
+
+    half4 orange = content.eval(refractedCoord + dispersedCoord * (2.0 / 3.0));
+    color.r += orange.r / 3.5;
+    color.g += orange.g / 7.0;
+    color.a += orange.a / 7.0;
+
+    half4 yellow = content.eval(refractedCoord + dispersedCoord * (1.0 / 3.0));
+    color.r += yellow.r / 3.5;
+    color.g += yellow.g / 3.5;
+    color.a += yellow.a / 7.0;
+
+    half4 green = content.eval(refractedCoord);
+    color.g += green.g / 3.5;
+    color.a += green.a / 7.0;
+
+    half4 cyan = content.eval(refractedCoord - dispersedCoord * (1.0 / 3.0));
+    color.g += cyan.g / 3.5;
+    color.b += cyan.b / 3.0;
+    color.a += cyan.a / 7.0;
+
+    half4 blue = content.eval(refractedCoord - dispersedCoord * (2.0 / 3.0));
+    color.b += blue.b / 3.0;
+    color.a += blue.a / 7.0;
+
+    half4 purple = content.eval(refractedCoord - dispersedCoord);
+    color.r += purple.r / 7.0;
+    color.b += purple.b / 3.0;
+    color.a += purple.a / 7.0;
+
+    return color;
+}"""
+
+    /**
+     * The ambient rim: lit on one side, dark on the other, no colour of its own.
+     *
+     * What the reference puts on a thumb while it is held, where the flat white rim goes
+     * on a card. It is the difference between a sheet of glass, which has an edge, and a
+     * bevelled object, which has a lit side and a shaded one.
+     */
+    private const val AMBIENT = """
+uniform float2 size;
+uniform float4 cornerRadii;
+uniform float angle;
+uniform float falloff;
+
+$SDF
+
+half4 main(float2 coord) {
+    float2 halfSize = size * 0.5;
+    float2 centeredCoord = coord - halfSize;
+    float radius = radiusAt(coord, cornerRadii);
+
+    float gradRadius = min(radius * 1.5, min(halfSize.x, halfSize.y));
+    float2 grad = gradSdRoundedRect(centeredCoord, halfSize, gradRadius);
+    float2 normal = float2(cos(angle), sin(angle));
+    float d = dot(grad, normal);
+    float intensity = pow(abs(d), falloff);
+    float t = step(0.0, d);
+    return half4(t, t, t, 1.0) * intensity;
+}"""
+
+    /**
      * The lit edge: a rim that catches the light from one direction.
      *
      * Drawn OVER the pane rather than being part of the refraction, because it is not
@@ -155,7 +272,9 @@ half4 main(float2 coord) {
      * is cheap, so one instance of each serves every pane.
      */
     val refraction: RuntimeShader by lazy { RuntimeShader(REFRACTION) }
+    val dispersion: RuntimeShader by lazy { RuntimeShader(DISPERSION) }
     val highlight: RuntimeShader by lazy { RuntimeShader(HIGHLIGHT) }
+    val ambient: RuntimeShader by lazy { RuntimeShader(AMBIENT) }
 
     // -- the numbers, in one place ----------------------------------------------------
 
@@ -231,4 +350,23 @@ half4 main(float2 coord) {
      * panel — at a card's opacity it disappears into the fill it is meant to be riding.
      */
     const val THUMB_TINT = 0x8CFFFFFF.toInt()
+
+    // -- the held look ----------------------------------------------------------------
+    //
+    // The reference's thumb, pressed: no blur at all, the lens fully on with chromatic
+    // aberration, and an ambient rim. Its numbers are 10dp of refraction height and 14dp
+    // of amount on a 40x24 thumb, which is 42% and 58% of the thumb's height — stated
+    // that way here so a thumb of any size is made of the same glass.
+
+    /** How deep the lens reaches into a thumb, as a fraction of its short side. */
+    const val THUMB_HEIGHT = 0.42f
+
+    /** How far the backdrop is displaced at a thumb's edge, likewise. */
+    const val THUMB_AMOUNT = 0.58f
+
+    /** How strongly a thumb's edges split into colour. One is the reference's own. */
+    const val THUMB_ABERRATION = 1f
+
+    /** How present the ambient rim is. The reference's Highlight.Ambient intensity. */
+    const val AMBIENT_ALPHA = 0.38f
 }

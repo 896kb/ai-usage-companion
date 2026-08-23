@@ -510,6 +510,8 @@ class RearDialView(context: Context) : View(context) {
      * front screen, for one.
      */
     override fun onDraw(canvas: Canvas) {
+        // Every pane this frame gets its own node — see nodePool.
+        nodesUsed = 0
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
             // POSITION, not just size. beginRecording says how big the display list is;
@@ -533,8 +535,28 @@ class RearDialView(context: Context) : View(context) {
     /** The panel behind the panes, so they have something to bend. */
     private val sceneNode = android.graphics.RenderNode("panel")
 
-    /** One pane's worth of that scene, with the lens on it. */
-    private val paneNode = android.graphics.RenderNode("glass")
+    /**
+     * Render nodes for this frame's panes, handed out in order and reused next frame.
+     *
+     * ONE SHARED NODE IS A BUG, and a quiet one. `drawRenderNode` puts a REFERENCE in the
+     * display list rather than a copy, so a node recorded again before the frame is
+     * rasterised shows its last contents at its last position — everywhere it was drawn.
+     * With one node and six bars, five of the six vanished and the sixth appeared six
+     * times in the same place. It was there from the first pane too and simply could not
+     * be seen: two notification cards over a black panel refract black either way.
+     *
+     * Nodes are cheap to keep and expensive to churn, so the pool grows to the busiest
+     * frame and then stops.
+     */
+    private val nodePool = ArrayList<android.graphics.RenderNode>(16)
+    private var nodesUsed = 0
+
+    private fun nextNode(): android.graphics.RenderNode {
+        if (nodesUsed == nodePool.size) {
+            nodePool.add(android.graphics.RenderNode("glass-${nodePool.size}"))
+        }
+        return nodePool[nodesUsed++]
+    }
 
     /**
      * The three things drawn over the panel rather than in it.
@@ -592,6 +614,28 @@ class RearDialView(context: Context) : View(context) {
         refract: Boolean = true,
         /** The lit rim. Off where the shape's own outline is not the pane's outline. */
         rim: Boolean = true,
+        /**
+         * What the pane bends, when it is not the whole panel.
+         *
+         * THE REFERENCE SLIDER DOES EXACTLY THIS. Its track is published as its own
+         * backdrop layer and the thumb's backdrop is that layer combined with the page
+         * behind — because a thumb is not lensing the wallpaper, it is lensing the track
+         * it is riding. Which also solves the ordering problem here: a bar is drawn inside
+         * the scene recording, so it can never sample the scene, but it can perfectly well
+         * sample a node holding its own track.
+         */
+        source: android.graphics.RenderNode = sceneNode,
+        /**
+         * The HELD look, for thumbs.
+         *
+         * In the reference a thumb at rest is blurred and barely lensed; pressed and held,
+         * the blur goes to nothing and the lens comes fully on with chromatic aberration
+         * and an ambient rim. That is the state borrowed here, at rest, because these
+         * thumbs are never actually held — they are readings. One that permanently looked
+         * mid-gesture would be a lie; one that permanently looks like the control's most
+         * solid state is simply what the control is.
+         */
+        held: Boolean = false,
     ): Boolean {
         val w = rect.width()
         val h = rect.height()
@@ -610,48 +654,61 @@ class RearDialView(context: Context) : View(context) {
         // to bend, and that is exactly where it happens: the notification cards and the
         // unlock slider, both overlays, both lying over the readout and the record.
         val recorder = canvas as? android.graphics.RecordingCanvas
-        if (recorder == null || !sceneNode.hasDisplayList()) {
+        if (recorder == null || !source.hasDisplayList()) {
             return drawUnbackedGlass(canvas, rect, radius, tint, shape, rim)
         }
 
+        val paneNode = nextNode()
         paneNode.setPosition(
             Math.round(rect.left), Math.round(rect.top),
             Math.round(rect.right), Math.round(rect.bottom),
         )
         val pane = paneNode.beginRecording()
         try {
-            // The scene, shifted so that the pane's top-left is this node's origin — which
-            // is the coordinate space the shader works in.
+            // The backdrop, shifted so that the pane's top-left is this node's origin —
+            // which is the coordinate space the shader works in.
             pane.translate(-rect.left, -rect.top)
-            pane.drawRenderNode(sceneNode)
+            pane.drawRenderNode(source)
         } finally {
             paneNode.endRecording()
         }
 
-        val shader = Glass.refraction
+        val short = minOf(w, h)
+        val shader = if (held) Glass.dispersion else Glass.refraction
         shader.setFloatUniform("size", w, h)
         shader.setFloatUniform("offset", 0f, 0f)
         shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
         // Depth as a fraction of the SHORT side, so a tall notice card and a long thin
         // slider are made of the same material rather than the same number of units.
-        shader.setFloatUniform("refractionHeight", minOf(w, h) * Glass.REFRACTION_HEIGHT)
-        shader.setFloatUniform("refractionAmount", Glass.REFRACTION_AMOUNT)
+        shader.setFloatUniform(
+            "refractionHeight",
+            short * if (held) Glass.THUMB_HEIGHT else Glass.REFRACTION_HEIGHT,
+        )
+        // Negative: the library negates the amount on the way in, and the sign is which
+        // way the backdrop is pushed. Positive here turns a lens into a pinch.
+        shader.setFloatUniform(
+            "refractionAmount",
+            if (held) -short * Glass.THUMB_AMOUNT else Glass.REFRACTION_AMOUNT,
+        )
         shader.setFloatUniform("depthEffect", Glass.DEPTH)
+        if (held) shader.setFloatUniform("chromaticAberration", Glass.THUMB_ABERRATION)
 
         // Blur FIRST, then bend. createChainEffect applies its second argument first, so
         // this reads backwards and is the right way round: bending a sharp backdrop
         // smears whatever it lands on into a streak, where bending a soft one is a lens.
+        // NO BLUR WHEN HELD. The reference fades its blur out as the press comes on —
+        // blur(8dp * (1 - progress)) — because a blur is what an object at rest does to
+        // what is behind it and a lens is what a held one does. Both at once is a
+        // smudge with a bevel.
         val blur = android.graphics.RenderEffect.createBlurEffect(
             Glass.BLUR, Glass.BLUR, android.graphics.Shader.TileMode.CLAMP,
         )
+        val lens = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         paneNode.setRenderEffect(
-            if (refract) {
-                android.graphics.RenderEffect.createChainEffect(
-                    android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
-                    blur,
-                )
-            } else {
-                blur
+            when {
+                held -> lens
+                refract -> android.graphics.RenderEffect.createChainEffect(lens, blur)
+                else -> blur
             },
         )
 
@@ -676,16 +733,21 @@ class RearDialView(context: Context) : View(context) {
 
         if (!rim) return true
 
-        // The lit rim, over the top and outside the clip so it is not cut in half by it.
-        val edge = Glass.highlight
+        // The rim, over the top and outside the clip so it is not cut in half by it.
+        //
+        // AMBIENT when held: lit on one side and shaded on the other, with no colour of
+        // its own. That is the difference between a sheet of glass, which has an edge,
+        // and a bevelled object, which has a lit side.
+        val edge = if (held) Glass.ambient else Glass.highlight
         edge.setFloatUniform("size", w, h)
         edge.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-        edge.setColorUniform("color", Glass.LIGHT_COLOR)
+        if (!held) edge.setColorUniform("color", Glass.LIGHT_COLOR)
         edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
         edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
         canvas.save()
         canvas.translate(rect.left, rect.top)
         panePaint.shader = edge
+        panePaint.alpha = if (held) (255 * Glass.AMBIENT_ALPHA).toInt() else 255
         panePaint.style = Paint.Style.STROKE
         panePaint.strokeWidth = Glass.RIM_WIDTH
         canvas.drawRoundRect(
@@ -695,6 +757,7 @@ class RearDialView(context: Context) : View(context) {
         )
         canvas.restore()
         panePaint.shader = null
+        panePaint.alpha = 255
         panePaint.style = Paint.Style.FILL
         return true
     }
@@ -744,6 +807,40 @@ class RearDialView(context: Context) : View(context) {
         return true
     }
 
+    /**
+     * Draw something into a node of its own, and hand the node back to be lensed.
+     *
+     * This is the reference component's `layerBackdrop`: the track publishes itself as a
+     * layer so the thumb has something local to bend. Everything drawn in [body] appears
+     * on the canvas exactly as it would have — the node is drawn straight back — and is
+     * additionally available as a backdrop.
+     *
+     * Returns null on a canvas with no render nodes, where the caller should simply draw
+     * the contents itself.
+     */
+    private inline fun localBackdrop(
+        canvas: Canvas,
+        bounds: android.graphics.RectF,
+        body: (Canvas) -> Unit,
+    ): android.graphics.RenderNode? {
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return null
+        if (bounds.width() < 1f || bounds.height() < 1f) return null
+        val backdropNode = nextNode()
+        backdropNode.setPosition(
+            Math.round(bounds.left), Math.round(bounds.top),
+            Math.round(bounds.right), Math.round(bounds.bottom),
+        )
+        val into = backdropNode.beginRecording()
+        try {
+            into.translate(-bounds.left, -bounds.top)
+            body(into)
+        } finally {
+            backdropNode.endRecording()
+        }
+        recorder.drawRenderNode(backdropNode)
+        return backdropNode
+    }
+
     private val paneClip = android.graphics.Path()
     private val panePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -777,6 +874,7 @@ class RearDialView(context: Context) : View(context) {
 
     private val discRect = android.graphics.RectF()
     private val barRect = android.graphics.RectF()
+    private val trackRect = android.graphics.RectF()
     private val shapePath = android.graphics.Path()
 
     private fun drawFrame(canvas: Canvas, overlays: Boolean) {
@@ -1766,74 +1864,87 @@ class RearDialView(context: Context) : View(context) {
             arc.alpha = (255 * visible).toInt()
         }
         if (config.theme.isGlass) {
-            drawGlassArc(canvas, scratch, startAngle, fullSweep * fraction, arc)
+            drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc)
         } else {
             canvas.drawArc(scratch, startAngle, fullSweep * fraction, false, arc)
         }
     }
 
     /**
-     * A ring as tinted glass rather than as paint.
+     * The ring, built as the same component the bars are: a track, a reading, and a glass
+     * thumb riding the end of it.
      *
-     * NO REFRACTION HERE, and that is a limit of the lens rather than a choice. The
-     * shader knows where its edges are from a rounded-rectangle distance field — that is
-     * the whole of how it works — so on an annulus it bends toward edges the shape does
-     * not have and smears instead of lensing. Handing it the ring's bounding box would be
-     * worse still: a pane of glass laid across both camera lenses.
+     * THE SAME STRATEGY, BENT ROUND A CIRCLE. A ring and a bar are the same instrument on
+     * this panel — both plot one fraction — and the reference builds that instrument one
+     * way: a muted track for the whole range, the reading drawn over it, and a small glass
+     * object at the value. There is no reason for the round one to be made of something
+     * else, and every reason for it not to be: two materials for one idea is two things to
+     * look at.
      *
-     * What is left is a blur of whatever lies under the ring and the reading's own colour
-     * at glass strength, which is what tinted glass over a dark panel actually looks like.
-     * The sheen is what sells it — a brighter line along the outer edge, where a curved
-     * piece of glass catches the light.
-     *
-     * The arc is turned into an outline first. A stroked arc is a stroke, and a stroke
-     * cannot be a clip; getFillPath is what turns one into the shape it covers.
+     * The track and the arc are published as a layer so the thumb bends THEM rather than
+     * the panel — again as the reference does. That is also what makes it work at all
+     * here: a ring is drawn inside the scene recording and can never sample the scene, but
+     * it can sample a node holding its own track.
      */
-    private fun drawGlassArc(
+    private fun drawGlassRing(
         canvas: Canvas,
         oval: android.graphics.RectF,
         startAngle: Float,
-        sweep: Float,
+        fullSweep: Float,
+        fraction: Float,
         paint: Paint,
     ) {
-        if (Math.abs(sweep) < 0.5f) return
-        shapePath.rewind()
-        shapePath.addArc(oval, startAngle, sweep)
-        arcOutline.rewind()
-        paint.getFillPath(shapePath, arcOutline)
-        arcOutline.computeBounds(arcBounds, true)
+        val reading = paint.color
+        val alpha = paint.alpha
+        val stroke = paint.strokeWidth
+        val f = fraction.coerceIn(0f, 1f)
 
-        val tint = (paint.color and 0x00FFFFFF) or
-            ((Glass.READING_ALPHA * paint.alpha / 255) shl 24)
-        val drawn = drawGlassPane(
-            canvas, arcBounds, 0f, tint,
-            shape = arcOutline, refract = false, rim = false,
+        // The layer covers the ring plus its stroke and the thumb standing proud of it.
+        val pad = stroke / 2f + stroke * RING_THUMB
+        arcBounds.set(
+            oval.left - pad, oval.top - pad, oval.right + pad, oval.bottom + pad,
         )
-        if (!drawn) {
-            canvas.drawArc(oval, startAngle, sweep, false, paint)
-            return
+        val layer = localBackdrop(canvas, arcBounds) { into ->
+            paint.color = Panel.Palette.TRACK
+            paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
+            into.drawArc(oval, startAngle, fullSweep, false, paint)
+            paint.color = reading
+            paint.alpha = alpha
+            if (Math.abs(fullSweep * f) > 0.4f) {
+                into.drawArc(oval, startAngle, fullSweep * f, false, paint)
+            }
+        }
+        if (layer == null) {
+            paint.color = Panel.Palette.TRACK
+            paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
+            canvas.drawArc(oval, startAngle, fullSweep, false, paint)
+            paint.color = reading
+            paint.alpha = alpha
+            canvas.drawArc(oval, startAngle, fullSweep * f, false, paint)
         }
 
-        // The sheen, along the OUTER edge only. A ring lit from every side is a tube;
-        // lit along one edge it is a curved surface with a light somewhere.
-        val was = paint.strokeWidth
-        val wasColor = paint.color
-        val wasAlpha = paint.alpha
-        val inset = was / 2f - Glass.SHEEN_WIDTH / 2f
-        sheenOval.set(
-            oval.left - inset, oval.top - inset, oval.right + inset, oval.bottom + inset,
-        )
-        paint.strokeWidth = Glass.SHEEN_WIDTH
-        paint.color = Glass.LIGHT_COLOR
-        canvas.drawArc(sheenOval, startAngle, sweep, false, paint)
-        paint.strokeWidth = was
-        paint.color = wasColor
-        paint.alpha = wasAlpha
+        // The thumb, on the circumference at the reading's end.
+        val angle = Math.toRadians((startAngle + fullSweep * f).toDouble())
+        val r = (oval.width() / 2f)
+        val cx = oval.centerX() + (Math.cos(angle) * r).toFloat()
+        val cy = oval.centerY() + (Math.sin(angle) * r).toFloat()
+        val tr = stroke * RING_THUMB / 2f
+        discRect.set(cx - tr, cy - tr, cx + tr, cy + tr)
+        if (!drawGlassPane(
+                canvas, discRect, tr, Glass.THUMB_TINT,
+                source = layer ?: sceneNode, held = true,
+            )
+        ) {
+            paint.color = reading
+            canvas.drawArc(oval, startAngle, fullSweep * f, false, paint)
+        }
+        paint.color = reading
+        paint.alpha = alpha
+        paint.strokeWidth = stroke
     }
 
     private val arcOutline = android.graphics.Path()
     private val arcBounds = android.graphics.RectF()
-    private val sheenOval = android.graphics.RectF()
 
     /** Drawn after the rings, inside onDraw: bars, the reset footer and the mark. */
     private fun drawCanvasSide(canvas: Canvas, dx: Float, dy: Float) {
@@ -4269,11 +4380,7 @@ class RearDialView(context: Context) : View(context) {
                 val trackH = if (glassBar) barH * SLIDER_TRACK else barH
                 val trackTop = y + (barH - trackH) / 2f
                 val barR = trackH / 2f
-                if (glassBar) {
-                    barRect.set(barLeft, trackTop, barRight, trackTop + trackH)
-                    barTrack.color = Panel.Palette.TRACK
-                    canvas.drawRoundRect(barRect, barR, barR, barTrack)
-                } else {
+                if (!glassBar) {
                     canvas.drawRect(barLeft, y, barRight, y + barH, barTrack)
                 }
                 // EVERY bar is utilisation, including the session row. It used to plot
@@ -4313,11 +4420,31 @@ class RearDialView(context: Context) : View(context) {
                     val span = barRight - barLeft
                     val f = fraction.coerceIn(0f, 1f)
                     val end = barLeft + span * f
-                    // The reading, filling the track up to the thumb.
-                    if (end > barLeft + 0.5f) {
-                        barRect.set(barLeft, trackTop, end, trackTop + trackH)
-                        canvas.drawRoundRect(barRect, barR, barR, barFill)
+                    val reading = barFill.color
+
+                    // The track and the reading, published as a layer of their own so the
+                    // thumb has something local to bend — see localBackdrop, and the
+                    // reference component, which does exactly this.
+                    trackRect.set(barLeft, trackTop, barRight, trackTop + trackH)
+                    val layer = localBackdrop(canvas, trackRect) { into ->
+                        barTrack.color = Panel.Palette.TRACK
+                        into.drawRoundRect(trackRect, barR, barR, barTrack)
+                        if (end > barLeft + 0.5f) {
+                            barRect.set(barLeft, trackTop, end, trackTop + trackH)
+                            barFill.color = reading
+                            into.drawRoundRect(barRect, barR, barR, barFill)
+                        }
                     }
+                    if (layer == null) {
+                        barTrack.color = Panel.Palette.TRACK
+                        canvas.drawRoundRect(trackRect, barR, barR, barTrack)
+                        if (end > barLeft + 0.5f) {
+                            barRect.set(barLeft, trackTop, end, trackTop + trackH)
+                            barFill.color = reading
+                            canvas.drawRoundRect(barRect, barR, barR, barFill)
+                        }
+                    }
+
                     // The thumb, riding the reading's end.
                     //
                     // KEPT INSIDE THE TRACK at both extremes, the way the reference pins
@@ -4329,7 +4456,12 @@ class RearDialView(context: Context) : View(context) {
                     val cx = (barLeft + tw / 2f) + (span - tw) * f
                     val cy = y + barH / 2f
                     barRect.set(cx - tw / 2f, cy - th / 2f, cx + tw / 2f, cy + th / 2f)
-                    if (!drawGlassPane(canvas, barRect, th / 2f, Glass.THUMB_TINT)) {
+                    if (!drawGlassPane(
+                            canvas, barRect, th / 2f, Glass.THUMB_TINT,
+                            source = layer ?: sceneNode, held = true,
+                        )
+                    ) {
+                        barFill.color = reading
                         canvas.drawRoundRect(barRect, th / 2f, th / 2f, barFill)
                     }
                 } else canvas.drawRect(
@@ -7078,6 +7210,18 @@ class RearDialView(context: Context) : View(context) {
         /** The thumb, as multiples of the row's height. */
         private const val SLIDER_THUMB_H = 1.05f
         private const val SLIDER_THUMB_W = 1.6f
+
+        /**
+         * The ring's thumb, as a multiple of the ring's own stroke.
+         *
+         * Above one, so it stands proud of the track the way the bar's does. The ring is
+         * drawn around a camera lens and its stroke is 25 units, so this is a disc of
+         * about 35 — a reading you can find at a glance from across a room.
+         */
+        private const val RING_THUMB = 1.4f
+
+        /** How present the ring's unfilled track is. Muted, like the reference's. */
+        private const val RING_TRACK_ALPHA = 0.36f
 
         private const val EXTRA_ICON_H = 20f
 
