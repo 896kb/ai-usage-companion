@@ -1780,6 +1780,7 @@ class RearDialView(context: Context) : View(context) {
     private val ringLensCache = HashMap<Long, android.graphics.RenderEffect>()
 
     private val cardRect = android.graphics.RectF()
+    private val extrasRect = android.graphics.RectF()
 
     /** A pane's rect in root coordinates, for sampling a root-space backdrop. */
     private val paneAbs = android.graphics.RectF()
@@ -5243,8 +5244,95 @@ class RearDialView(context: Context) : View(context) {
         return text.take(n) + "…"
     }
 
+    /**
+     * A sheet of glass behind something, bending what is behind the readout.
+     *
+     * The account cards' own material and the buttons' lens. [screenCorner] gives the
+     * top-right corner the display's own curve less the margin, so the two arcs share a
+     * centre and the card's edge runs parallel to the screen's — the notification cards
+     * learned this first, and any card that reaches the corner needs it or it reads as
+     * something dropped there rather than something fitted.
+     */
+    private fun glassCard(
+        canvas: Canvas,
+        rect: android.graphics.RectF,
+        radius: Float = CARD_RADIUS,
+        screenCorner: Boolean = false,
+    ) {
+        if (!config.theme.isGlass) return
+        var shape: android.graphics.Path? = null
+        if (screenCorner) {
+            val tr = GlassCard.innerRadius(cornerRadius(), Panel.WIDTH - rect.right, radius)
+            cardShape.rewind()
+            cardShape.addRoundRect(
+                rect,
+                floatArrayOf(radius, radius, tr, tr, radius, radius, radius, radius),
+                android.graphics.Path.Direction.CW,
+            )
+            shape = cardShape
+        }
+        drawGlassPane(
+            canvas, rect, radius, clearReactive(rect), shape = shape,
+            source = groundNode, held = true, aberration = Glass.BUTTON_ABERRATION,
+        )
+    }
+
+    private val cardShape = android.graphics.Path()
+
+    /**
+     * The corner block's box, or false when nothing is in it.
+     *
+     * Worked out in one place because two things need it: the block draws it, and the
+     * masthead has to stop short of it. A card cut for the largest possible block would
+     * leave a pane of empty glass under a single clock, so the count decides the height
+     * and the widest line the width.
+     */
+    private fun extrasCard(out: android.graphics.RectF): Boolean {
+        val lines = (if (config.showClock) 1 else 0) +
+            (if (config.showDate) 1 else 0) +
+            (if (config.showBattery) 1 else 0)
+        if (!config.theme.isGlass || lines == 0) return false
+        val was = extras.textSize
+        extras.textSize = typed(18f)
+        var widest = 0f
+        if (config.showClock) widest = maxOf(widest, extras.measureText("00:00"))
+        if (config.showDate) widest = maxOf(widest, extras.measureText("WED 00"))
+        if (config.showBattery) widest = maxOf(widest, extras.measureText("100%"))
+        extras.textSize = was
+        val top = TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H - EXTRA_PAD_Y
+        out.set(
+            CONTENT_RIGHT + EXTRA_PAD_X -
+                (EXTRA_PAD_X * 2f + EXTRA_ICON_H + EXTRA_ICON_GAP + widest),
+            top,
+            CONTENT_RIGHT + EXTRA_PAD_X,
+            top + EXTRA_ICON_H + (lines - 1) * EXTRA_LINE_H + EXTRA_PAD_Y * 2f,
+        )
+        return true
+    }
+
     private fun drawExtras(canvas: Canvas) {
-        var baseline = TITLE_BASELINE
+        // ---- the card, sized to whichever of the three are on ------------------------
+        //
+        // A block of one line and a block of three are different objects, and a card cut
+        // for the largest of them would leave a pane of empty glass under a single clock.
+        // The count decides the height; the widest line decides the width.
+        // LEFT-ALIGNED INSIDE THEIR OWN BOX, not right-aligned against the panel.
+        //
+        // Right-aligned, three lines of different lengths leave three different left
+        // edges — which nothing notices while the block floats on the panel, and which is
+        // the first thing you see once it has a card around it: the type drifts away from
+        // the edge it is supposed to be sitting against. The icons keep their own column
+        // on the right, so both edges of the block are straight.
+        val boxed = extrasCard(cardRect)
+        if (boxed) glassCard(canvas, cardRect, screenCorner = true)
+        // THE ICON LEADS. Left-aligned rows read left to right, so the mark that says what
+        // the number IS should arrive before the number does — trailing it, the eye has to
+        // read the value, then check what it was, then go back.
+        val iconLeft = if (boxed) cardRect.left + EXTRA_PAD_X else CONTENT_RIGHT - EXTRA_ICON_H
+        val textLeft = iconLeft + EXTRA_ICON_H + EXTRA_ICON_GAP
+        val align = if (boxed) Paint.Align.LEFT else Paint.Align.RIGHT
+
+        var baseline = TITLE_BASELINE - EXTRA_LIFT
         if (config.showClock) {
             // Each extra takes its own colour, eased separately. They shared one until
             // the panel had three of them, at which point "the extras colour" stopped
@@ -5260,10 +5348,10 @@ class RearDialView(context: Context) : View(context) {
             // Icon on the RIGHT, text to its left. Both icons then share one edge at
             // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
             // ending wherever its own text happens to stop.
-            drawIcon(canvas, PanelIcons.CLOCK, CONTENT_RIGHT - EXTRA_ICON_H,
+            drawIcon(canvas, PanelIcons.CLOCK, iconLeft,
                 baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            extras.textAlign = Paint.Align.RIGHT
-            canvas.drawText(text, CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
+            extras.textAlign = align
+            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
             baseline += EXTRA_LINE_H
         }
         if (config.showDate) {
@@ -5281,10 +5369,10 @@ class RearDialView(context: Context) : View(context) {
             // does not — but a column of three rows where one lacks the mark the other
             // two share reads as a rendering fault, and the alignment is worth more here
             // than the argument against ornament.
-            drawIcon(canvas, PanelIcons.CALENDAR, CONTENT_RIGHT - EXTRA_ICON_H,
+            drawIcon(canvas, PanelIcons.CALENDAR, iconLeft,
                 baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            extras.textAlign = Paint.Align.RIGHT
-            canvas.drawText(text, CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
+            extras.textAlign = align
+            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
             baseline += EXTRA_LINE_H
         }
         if (config.showBattery) {
@@ -5295,10 +5383,10 @@ class RearDialView(context: Context) : View(context) {
             // not own. A sticky read is a snapshot with nothing to leak.
             val level = batteryPercent()
             if (level >= 0) {
-                val iconX = CONTENT_RIGHT - EXTRA_ICON_H
+                val iconX = iconLeft
                 val iconY = baseline - EXTRA_ICON_H + 2f
-                extras.textAlign = Paint.Align.RIGHT
-                canvas.drawText("$level%", iconX - 8f, baseline, extras)
+                extras.textAlign = align
+                canvas.drawText("$level%", if (boxed) textLeft else iconX - 8f, baseline, extras)
                 // The charging glyph replaces the outline entirely rather than being
                 // overlaid: it already contains the bolt, and two glyphs stacked would
                 // read as one badly drawn one.
@@ -5492,6 +5580,30 @@ class RearDialView(context: Context) : View(context) {
      * so the half-height used here is half the CAP height and the descenders are ignored.
      * A title centred on its line box sits visibly low, every time.
      */
+    /**
+     * Where the masthead's centre is.
+     *
+     * The bar column's middle until the corner block is there, and then the middle of
+     * what is left of the row. Centred on the column it reached under the clock — close
+     * enough to look accidental before either had a card, and plainly wrong once both
+     * did. Centring it on the space it actually has is the same idea the block above the
+     * first card uses: put a thing in the middle of its own region, not at an offset from
+     * somewhere else.
+     */
+    private fun titleMid(w: Float): Float {
+        val mid = (BAR_LEFT + BAR_RIGHT) / 2f
+        if (!extrasCard(extrasRect)) return mid
+        // PUSHED LEFT ONLY AS FAR AS IT HAS TO BE.
+        //
+        // The first attempt centred the masthead in the space beside the corner block,
+        // which moved it the WRONG WAY: that space is wider than the bar column, so
+        // centring in it shifted the title right, into the very thing it was supposed to
+        // clear. What it actually needs is its own column's centre, and to give ground
+        // only when the block would otherwise be underneath it.
+        val limit = extrasRect.left - CARD_GAP - w / 2f - TITLE_PAD_X
+        return minOf(mid, limit)
+    }
+
     private fun titleBaseline(): Float {
         val band = firstCardTop
         if (band <= 0f) return TITLE_BASELINE
@@ -5511,15 +5623,48 @@ class RearDialView(context: Context) : View(context) {
         // which worked and was not wanted: a masthead is the one thing on this panel that
         // has to be read at a glance from across a room, and a lens over a dark panel is
         // dark. Glass is for the things you look past; this is a thing you look at.
+        // ---- its own card -----------------------------------------------------------
+        //
+        // Sized to the title rather than to the column: the masthead is free text and a
+        // card cut to the bar column would be a wide empty pane behind a short word. The
+        // corner is not the screen's — this one sits in the middle of the panel and has
+        // the display's curve nowhere near it.
+        val baseline = titleBaseline()
+        if (config.theme.isGlass) {
+            val w = title.measureText(config.title)
+            val mid = titleMid(w)
+            // STOPPING SHORT OF THE CORNER BLOCK. The masthead is centred on the bar
+            // column and the clock is in the corner, and until both had cards the two
+            // merely came close; two overlapping sheets of glass make it obvious, and
+            // they double their own tint where they cross.
+            var rightEdge = mid + w / 2f + TITLE_PAD_X
+            if (extrasCard(extrasRect)) {
+                rightEdge = minOf(rightEdge, extrasRect.left - CARD_GAP)
+            }
+            // THE SAME HEIGHT AS THE BLOCK BESIDE IT. Two cards on one row at two
+            // heights read as two unrelated things that happen to be level; matched, they
+            // read as one band of furniture. The corner block is the taller of the two and
+            // is sized by its contents, so it sets the height and the masthead takes it —
+            // centred on the title's own middle, so the type stays where it was.
+            val mine = title.textSize * TITLE_OPTICAL * 2f + TITLE_PAD_Y * 2f
+            val h = if (extrasCard(extrasRect)) maxOf(mine, extrasRect.height()) else mine
+            val centreY = baseline - title.textSize * TITLE_OPTICAL
+            cardRect.set(
+                mid - w / 2f - TITLE_PAD_X,
+                centreY - h / 2f,
+                rightEdge,
+                centreY + h / 2f,
+            )
+            if (cardRect.width() > CARD_RADIUS * 2f) glassCard(canvas, cardRect)
+        }
+
         title.color = colorFor("title", config.titleColor)
         // CENTRED IN THE BAND IT HAS, rather than pinned to a baseline measured from the
         // top of the panel. Once the accounts are on cards, the space above the first one
         // is a real region with two edges, and type that sits in the middle of it looks
         // placed where type at a fixed offset looks like it happens to be there. Falls
         // back to the fixed baseline when there are no cards to measure against.
-        canvas.drawText(
-            config.title, (BAR_LEFT + BAR_RIGHT) / 2f, titleBaseline(), title,
-        )
+        canvas.drawText(config.title, titleMid(title.measureText(config.title)), baseline, title)
     }
 
 
@@ -5608,8 +5753,16 @@ class RearDialView(context: Context) : View(context) {
         // baseline lands exactly on the first account heading — the two collided by
         // arithmetic rather than by accident, so the region has to know they are there.
         val extraLines = (if (config.showClock) 1 else 0) + (if (config.showBattery) 1 else 0)
+        // A LITTLE FURTHER DOWN, for air under the masthead now that it has a card.
+        //
+        // Safe to move by construction rather than by measurement: the gap below is not a
+        // constant, it is whatever is left of the region divided between the blocks, so
+        // pushing the top down takes the space out of the gaps and the last block still
+        // ends exactly where it did — clear of the artwork slot and the unlock slider,
+        // which is what regionBottom is measured from.
         val regionTop = if (onlyAccount != null) SINGLE_ACCOUNT_TOP
-            else TITLE_BASELINE + 26f + (extraLines - 1).coerceAtLeast(0) * EXTRA_LINE_H
+            else TITLE_BASELINE + 26f + BLOCKS_DROP +
+                (extraLines - 1).coerceAtLeast(0) * EXTRA_LINE_H
         // Without a masthead above or a mark below, one account has the whole height.
         val regionBottom = if (onlyAccount != null) Panel.HEIGHT - SINGLE_ACCOUNT_TOP
             else Panel.HEIGHT - MARK_BOTTOM - MARK_H
@@ -6653,6 +6806,27 @@ class RearDialView(context: Context) : View(context) {
         val lift = lockLift()
         val titleBase = MediaPage.TITLE_BASELINE - lift
         val artistBase = MediaPage.ARTIST_BASELINE - lift
+
+        // A card behind the name, on both pages, for the same reason the accounts have
+        // one: over a photograph the words have nothing to sit on. Sized to the wider of
+        // the two lines rather than to the column — a fixed-width pane behind a short
+        // title is a pane with a title in the corner of it.
+        if (config.theme.isGlass) {
+            extras.textSize = typed(MediaPage.TITLE_SIZE)
+            var w = extras.measureText(m.title)
+            if (m.artist.isNotBlank()) {
+                extras.textSize = typed(MediaPage.ARTIST_SIZE)
+                w = maxOf(w, extras.measureText(m.artist))
+            }
+            w = minOf(w, PAGE_TEXT_WIDTH)
+            cardRect.set(
+                cx - w / 2f - TRACK_PAD_X,
+                titleBase - MediaPage.TITLE_SIZE - TRACK_PAD_Y,
+                cx + w / 2f + TRACK_PAD_X,
+                (if (m.artist.isNotBlank()) artistBase else titleBase) + TRACK_PAD_Y,
+            )
+            glassCard(canvas, cardRect)
+        }
 
         extras.textSize = typed(MediaPage.TITLE_SIZE)
         extras.color = shade(tint, 0xFF)
@@ -8998,6 +9172,12 @@ class RearDialView(context: Context) : View(context) {
         /** Its corner. The notification cards' own, so one panel has one radius. */
         private const val CARD_RADIUS = 18f
 
+        /** Air between two cards that would otherwise touch. */
+        private const val CARD_GAP = 8f
+
+        /** How much further down the accounts start, to give the masthead room. */
+        private const val BLOCKS_DROP = 16f
+
         // -- the glass bars, built as sliders -------------------------------------------
         //
         // Proportions taken from the reference component rather than invented: its track
@@ -9041,6 +9221,16 @@ class RearDialView(context: Context) : View(context) {
 
         private const val EXTRA_LINE_H = 26f
 
+        /** How far the corner block sits above where it used to. */
+        private const val EXTRA_LIFT = 6f
+
+        /** Air inside its card. */
+        private const val EXTRA_PAD_X = 12f
+        private const val EXTRA_PAD_Y = 8f
+
+        /** Between an icon and the text it introduces. */
+        private const val EXTRA_ICON_GAP = 8f
+
         /** Breathing room above and below a single-account preview, replacing the
          *  masthead and the maker's mark it does not draw. */
         private const val SINGLE_ACCOUNT_TOP = 24f
@@ -9049,6 +9239,14 @@ class RearDialView(context: Context) : View(context) {
 
         /** Half a cap height, near enough, for centring type on its ink. */
         private const val TITLE_OPTICAL = 0.36f
+
+        /** Air inside the masthead's card. */
+        private const val TITLE_PAD_X = 18f
+        private const val TITLE_PAD_Y = 9f
+
+        /** And inside the one behind a track's name. */
+        private const val TRACK_PAD_X = 14f
+        private const val TRACK_PAD_Y = 8f
 /**
          * How long a value takes to travel from its old reading to its new one.
          *
