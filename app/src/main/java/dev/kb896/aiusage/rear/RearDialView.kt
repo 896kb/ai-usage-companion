@@ -1633,13 +1633,14 @@ class RearDialView(context: Context) : View(context) {
         /**
          * How present the button is, for a page that is still arriving.
          *
-         * The glass is drawn later than the glyph — see below — so it does not inherit
-         * whatever the caller was fading. Without this the disc appeared at full strength
-         * the instant the media page began to scroll in, while the mark inside it faded
-         * up underneath: a button that arrives before its own icon.
+         * Both the disc and its mark are laid down in the overlay pass, so neither
+         * inherits whatever the caller was fading when it asked for the button — this is
+         * the only thing that reaches them. It now covers the pair: they are drawn into
+         * one layer at this alpha, which is what stops a disc arriving at full strength
+         * ahead of the icon that belongs to it.
          */
         alpha: Float = 1f,
-        glyph: (Canvas) -> Unit,
+        noinline glyph: (Canvas) -> Unit,
     ) {
         if (!config.theme.isGlass) {
             glyph(canvas)
@@ -1647,20 +1648,22 @@ class RearDialView(context: Context) : View(context) {
         }
         val r = discH * DISC_RADIUS
 
-        // THE GLYPH GOES DOWN NOW; THE GLASS GOES OVER IT LATER.
+        // THE GLYPH GOES OVER THE GLASS, and it used to go under it.
         //
-        // Giving the button a layer holding only its glyph was not enough, and the reason
-        // is worth keeping: the lens bends a band around the pane's EDGE, and around a
-        // 27-unit disc that band is the outer 21 — which for a glyph-only layer is empty.
-        // Bending nothing shows nothing, so the button had a lens with stronger settings
-        // than any thumb and looked like it had none at all.
+        // What a button bends is what it is sitting ON — the scene, which is being
+        // recorded right now — so the disc still cannot be drawn until that recording is
+        // finished and can be sampled. That much is unchanged, and it is why a button's
+        // glass is deferred at all: a layer holding only the glyph gave the lens nothing
+        // to bend, because the lens works a band around the pane's EDGE and around a
+        // 27-unit disc that band is the outer 21, which on a glyph-only layer is empty.
         //
-        // What a button needs to bend is what a button is sitting ON. That is the scene,
-        // and the scene is being recorded right now — so the glyph is drawn here, its
-        // place is noted, and the lens is laid over it once the scene is finished and can
-        // be sampled. The mark ends up UNDER the glass, which is where a mark on a button
-        // belongs, and the panel behind it bends round the rim.
-        glyph(canvas)
+        // What changed is which side of that glass the mark ends up on. Drawn into the
+        // scene it went under the pane AND under the pane's tint, so the tint recoloured
+        // it — and once the luminance was corrected to oppose its backdrop, that tint
+        // became a white wash over a dark panel instead of a black one, which is when it
+        // stopped being subtle. A mark under glass is a nice idea about buttons and a bad
+        // one about legibility. The glyph is carried with the disc now and laid down
+        // straight after it, the way the dial's own labels are — see deferOver.
         if (alpha <= 0.004f) return
         discRect.set(cx - r, cy - r, cx + r, cy + r)
         val m = canvas.getMatrix()
@@ -1682,15 +1685,27 @@ class RearDialView(context: Context) : View(context) {
                     pendingRect.right, pendingRect.bottom),
                 clip,
                 alpha,
+                android.graphics.Matrix(m),
+                glyph,
             ),
         )
     }
 
-    /** A button whose glyph is down and whose glass is not yet. See glassButton. */
+    /** A button whose glass and mark are both still to be laid down. See glassButton. */
     private class PendingButton(
         val rect: android.graphics.RectF,
         val clip: android.graphics.RectF,
         val alpha: Float,
+        /**
+         * The transform the glyph was going to be drawn under.
+         *
+         * Kept for the same reason [rect] is mapped rather than recomputed: the offsets
+         * in play are scattered across half a dozen locals — the drift, the page scroll,
+         * the notice push, the media row's own drum — and a sum copied out of them is a
+         * sum that will drift from them.
+         */
+        val matrix: android.graphics.Matrix,
+        val glyph: (Canvas) -> Unit,
     )
 
     /**
@@ -1721,6 +1736,13 @@ class RearDialView(context: Context) : View(context) {
                 canvas, b.rect, b.rect.height() / 2f, clearReactive(b.rect), held = true,
                 aberration = Glass.BUTTON_ABERRATION,
             )
+            // AND THE MARK ON TOP OF IT, under the transform it was noted with, inside
+            // the same fading layer so the two arrive together rather than a disc showing
+            // up ahead of its own icon.
+            canvas.save()
+            canvas.concat(b.matrix)
+            b.glyph(canvas)
+            canvas.restore()
             if (fading) canvas.restore()
             canvas.restore()
         }
