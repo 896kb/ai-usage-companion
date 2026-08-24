@@ -2660,14 +2660,23 @@ class RearDialView(context: Context) : View(context) {
         // one is a vessel whose contents are the point, and a lit outline around a glass
         // of moving liquid is a second thing competing with the first. The liquid's own
         // surface and the refraction at the walls say where the glass is.
-        // THE CARD'S OWN DIM. The cell used to carry a much fainter tint of its own, set
-        // when the panel behind it was black and a heavier one would have muted the
-        // liquid. It does not mute it — the liquid is drawn over this, at its own alpha —
-        // and two glass surfaces on one panel at two different weights read as two
-        // materials. One dim, reacting to the same backdrop, in both places.
+        // NO TINT OF ITS OWN. It wore the notification card's dim for a while, on the
+        // reasoning that two glass surfaces at two different weights read as two
+        // materials — which is true of two CARDS, and this is not one. A notification is
+        // a sheet you read type off, and it needs a colour so the type has something to
+        // sit against. A cell is a vessel: the whole point of it is that you see what is
+        // inside, and the dim it borrowed came from the notification's ground colour,
+        // which is black unless the user has been into the settings to say otherwise. So
+        // the cell was a black-tinted glass by default, with coloured liquid behind the
+        // tint.
+        //
+        // Clear, then — and clear here means the same thing it means on the buttons: no
+        // colour at all through the middle of the range, and a tint only at the two ends
+        // where clear glass genuinely stops reading. The backdrop is the only thing that
+        // gives it one. See clearReactive, which exists for exactly this.
         val paned = config.theme.isGlass &&
             drawGlassPane(
-                canvas, chargeRect, r, reactive(glassNoticeTint(), chargeRect), rim = false,
+                canvas, chargeRect, r, clearReactive(chargeRect), rim = false,
             )
 
         canvas.save()
