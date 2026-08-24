@@ -5347,8 +5347,14 @@ class RearDialView(context: Context) : View(context) {
         rect: android.graphics.RectF,
         radius: Float = CARD_RADIUS,
         screenCorner: Boolean = false,
+        /** How present it is, for a page still arriving. See the transport buttons. */
+        alpha: Float = 1f,
     ) {
-        if (!config.theme.isGlass) return
+        if (!config.theme.isGlass || alpha <= 0.004f) return
+        if (alpha < 0.999f) {
+            fading(canvas, rect, alpha) { glassCard(canvas, rect, radius, screenCorner) }
+            return
+        }
         var shape: android.graphics.Path? = null
         if (screenCorner) {
             val tr = GlassCard.innerRadius(cornerRadius(), Panel.WIDTH - rect.right, radius)
@@ -6954,7 +6960,7 @@ class RearDialView(context: Context) : View(context) {
                 cx + w / 2f + TRACK_PAD_X,
                 (if (m.artist.isNotBlank()) artistBase else titleBase) + TRACK_PAD_Y,
             )
-            glassCard(canvas, cardRect)
+            glassCard(canvas, cardRect, alpha = paging)
         }
 
         extras.textSize = typed(MediaPage.TITLE_SIZE)
@@ -7105,7 +7111,11 @@ class RearDialView(context: Context) : View(context) {
         val mh = MediaPage.MUTE_H
         val speakerW = mh * speaker.aspect
 
-        extras.color = shade(tint, if (isMuted) MediaLayout.ARTIST_ALPHA else 0xFF)
+        extras.color = shade(
+            tint,
+            ((if (isMuted) MediaLayout.ARTIST_ALPHA else 0xFF) * paging).toInt()
+                .coerceIn(0, 255),
+        )
         canvas.save()
         // Turned to the arc's own angle, so the speaker points out of the ring wherever
         // it has got to. The glyph's natural direction is +x, which is the angle's own
@@ -7245,9 +7255,13 @@ class RearDialView(context: Context) : View(context) {
         // the square. That was invisible while the bubble sat on the rotation's own pivot;
         // centred anywhere else it would swing the glass off the speaker and breathe with
         // the angle. Placed unrotated, it is simply a circle where the circle belongs.
+        // ON THE SCROLL, like the transport it sits beside. The speaker belongs to the
+        // media page and was the one control still switching on when the page arrived
+        // rather than coming in with it.
         glassButton(
             canvas, bubbleX, bubbleY, mh,
             discH = maxOf(mh, need / DISC_RADIUS),
+            alpha = paging,
         ) { }
         canvas.restore()
 
