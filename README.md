@@ -1103,7 +1103,12 @@ phone, understanding all of the above.
 
 1. **Get Shizuku running** — see [above](#shizuku-and-why-you-cannot-skip-it).
 2. **Install the app.** Download the APK from
-   [Releases](../../releases) and install it.
+   [Releases](https://gitlab.com/896kb/ai-usage-companion/-/releases) and install it.
+
+   Releases are cut from **version tags**, not from pushes to `main` — see
+   [`.gitlab-ci.yml`](.gitlab-ci.yml). Pushing to `main` runs the tests and builds an
+   unsigned release APK so a broken release build is caught on the branch; the signed APK
+   and the release itself only happen when a tag goes up.
 
    Or build it yourself — the APK is nothing special, and you may reasonably prefer not
    to trust a stranger's binary with an API token:
