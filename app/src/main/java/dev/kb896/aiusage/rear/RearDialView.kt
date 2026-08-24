@@ -689,23 +689,60 @@ class RearDialView(context: Context) : View(context) {
      * wheel keeps turning the old one until it has. The two become a sequence, which is
      * what it looks like anyway when it is done properly.
      */
-    private class HeldText(var target: String, var shown: String, var at: Long)
+    private class HeldText(
+        var target: String,
+        var shown: String,
+        var at: Long,
+        var growing: Boolean,
+        var holdWidth: Float,
+    )
 
     private val heldTexts = HashMap<String, HeldText>()
 
-    private fun afterResize(key: String, text: String): String {
-        val h = heldTexts.getOrPut(key) { HeldText(text, text, 0L) }
+    /** The width the card should be at right now, set by [sequenced]. */
+    private var sequencedWidth = 0f
+
+    /**
+     * The name to draw, and — through [sequencedWidth] — the width to draw its card at.
+     *
+     * WHICHEVER IS BIGGER GOES FIRST, and that is the whole rule. The box has to be large
+     * enough for whatever text is in it at every instant, so the order depends on which
+     * way it is going:
+     *
+     *   growing — the new name is longer, so the box opens first and the wheel turns into
+     *             the room it has made.
+     *   shrinking — the OLD name is longer, so the wheel turns first and the box closes
+     *             behind it, once there is nothing left needing the space.
+     *
+     * Doing it one way for both looked right in one direction and wrong in the other: a
+     * box that shrinks before the words have gone clips the very text it is holding.
+     */
+    private fun sequenced(key: String, text: String, width: (String) -> Float): String {
+        val h = heldTexts.getOrPut(key) { HeldText(text, text, 0L, false, width(text)) }
         if (text != h.target) {
+            val old = width(h.shown)
+            h.growing = width(text) > old
             h.target = text
             h.at = frameNowMs
+            if (!h.growing) {
+                // The words leave now; the box keeps their room until they have.
+                h.shown = text
+                h.holdWidth = old
+            }
         }
         if (h.at != 0L) {
-            if (frameNowMs - h.at >= CARD_GROW_MS) {
+            val wait = if (h.growing) CARD_GROW_MS else WHEEL_MS
+            if (frameNowMs - h.at >= wait) {
                 h.shown = h.target
                 h.at = 0L
             } else {
                 animating = true
             }
+        }
+        sequencedWidth = when {
+            h.at == 0L -> width(h.shown)
+            h.growing -> width(h.target)
+            else -> h.holdWidth
         }
         return h.shown
     }
@@ -6892,13 +6929,17 @@ class RearDialView(context: Context) : View(context) {
         // one: over a photograph the words have nothing to sit on. Sized to the wider of
         // the two lines rather than to the column — a fixed-width pane behind a short
         // title is a pane with a title in the corner of it.
+        extras.textSize = typed(MediaPage.TITLE_SIZE)
+        val pageTitle = sequenced("page:title", m.title) { extras.measureText(it) }
+        var pageWant = sequencedWidth
+        var pageArtist = ""
+        if (m.artist.isNotBlank()) {
+            extras.textSize = typed(MediaPage.ARTIST_SIZE)
+            pageArtist = sequenced("page:artist", m.artist) { extras.measureText(it) }
+            pageWant = maxOf(pageWant, sequencedWidth)
+        }
         if (config.theme.isGlass) {
-            extras.textSize = typed(MediaPage.TITLE_SIZE)
-            var w = extras.measureText(m.title)
-            if (m.artist.isNotBlank()) {
-                extras.textSize = typed(MediaPage.ARTIST_SIZE)
-                w = maxOf(w, extras.measureText(m.artist))
-            }
+            var w = pageWant
             // EASED TO THE NEW WIDTH, not cut to it. The name changes while you are looking
             // at it, and a card that jumps to the next title's width reads as a second
             // thing happening — the card flinching at the same moment the words turn over.
@@ -6919,7 +6960,7 @@ class RearDialView(context: Context) : View(context) {
         var runs = extras.measureText(m.title) > PAGE_TEXT_WIDTH
         extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
         rolling(
-            canvas, "page:title", afterResize("page:title", m.title),
+            canvas, "page:title", pageTitle,
             if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
             titleBase,
             lineBand(cx, titleBase, PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
@@ -6931,7 +6972,7 @@ class RearDialView(context: Context) : View(context) {
             runs = extras.measureText(m.artist) > PAGE_TEXT_WIDTH
             extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
             rolling(
-                canvas, "page:artist", afterResize("page:artist", m.artist),
+                canvas, "page:artist", pageArtist,
                 if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
                 artistBase,
                 lineBand(cx, artistBase, PAGE_TEXT_WIDTH,
@@ -8200,8 +8241,16 @@ class RearDialView(context: Context) : View(context) {
         // panel the moment the page began to move.
         val hasCover =
             config.mediaArt == MediaArt.SQUARE && coverArt(m.artPath) != null
-        val textLeft =
-            if (hasCover) band.left + band.height() + MediaLayout.COVER_GAP else band.left
+        // ROOM FOR THE CARD'S OWN EDGE. With a cover there is a gap already; without one
+        // the name started exactly at the row's left, which left its card a choice between
+        // reaching past the clip and having no padding down that side. Neither is a
+        // margin — so the text moves in by one instead, and the card sits where the row
+        // starts with the same air on both sides.
+        val textLeft = when {
+            hasCover -> band.left + band.height() + MediaLayout.COVER_GAP
+            config.theme.isGlass -> band.left + ROW_CARD_PAD_X
+            else -> band.left
+        }
 
         // ROOM FOR THE DISCS. The row is laid out from its right edge leftwards, so the
         // last glyph's own box ends exactly there — and under GLASS each glyph sits on a
@@ -8247,11 +8296,15 @@ class RearDialView(context: Context) : View(context) {
 
         // The same card the media page's name gets. This row is the same information in a
         // smaller place, and over a photograph it needs something to sit on just as much.
+        extrasMedia.textSize = typed(MediaLayout.TEXT_SIZE)
+        val rowTitle = sequenced("row:title", m.title) { extrasMedia.measureText(it) }
+        var rowWant = sequencedWidth
+        val rowArtist =
+            if (!hasArtist) ""
+            else sequenced("row:artist", m.artist) { extrasMedia.measureText(it) }
+        if (hasArtist) rowWant = maxOf(rowWant, sequencedWidth)
         if (config.theme.isGlass) {
-            extrasMedia.textSize = typed(MediaLayout.TEXT_SIZE)
-            var w = extrasMedia.measureText(m.title)
-            if (hasArtist) w = maxOf(w, extrasMedia.measureText(m.artist))
-            w = ease("row:card:w", minOf(w, row.textWidth), CARD_GROW_MS, back = true)
+            var w = ease("row:card:w", minOf(rowWant, row.textWidth), CARD_GROW_MS, back = true)
             val top = baseline - MediaLayout.TEXT_SIZE - ROW_CARD_PAD_Y
             val bottom =
                 (if (hasArtist) baseline + MediaLayout.LINE else baseline) + ROW_CARD_PAD_Y
@@ -8281,7 +8334,7 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = typed(MediaLayout.TEXT_SIZE)
         extras.color = tint
         rolling(
-            canvas, "row:title", afterResize("row:title", m.title), textLeft, baseline,
+            canvas, "row:title", rowTitle, textLeft, baseline,
             android.graphics.RectF(
                 textLeft, baseline - MediaLayout.TEXT_SIZE,
                 textLeft + row.textWidth, baseline + MediaLayout.TEXT_SIZE * 0.35f,
@@ -8297,7 +8350,7 @@ class RearDialView(context: Context) : View(context) {
             // The artist goes with the title. Left at the panel's weight it would come
             // out bolder than the name of the track above it.
             rolling(
-                canvas, "row:artist", afterResize("row:artist", m.artist), textLeft, baseline,
+                canvas, "row:artist", rowArtist, textLeft, baseline,
                 android.graphics.RectF(
                     textLeft, baseline - MediaLayout.TEXT_SIZE,
                     textLeft + row.textWidth, baseline + MediaLayout.TEXT_SIZE * 0.35f,
