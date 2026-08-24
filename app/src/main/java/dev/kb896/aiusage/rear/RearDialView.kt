@@ -1919,16 +1919,24 @@ class RearDialView(context: Context) : View(context) {
         // watchdog cannot see. Any colour is fine; transparency is not.
         //
         // AMBIENT is the one exception, and it is a deliberate risk: see AMBIENT_ALPHA.
-        if (!hidden) {
+        // NOT GATED ON `hidden`, and that is the point of it. The gamepad takes the
+        // readout away — the bars, the rings, the record, the mark — because that screen
+        // is going to be something else. It does not take away the colour or the
+        // photograph the user chose to look at: those are the panel's ground, not its
+        // contents, and a background that disappears along with the thing standing on it
+        // was never a background.
+        run {
             // Hue and opacity ease SEPARATELY, and they have to: ColorTween runs through
             // RampColor.lerp, which forces alpha to 0xFF so a ramp stop or an accent can
             // never be saved half-invisible. Alpha therefore gets a Tween of its own —
             // the same curve, the same duration, so switching the background off reads
             // as one movement rather than a colour easing while a transparency snaps.
-            val alpha = animateTo(
-                "bg:alpha",
-                if (config.showBackground) 255f else SEE_THROUGH_ALPHA.toFloat(),
-            )
+            // FULL, ALWAYS. There used to be a switch for this and it earned its
+            // removal twice over: it did nothing a user could see, and the one thing it
+            // could have done — take the ground to nothing — is the documented way to
+            // lose the display to MIUI's SubScreenLauncher. A setting whose only
+            // reachable states are "no change" and "break the panel" is not a setting.
+            val alpha = animateTo("bg:alpha", 255f)
             val hue = colorFor("bg", config.background or (0xFF shl 24))
             val ground = (hue and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24)
 
@@ -1994,6 +2002,8 @@ class RearDialView(context: Context) : View(context) {
         // armEvictionTimer() guard, which uses the same clock for the same reason.
         val nowReal = SystemClock.elapsedRealtime()
         val (dx, dy) = driftOffset(nowReal)
+        dxNow = dx
+        dyNow = dy
         // How far a notification strip has pushed the canvas side down. Computed here
         // rather than where it is used, because the record behind the readout rides the
         // same offset and is drawn first.
@@ -2073,6 +2083,7 @@ class RearDialView(context: Context) : View(context) {
         // Re-earned every frame. The row records it as it draws, and if the row is not
         // there to record it the page falls back to its own arrangement.
         transportHomeKnown = false
+        nameHomeKnown = false
 
         // The notice pushes the READOUT down, and only while the readout is the page you
         // are on. Off-page it must not: the readout sits a full panel height above, so
@@ -2137,7 +2148,7 @@ class RearDialView(context: Context) : View(context) {
         // clip so the ripple sweeps it away with the rest, and under the drift for the
         // same reason the mark is: a 572-unit disc held still on an always-on OLED is
         // the largest burn-in target this panel has ever had.
-        if (!hidden) {
+        run {
             // EVERYTHING BEHIND THE READOUT, IN ONE NODE.
             //
             // The account cards sit under the readings and bend what is behind them, and
@@ -2155,15 +2166,19 @@ class RearDialView(context: Context) : View(context) {
                 try {
                     into.drawColor(groundColor)
                     drawBackdropImage(into)
-                    into.save()
-                    into.translate(dx, dy + readoutPush)
-                    drawVinyl(into, paging, panelPush, geometry)
-                    into.restore()
+                    // The record is contents, so it goes when the panel does. The two
+                    // lines above are ground, so they stay. See the run block's note.
+                    if (!hidden) {
+                        into.save()
+                        into.translate(dx, dy + readoutPush)
+                        drawVinyl(into, paging, panelPush, geometry)
+                        into.restore()
+                    }
                 } finally {
                     groundNode.endRecording()
                 }
                 behind.drawRenderNode(groundNode)
-            } else {
+            } else if (!hidden) {
             canvas.save()
             // NOT paged. The record is the one thing that does not scroll away — it
             // travels between the two pages instead, shrinking and moving to the middle
@@ -2441,9 +2456,16 @@ class RearDialView(context: Context) : View(context) {
             if (v > 0.001f) {
                 canvas.save()
                 if (front != null) canvas.clipPath(front)
-                // The ambient background belongs to this side too, or the swept region
-                // is briefly fully transparent and then snaps to its alpha at the end.
-                canvas.drawColor((config.background and 0x00FFFFFF) or (SEE_THROUGH_ALPHA shl 24))
+                // NOTHING IS PAINTED HERE ANY MORE, and that is the fix rather than an
+                // omission. This used to wash the swept region with a see-through copy of
+                // the background colour, because the ground itself was drawn only when
+                // the panel was NOT put away — so without it this side came up
+                // transparent. The ground is now drawn whatever state the panel is in,
+                // which means a wash over the top is no longer covering a gap: it is
+                // covering the photograph, at two-thirds opacity, with a flat colour.
+                //
+                // Which is exactly what "the gamepad trashes the panel but keeps the
+                // background" rules out. The readout goes; what it was standing on stays.
                 drawAmbientWalk(canvas, nowReal)
                 canvas.restore()
             }
@@ -3288,9 +3310,37 @@ class RearDialView(context: Context) : View(context) {
     /** Scratch for mapping those three centres out of the readout's matrix. */
     private val transportPoints = FloatArray(6)
 
+    /**
+     * And where the name rests, for the same reason and by the same method.
+     *
+     * The track's title and artist are the other thing that exists on both pages: a line
+     * of type in a column beside the artwork, and the same line centred under the record.
+     * Recorded here as the row draws so the page can carry it across rather than fade one
+     * copy out under another fading in.
+     */
+    private val nameHomeCard = android.graphics.RectF()
+    private var nameHomeLeft = 0f
+    private var nameHomeTitle = 0f
+    private var nameHomeArtist = 0f
+    private var nameHomeWidth = 0f
+    private var nameHomeKnown = false
+    private val namePoints = FloatArray(4)
+
     /** This frame's scroll, for the parts drawn on one page that belong to both. */
     private var pagingNow = 0f
     private var pagedNow = 0f
+
+    /**
+     * This frame's burn-in drift, RAW.
+     *
+     * Not the same number the canvas side is handed: that one arrives as
+     * `dy + readoutPush - paged`, with the notice and the scroll already folded in. Taking
+     * a rest position against it cancelled the wrong term and left the row's recorded home
+     * sliding along with the scroll — so the buttons travelled to a destination that was
+     * running away from them, which is what turned a transition into a slide.
+     */
+    private var dxNow = 0f
+    private var dyNow = 0f
 
     private var mediaCentres: List<Float> = emptyList()
 
@@ -6969,6 +7019,18 @@ class RearDialView(context: Context) : View(context) {
         // one: over a photograph the words have nothing to sit on. Sized to the wider of
         // the two lines rather than to the column — a fixed-width pane behind a short
         // title is a pane with a title in the corner of it.
+        // HOW FAR ALONG THE TRAVEL THE NAME IS. The row's two lines and these two are the
+        // same two lines; see nameHomeCard. With no home recorded — no row drawn this
+        // frame — every interpolation below collapses to this page's own geometry.
+        val nt = if (nameHomeKnown) paging else 1f
+        // The row sets the name lighter than the panel, on the grounds that it is somebody
+        // else's writing rather than a label this app chose, and this page has always set
+        // it at the panel's weight. A weight cannot be interpolated — it is a different
+        // typeface, not a number — so the swap happens at the midpoint of the travel,
+        // where the type is moving and resizing fastest and is least likely to be read.
+        val wasPen = extras
+        extras = if (nt < 0.5f) extrasMedia else extrasBody
+
         extras.textSize = typed(MediaPage.TITLE_SIZE)
         val pageTitle = sequenced("page:title", m.title) { extras.measureText(it) }
         var pageWant = sequencedWidth
@@ -6986,40 +7048,71 @@ class RearDialView(context: Context) : View(context) {
             // Grown, the two are one event: the sheet opens out and the new name arrives
             // on it. The same wheel the text itself rolls on, near enough.
             w = ease("page:card:w", minOf(w, PAGE_TEXT_WIDTH), CARD_GROW_MS, back = true)
-            cardRect.set(
-                cx - w / 2f - TRACK_PAD_X,
-                titleBase - MediaPage.TITLE_SIZE - TRACK_PAD_Y,
-                cx + w / 2f + TRACK_PAD_X,
-                (if (m.artist.isNotBlank()) artistBase else titleBase) + TRACK_PAD_Y,
+            // Where it is GOING, and then where it is: the row's card travels to this
+            // one, corner by corner, and its radius with it. No fade — the card the row
+            // drew and the card under the record are one sheet.
+            val toL = cx - w / 2f - TRACK_PAD_X
+            val toT = titleBase - MediaPage.TITLE_SIZE - TRACK_PAD_Y
+            val toR = cx + w / 2f + TRACK_PAD_X
+            val toB = (if (m.artist.isNotBlank()) artistBase else titleBase) + TRACK_PAD_Y
+            if (nameHomeKnown) {
+                cardRect.set(
+                    nameHomeCard.left + (toL - nameHomeCard.left) * nt,
+                    nameHomeCard.top + (toT - nameHomeCard.top) * nt,
+                    nameHomeCard.right + (toR - nameHomeCard.right) * nt,
+                    nameHomeCard.bottom + (toB - nameHomeCard.bottom) * nt,
+                )
+            } else {
+                cardRect.set(toL, toT, toR, toB)
+            }
+            glassCard(
+                canvas, cardRect,
+                ROW_CARD_RADIUS + (CARD_RADIUS - ROW_CARD_RADIUS) * nt,
             )
-            glassCard(canvas, cardRect, alpha = paging)
         }
 
-        extras.textSize = typed(MediaPage.TITLE_SIZE)
+        // ---- the name, in flight ----------------------------------------------
+        //
+        // Drawn LEFT-aligned at an interpolated left edge rather than centred, which is
+        // not a change of appearance: a centred line IS a left-aligned line placed at
+        // half its own width back from the centre, and saying it that way gives one
+        // number to interpolate instead of two incompatible alignments.
+        val titleSize =
+            MediaLayout.TEXT_SIZE + (MediaPage.TITLE_SIZE - MediaLayout.TEXT_SIZE) * nt
+        val artistSize =
+            MediaLayout.TEXT_SIZE + (MediaPage.ARTIST_SIZE - MediaLayout.TEXT_SIZE) * nt
+        val bandW = nameHomeWidth + (PAGE_TEXT_WIDTH - nameHomeWidth) * nt
+        val tBase = nameHomeTitle + (titleBase - nameHomeTitle) * nt
+        val aBase = nameHomeArtist + (artistBase - nameHomeArtist) * nt
+
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = typed(titleSize)
         extras.color = shade(tint, 0xFF)
-        var runs = extras.measureText(m.title) > PAGE_TEXT_WIDTH
-        extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
+        var seen = extras.measureText(m.title)
+        val toTitleLeft = cx - minOf(seen, PAGE_TEXT_WIDTH) / 2f
+        val tLeft = nameHomeLeft + (toTitleLeft - nameHomeLeft) * nt
         rolling(
-            canvas, "page:title", pageTitle,
-            if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
-            titleBase,
-            lineBand(cx, titleBase, PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
-            width = PAGE_TEXT_WIDTH,
+            canvas, "page:title", pageTitle, tLeft, tBase,
+            android.graphics.RectF(
+                tLeft, tBase - titleSize, tLeft + bandW, tBase + titleSize * 0.35f,
+            ),
+            width = bandW,
         )
         if (m.artist.isNotBlank()) {
-            extras.textSize = typed(MediaPage.ARTIST_SIZE)
+            extras.textSize = typed(artistSize)
             extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
-            runs = extras.measureText(m.artist) > PAGE_TEXT_WIDTH
-            extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
+            seen = extras.measureText(m.artist)
+            val toArtistLeft = cx - minOf(seen, PAGE_TEXT_WIDTH) / 2f
+            val aLeft = nameHomeLeft + (toArtistLeft - nameHomeLeft) * nt
             rolling(
-                canvas, "page:artist", pageArtist,
-                if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
-                artistBase,
-                lineBand(cx, artistBase, PAGE_TEXT_WIDTH,
-                    MediaPage.ARTIST_SIZE),
-                width = PAGE_TEXT_WIDTH,
+                canvas, "page:artist", pageArtist, aLeft, aBase,
+                android.graphics.RectF(
+                    aLeft, aBase - artistSize, aLeft + bandW, aBase + artistSize * 0.35f,
+                ),
+                width = bandW,
             )
         }
+        extras = wasPen
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(18f)
 
@@ -8349,10 +8442,10 @@ class RearDialView(context: Context) : View(context) {
         transportPoints[3] = discCy
         transportPoints[5] = discCy
         canvas.getMatrix().mapPoints(transportPoints)
-        transportHomeX[0] = transportPoints[0] - dx
-        transportHomeX[1] = transportPoints[2] - dx
-        transportHomeX[2] = transportPoints[4] - dx
-        transportHomeY = transportPoints[1] + pagedNow - dy
+        transportHomeX[0] = transportPoints[0] - dxNow
+        transportHomeX[1] = transportPoints[2] - dxNow
+        transportHomeX[2] = transportPoints[4] - dxNow
+        transportHomeY = transportPoints[1] + pagedNow - dyNow
         transportHomeH = gh
         transportHomeKnown = true
 
@@ -8416,8 +8509,25 @@ class RearDialView(context: Context) : View(context) {
                 textLeft + w + ROW_CARD_PAD_X,
                 bottom,
             )
-            glassCard(canvas, cardRect, ROW_CARD_RADIUS)
+            // Where this card rests, in the media page's space. See nameHomeCard.
+            nameHomeCard.set(cardRect)
+            canvas.getMatrix().mapRect(nameHomeCard)
+            nameHomeCard.offset(-dxNow, pagedNow - dyNow)
+            if (pagingNow <= 0.001f) glassCard(canvas, cardRect, ROW_CARD_RADIUS)
         }
+
+        // And where the two lines rest. Mapped, like the transport's, because this row is
+        // drifting and pushed and slid all at once.
+        namePoints[0] = textLeft
+        namePoints[1] = baseline
+        namePoints[2] = textLeft
+        namePoints[3] = baseline + MediaLayout.LINE
+        canvas.getMatrix().mapPoints(namePoints)
+        nameHomeLeft = namePoints[0] - dxNow
+        nameHomeTitle = namePoints[1] + pagedNow - dyNow
+        nameHomeArtist = namePoints[3] + pagedNow - dyNow
+        nameHomeWidth = row.textWidth
+        nameHomeKnown = true
 
         // The same wheel the media page uses, for the same reason: a track changing is
         // news and should be seen changing. `rolling` hands each line to the marquee when
@@ -8432,7 +8542,9 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(MediaLayout.TEXT_SIZE)
         extras.color = tint
-        rolling(
+        // Only where the row owns them. Off rest the name belongs to the travelling copy
+        // the media page draws — see nameHomeCard.
+        if (pagingNow <= 0.001f) rolling(
             canvas, "row:title", rowTitle, textLeft, baseline,
             android.graphics.RectF(
                 textLeft, baseline - MediaLayout.TEXT_SIZE,
@@ -8448,7 +8560,7 @@ class RearDialView(context: Context) : View(context) {
             extras.color = (tint and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
             // The artist goes with the title. Left at the panel's weight it would come
             // out bolder than the name of the track above it.
-            rolling(
+            if (pagingNow <= 0.001f) rolling(
                 canvas, "row:artist", rowArtist, textLeft, baseline,
                 android.graphics.RectF(
                     textLeft, baseline - MediaLayout.TEXT_SIZE,
@@ -8943,25 +9055,6 @@ class RearDialView(context: Context) : View(context) {
          * glitch rather than a decision.
          */
         private const val RIPPLE_MS = 1200f
-
-        /**
-         * How opaque the panel stays when it is meant to be see-through — ambient mode,
-         * and the background switched off.
-         *
-         * NOT zero, and this is the one number in this file that must never become it.
-         * At zero the panel stops working entirely: with nothing occluding it, MIUI's
-         * SubScreenLauncher resumes, takes the display, and RearActivity's window leaves
-         * the window list while its process and task record stay alive — a failure the
-         * respawn watchdog cannot see, because it asks whether the TASK is alive and the
-         * task is fine. See the block comment on the background fill.
-         *
-         * Low enough to see the system's own rear screen through, high enough to still
-         * be a surface. The panel ran at 0xB4 for a whole build, so the mechanism
-         * tolerates partial alpha; how far down it tolerates is not established, and
-         * this is the value to raise first if the panel ever vanishes into MIUI's
-         * launcher after a close, or after the background is switched off.
-         */
-        private const val SEE_THROUGH_ALPHA = 0x60
 
         private const val CLOSE_STROKE = 3f
 

@@ -242,29 +242,18 @@
             colour as a row up in the toggles, the picture as its own heading down here —
             so choosing between them meant knowing that they were the same decision.
 
-            The switch on the heading is not a third option: it is whether the panel's
-            ground is drawn at all, which is what makes the readout see-through.
+            There is no switch on the heading. There was, and it offered a choice between
+            the panel as it is and the panel with no ground at all — which is the one
+            state that hands the display back to MIUI's SubScreenLauncher. The background
+            is not optional; WHICH background it is, is the only question here.
         -->
-        <LinearLayout
+        <TextView
+            android:id="@+id/backdrop_heading"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/backdrop_heading"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="BACKGROUND"
-                android:textSize="11sp" />
-
-            <Switch
-                android:id="@+id/backdrop_show"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-        </LinearLayout>
+            android:text="BACKGROUND"
+            android:textSize="11sp" />
 
         <LinearLayout
             android:layout_width="match_parent"

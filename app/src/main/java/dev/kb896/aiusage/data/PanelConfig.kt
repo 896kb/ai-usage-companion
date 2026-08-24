@@ -224,15 +224,6 @@ data class PanelConfig(
     val showDate: Boolean = false,
 
     /**
-     * Whether the panel paints its own background.
-     *
-     * Off does NOT mean transparent. It means as see-through as this surface may safely
-     * be — see RearDialView.SEE_THROUGH_ALPHA, which explains at length why zero takes
-     * the panel away from us permanently.
-     */
-    val showBackground: Boolean = true,
-
-    /**
      * Mirror other apps' notifications onto the panel.
      *
      * Off by default, and [showNotificationText] is a SEPARATE opt-in, because this

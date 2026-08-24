@@ -900,19 +900,6 @@ class MainActivity : ComponentActivity() {
             true
         }
 
-        findViewById<android.widget.Switch>(R.id.backdrop_show).apply {
-            isChecked = ConfigStore(this@MainActivity).load().showBackground
-            setOnCheckedChangeListener { _, on ->
-                val store = ConfigStore(this@MainActivity)
-                val config = store.load().copy(showBackground = on)
-                store.save(config)
-                graph.bridge.update(
-                    StatePayload.encode(graph.repository.state.value, config),
-                )
-                refreshPreview()
-            }
-        }
-
         findViewById<android.widget.ImageButton>(R.id.backdrop_clear).setOnClickListener {
             val store = ConfigStore(this)
             val config = store.load().copy(backdrop = ArtConfig())
