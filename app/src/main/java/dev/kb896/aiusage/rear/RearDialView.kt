@@ -2068,6 +2068,11 @@ class RearDialView(context: Context) : View(context) {
             panelPrefs.edit().putInt(KEY_PAGE, pageSaved).apply()
         }
         val paging = (paged / Panel.HEIGHT).coerceIn(0f, 1f)
+        pagingNow = paging
+        pagedNow = paged
+        // Re-earned every frame. The row records it as it draws, and if the row is not
+        // there to record it the page falls back to its own arrangement.
+        transportHomeKnown = false
 
         // The notice pushes the READOUT down, and only while the readout is the page you
         // are on. Off-page it must not: the readout sits a full panel height above, so
@@ -3260,6 +3265,33 @@ class RearDialView(context: Context) : View(context) {
      * 35-unit centres actually did.
      */
     private var mediaStrip: android.graphics.RectF? = null
+    /**
+     * Where the readout's transport rests, in the media page's space.
+     *
+     * THE TWO PAGES SHOW THE SAME THREE BUTTONS. They were built as two sets — the row
+     * lays out from its right edge against a strip, the page centres a group under a
+     * record — and on a scroll one set left over the top of the other arriving. Which is
+     * an odd thing to say about previous/play/next: they are the same three controls, and
+     * a control that exists on both sides of a gesture should travel across it rather
+     * than be destroyed and rebuilt one glyph to the left.
+     *
+     * So the row's arrangement is recorded here as it draws, mapped out of its own
+     * transform and with the page slide taken back off, and the page interpolates from it.
+     * At either end the geometry is exactly what each page had on its own; in between the
+     * three buttons walk from one arrangement to the other, growing as they go.
+     */
+    private val transportHomeX = FloatArray(3)
+    private var transportHomeY = 0f
+    private var transportHomeH = 0f
+    private var transportHomeKnown = false
+
+    /** Scratch for mapping those three centres out of the readout's matrix. */
+    private val transportPoints = FloatArray(6)
+
+    /** This frame's scroll, for the parts drawn on one page that belong to both. */
+    private var pagingNow = 0f
+    private var pagedNow = 0f
+
     private var mediaCentres: List<Float> = emptyList()
 
     /** In drawing order, matching [mediaCentres]. */
@@ -7023,32 +7055,52 @@ class RearDialView(context: Context) : View(context) {
             canvas.translate(0f, lockOut * (Panel.HEIGHT - top + gh))
         }
 
-        extras.color = shade(tint, 0xFF)
-        val prevX = x
-        glassButton(canvas, x + widths[0] / 2f, top + gh / 2f, gh, alpha = paging) { c ->
-            extras.color = shade(tint, 0xFF)
-            drawIcon(c, PanelIcons.PREV, prevX, top, gh)
-        }
-        centres += x + widths[0] / 2f
-        x += widths[0] + MediaPage.TRANSPORT_GAP
+        // WHERE THE THREE ACTUALLY ARE THIS FRAME. The arrangement above is where they
+        // are GOING; transportHomeX is where the readout's row left them. They travel
+        // between the two on the scroll, growing from the row's glyph height to this
+        // page's as they go, and they no longer fade — a fade is for something arriving,
+        // and nothing arrives here. They were already on the panel.
+        val pageCx = floatArrayOf(
+            x + widths[0] / 2f,
+            x + widths[0] + MediaPage.TRANSPORT_GAP + widths[1] / 2f,
+            x + widths.sum() - widths[2] / 2f + MediaPage.TRANSPORT_GAP * 2f,
+        )
+        val pageCy = top + gh / 2f
+        val t = if (transportHomeKnown) paging else 1f
+        val bh = transportHomeH + (gh - transportHomeH) * t
+        val bcy = transportHomeY + (pageCy - transportHomeY) * t
+        val bTop = bcy - bh / 2f
+        fun travelled(i: Int) =
+            if (!transportHomeKnown) pageCx[i]
+            else transportHomeX[i] + (pageCx[i] - transportHomeX[i]) * t
 
-        // The play/pause drum again, one size up. Same clip-and-slide as the row's.
-        val playX = x
-        glassButton(canvas, x + widths[1] / 2f, top + gh / 2f, gh, alpha = paging) { c ->
+        extras.color = shade(tint, 0xFF)
+        val prevCx = travelled(0)
+        val prevX = prevCx - bh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f
+        glassButton(canvas, prevCx, bcy, bh) { c ->
+            extras.color = shade(tint, 0xFF)
+            drawIcon(c, PanelIcons.PREV, prevX, bTop, bh)
+        }
+        centres += prevCx
+
+        // The play/pause drum again. Same clip-and-slide as the row's.
+        val playCx = travelled(1)
+        val playX = playCx - bh * Glyphs.aspect(PanelIcons.PAUSE, config.theme) / 2f
+        glassButton(canvas, playCx, bcy, bh) { c ->
             c.save()
-            c.clipRect(playX, top - gh, playX + gh, top + gh * 2f)
-            drawPlayPause(c, playX, top, gh, shade(tint, 0xFF))
+            c.clipRect(playX, bTop - bh, playX + bh, bTop + bh * 2f)
+            drawPlayPause(c, playX, bTop, bh, shade(tint, 0xFF))
             c.restore()
         }
-        centres += x + widths[1] / 2f
-        x += widths[1] + MediaPage.TRANSPORT_GAP
+        centres += playCx
 
-        val nextX = x
-        glassButton(canvas, x + widths[2] / 2f, top + gh / 2f, gh, alpha = paging) { c ->
+        val nextCx = travelled(2)
+        val nextX = nextCx - bh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f
+        glassButton(canvas, nextCx, bcy, bh) { c ->
             extras.color = shade(tint, 0xFF)
-            drawIcon(c, PanelIcons.NEXT, nextX, top, gh)
+            drawIcon(c, PanelIcons.NEXT, nextX, bTop, bh)
         }
-        centres += x + widths[2] / 2f
+        centres += nextCx
         canvas.restore()
 
         // No clocks along the bottom. Elapsed and total are on the playback ring now,
@@ -8283,12 +8335,40 @@ class RearDialView(context: Context) : View(context) {
 
         extras.color = tint
         val discCy = row.glyphTop + gh / 2f
-        glassButton(
-            canvas, prev + gh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f, discCy, gh,
-        ) { c -> extras.color = tint; drawIcon(c, PanelIcons.PREV, prev, row.glyphTop, gh) }
-        glassButton(
-            canvas, next + gh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f, discCy, gh,
-        ) { c -> extras.color = tint; drawIcon(c, PanelIcons.NEXT, next, row.glyphTop, gh) }
+
+        // WHERE THESE THREE REST, for the media page to travel them to. Mapped through
+        // the live matrix rather than reasoned about: this row sits inside the readout,
+        // which is drifting for burn-in, pushed by a notice and slid by the scroll all at
+        // once, and the only honest way to say where it is on the panel is to ask. The
+        // slide is then taken back off, because the destination wants the place the row
+        // RESTS, not the place the scroll has already dragged it to.
+        transportPoints[0] = prev + gh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f
+        transportPoints[2] = play + gh * Glyphs.aspect(PanelIcons.PAUSE, config.theme) / 2f
+        transportPoints[4] = next + gh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f
+        transportPoints[1] = discCy
+        transportPoints[3] = discCy
+        transportPoints[5] = discCy
+        canvas.getMatrix().mapPoints(transportPoints)
+        transportHomeX[0] = transportPoints[0] - dx
+        transportHomeX[1] = transportPoints[2] - dx
+        transportHomeX[2] = transportPoints[4] - dx
+        transportHomeY = transportPoints[1] + pagedNow - dy
+        transportHomeH = gh
+        transportHomeKnown = true
+
+        // AND THE ROW ONLY DRAWS THEM WHERE IT OWNS THEM. Off rest they belong to the
+        // travelling set, which the media page draws — see drawMediaPage. Drawing both
+        // would be the same three buttons twice, which is what this replaced.
+        if (pagingNow <= 0.001f) {
+            glassButton(
+                canvas,
+                prev + gh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f, discCy, gh,
+            ) { c -> extras.color = tint; drawIcon(c, PanelIcons.PREV, prev, row.glyphTop, gh) }
+            glassButton(
+                canvas,
+                next + gh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f, discCy, gh,
+            ) { c -> extras.color = tint; drawIcon(c, PanelIcons.NEXT, next, row.glyphTop, gh) }
+        }
 
         // The middle glyph is its own little drum, clipped to one cell: pause rises out
         // of the top as play drops off the bottom. It is the same gesture as the row
@@ -8298,13 +8378,16 @@ class RearDialView(context: Context) : View(context) {
         // On a disc like the two beside it. It was the only one of the three without,
         // because it is drawn apart from them — the drum needs its own clip — and taking
         // it out of the row cost it the button it sits on.
-        glassButton(
-            canvas, play + gh * Glyphs.aspect(PanelIcons.PAUSE, config.theme) / 2f, discCy, gh,
-        ) { c ->
-            c.save()
-            c.clipRect(play, region.top, play + gh, region.bottom)
-            drawPlayPause(c, play, row.glyphTop, gh, tint)
-            c.restore()
+        if (pagingNow <= 0.001f) {
+            glassButton(
+                canvas,
+                play + gh * Glyphs.aspect(PanelIcons.PAUSE, config.theme) / 2f, discCy, gh,
+            ) { c ->
+                c.save()
+                c.clipRect(play, region.top, play + gh, region.bottom)
+                drawPlayPause(c, play, row.glyphTop, gh, tint)
+                c.restore()
+            }
         }
 
         val hasArtist = m.artist.isNotBlank()
