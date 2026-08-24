@@ -6036,9 +6036,25 @@ class RearDialView(context: Context) : View(context) {
         // pushing the top down takes the space out of the gaps and the last block still
         // ends exactly where it did — clear of the artwork slot and the unlock slider,
         // which is what regionBottom is measured from.
+        // WHAT IS ACTUALLY UP THERE, rather than a line count standing in for it.
+        //
+        // The corner block does not sit at a fixed height: it is CENTRED in the band
+        // above the first card — see topBandCentre. A block of height h centred that way
+        // has its bottom at firstCardTop/2 + h/2, which clears whatever is below it
+        // exactly when firstCardTop is at least h. So the only thing the accounts owe the
+        // corner block is enough band for it to be centred in, which is its own height
+        // and nothing more.
+        //
+        // The count this replaces reserved a line of the block's height for every row it
+        // had, on top of the masthead's own allowance — about fifty units more than the
+        // block occupies. That was the space the two accounts needed, and it is why they
+        // came out touching however the gaps were divided: the arithmetic below was
+        // sharing out a region that had already given away the room.
+        val topBandNeed =
+            if (extraLines <= 0) TITLE_BASELINE + 26f
+            else EXTRA_ICON_H + (EXTRA_ROWS - 1) * EXTRA_LINE_H + EXTRA_PAD_Y * 2f
         val regionTop = if (onlyAccount != null) SINGLE_ACCOUNT_TOP
-            else TITLE_BASELINE + 26f + BLOCKS_DROP +
-                (extraLines - 1).coerceAtLeast(0) * EXTRA_LINE_H
+            else maxOf(TITLE_BASELINE + 26f, topBandNeed) + BLOCKS_DROP
         // Without a masthead above or a mark below, one account has the whole height.
         val regionBottom = if (onlyAccount != null) Panel.HEIGHT - SINGLE_ACCOUNT_TOP
             else Panel.HEIGHT - MARK_BOTTOM - MARK_H
