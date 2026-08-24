@@ -151,6 +151,56 @@ Both animate with a 1.8s ease-in-out rather than snapping to new values, so a ch
 catches your eye without you watching for it — and never overshoots, because a bar that
 punched past 100% and settled back would be reporting a number the data never held.
 
+## Two things the panel can be made of
+
+A theme here is not a palette swap. It changes the face, the icon set and the material,
+and everything on the panel follows it — including the settings screen, so the app you set
+it from looks like the panel you are setting.
+
+**ORIGINAL** is the panel as it started: Departure Mono, glyphs traced out of a terminal
+font into pixel rectangles, flat fills, hard edges. Everything is drawn as rows of
+rectangles because the panel draws all its own artwork that way, and shipping a whole
+Nerd Font to render four shapes would have added megabytes to a 1.4MB release.
+
+**GLASS** is Outfit, Material Symbols Rounded, and real refraction — built on
+[AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass), whose AGSL is vendored
+here with its licence. Every surface that was a filled shape becomes a pane that bends the
+panel behind it: the notification cards, the unlock slider, the transport buttons, the
+speaker, the controller, and a thumb on every bar and ring.
+
+The lens is the reference's own, at the reference's own numbers, in the state its slider
+thumb reaches when you press and hold it — because these thumbs are never actually held.
+They are readings, and a reading that permanently looked mid-gesture would be a lie, where
+one that permanently looks like the control's most solid state is simply what the control
+is.
+
+**Clear, never frosted.** There was a blur under the lens at first, which is what the
+reference does to a thumb at rest, and it was the wrong half of that component to copy. A
+blur is what a surface does when you cannot see through it; this panel's whole appeal is
+that you can.
+
+### The glass takes its colour from what is behind it
+
+A fixed tint only works over a fixed backdrop. The notification card and the charging cell
+were tuned against a black panel; put a photograph back there and a tint chosen for black
+is a smear, while one chosen for the photograph disappears the moment the panel is dark.
+
+So the panes read the backdrop and answer it — the reference's own method: scale the
+backdrop to twenty-five pixels, average their Rec.709 luminance, drive the glass from
+that. Twenty-five is not an approximation of a better answer; a pane covers a region and
+what matters is the region's average, so throwing the detail away *is* the measurement.
+
+Where this departs from the reference: it reads its backdrop back from a layer every
+frame, on a phone showing one demo. This panel is always on, and a per-frame pixel readback
+is the most expensive thing it could do — it stalls the render thread waiting for the GPU.
+What is behind these panes is a background image and a ground colour, neither of which
+changes between frames, so the grid is rebuilt only when one of them does.
+
+The buttons get the same treatment inverted. They carry no tint at all by design, which is
+right across most of the panel and wrong at the ends: over black there is nothing to see
+through them and the disc disappears; over a bright photograph they are a hole with a rim.
+They are given a tint *only* where clear glass stops working, and none in the middle.
+
 ## The preview shows what the panel shows
 
 The preview on the front screen is the same view class as the panel, drawing the same
@@ -177,7 +227,7 @@ Separate warnings fire at half of a limit, then at 90% and every 2% after that.
 
 ---
 
-## The two buttons on the panel
+## The buttons on the panel
 
 Both are off by default and both are toggles. The panel is otherwise a readout, and a
 surface that reacts to being touched is a surprise unless it was asked for.
@@ -195,10 +245,18 @@ on the front by itself.
 Closing the camera returns to the panel. Not an assumption — panel, camera on top, back,
 panel again, measured.
 
-### Hide
+### Game
 
-Top-left corner. Ripples the readout away and leaves the mascot walking the bottom of the
-panel. Tap the mascot to bring it back.
+Top-left corner, and a controller rather than a cross. Ripples the readout away and leaves
+the mascot walking the bottom of the panel. Tap the mascot to bring it back.
+
+It was a cross for a long time, which was an honest description of what the button did and
+a poor one of where it goes. What is behind the readout is not nothing — it is the
+mascot's own screen, and that screen is going to be something to play with. A cross says
+"dismiss this"; a controller says "go there". For now the screen says **COMING SOON**,
+centred on the part of the panel you can actually see rather than on the panel: the left
+296 units are camera glass, so type centred on the true middle sits a third of the way
+under a lens.
 
 It scrolls away with the readout rather than being pinned across both pages. It closes the
 *readout*, so on a page that is not the readout it would be a button for somewhere else.
@@ -228,6 +286,30 @@ is alive and the task is fine.
 The ripple radiates from wherever you touched, and it can be interrupted: change your
 mind halfway and it reverses from halfway, with the remaining distance setting the
 duration.
+
+## When the panel lights itself
+
+A notification or a charger will wake the rear display, so the panel is readable at the
+moment the thing worth reading arrives rather than whenever you next happen to look.
+
+Which creates a problem it has to solve on its own: **a phone that lights its own back
+screen is very often in a pocket.** Every control on the panel is then under a thigh — the
+volume strip, the transport, the page swipe. A screen that turns itself on has to assume
+nobody asked it to.
+
+So it refuses everything and shows a slider instead. Not a tap, because cloth taps; not a
+tap on the right-hand end, because that is a tap with extra steps. A thumb has to land on
+the knob where it rests, at the left, and carry it the whole way across without letting go
+— three things in sequence, in one gesture, which a pocket does not produce.
+
+It replaces only the art slot. The rings, the bars and the record stay where they are and
+keep reporting, because the readout is the reason the display lit up. The transport and
+the camera button leave with the same movement the slider arrives on, since a control you
+cannot use should not be sitting there looking usable.
+
+If nobody swipes, the panel waits for the notice or the charger to be gone, lets the
+display go dark again, and puts the artwork back — all animated, including the record
+spinning back up.
 
 ## Media controls
 
@@ -276,20 +358,39 @@ The record changer stays the record's, though. Flying a rectangle through a came
 a conceit that belongs to the thing shaped like a record; a square cover changing tracks
 simply becomes the next cover.
 
-**Vinyl** has a colour of its own — grooves, rim and label edge, separate from the row's
-type, because making the grooves visible and making the title legible are not the same
-decision. It is a record the height of the panel, sitting behind the readout — centred on
-the half of the panel that is actually a display, and dropped far enough that a third of
-it runs off the bottom edge. A record on a deck rather than a circle placed on a screen.
+**Vinyl** is a record the height of the panel, sitting behind the readout — centred on the
+half of the panel that is actually a display, and dropped far enough that a third of it
+runs off the bottom edge. A record on a deck rather than a circle placed on a screen.
 There is no thumbnail in the row under this style: the record *is* the artwork, and a
 second copy of the same cover beside it would be the same picture twice.
 
 It took two goes to stop looking like a CD, which is what you get when the cover art is
 the whole disc. A record is black; its picture is a label the size of a fist in the
-middle; and what you see across the rest of it is grooves — 34 of them, banded brighter
-every sixth ring where one track ends and the next begins, with a bright lip at the rim.
-A static sheen crosses the grooves: a reflection belongs to the room, not to the record,
-so it does not turn with it.
+middle; and what you see across the rest of it is grooves.
+
+It is a **photograph** of one now. It used to be constructed — a black circle, thirty-four
+concentric strokes, a rim and two sheen arcs — and that is the honest limit of the
+approach: it draws a diagram of a record. The things that actually say *vinyl* are how the
+light runs in bands across the grooves and how the sheen falls off toward the rim, and a
+stack of circles at graded alphas can gesture at those without ever claiming them. Worth
+saying plainly that this bought nothing in speed: the whole constructed disc measured
+0.2ms.
+
+The disc does not turn, and that is deliberate rather than an omission — the image has a
+fixed highlight lying across it the way a record under a lamp does, and spinning it would
+spin the lamp with it. What it does instead is **lean**, a third of a degree at most, every
+half second. Five degrees was the first attempt and read as a record being shaken; a deck's
+play is the kind of thing you only notice once it stops.
+
+Its **spindle is a hole**, cut rather than painted. It used to be a dot filled with the
+panel's background colour, which is the same thing as a hole for exactly as long as the
+panel's background *is* that colour — put a photograph back there and the record gains a
+small flat disc of the wrong colour in its middle.
+
+It is sheer on the readout and solid on the media page, thickening as you scroll between
+them. The two pages want opposite things from it: behind six bars and two rings a solid
+disc is a hole punched in the panel, and on the media page a sheer one looks like a picture
+of a record rather than the thing.
 
 The label does. It stops dead when the music does, which is the point — it is a second
 reading of the transport state, legible from much further away than a 38-unit glyph on a
@@ -619,6 +720,15 @@ rather than written down as an angle, so it corrects itself if any of them move.
 the glyph is *centred* on its orbit, so half its height comes out of the clearance too —
 missing that is what once made a stated gap of ten read as stuck to the ring.
 
+Under GLASS the speaker sits on a disc of glass like every other control that does
+something when tapped — it was the last one still drawn as a bare mark, which read as a
+label for the ring rather than a thing to press. **The bubble holds the sound:** it is
+sized from how far the outermost wave has travelled, so it opens as the waves leave the
+cone and closes as they come back. Sized to *exactly* contain them it looked like a bubble
+straining to hold something, so the reach is curved — most room where the sound has gone
+least, none at all at full volume — which also keeps the glass ahead of the wave at every
+point in between.
+
 ### Setting the volume
 
 A **vertical drag in the strip down the right-hand sixth** — see [the two drag
@@ -803,6 +913,44 @@ that a message arrived and broadcasting what it said are different decisions, so
 different switches, and both start off. With the body switched off the group cascade
 lists **senders** rather than falling silent — the panel still says who is waiting.
 
+## Charging
+
+Plug the phone in and a cell slides in from the right edge and fills with liquid.
+
+It is liquid rather than a bar, and that took three attempts to get right. Drops were the
+second and metaballs the third, and both were the wrong shape of answer: blobs merging and
+pulling apart is what happens to liquid moving through *air*, and this is a vessel with
+liquid sitting in it. However well a heap of circles is packed, the eye keeps finding the
+lumps — because a still liquid in a glass does not have any.
+
+What it has is a **surface**: one smooth line that ripples when disturbed and settles flat
+when left alone. The level knocks it as it passes each tenth, so the arriving charge
+disturbs the water instead of sliding up under a sheet of glass. Charge going in shows the
+way a cloud shows it — lit from inside, the source never visible.
+
+**It knows which way is down.** The surface is worked out from the gravity sensor, so
+turning the phone over tilts the water. The drawn direction lags the measured one on
+purpose: following the sensor exactly makes a rotation a teleport, where swinging the
+direction round means the surface tilts through every angle in between — the liquid going
+round the glass rather than reappearing somewhere else.
+
+Under GLASS the cell is a real glass: the readout and the record bend through the empty
+part above the water line, and **the liquid magnifies**. That is the tell that there is
+something in there — what is behind the cell steps as it crosses the surface. The lit line
+along the meniscus goes when that happens, because the magnification already says where
+the surface is, and the two together read as two tops a hair apart.
+
+The percentage stands beside the cell at the height of the water and rises with it, so the
+figure is a label *on* the level rather than a number placed near it. It counts from the
+same fill the surface is drawn at, so the reading and the picture cannot disagree. It
+grows in and shrinks away on the cell's own timings — a number that fades in was already
+there and became visible; one that grows was brought.
+
+Under GLASS it is made of glass too, at the heaviest weight the face has, carrying a wash
+of whatever colour you chose for the liquid. That wash is a fifth opaque, not more: at
+higher strengths the tint becomes most of what you see and the refraction underneath is
+averaged into a flat colour, which is coloured type rather than tinted glass.
+
 ## Customisation
 
 Almost everything on the panel is editable, and the settings screen shows a **live
@@ -813,12 +961,13 @@ drift from what the back of the phone is doing.
 | | |
 |---|---|
 | **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. Each is capped at what it can actually draw, measured off the real font rather than guessed, and each field says its own limit. |
-| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the battery, the camera and hide buttons, the notification strip and its ground. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
+| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the battery, the camera and game buttons, the notification strip and its ground. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
 | **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. |
 | **Account order** | Reorder the accounts and the rings follow them: ring one belongs to whichever account is first, so there is nothing to keep in step by hand. |
 | **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
+| **Background picture** | A photograph behind the whole readout, cropped the same way the artwork is. Under GLASS it is also the best thing that has ever been behind a pane — the lenses had almost nothing but flat black to bend until it arrived. |
 | **Extras** | A clock, a date and a battery readout, stacked in the corner with pixel-traced glyphs, each its own toggle and its own colour. |
-| **Background** | On or off, and off does not mean gone — it drops to a low alpha so the system's rear screen shows through. The change eases rather than snapping. |
+| **Background** | One section, three columns: a colour, a picture, and a bin that is live only when there is a picture to empty. They are exclusive — choosing a colour clears the image, because the picture is drawn *over* the ground and would otherwise go on covering whatever you picked. The switch beside the heading is not a third option: it is whether the ground is drawn at all, and off does not mean gone — it drops to a low alpha so the system's rear screen shows through. |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
 Each account gets **its own settings screen**, reached from a row on the main one and
@@ -861,6 +1010,10 @@ nothing behind it and no undo. Your connected accounts stay signed in.
   `mTouchableInsets` and `visibleInsets` and nothing else. Not the hidden-API blocklist,
   which would also have hidden `setTouchableInsets`, and that resolves. The `CONTENT`
   fallback installs without error and does nothing.
+- **A game behind the readout.** The controller in the corner already goes somewhere: a
+  screen with the mascot walking it and `COMING SOON` written across it. The intention is
+  a Tamagotchi — the same animal that reports your usage, with something to do when you
+  are not reading numbers off it.
 - **Mascot states that enter and leave**, rather than looping whole. The lifting mascot
   should put its headband on once, lift for as long as you are working, and take it off
   when you stop — instead of restarting the whole performance every three seconds. And
@@ -1111,7 +1264,21 @@ panel is **ACRNM**'s. Neither is my work and neither is covered by this reposito
 licence — they are included for fidelity to the design the panel was built around. If you
 own either and would rather they were not here, open an issue and I will remove them.
 
-The typeface is [Departure Mono](https://departuremono.com/) by Helena Zhang.
+The typefaces are [Departure Mono](https://departuremono.com/) by Helena Zhang, under
+ORIGINAL, and [Outfit](https://github.com/Outfitio/Outfit-Fonts) by Smartsheet, under
+GLASS — both SIL Open Font License 1.1.
+
+GLASS is built on [AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) by
+Kyant0, Apache 2.0. Its AGSL is vendored rather than depended on — the shaders are used
+directly against a Canvas here, where the library is written for Compose — with the licence
+notice kept alongside. Its glyphs are **Material Symbols Rounded** and the front screen's
+are **Material Icons**, both Apache 2.0, from
+[material-design-icons](https://github.com/google/material-design-icons). ORIGINAL's glyphs
+are traced from Nerd Fonts into pixel rectangles rather than bundled.
+
+The record is a stock photograph, cropped to the disc and with its label flattened out —
+the album art always covers that part, and an orange label underneath would have tinted
+every cover on the panel.
 
 ## Licence
 
