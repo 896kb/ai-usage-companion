@@ -6978,6 +6978,16 @@ class RearDialView(context: Context) : View(context) {
         val alpha = { a: Int -> (a * paging).toInt().coerceIn(0, 255) }
         fun shade(base: Int, a: Int) = (base and 0x00FFFFFF) or (alpha(a) shl 24)
 
+        // THE SAME, WITHOUT THE SCROLL IN IT. Everything on this page fades in with the
+        // paging, which is right for page furniture — the timeline, the arcs, the speaker
+        // — because it genuinely arrives when the page does. It is wrong for the two
+        // things that DO NOT arrive: the transport and the name exist on the readout too
+        // and cross between the pages, and multiplying their alpha by the scroll dissolves
+        // something that is only moving. That is what made the row's copies vanish at the
+        // first flicker of a drag and the page's copies wash in behind them.
+        fun solid(base: Int, a: Int) =
+            (base and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
+
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
 
         // The labels and end marks naming the two rings.
@@ -7085,32 +7095,13 @@ class RearDialView(context: Context) : View(context) {
         val tBase = nameHomeTitle + (titleBase - nameHomeTitle) * nt
         val aBase = nameHomeArtist + (artistBase - nameHomeArtist) * nt
 
-        extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(titleSize)
-        extras.color = shade(tint, 0xFF)
-        var seen = extras.measureText(m.title)
-        val toTitleLeft = cx - minOf(seen, PAGE_TEXT_WIDTH) / 2f
-        val tLeft = nameHomeLeft + (toTitleLeft - nameHomeLeft) * nt
-        rolling(
-            canvas, "page:title", pageTitle, tLeft, tBase,
-            android.graphics.RectF(
-                tLeft, tBase - titleSize, tLeft + bandW, tBase + titleSize * 0.35f,
-            ),
-            width = bandW,
-        )
+        extras.color = solid(tint, 0xFF)
+        line(canvas, "page:title", pageTitle, nt, cx, tBase, titleSize, bandW)
         if (m.artist.isNotBlank()) {
             extras.textSize = typed(artistSize)
-            extras.color = shade(tint, MediaLayout.ARTIST_ALPHA)
-            seen = extras.measureText(m.artist)
-            val toArtistLeft = cx - minOf(seen, PAGE_TEXT_WIDTH) / 2f
-            val aLeft = nameHomeLeft + (toArtistLeft - nameHomeLeft) * nt
-            rolling(
-                canvas, "page:artist", pageArtist, aLeft, aBase,
-                android.graphics.RectF(
-                    aLeft, aBase - artistSize, aLeft + bandW, aBase + artistSize * 0.35f,
-                ),
-                width = bandW,
-            )
+            extras.color = solid(tint, MediaLayout.ARTIST_ALPHA)
+            line(canvas, "page:artist", pageArtist, nt, cx, aBase, artistSize, bandW)
         }
         extras = wasPen
         extras.textAlign = Paint.Align.LEFT
@@ -7167,11 +7158,11 @@ class RearDialView(context: Context) : View(context) {
             if (!transportHomeKnown) pageCx[i]
             else transportHomeX[i] + (pageCx[i] - transportHomeX[i]) * t
 
-        extras.color = shade(tint, 0xFF)
+        extras.color = solid(tint, 0xFF)
         val prevCx = travelled(0)
         val prevX = prevCx - bh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f
         glassButton(canvas, prevCx, bcy, bh) { c ->
-            extras.color = shade(tint, 0xFF)
+            extras.color = solid(tint, 0xFF)
             drawIcon(c, PanelIcons.PREV, prevX, bTop, bh)
         }
         centres += prevCx
@@ -7182,7 +7173,7 @@ class RearDialView(context: Context) : View(context) {
         glassButton(canvas, playCx, bcy, bh) { c ->
             c.save()
             c.clipRect(playX, bTop - bh, playX + bh, bTop + bh * 2f)
-            drawPlayPause(c, playX, bTop, bh, shade(tint, 0xFF))
+            drawPlayPause(c, playX, bTop, bh, solid(tint, 0xFF))
             c.restore()
         }
         centres += playCx
@@ -7190,7 +7181,7 @@ class RearDialView(context: Context) : View(context) {
         val nextCx = travelled(2)
         val nextX = nextCx - bh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f
         glassButton(canvas, nextCx, bcy, bh) { c ->
-            extras.color = shade(tint, 0xFF)
+            extras.color = solid(tint, 0xFF)
             drawIcon(c, PanelIcons.NEXT, nextX, bTop, bh)
         }
         centres += nextCx
@@ -7668,15 +7659,48 @@ class RearDialView(context: Context) : View(context) {
      * Generous on width — a rolling replacement can be wider than the text it replaces,
      * and a clip cut to the outgoing string would shave the incoming one.
      */
-    private fun lineBand(
-        centreX: Float,
+    /**
+     * One line of the track's name, wherever along its travel it happens to be.
+     *
+     * ANCHORED THE WAY EACH END ANCHORS IT, and getting this wrong is what made the name
+     * shift about while it changed. A line that FITS is centred — which is what the media
+     * page has always done, and it matters for more than symmetry: the wheel draws the
+     * outgoing title and the incoming one at the same moment, and centring puts each on
+     * its own middle. Pinning them to a left edge computed from the incoming string's
+     * width drags the outgoing one sideways as the card grows, which is a layout shift
+     * with nothing behind it. A line that does NOT fit is left-aligned at the band's
+     * edge, because a marquee has to start somewhere definite.
+     *
+     * [t] runs 0 at the readout's row to 1 here. At 1 this is exactly what the page drew
+     * before there was any travel at all.
+     */
+    private fun line(
+        canvas: Canvas,
+        key: String,
+        text: String,
+        t: Float,
+        cx: Float,
         baseline: Float,
-        width: Float,
         size: Float,
-    ) = android.graphics.RectF(
-        centreX - width / 2f, baseline - size,
-        centreX + width / 2f, baseline + size * 0.35f,
-    )
+        width: Float,
+    ) {
+        val seen = extras.measureText(text)
+        val runs = seen > width
+        extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
+        // The row holds this line by its left edge and the page by its middle, so the
+        // journey is expressed in whichever of the two the drawing is about to use.
+        val from = if (runs) nameHomeLeft else nameHomeLeft + seen / 2f
+        val to = if (runs) cx - width / 2f else cx
+        val at = from + (to - from) * t
+        val left = if (runs) at else at - width / 2f
+        rolling(
+            canvas, key, text, at, baseline,
+            android.graphics.RectF(
+                left, baseline - size, left + width, baseline + size * 0.35f,
+            ),
+            width = width,
+        )
+    }
 
     /**
      * The play/pause drum: one glyph leaves as the other arrives.
