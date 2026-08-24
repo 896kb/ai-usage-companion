@@ -485,7 +485,7 @@ half4 main(float2 coord) {
     const val RING_BAND = 1.7f
 
     /** And how much slimmer the reading gets, now that it is inside something. */
-    const val RING_FILL = 0.52f
+    const val RING_FILL = 0.70f
 
     /**
      * The lit edges of a glass ring, and how bright they are.

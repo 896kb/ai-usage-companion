@@ -837,6 +837,7 @@ class RearDialView(context: Context) : View(context) {
         nodesUsed = 0
         pendingButtons.clear()
         pendingRings.clear()
+        pendingOver.clear()
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
             // POSITION, not just size. beginRecording says how big the display list is;
@@ -899,6 +900,7 @@ class RearDialView(context: Context) : View(context) {
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (recorder == null || !config.theme.isGlass || !sceneNode.hasDisplayList()) {
             drawPendingRings(canvas)
+            drawPendingOver(canvas)
             drawPendingButtons(canvas)
             drawLockOverlay(canvas)
             drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
@@ -929,6 +931,8 @@ class RearDialView(context: Context) : View(context) {
         // Rings first, so a button crossing one is glass over glass in that order rather
         // than the other way round.
         if (pendingRings.isNotEmpty()) active.add(GROUP_RINGS)
+        // Straight after the bands, so a ring's own label is legible on top of it.
+        if (pendingOver.isNotEmpty()) active.add(GROUP_OVER)
         if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
         if (lockSwap(frameNowMs) > 0.001f) active.add(GROUP_LOCK)
         if (noticeSlideHeld > 0.001f) active.add(GROUP_NOTICE)
@@ -955,6 +959,7 @@ class RearDialView(context: Context) : View(context) {
     private fun drawOverlayGroup(group: Int, canvas: Canvas) {
         when (group) {
             GROUP_RINGS -> drawPendingRings(canvas)
+            GROUP_OVER -> drawPendingOver(canvas)
             GROUP_BUTTONS -> drawPendingButtons(canvas)
             GROUP_LOCK -> drawLockOverlay(canvas)
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
@@ -1627,6 +1632,42 @@ class RearDialView(context: Context) : View(context) {
         pendingRings.add(
             PendingRing(ringPoint[0], ringPoint[1], radius * scale, thickness * scale, clip),
         )
+    }
+
+    /**
+     * Something that must be drawn OVER the glass rather than under it.
+     *
+     * The ring bands are held back to the overlay pass so they can bend the finished
+     * panel, which puts them on top of everything drawn in the scene — including the
+     * labels that belong to those very rings. A time and a volume read through a lens are
+     * not a reading, they are a texture.
+     *
+     * So the label goes with them, one step later. The canvas matrix travels too: the
+     * rings are drawn in their own frame and the overlay pass has no idea about it, so the
+     * transform in force when the label was deferred is the transform it is replayed
+     * under.
+     */
+    private class PendingOver(
+        val matrix: android.graphics.Matrix,
+        val draw: (Canvas) -> Unit,
+    )
+
+    private val pendingOver = ArrayList<PendingOver>(4)
+
+    /** Returns false when there is no overlay pass, and the caller should just draw. */
+    private fun deferOver(canvas: Canvas, draw: (Canvas) -> Unit): Boolean {
+        if (!config.theme.isGlass || !recordingScene) return false
+        pendingOver.add(PendingOver(android.graphics.Matrix(canvas.getMatrix()), draw))
+        return true
+    }
+
+    private fun drawPendingOver(canvas: Canvas) {
+        for (o in pendingOver) {
+            canvas.save()
+            canvas.concat(o.matrix)
+            o.draw(canvas)
+            canvas.restore()
+        }
     }
 
     private val ringPoint = FloatArray(2)
@@ -6661,14 +6702,26 @@ class RearDialView(context: Context) : View(context) {
         //
         // Never smaller than the glyph's own cell, so a muted speaker is a button the same
         // size as every other button rather than a shrunken one.
-        val discH = maxOf(mh, soundEdge / DISC_RADIUS)
-        glassButton(canvas, hx, hy, mh, discH = discH) { c ->
-            drawIcon(
-                c, speaker,
-                hx - speakerW / 2f - (mh - speakerW) / 2f, hy - mh / 2f, mh,
-                smooth = true,
-            )
-        }
+        // WHERE THE BUBBLE'S MIDDLE ACTUALLY IS.
+        //
+        // It was centred on the glyph, which is only right when the glyph is all there is.
+        // The waves leave the cone's mouth and travel one way — outward, along the arc —
+        // so what the glass has to hold is lopsided, and a bubble centred on the cone grows
+        // as much empty space behind the speaker as it does room in front of it.
+        //
+        // The contents run from the glyph's own left edge to the far side of the outermost
+        // wave, so the centre is the middle of THAT and the radius is half of it. Measured
+        // along the direction the speaker points, then placed in the panel's coordinates.
+        val need = (soundEdge + mh / 2f) / 2f
+        val shift = (soundEdge - mh / 2f) / 2f
+        val bubbleX = hx + Math.cos(radians).toFloat() * shift
+        val bubbleY = hy + Math.sin(radians).toFloat() * shift
+
+        drawIcon(
+            canvas, speaker,
+            hx - speakerW / 2f - (mh - speakerW) / 2f, hy - mh / 2f, mh,
+            smooth = true,
+        )
         // The waves, concentric on the cone's mouth and clipped to a wedge, so they read
         // as sound leaving the speaker rather than as rings around it.
         run {
@@ -6718,6 +6771,17 @@ class RearDialView(context: Context) : View(context) {
             canvas.drawLine(x0, y0, x1, y1, closePaint)
         }
         canvas.restore()
+
+        // THE BUBBLE, OUTSIDE THE ROTATION. A circle does not need turning, and turning it
+        // costs something real: a pane is noted by mapping its square through the canvas's
+        // matrix, and the bounding box of a rotated square is up to half again as wide as
+        // the square. That was invisible while the bubble sat on the rotation's own pivot;
+        // centred anywhere else it would swing the glass off the speaker and breathe with
+        // the angle. Placed unrotated, it is simply a circle where the circle belongs.
+        glassButton(
+            canvas, bubbleX, bubbleY, mh,
+            discH = maxOf(mh, need / DISC_RADIUS),
+        ) { }
         canvas.restore()
 
         // Targets, and only once the page has arrived — the same rule the row follows.
@@ -6848,29 +6912,46 @@ class RearDialView(context: Context) : View(context) {
         val shownElapsed =
             if (held != null && m.durationMs > 0L) (held * m.durationMs).toLong()
             else elapsed
-        curvedRolling(
-            canvas, "dial:elapsed", MediaPage.clock(shownElapsed), rings.personal,
-            centreDeg = MediaPage.ELAPSED_AT, outward = true,
-            animate = scrubTo == null,
-        )
-        if (m.durationMs > 0L) {
+        val labelColor = extras.color
+
+        // OVER THE GLASS, NOT UNDER IT.
+        //
+        // These belong to the rings, and the rings are bands of glass now, held back to
+        // the overlay pass so they can bend the finished panel. A label drawn here in the
+        // scene therefore ends up UNDER a lens — and a time read through a lens is a
+        // texture rather than a reading.
+        //
+        // So it goes one step later, with the paint set inside rather than outside: by the
+        // time this runs, `extras` has been through half the panel.
+        val labels = { c: Canvas ->
+            extras.textSize = typed(MediaPage.LABEL_SIZE)
+            extras.textAlign = Paint.Align.CENTER
+            extras.color = labelColor
             curvedRolling(
-                canvas, "dial:total", MediaPage.clock(m.durationMs), rings.personal,
-                centreDeg = MediaPage.TOTAL_AT, outward = false,
+                c, "dial:elapsed", MediaPage.clock(shownElapsed), rings.personal,
+                centreDeg = MediaPage.ELAPSED_AT, outward = true,
+                animate = scrubTo == null,
             )
+            if (m.durationMs > 0L) {
+                curvedRolling(
+                    c, "dial:total", MediaPage.clock(m.durationMs), rings.personal,
+                    centreDeg = MediaPage.TOTAL_AT, outward = false,
+                )
+            }
+            // Bottom-left of its ring rather than over the top of it. Outside at twelve
+            // o'clock lands in the twenty units between the two rings, which is not
+            // enough, and any further out is inside the ring above. Down here there is
+            // open panel. VOLUME with its reading attached, so the percentage rolls in the
+            // same wheel as everything else and the word acts as its unit.
+            curvedRolling(
+                c, "dial:volume",
+                MediaPage.VOLUME_LABEL + " " + Math.round(volumeShown * 100f) + "%",
+                rings.work, centreDeg = 135f, outward = false,
+            )
+            extras.textAlign = Paint.Align.LEFT
+            extras.textSize = typed(18f)
         }
-        // Bottom-left of its ring rather than over the top of it. Outside at twelve
-        // o'clock lands in the twenty units between the two rings, which is not enough,
-        // and any further out is inside the ring above. Down here there is open panel.
-        // VOLUME with its reading attached. One label rather than two, so the percentage
-        // rolls in the same wheel as everything else and the word acts as its unit.
-        curvedRolling(
-            canvas, "dial:volume",
-            MediaPage.VOLUME_LABEL + " " + Math.round(volumeShown * 100f) + "%",
-            rings.work, centreDeg = 135f, outward = false,
-        )
-        extras.textAlign = Paint.Align.LEFT
-        extras.textSize = typed(18f)
+        if (!deferOver(canvas, labels)) labels(canvas)
     }
 
     /**
@@ -8232,6 +8313,7 @@ class RearDialView(context: Context) : View(context) {
 
         /** The overlay groups, in the order they stack over the panel. See drawOverlays. */
         private const val GROUP_RINGS = 4
+        private const val GROUP_OVER = 5
         private const val GROUP_BUTTONS = 0
         private const val GROUP_LOCK = 1
         private const val GROUP_NOTICE = 2
