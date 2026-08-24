@@ -5436,48 +5436,8 @@ class RearDialView(context: Context) : View(context) {
         var baseline =
             if (boxed) cardRect.top + EXTRA_PAD_Y + EXTRA_ICON_H - 2f
             else TITLE_BASELINE - EXTRA_LIFT
-        if (config.showClock) {
-            // Each extra takes its own colour, eased separately. They shared one until
-            // the panel had three of them, at which point "the extras colour" stopped
-            // describing anything — a clock and a battery are different readings and
-            // there is no reason they should agree.
-            extras.color = colorFor("clock", config.clockTint)
-            val now = java.util.Calendar.getInstance()
-            val text = String.format(
-                "%02d:%02d",
-                now.get(java.util.Calendar.HOUR_OF_DAY),
-                now.get(java.util.Calendar.MINUTE),
-            )
-            // Icon on the RIGHT, text to its left. Both icons then share one edge at
-            // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
-            // ending wherever its own text happens to stop.
-            drawIcon(canvas, PanelIcons.CLOCK, iconLeft,
-                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            extras.textAlign = align
-            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
-            baseline += EXTRA_LINE_H
-        }
-        if (config.showDate) {
-            val now = java.util.Calendar.getInstance()
-            // Day of the week, then the day of the month. Not the month name: on a panel
-            // read at a glance, "which day is it" is the question, and the month is the
-            // one part of a date nobody needs reminding of.
-            val text = String.format(
-                "%s %02d",
-                DAYS[now.get(java.util.Calendar.DAY_OF_WEEK) - 1],
-                now.get(java.util.Calendar.DAY_OF_MONTH),
-            )
-            extras.color = colorFor("date", config.dateTint)
-            // Icon on the right like its neighbours. It carries no information "TUE 20"
-            // does not — but a column of three rows where one lacks the mark the other
-            // two share reads as a rendering fault, and the alignment is worth more here
-            // than the argument against ornament.
-            drawIcon(canvas, PanelIcons.CALENDAR, iconLeft,
-                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            extras.textAlign = align
-            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
-            baseline += EXTRA_LINE_H
-        }
+        // BATTERY FIRST, then the time, then the day. The order is the user's: the
+        // reading that changes fastest and matters soonest is the one at the top.
         if (config.showBattery) {
             extras.color = colorFor("battery", config.batteryTint)
             // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
@@ -5558,6 +5518,48 @@ class RearDialView(context: Context) : View(context) {
                     }
                 }
             }
+        }
+        if (config.showClock) {
+            // Each extra takes its own colour, eased separately. They shared one until
+            // the panel had three of them, at which point "the extras colour" stopped
+            // describing anything — a clock and a battery are different readings and
+            // there is no reason they should agree.
+            extras.color = colorFor("clock", config.clockTint)
+            val now = java.util.Calendar.getInstance()
+            val text = String.format(
+                "%02d:%02d",
+                now.get(java.util.Calendar.HOUR_OF_DAY),
+                now.get(java.util.Calendar.MINUTE),
+            )
+            // Icon on the RIGHT, text to its left. Both icons then share one edge at
+            // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
+            // ending wherever its own text happens to stop.
+            drawIcon(canvas, PanelIcons.CLOCK, iconLeft,
+                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
+            extras.textAlign = align
+            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
+            baseline += EXTRA_LINE_H
+        }
+        if (config.showDate) {
+            val now = java.util.Calendar.getInstance()
+            // Day of the week, then the day of the month. Not the month name: on a panel
+            // read at a glance, "which day is it" is the question, and the month is the
+            // one part of a date nobody needs reminding of.
+            val text = String.format(
+                "%s %02d",
+                DAYS[now.get(java.util.Calendar.DAY_OF_WEEK) - 1],
+                now.get(java.util.Calendar.DAY_OF_MONTH),
+            )
+            extras.color = colorFor("date", config.dateTint)
+            // Icon on the right like its neighbours. It carries no information "TUE 20"
+            // does not — but a column of three rows where one lacks the mark the other
+            // two share reads as a rendering fault, and the alignment is worth more here
+            // than the argument against ornament.
+            drawIcon(canvas, PanelIcons.CALENDAR, iconLeft,
+                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
+            extras.textAlign = align
+            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
+            baseline += EXTRA_LINE_H
         }
     }
 
