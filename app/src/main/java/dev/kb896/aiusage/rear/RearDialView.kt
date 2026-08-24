@@ -6115,6 +6115,26 @@ class RearDialView(context: Context) : View(context) {
         // way a record under a lamp does, and spinning the disc would spin the lamp with
         // it. What turns is the label, which is where a record's rotation is legible
         // anyway — the grooves are a featureless black ring whichever way round they are.
+        // THE SPINDLE IS A HOLE, and it has to be cut rather than painted.
+        //
+        // It used to be a dot filled with the panel's background colour, which is the same
+        // thing as a hole for exactly as long as the panel's background IS that colour.
+        // Put a photograph behind the readout and the illusion goes: the record gains a
+        // small flat disc of the wrong colour in its middle, sitting on top of a picture
+        // it is supposed to be showing through.
+        //
+        // So the disc is composed in a layer and the spindle is taken OUT of it, which
+        // reveals whatever the panel had already drawn underneath — the ground, the
+        // photograph, the readout, whatever it happens to be. A clip would have been
+        // cheaper than a layer, but clip paths are not anti-aliased on a hardware canvas
+        // and this hole is six pixels across; a jagged six-pixel circle is worse than the
+        // wrong colour.
+        spindleBounds.set(
+            disc.cx - disc.radius, disc.cy - disc.radius,
+            disc.cx + disc.radius, disc.cy + disc.radius,
+        )
+        val discLayer = canvas.saveLayer(spindleBounds, null)
+
         val record = recordArt
         if (record != null) {
             recordRect.set(
@@ -6195,15 +6215,31 @@ class RearDialView(context: Context) : View(context) {
         vinylPaint.color = shade(VINYL_LABEL_ALPHA)
         canvas.drawCircle(disc.cx, disc.cy, label, vinylPaint)
 
+        // Cut, not painted. Anti-aliased, which is the whole reason this is a layer.
         vinylPaint.style = Paint.Style.FILL
-        vinylPaint.color = colorFor("bg", config.background or (0xFF shl 24))
+        vinylPaint.xfermode = clearMode
         canvas.drawCircle(
             disc.cx, disc.cy, disc.radius * MediaLayout.VINYL_SPINDLE, vinylPaint)
+        vinylPaint.xfermode = null
+        canvas.restoreToCount(discLayer)
     }
 
     /** The record's body, grooves and label. Anti-aliased — it is the one thing on this
      *  panel that is genuinely round rather than pixel art. */
     private val vinylPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** The record's extent, for the layer the spindle is cut out of. */
+    private val spindleBounds = android.graphics.RectF()
+
+    /**
+     * Kept rather than made, like everything else that wraps a native object here.
+     *
+     * A PorterDuffXfermode is a small Java object in front of a native one, allocated on
+     * the draw path — the exact shape that filled the native heap when the pane lenses
+     * were built per frame.
+     */
+    private val clearMode =
+        android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
 
     /**
      * The media page's furniture: type, transport, timeline and volume.
