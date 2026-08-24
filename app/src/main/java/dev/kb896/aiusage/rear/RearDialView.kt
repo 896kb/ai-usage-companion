@@ -627,6 +627,8 @@ class RearDialView(context: Context) : View(context) {
         target: Float,
         durationMs: Float,
         linear: Boolean = false,
+        /** Overshoot and settle, for things that change SIZE rather than move. */
+        back: Boolean = false,
         /**
          * How big a change has to be to count as a new movement.
          *
@@ -655,7 +657,12 @@ class RearDialView(context: Context) : View(context) {
         // target moved from 0.166 to 0.02. The animation was never wrong; it was being
         // told no time had passed.
         val t = ((frameNowMs - leg.startMs).toFloat() / durationMs).coerceIn(0f, 1f)
-        val value = leg.from + (leg.to - leg.from) * (if (linear) t else Tween.easeInOut(t))
+        val curve = when {
+            linear -> t
+            back -> Tween.easeOutBack(t)
+            else -> Tween.easeInOut(t)
+        }
+        val value = leg.from + (leg.to - leg.from) * curve
         if (Math.abs(target - leg.to) > epsilon) {
             leg.from = value
             leg.to = target
@@ -667,6 +674,40 @@ class RearDialView(context: Context) : View(context) {
         }
         if (t < 1f) animating = true
         return value
+    }
+
+    /**
+     * A string held back until the box around it has finished growing.
+     *
+     * THE BOX MOVES FIRST, THEN THE WORDS. A card and the name on it are one object, and
+     * changing both at once makes them two: the sheet resizing while the letters roll over
+     * reads as the panel redrawing rather than as a record changing. Worse, a longer title
+     * arriving before its card has opened is a title hanging outside its own box for the
+     * length of the roll.
+     *
+     * So the card is given the NEW text's width immediately and springs to it, while the
+     * wheel keeps turning the old one until it has. The two become a sequence, which is
+     * what it looks like anyway when it is done properly.
+     */
+    private class HeldText(var target: String, var shown: String, var at: Long)
+
+    private val heldTexts = HashMap<String, HeldText>()
+
+    private fun afterResize(key: String, text: String): String {
+        val h = heldTexts.getOrPut(key) { HeldText(text, text, 0L) }
+        if (text != h.target) {
+            h.target = text
+            h.at = frameNowMs
+        }
+        if (h.at != 0L) {
+            if (frameNowMs - h.at >= CARD_GROW_MS) {
+                h.shown = h.target
+                h.at = 0L
+            } else {
+                animating = true
+            }
+        }
+        return h.shown
     }
 
     /** One eased value: where it came from, where it is going, and when it set off. */
@@ -1728,7 +1769,10 @@ class RearDialView(context: Context) : View(context) {
                 node.endRecording()
             }
             node.setRenderEffect(
-                ringLensFor(r.cx - ringRect.left, r.cy - ringRect.top, r.radius, half),
+                ringLensFor(
+                    r.cx - ringRect.left, r.cy - ringRect.top, r.radius, half,
+                    clearReactive(ringRect),
+                ),
             )
             canvas.save()
             canvas.clipRect(r.clip)
@@ -1753,11 +1797,18 @@ class RearDialView(context: Context) : View(context) {
      * the volume ring's thumb swells and a geometry that crept would mint an effect a
      * frame, which is the native-heap leak in another costume.
      */
-    private fun ringLensFor(cx: Float, cy: Float, radius: Float, half: Float): android.graphics.RenderEffect {
+    private fun ringLensFor(
+        cx: Float,
+        cy: Float,
+        radius: Float,
+        half: Float,
+        tint: Int,
+    ): android.graphics.RenderEffect {
         val key = (Math.round(cx).toLong() shl 45) or
             (Math.round(cy).toLong() shl 30) or
             (Math.round(radius).toLong() shl 15) or
-            Math.round(half * 4f).toLong().coerceIn(0L, 32767L)
+            Math.round(half * 4f).toLong().coerceIn(0L, 32767L) xor
+            (tint.toLong() shl 20)
         ringLensCache[key]?.let { return it }
         val shader = Glass.ringLens
         shader.setFloatUniform("center", cx, cy)
@@ -1770,6 +1821,7 @@ class RearDialView(context: Context) : View(context) {
         shader.setFloatUniform(
             "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
         )
+        shader.setColorUniform("tint", tint)
         val effect =
             android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         if (ringLensCache.size >= LENS_CACHE_MAX) ringLensCache.clear()
@@ -5279,6 +5331,10 @@ class RearDialView(context: Context) : View(context) {
 
     private val cardShape = android.graphics.Path()
 
+    /** Whether the corner block has anything to say at all. */
+    private fun anyExtra(): Boolean =
+        config.showClock || config.showDate || config.showBattery
+
     /**
      * The corner block's box, or false when nothing is in it.
      *
@@ -5288,24 +5344,31 @@ class RearDialView(context: Context) : View(context) {
      * and the widest line the width.
      */
     private fun extrasCard(out: android.graphics.RectF): Boolean {
-        val lines = (if (config.showClock) 1 else 0) +
-            (if (config.showDate) 1 else 0) +
-            (if (config.showBattery) 1 else 0)
-        if (!config.theme.isGlass || lines == 0) return false
+        if (!config.theme.isGlass || !anyExtra()) return false
+        // ONE SIZE, WHATEVER IS IN IT — the full three rows if any of the three is on, and
+        // nothing at all if none are.
+        //
+        // Sizing it by the count was the obvious thing and the wrong one. Everything below
+        // is laid out against the bottom of this block, so turning the clock off did not
+        // just remove a line: it moved every account on the panel. A control that quietly
+        // relays the whole readout is worse than a little empty glass under a single
+        // reading, and the empty glass is only ever visible to somebody who has turned two
+        // of the three off and is looking for it.
         val was = extras.textSize
         extras.textSize = typed(18f)
-        var widest = 0f
-        if (config.showClock) widest = maxOf(widest, extras.measureText("00:00"))
-        if (config.showDate) widest = maxOf(widest, extras.measureText("WED 00"))
-        if (config.showBattery) widest = maxOf(widest, extras.measureText("100%"))
+        val widest = maxOf(
+            extras.measureText("00:00"),
+            maxOf(extras.measureText("WED 00"), extras.measureText("100%")),
+        )
         extras.textSize = was
-        val top = TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H - EXTRA_PAD_Y
+        val h = EXTRA_ICON_H + (EXTRA_ROWS - 1) * EXTRA_LINE_H + EXTRA_PAD_Y * 2f
+        val top = topBandCentre() - h / 2f
         out.set(
             CONTENT_RIGHT + EXTRA_PAD_X -
                 (EXTRA_PAD_X * 2f + EXTRA_ICON_H + EXTRA_ICON_GAP + widest),
             top,
             CONTENT_RIGHT + EXTRA_PAD_X,
-            top + EXTRA_ICON_H + (lines - 1) * EXTRA_LINE_H + EXTRA_PAD_Y * 2f,
+            top + h,
         )
         return true
     }
@@ -5332,7 +5395,10 @@ class RearDialView(context: Context) : View(context) {
         val textLeft = iconLeft + EXTRA_ICON_H + EXTRA_ICON_GAP
         val align = if (boxed) Paint.Align.LEFT else Paint.Align.RIGHT
 
-        var baseline = TITLE_BASELINE - EXTRA_LIFT
+        // From the card's own top, so the two cannot drift apart when either changes.
+        var baseline =
+            if (boxed) cardRect.top + EXTRA_PAD_Y + EXTRA_ICON_H - 2f
+            else TITLE_BASELINE - EXTRA_LIFT
         if (config.showClock) {
             // Each extra takes its own colour, eased separately. They shared one until
             // the panel had three of them, at which point "the extras colour" stopped
@@ -5605,10 +5671,22 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun titleBaseline(): Float {
-        val band = firstCardTop
-        if (band <= 0f) return TITLE_BASELINE
-        return band / 2f + title.textSize * TITLE_OPTICAL
+        if (firstCardTop <= 0f) return TITLE_BASELINE
+        return topBandCentre() + title.textSize * TITLE_OPTICAL
     }
+
+    /**
+     * The middle of the band above the first account card.
+     *
+     * ONE LINE FOR EVERYTHING ON THAT ROW. The masthead and the corner block are the two
+     * things up there, and each was placed against something different — one centred in
+     * the band, the other at a fixed offset from the top. Matching their heights made them
+     * the same size and no more aligned than before, which reads worse than two obviously
+     * different objects: near-alignment looks like a miss.
+     */
+    private fun topBandCentre(): Float =
+        if (firstCardTop > 0f) firstCardTop / 2f
+        else TITLE_BASELINE - EXTRA_ICON_H / 2f
 
     /** How far below a centre a cap-height baseline sits, as a fraction of the size. */
     private var firstCardTop = 0f
@@ -5752,7 +5830,10 @@ class RearDialView(context: Context) : View(context) {
         // The bars start below whatever the extras occupy. Stacked, the battery's
         // baseline lands exactly on the first account heading — the two collided by
         // arithmetic rather than by accident, so the region has to know they are there.
-        val extraLines = (if (config.showClock) 1 else 0) + (if (config.showBattery) 1 else 0)
+        // The corner block is one size or absent — see extrasCard — so this is a yes or a
+        // no rather than a count. It used to be a count, which is what made turning the
+        // clock off shuffle every account down the panel.
+        val extraLines = if (anyExtra()) EXTRA_ROWS else 0
         // A LITTLE FURTHER DOWN, for air under the masthead now that it has a card.
         //
         // Safe to move by construction rather than by measurement: the gap below is not a
@@ -6818,7 +6899,12 @@ class RearDialView(context: Context) : View(context) {
                 extras.textSize = typed(MediaPage.ARTIST_SIZE)
                 w = maxOf(w, extras.measureText(m.artist))
             }
-            w = minOf(w, PAGE_TEXT_WIDTH)
+            // EASED TO THE NEW WIDTH, not cut to it. The name changes while you are looking
+            // at it, and a card that jumps to the next title's width reads as a second
+            // thing happening — the card flinching at the same moment the words turn over.
+            // Grown, the two are one event: the sheet opens out and the new name arrives
+            // on it. The same wheel the text itself rolls on, near enough.
+            w = ease("page:card:w", minOf(w, PAGE_TEXT_WIDTH), CARD_GROW_MS, back = true)
             cardRect.set(
                 cx - w / 2f - TRACK_PAD_X,
                 titleBase - MediaPage.TITLE_SIZE - TRACK_PAD_Y,
@@ -6833,7 +6919,7 @@ class RearDialView(context: Context) : View(context) {
         var runs = extras.measureText(m.title) > PAGE_TEXT_WIDTH
         extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
         rolling(
-            canvas, "page:title", m.title,
+            canvas, "page:title", afterResize("page:title", m.title),
             if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
             titleBase,
             lineBand(cx, titleBase, PAGE_TEXT_WIDTH, MediaPage.TITLE_SIZE),
@@ -6845,7 +6931,7 @@ class RearDialView(context: Context) : View(context) {
             runs = extras.measureText(m.artist) > PAGE_TEXT_WIDTH
             extras.textAlign = if (runs) Paint.Align.LEFT else Paint.Align.CENTER
             rolling(
-                canvas, "page:artist", m.artist,
+                canvas, "page:artist", afterResize("page:artist", m.artist),
                 if (runs) cx - PAGE_TEXT_WIDTH / 2f else cx,
                 artistBase,
                 lineBand(cx, artistBase, PAGE_TEXT_WIDTH,
@@ -8159,6 +8245,28 @@ class RearDialView(context: Context) : View(context) {
         val hasArtist = m.artist.isNotBlank()
         var baseline = MediaLayout.firstBaseline(region.centerY(), hasArtist)
 
+        // The same card the media page's name gets. This row is the same information in a
+        // smaller place, and over a photograph it needs something to sit on just as much.
+        if (config.theme.isGlass) {
+            extrasMedia.textSize = typed(MediaLayout.TEXT_SIZE)
+            var w = extrasMedia.measureText(m.title)
+            if (hasArtist) w = maxOf(w, extrasMedia.measureText(m.artist))
+            w = ease("row:card:w", minOf(w, row.textWidth), CARD_GROW_MS, back = true)
+            val top = baseline - MediaLayout.TEXT_SIZE - ROW_CARD_PAD_Y
+            val bottom =
+                (if (hasArtist) baseline + MediaLayout.LINE else baseline) + ROW_CARD_PAD_Y
+            // Never left of the row itself. With no cover the text starts AT the row's
+            // left edge, so a card with padding around it reached past into the clip and
+            // came back with a straight edge down one side.
+            cardRect.set(
+                maxOf(textLeft - ROW_CARD_PAD_X, band.left),
+                top,
+                textLeft + w + ROW_CARD_PAD_X,
+                bottom,
+            )
+            glassCard(canvas, cardRect, ROW_CARD_RADIUS)
+        }
+
         // The same wheel the media page uses, for the same reason: a track changing is
         // news and should be seen changing. `rolling` hands each line to the marquee when
         // it does not fit, so a long title both turns over and then scrolls.
@@ -8173,7 +8281,7 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = typed(MediaLayout.TEXT_SIZE)
         extras.color = tint
         rolling(
-            canvas, "row:title", m.title, textLeft, baseline,
+            canvas, "row:title", afterResize("row:title", m.title), textLeft, baseline,
             android.graphics.RectF(
                 textLeft, baseline - MediaLayout.TEXT_SIZE,
                 textLeft + row.textWidth, baseline + MediaLayout.TEXT_SIZE * 0.35f,
@@ -8189,7 +8297,7 @@ class RearDialView(context: Context) : View(context) {
             // The artist goes with the title. Left at the panel's weight it would come
             // out bolder than the name of the track above it.
             rolling(
-                canvas, "row:artist", m.artist, textLeft, baseline,
+                canvas, "row:artist", afterResize("row:artist", m.artist), textLeft, baseline,
                 android.graphics.RectF(
                     textLeft, baseline - MediaLayout.TEXT_SIZE,
                     textLeft + row.textWidth, baseline + MediaLayout.TEXT_SIZE * 0.35f,
@@ -9231,6 +9339,9 @@ class RearDialView(context: Context) : View(context) {
         /** Between an icon and the text it introduces. */
         private const val EXTRA_ICON_GAP = 8f
 
+        /** How many rows the corner block always reserves. See extrasCard. */
+        private const val EXTRA_ROWS = 3
+
         /** Breathing room above and below a single-account preview, replacing the
          *  masthead and the maker's mark it does not draw. */
         private const val SINGLE_ACCOUNT_TOP = 24f
@@ -9247,6 +9358,20 @@ class RearDialView(context: Context) : View(context) {
         /** And inside the one behind a track's name. */
         private const val TRACK_PAD_X = 14f
         private const val TRACK_PAD_Y = 8f
+
+        /** And inside the readout row's smaller one. */
+        private const val ROW_CARD_PAD_X = 10f
+        private const val ROW_CARD_PAD_Y = 6f
+        private const val ROW_CARD_RADIUS = 12f
+
+        /**
+         * How long a name's card takes to spring to its new width.
+         *
+         * Short. It is not the movement anybody is meant to watch — it is the box getting
+         * out of the way so the name can turn over inside it, and the roll is the part
+         * with something to say.
+         */
+        private const val CARD_GROW_MS = 170f
 /**
          * How long a value takes to travel from its old reading to its new one.
          *

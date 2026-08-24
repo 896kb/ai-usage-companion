@@ -79,6 +79,22 @@ internal class Tween {
          * design, and on a bounded quantity that means a bar heading for 94% punches
          * past 100%, clamps flat, and creeps back: a value the data never held.
          */
+        /**
+         * Out, past, and back — a spring that overshoots once and settles.
+         *
+         * For things that CHANGE SIZE rather than move. A box easing to a new width looks
+         * like it is being resized by something; one that overshoots and comes back looks
+         * like it sprang to fit, which is the difference between a panel redrawing and a
+         * thing reacting. The constant is the standard back-easing one: 1.70158 gives
+         * roughly a ten per cent overshoot.
+         */
+        fun easeOutBack(t: Float): Float {
+            val x = t.coerceIn(0f, 1f) - 1f
+            return 1f + (BACK + 1f) * x * x * x + BACK * x * x
+        }
+
+        private const val BACK = 1.70158f
+
         fun easeInOut(t: Float): Float =
             if (t < 0.5f) 4f * t * t * t
             else 1f - (-2f * t + 2f).let { it * it * it } / 2f

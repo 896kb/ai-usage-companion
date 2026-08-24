@@ -290,6 +290,7 @@ uniform float ringRadius;
 uniform float halfThickness;
 uniform float refractionHeight;
 uniform float refractionAmount;
+layout(color) uniform half4 tint;
 
 float sdRing(float2 p, float r, float t) {
     return abs(length(p) - r) - t;
@@ -319,13 +320,19 @@ half4 main(float2 coord) {
     }
 
     // Deep enough inside the band that the lens has nothing left to do.
+    half4 color;
     if (-sd >= refractionHeight) {
-        return content.eval(coord) * aa;
+        color = content.eval(coord) * aa;
+    } else {
+        float d = circleMap(1.0 - -min(sd, 0.0) / refractionHeight) * refractionAmount;
+        float2 grad = gradSdRing(p, ringRadius);
+        color = content.eval(coord + d * grad) * aa;
     }
-
-    float d = circleMap(1.0 - -min(sd, 0.0) / refractionHeight) * refractionAmount;
-    float2 grad = gradSdRing(p, ringRadius);
-    return content.eval(coord + d * grad) * aa;
+    // The backdrop's own tint, for a band with none of its own — the same thing the
+    // buttons get, and for the same reason: clear glass has nothing to show over black.
+    // Premultiplied by coverage, like everything else here.
+    color.rgb = mix(color.rgb, tint.rgb * aa, tint.a);
+    return color;
 }"""
 
     /**
