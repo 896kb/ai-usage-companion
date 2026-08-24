@@ -990,9 +990,9 @@ class RearDialView(context: Context) : View(context) {
     private fun drawOverlays(canvas: Canvas) {
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (recorder == null || !config.theme.isGlass || !sceneNode.hasDisplayList()) {
-            drawPendingRings(canvas)
-            drawPendingOver(canvas)
-            drawPendingButtons(canvas)
+            swept(canvas) { drawPendingRings(it) }
+            swept(canvas) { drawPendingOver(it) }
+            swept(canvas) { drawPendingButtons(it) }
             drawLockOverlay(canvas)
             drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             drawCharge(canvas)
@@ -1047,16 +1047,44 @@ class RearDialView(context: Context) : View(context) {
         }
     }
 
+    /** [draw], minus whatever the ripple has already taken. See [sweepFront]. */
+    private inline fun swept(canvas: Canvas, draw: (Canvas) -> Unit) {
+        val front = sweepFront
+        if (front == null) {
+            draw(canvas)
+            return
+        }
+        canvas.save()
+        canvas.clipOutPath(front)
+        try {
+            draw(canvas)
+        } finally {
+            canvas.restore()
+        }
+    }
+
     private fun drawOverlayGroup(group: Int, canvas: Canvas) {
         when (group) {
-            GROUP_RINGS -> drawPendingRings(canvas)
-            GROUP_OVER -> drawPendingOver(canvas)
-            GROUP_BUTTONS -> drawPendingButtons(canvas)
+            GROUP_RINGS -> swept(canvas) { drawPendingRings(it) }
+            GROUP_OVER -> swept(canvas) { drawPendingOver(it) }
+            GROUP_BUTTONS -> swept(canvas) { drawPendingButtons(it) }
             GROUP_LOCK -> drawLockOverlay(canvas)
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             else -> drawCharge(canvas)
         }
     }
+
+    /**
+     * The ripple's leading edge this frame, or null when it is not sweeping.
+     *
+     * The overlay pass runs on the outer canvas, after the scene node has been drawn and
+     * outside every clip that was set while recording it. That is right for the notice
+     * and the charger — they are why the panel is awake and should be readable whatever
+     * the readout is doing — and wrong for the glass, which IS readout furniture: the
+     * transport, the camera button, the gamepad itself. Left unclipped they hovered over
+     * the ambient screen while the sweep passed underneath them.
+     */
+    private var sweepFront: android.graphics.Path? = null
 
     /** Which overlays have something to draw this frame, in the order they stack. */
     private val overlayGroups = ArrayList<Int>(4)
@@ -1905,8 +1933,6 @@ class RearDialView(context: Context) : View(context) {
         val front = if (v > 0.001f && v < 0.999f) android.graphics.Path().apply {
             addCircle(rippleCx, rippleCy, rippleReach() * v, android.graphics.Path.Direction.CW)
         } else null
-        canvas.save()
-        if (front != null) canvas.clipOutPath(front)
 
         // Opaque, and the colour is the user's.
         //
@@ -1955,12 +1981,40 @@ class RearDialView(context: Context) : View(context) {
             // goes into the same node a little further down — see groundNode — and the
             // whole thing is drawn once, there.
             groundColor = ground
-            if (!config.theme.isGlass) {
-                canvas.drawColor(ground)
-                // Over the ground colour and under everything else.
-                drawBackdropImage(canvas)
-            }
         }
+
+        // THE GROUND IS NOT SWEPT AWAY WITH THE READOUT, and this is the whole reason the
+        // fill happens up here, before the sweep is clipped out, rather than inside it
+        // with everything else.
+        //
+        // The gamepad's ripple wipes the readout to reveal what is behind it. The ground
+        // was being wiped along with it, so the circle opened onto black and the colour
+        // or photograph underneath only reappeared once the sweep had finished. It was
+        // masked for a while by a see-through wash painted into the swept region, which
+        // is why removing that wash is what exposed it.
+        //
+        // IT IS ALSO WHAT MADE THE GLASS LOOK WRONG MID-SWEEP. A pane takes its tint from
+        // a stored luminance grid of the backdrop, not from the pixels beneath it at the
+        // moment it draws — that grid is built when the background changes, because
+        // reading pixels back every frame is the most expensive thing this panel could
+        // do. So over a bright picture the panes lift toward white, and when the ripple
+        // took the picture away they were left lifting toward white over black: every
+        // pane's tint suddenly legible as a pale patch. The panes were right. The
+        // backdrop had gone missing underneath them.
+        //
+        // Unconditional, and that is deliberate beyond this bug: this fill is the one
+        // that occludes, and an occluding fill that can be clipped away is one the
+        // SubScreenLauncher can find a gap in.
+        canvas.drawColor(groundColor)
+        // Under glass the picture is already in groundNode, panel-wide, so a second blit
+        // buys nothing except while the sweep is carving a hole this one has to fill.
+        if (!config.theme.isGlass || front != null) drawBackdropImage(canvas)
+
+        // Held for the overlay pass, which draws outside every clip in here. See
+        // drawOverlayGroup: the glass belongs to the readout and has to leave with it.
+        sweepFront = front
+        canvas.save()
+        if (front != null) canvas.clipOutPath(front)
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
         // — it was in place for a full build while this line painted Palette.BG at full
@@ -5606,6 +5660,11 @@ class RearDialView(context: Context) : View(context) {
                     }
                 }
             }
+            // DOWN A LINE, like the two below it. The battery had no advance for as long
+            // as it was drawn last, where there was nothing after it to push out of the
+            // way. Reading order put it first — battery, hour, date — and a row that does
+            // not move the baseline is a row the next one is drawn on top of.
+            baseline += EXTRA_LINE_H
         }
         if (config.showClock) {
             // Each extra takes its own colour, eased separately. They shared one until

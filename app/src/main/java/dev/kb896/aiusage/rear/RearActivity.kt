@@ -174,6 +174,16 @@ class RearActivity : Activity() {
         const val STRAND_GRACE_MS = 4_000L
 
         /**
+         * The shortest gap between two requests to be moved back to the panel.
+         *
+         * A second is long against a looper and short against a person: a move that was
+         * going to work has finished well inside it, and one that was not is no more
+         * likely to work for being asked again immediately. See escapeAndRequestMove for
+         * what the unbounded version does to system_server.
+         */
+        const val ESCAPE_FLOOR_MS = 1_000L
+
+        /**
          * How long the panel waits after letting go of the display before putting itself
          * back to normal.
          *
@@ -585,9 +595,37 @@ class RearActivity : Activity() {
     }
 
     /** Stage 1 + 2. Cheap, and safe to run more than once. */
+    /** When the last move was actually asked for. See the floor in [escapeAndRequestMove]. */
+    private var lastEscapeMs = 0L
+
+    /**
+     * Show the way out, and ask to be moved back — but not without limit.
+     *
+     * THE BROADCAST COSTS A WINDOW TRANSITION. It ends in a request to place this
+     * activity on the rear display, and system_server builds a Transition for every one
+     * of those. This is armed from onResume AND onConfigurationChanged, and a display
+     * move is itself a configuration change — so a move that does not take can arm the
+     * next request that does not take either, as fast as the looper will carry it.
+     *
+     * That is not a hypothetical. system_server on this phone aborts with
+     *
+     *     JNI ERROR (app bug): global reference table overflow (max=51200)
+     *
+     * and the table is 39,814 instances of com.android.server.wm.Transition$Token — it
+     * never releases them, so anything that asks for transitions in a loop eventually
+     * takes the whole system down with it, and MIUI restarts. Roughly 25,000 tokens
+     * accumulated in the two minutes between two of those crashes.
+     *
+     * Not releasing its own tokens is HyperOS's bug and cannot be fixed from here. Asking
+     * for them faster than any display can answer is ours. Showing the system bars stays
+     * unthrottled — it is local, idempotent, and it is the user's way out.
+     */
     private fun escapeAndRequestMove() {
         WindowInsetsControllerCompat(window, window.decorView)
             .show(WindowInsetsCompat.Type.systemBars())
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastEscapeMs < ESCAPE_FLOOR_MS) return
+        lastEscapeMs = now
         sendBroadcast(Intent(ACTION_STRANDED).setPackage(packageName))
     }
 
