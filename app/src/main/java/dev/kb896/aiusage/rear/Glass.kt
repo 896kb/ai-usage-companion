@@ -265,6 +265,70 @@ half4 main(float2 coord) {
 }"""
 
     /**
+     * A ring of glass, bent through the distance field of an annulus.
+     *
+     * THE ONE SHAPE HERE THAT IS EASIER THAN A RECTANGLE. Every other pane is a rounded
+     * rect and needs the reference's SDF to know where its edges are; a ring's distance
+     * field is one line — how far you are from the circle, less half the band's thickness
+     * — and its gradient is the direction away from that circle, which is just the radial
+     * unit vector with a sign on it. Letterforms had to have their field measured into a
+     * texture; this one is arithmetic.
+     *
+     * The band masks ITSELF rather than being clipped to a path. A clip on a hardware
+     * canvas is not anti-aliased, and a ring is nothing but curved edge — two of them —
+     * so a clipped one would be a staircase all the way round. Feathering the coverage in
+     * the shader costs nothing and comes out smooth.
+     *
+     * No dispersion: the buttons split no light — see BUTTON_ABERRATION — and the rings
+     * are asked to be the same material as the buttons.
+     */
+    private val RING_LENS = """
+uniform shader content;
+
+uniform float2 center;
+uniform float ringRadius;
+uniform float halfThickness;
+uniform float refractionHeight;
+uniform float refractionAmount;
+
+float sdRing(float2 p, float r, float t) {
+    return abs(length(p) - r) - t;
+}
+
+float2 gradSdRing(float2 p, float r) {
+    float l = length(p);
+    if (l < 0.0001) {
+        return float2(0.0, 1.0);
+    }
+    return sign(l - r) * (p / l);
+}
+
+float circleMap(float x) {
+    return 1.0 - sqrt(1.0 - x * x);
+}
+
+half4 main(float2 coord) {
+    float2 p = coord - center;
+    float sd = sdRing(p, ringRadius, halfThickness);
+
+    // Coverage, feathered over a unit either side of the edge. Everything below is
+    // premultiplied, so scaling the colour by this scales its alpha with it.
+    float aa = 1.0 - smoothstep(-1.0, 1.0, sd);
+    if (aa <= 0.0) {
+        return half4(0.0);
+    }
+
+    // Deep enough inside the band that the lens has nothing left to do.
+    if (-sd >= refractionHeight) {
+        return content.eval(coord) * aa;
+    }
+
+    float d = circleMap(1.0 - -min(sd, 0.0) / refractionHeight) * refractionAmount;
+    float2 grad = gradSdRing(p, ringRadius);
+    return content.eval(coord + d * grad) * aa;
+}"""
+
+    /**
      * Type made of glass, bent through a distance field rather than a rounded rectangle.
      *
      * The reference's own SdfShader, and the one effect here that cannot work off a shape
@@ -362,6 +426,7 @@ half4 main(float2 coord) {
      * compiler on the draw path of an always-on display. Uniforms are set per use, which
      * is cheap, so one instance of each serves every pane.
      */
+    val ringLens: RuntimeShader by lazy { RuntimeShader(RING_LENS) }
     val sdf: RuntimeShader by lazy { RuntimeShader(SDF_TEXT) }
     val magnifier: RuntimeShader by lazy { RuntimeShader(MAGNIFIER) }
     val refraction: RuntimeShader by lazy { RuntimeShader(REFRACTION) }
@@ -409,6 +474,30 @@ half4 main(float2 coord) {
      * which is the whole difference between tinted glass and coloured type.
      */
     const val SDF_TINT = 0.40f
+
+    /**
+     * How thick the glass ring's band is, against the reading's own stroke.
+     *
+     * Wider than the colour it holds, because it is a vessel for it — a band the same
+     * width as its contents reads as a coloured ring that happens to be shiny, where one
+     * the reading sits inside reads as glass with something in it.
+     */
+    const val RING_BAND = 1.7f
+
+    /** And how much slimmer the reading gets, now that it is inside something. */
+    const val RING_FILL = 0.52f
+
+    /**
+     * The lit edges of a glass ring, and how bright they are.
+     *
+     * Every other pane here gets a rim from the reference's highlight shader, which is
+     * built around a rounded rectangle. A ring has two edges rather than four and both are
+     * circles, so they are simply stroked — and they matter more here than anywhere else:
+     * without them the band is a distortion in the panel rather than an object lying on
+     * it, because a lens with no edge has nowhere to start.
+     */
+    const val RING_RIM_ALPHA = 0x3A
+    const val RING_RIM_WIDTH = 1.1f
 
     const val LIQUID_ZOOM = 1.25f
 

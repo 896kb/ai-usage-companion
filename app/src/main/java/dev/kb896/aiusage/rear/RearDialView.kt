@@ -836,6 +836,7 @@ class RearDialView(context: Context) : View(context) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         pendingButtons.clear()
+        pendingRings.clear()
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (config.theme.isGlass && recorder != null && width > 0 && height > 0) {
             // POSITION, not just size. beginRecording says how big the display list is;
@@ -897,6 +898,7 @@ class RearDialView(context: Context) : View(context) {
     private fun drawOverlays(canvas: Canvas) {
         val recorder = canvas as? android.graphics.RecordingCanvas
         if (recorder == null || !config.theme.isGlass || !sceneNode.hasDisplayList()) {
+            drawPendingRings(canvas)
             drawPendingButtons(canvas)
             drawLockOverlay(canvas)
             drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
@@ -924,6 +926,9 @@ class RearDialView(context: Context) : View(context) {
         // that sample it. Most frames need no chain at all.
         val active = overlayGroups
         active.clear()
+        // Rings first, so a button crossing one is glass over glass in that order rather
+        // than the other way round.
+        if (pendingRings.isNotEmpty()) active.add(GROUP_RINGS)
         if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
         if (lockSwap(frameNowMs) > 0.001f) active.add(GROUP_LOCK)
         if (noticeSlideHeld > 0.001f) active.add(GROUP_NOTICE)
@@ -949,6 +954,7 @@ class RearDialView(context: Context) : View(context) {
 
     private fun drawOverlayGroup(group: Int, canvas: Canvas) {
         when (group) {
+            GROUP_RINGS -> drawPendingRings(canvas)
             GROUP_BUTTONS -> drawPendingButtons(canvas)
             GROUP_LOCK -> drawLockOverlay(canvas)
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
@@ -1579,6 +1585,126 @@ class RearDialView(context: Context) : View(context) {
 
     /** Each wave's journey out of the cone, this frame. See the speaker. */
     private val waveOut = FloatArray(WAVE_MAX)
+
+    /**
+     * A ring of glass whose band is still to be laid over the panel.
+     *
+     * DEFERRED FOR THE SAME REASON THE BUTTONS ARE, and it matters more here. A ring is
+     * drawn early, underneath the readout, and anything drawn inside the scene recording
+     * can only bend what it publishes for itself — which for a ring is its own track, a
+     * hairline. Held back until the scene is finished, the band bends the whole panel:
+     * the background picture, the bars it crosses, the record behind it.
+     */
+    private class PendingRing(
+        val cx: Float,
+        val cy: Float,
+        val radius: Float,
+        val thickness: Float,
+        val clip: android.graphics.RectF,
+    )
+
+    private val pendingRings = ArrayList<PendingRing>(4)
+
+    /** Note a ring's band now, and lay its glass over the finished panel. */
+    private fun deferRing(canvas: Canvas, cx: Float, cy: Float, radius: Float, thickness: Float) {
+        if (!config.theme.isGlass || !recordingScene) return
+        if (radius < 1f || thickness < 0.5f) return
+        val m = canvas.getMatrix()
+        ringPoint[0] = cx
+        ringPoint[1] = cy
+        m.mapPoints(ringPoint)
+        // The radius travels through the same matrix. Only translation and a uniform
+        // scale are ever in play here, so one axis answers for both.
+        val scale = m.mapRadius(1f)
+        val bounds = android.graphics.Rect()
+        val clip = android.graphics.RectF()
+        if (canvas.getClipBounds(bounds)) {
+            clip.set(bounds)
+            m.mapRect(clip)
+        } else {
+            clip.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        }
+        pendingRings.add(
+            PendingRing(ringPoint[0], ringPoint[1], radius * scale, thickness * scale, clip),
+        )
+    }
+
+    private val ringPoint = FloatArray(2)
+    private val ringRect = android.graphics.RectF()
+
+    /** Lay the glass over every ring noted during the scene. */
+    private fun drawPendingRings(canvas: Canvas) {
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return
+        val source = paneBackdrop
+        if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return
+        for (r in pendingRings) {
+            val half = r.thickness / 2f
+            // Room for the feathered edge on both sides — see the shader.
+            val outer = r.radius + half + RING_FEATHER
+            ringRect.set(r.cx - outer, r.cy - outer, r.cx + outer, r.cy + outer)
+            val node = nextNode()
+            node.setPosition(
+                Math.round(ringRect.left), Math.round(ringRect.top),
+                Math.round(ringRect.right), Math.round(ringRect.bottom),
+            )
+            val into = node.beginRecording()
+            try {
+                into.translate(-ringRect.left, -ringRect.top)
+                into.drawRenderNode(source)
+            } finally {
+                node.endRecording()
+            }
+            node.setRenderEffect(
+                ringLensFor(r.cx - ringRect.left, r.cy - ringRect.top, r.radius, half),
+            )
+            canvas.save()
+            canvas.clipRect(r.clip)
+            recorder.drawRenderNode(node)
+            // The two edges, lit. A lens with no edge has nowhere to start and reads as a
+            // smear in the panel rather than a thing lying on it.
+            vinylPaint.style = Paint.Style.STROKE
+            vinylPaint.strokeWidth = Glass.RING_RIM_WIDTH
+            vinylPaint.color = (Glass.RING_RIM_ALPHA shl 24) or 0x00FFFFFF
+            canvas.drawCircle(r.cx, r.cy, r.radius + half, vinylPaint)
+            canvas.drawCircle(r.cx, r.cy, r.radius - half, vinylPaint)
+            vinylPaint.style = Paint.Style.FILL
+            canvas.restore()
+        }
+    }
+
+    /**
+     * The lens for a band of this geometry, kept for the same reason every other one is.
+     *
+     * A ring's geometry does not move between frames — the rings are fixed furniture — so
+     * in practice this is built once each and hit forever after. Quantised anyway, because
+     * the volume ring's thumb swells and a geometry that crept would mint an effect a
+     * frame, which is the native-heap leak in another costume.
+     */
+    private fun ringLensFor(cx: Float, cy: Float, radius: Float, half: Float): android.graphics.RenderEffect {
+        val key = (Math.round(cx).toLong() shl 45) or
+            (Math.round(cy).toLong() shl 30) or
+            (Math.round(radius).toLong() shl 15) or
+            Math.round(half * 4f).toLong().coerceIn(0L, 32767L)
+        ringLensCache[key]?.let { return it }
+        val shader = Glass.ringLens
+        shader.setFloatUniform("center", cx, cy)
+        shader.setFloatUniform("ringRadius", radius)
+        shader.setFloatUniform("halfThickness", half)
+        val short = half * 2f
+        shader.setFloatUniform(
+            "refractionHeight", minOf(short * Glass.HEIGHT, Glass.HEIGHT_MAX),
+        )
+        shader.setFloatUniform(
+            "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
+        )
+        val effect =
+            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+        if (ringLensCache.size >= LENS_CACHE_MAX) ringLensCache.clear()
+        ringLensCache[key] = effect
+        return effect
+    }
+
+    private val ringLensCache = HashMap<Long, android.graphics.RenderEffect>()
 
     private val discRect = android.graphics.RectF()
     private val barRect = android.graphics.RectF()
@@ -2725,24 +2851,39 @@ class RearDialView(context: Context) : View(context) {
         arcBounds.set(
             oval.left - pad, oval.top - pad, oval.right + pad, oval.bottom + pad,
         )
-        val layer = localBackdrop(canvas, arcBounds) { into ->
-            paint.color = Panel.Palette.TRACK
-            paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
-            into.drawArc(oval, startAngle, fullSweep, false, paint)
-            paint.color = reading
-            paint.alpha = alpha
-            if (Math.abs(fullSweep * f) > 0.4f) {
-                into.drawArc(oval, startAngle, fullSweep * f, false, paint)
-            }
-        }
-        if (layer == null) {
-            paint.color = Panel.Palette.TRACK
-            paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
-            canvas.drawArc(oval, startAngle, fullSweep, false, paint)
-            paint.color = reading
-            paint.alpha = alpha
+        // ---- the reading, behind the glass -----------------------------------------
+        //
+        // Drawn straight onto the panel rather than into a layer of its own. The band is
+        // held back to the overlay pass — see deferRing — so what it bends is the finished
+        // panel with this colour already on it, which is the whole point: the reading is
+        // INSIDE the ring rather than under a separate piece of glass beside it.
+        //
+        // Slimmer than the band that holds it. A colour the same width as its vessel reads
+        // as a coloured ring that happens to be shiny; one the vessel is visibly wider than
+        // reads as glass with something in it.
+        val fillStroke = stroke * Glass.RING_FILL
+        paint.strokeWidth = fillStroke
+        paint.color = Panel.Palette.TRACK
+        paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
+        canvas.drawArc(oval, startAngle, fullSweep, false, paint)
+        paint.color = reading
+        paint.alpha = alpha
+        if (Math.abs(fullSweep * f) > 0.4f) {
             canvas.drawArc(oval, startAngle, fullSweep * f, false, paint)
         }
+        paint.strokeWidth = stroke
+
+        // ---- and the band, which is always there ------------------------------------
+        //
+        // Every page, whatever the reading is doing. The ring is a physical object on this
+        // panel and objects do not come and go with what they happen to be reporting: on
+        // the readout it holds a usage figure, on the media page the same glass holds the
+        // playback and the volume.
+        deferRing(
+            canvas, oval.centerX(), oval.centerY(), oval.width() / 2f,
+            stroke * Glass.RING_BAND,
+        )
+        val layer: android.graphics.RenderNode? = null
 
         // The thumb, on the circumference at the reading's end.
         val angle = Math.toRadians((startAngle + fullSweep * f).toDouble())
@@ -8036,6 +8177,9 @@ class RearDialView(context: Context) : View(context) {
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
 
+        /** Room around a ring's band for its feathered edge. See the ring lens. */
+        private const val RING_FEATHER = 2f
+
         /** What is behind the readout, for now. */
         private const val COMING_SOON = "COMING SOON"
 
@@ -8087,6 +8231,7 @@ class RearDialView(context: Context) : View(context) {
 
 
         /** The overlay groups, in the order they stack over the panel. See drawOverlays. */
+        private const val GROUP_RINGS = 4
         private const val GROUP_BUTTONS = 0
         private const val GROUP_LOCK = 1
         private const val GROUP_NOTICE = 2
