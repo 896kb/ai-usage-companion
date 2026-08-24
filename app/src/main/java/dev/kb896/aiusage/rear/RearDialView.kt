@@ -6060,15 +6060,41 @@ class RearDialView(context: Context) : View(context) {
             if (!config.theme.isGlass) 0f
             else (CARD_PAD_TOP + CARD_PAD_BOTTOM + heading.textSize + BAR_ROW_H - rowPitch)
                 .coerceAtLeast(0f)
-        var gap = if (onlyAccount != null) ((regionBottom - regionTop - contentH) / 2f).coerceAtLeast(0f)
-            else ((regionBottom - regionTop - contentH) / (blocks.size + 1)).coerceAtLeast(0f)
-        // A FLOOR, not a share. Reserving the card's extra inside contentH does not work:
-        // it comes back divided by the number of gaps, so the blocks each get a fraction
-        // of what any one of them needs. The gap has to be at least the overlap it is
-        // there to prevent, whatever is left over.
-        if (onlyAccount == null && gap < cardExtra) gap = cardExtra
+        // EQUAL SPACE, MEASURED BETWEEN CARD EDGES.
+        //
+        // A block's y is its heading's baseline, and its card reaches above that by the
+        // heading's own height and its padding. So laying blocks out at an equal PITCH
+        // does not put an equal amount of glass-free panel between them: the space above
+        // the first card is short by exactly that overhang, which is why raising the
+        // stack ran the personal card up into the masthead's band.
+        //
+        // The gap that matters is the one you can see — card bottom to card top — so that
+        // is the one held equal. Above the first card it is measured from the top of the
+        // region; between two cards, from one edge to the other. Both come out as v.
+        val cardTopOffset =
+            if (config.theme.isGlass) heading.textSize + CARD_PAD_TOP else 0f
+        val gap: Float
+        val lead: Float
+        if (onlyAccount != null) {
+            // One account centres in the space it has, which is a different question.
+            gap = ((regionBottom - regionTop - contentH) / 2f).coerceAtLeast(0f)
+            lead = gap
+        } else if (config.theme.isGlass) {
+            // n cards need n gaps: one above the first, one between each pair after it.
+            // Nothing is reserved below the last, because the region's own bottom is
+            // already measured clear of the artwork and the slider.
+            val v = ((regionBottom - regionTop - contentH - blocks.size * cardExtra) /
+                blocks.size).coerceAtLeast(0f)
+            gap = cardExtra + v
+            lead = cardTopOffset + v
+        } else {
+            // No cards, so a block IS its content and the old even share is right.
+            gap = ((regionBottom - regionTop - contentH) / (blocks.size + 1))
+                .coerceAtLeast(0f)
+            lead = gap
+        }
 
-        var y = regionTop + gap
+        var y = regionTop + lead
 
         // ---- a card per account ------------------------------------------------------
         //
