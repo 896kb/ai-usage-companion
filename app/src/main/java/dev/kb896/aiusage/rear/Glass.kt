@@ -408,7 +408,7 @@ half4 main(float2 coord) {
      * weight the hue is unmistakable and every bit of refraction still reads through it,
      * which is the whole difference between tinted glass and coloured type.
      */
-    const val SDF_TINT = 0.20f
+    const val SDF_TINT = 0.40f
 
     const val LIQUID_ZOOM = 1.25f
 
