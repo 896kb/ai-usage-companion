@@ -92,22 +92,30 @@ object GlassLuminance {
     /**
      * [base] adjusted for a backdrop of this luminance.
      *
-     * The reference expresses this as brightness and contrast on the backdrop itself. This
-     * panel has no colour controls in its shader, so it says the same thing with the tint,
-     * which is the one knob a pane here actually has: over a bright backdrop the glass
-     * goes lighter and more opaque, which is what frosting looks like against daylight;
-     * over a dark one it goes darker and thinner, and gets out of the way.
+     * AGAINST THE BACKDROP, NOT WITH IT. This used to go the other way — lighter over a
+     * bright panel, darker over a dark one — on the reference's reasoning that frosted
+     * glass held up to daylight glows. That is true of frosting and false of this: the
+     * panes here are read AGAINST what is behind them, and a pane that lightens over
+     * white and darkens over black is a pane that disappears at both ends of the range,
+     * which is precisely where it is most needed. Over white it now goes darker, over
+     * black lighter, and either way there is a surface to see.
+     *
+     * The alpha follows the same logic and had to change with it. It used to thicken over
+     * bright backdrops and THIN over dark ones, which under the old direction merely
+     * softened a tint that was already too quiet; under this one it would cancel the fix,
+     * weakening the pale tint exactly when the backdrop is blackest. It now thickens
+     * toward both ends and leaves the middle alone, which is where clear glass works.
      *
      * The alpha is bounded rather than scaled freely. A card is a surface to read type
      * against and it has to stay one at both ends.
      */
     fun reactive(base: Int, luminance: Float): Int {
         val r = response(luminance)
+        val away = Math.abs(r)
         val a = (base ushr 24) and 0xFF
-        val toward = if (r > 0f) 0xFF else 0x00
-        val mix = if (r > 0f) lerp(LIFT_MIN, LIFT_MAX, r) else lerp(LIFT_MIN, SINK_MAX, -r)
-        val alpha = (a * (if (r > 0f) lerp(1f, ALPHA_MAX, r) else lerp(1f, ALPHA_MIN, -r)))
-            .toInt().coerceIn(0, 255)
+        val toward = if (r > 0f) 0x00 else 0xFF
+        val mix = lerp(LIFT_MIN, LIFT_MAX, away)
+        val alpha = (a * lerp(1f, ALPHA_MAX, away)).toInt().coerceIn(0, 255)
         return (alpha shl 24) or
             (blend((base shr 16) and 0xFF, toward, mix) shl 16) or
             (blend((base shr 8) and 0xFF, toward, mix) shl 8) or
@@ -126,10 +134,14 @@ object GlassLuminance {
      * squared response is exactly right here, unlike everywhere it has been wrong today:
      * it returns nothing at all over a middling backdrop, which keeps the glass clear in
      * the case that matters, and comes on only as the panel runs to one end or the other.
+     *
+     * And it comes on OPPOSED, for the reason [reactive] gives at length: a dark wash over
+     * a black panel and a white one over a white panel are both invisible, which makes the
+     * whole measurement pointless in the two cases it exists to serve.
      */
     fun clearTint(luminance: Float, strength: Float = CLEAR_STRENGTH): Int {
         val r = response(luminance)
-        val toward = if (r > 0f) 0xFF else 0x00
+        val toward = if (r > 0f) 0x00 else 0xFF
         val a = (Math.abs(r) * strength * 255f).toInt().coerceIn(0, 255)
         return (a shl 24) or (toward shl 16) or (toward shl 8) or toward
     }
@@ -145,13 +157,9 @@ object GlassLuminance {
     /** How far the tint moves at a middling backdrop — the reference's 0.1 brightness. */
     private const val LIFT_MIN = 0.1f
 
-    /** And at a white one. The reference's 0.5. */
+    /** And at either extreme of it. The reference's 0.5. */
     private const val LIFT_MAX = 0.5f
 
-    /** Toward black at a black one. The reference's -0.2, as a mix rather than an offset. */
-    private const val SINK_MAX = 0.2f
-
-    /** How much heavier a pane gets over a bright backdrop, and lighter over a dark one. */
+    /** How much heavier a pane gets at the ends of the range, where it has work to do. */
     private const val ALPHA_MAX = 1.25f
-    private const val ALPHA_MIN = 0.85f
 }

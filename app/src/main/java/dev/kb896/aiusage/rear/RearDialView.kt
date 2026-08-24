@@ -6047,8 +6047,26 @@ class RearDialView(context: Context) : View(context) {
         // One account centres in the space it has; several share it evenly. Centring is
         // what puts the block level with the ring beside it — the two are read as one
         // row, and a block starting at the top with a ring in the middle is not that.
-        val gap = if (onlyAccount != null) ((regionBottom - regionTop - contentH) / 2f).coerceAtLeast(0f)
+        // WHAT THE CARD NEEDS THAT THE CONTENT DOES NOT.
+        //
+        // A block's height is its heading and its bars. Its CARD is taller than that at
+        // both ends — up over the heading's own cap height and down past the last bar —
+        // and none of that was ever in the budget, because the budget was written before
+        // there were cards. So the gap between two blocks was measured as if they were
+        // two columns of text, and once they became two sheets of glass the personal
+        // account's card ran into the work account's heading. At three bars each it
+        // overlapped by fifteen units; at four the blocks themselves collided.
+        val cardExtra =
+            if (!config.theme.isGlass) 0f
+            else (CARD_PAD_TOP + CARD_PAD_BOTTOM + heading.textSize + BAR_ROW_H - rowPitch)
+                .coerceAtLeast(0f)
+        var gap = if (onlyAccount != null) ((regionBottom - regionTop - contentH) / 2f).coerceAtLeast(0f)
             else ((regionBottom - regionTop - contentH) / (blocks.size + 1)).coerceAtLeast(0f)
+        // A FLOOR, not a share. Reserving the card's extra inside contentH does not work:
+        // it comes back divided by the number of gaps, so the blocks each get a fraction
+        // of what any one of them needs. The gap has to be at least the overlap it is
+        // there to prevent, whatever is left over.
+        if (onlyAccount == null && gap < cardExtra) gap = cardExtra
 
         var y = regionTop + gap
 
@@ -9621,7 +9639,7 @@ class RearDialView(context: Context) : View(context) {
         private const val CARD_GAP = 8f
 
         /** How much further down the accounts start, to give the masthead room. */
-        private const val BLOCKS_DROP = 16f
+        private const val BLOCKS_DROP = 6f
 
         // -- the glass bars, built as sliders -------------------------------------------
         //

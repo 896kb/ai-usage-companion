@@ -98,16 +98,37 @@ class GlassLuminanceTest {
 
     private val base = 0xB0203040.toInt()
 
-    @Test fun `a bright backdrop lifts the glass toward white`() {
+    /**
+     * A pane is read AGAINST its backdrop, so it has to move away from it. Matching it —
+     * pale over white, dark over black — is a pane that vanishes at exactly the two ends
+     * of the range where the measurement exists to help.
+     */
+    @Test fun `a bright backdrop darkens the glass`() {
         val lit = GlassLuminance.reactive(base, 1f)
-        assertTrue("should have lightened", (lit shr 16 and 0xFF) > (base shr 16 and 0xFF))
+        assertTrue("should have darkened", (lit shr 16 and 0xFF) < (base shr 16 and 0xFF))
         assertTrue("should have thickened", (lit ushr 24) > (base ushr 24))
     }
 
-    @Test fun `a dark backdrop sinks it and thins it`() {
+    @Test fun `a dark backdrop lightens it`() {
         val dim = GlassLuminance.reactive(base, 0f)
-        assertTrue("should have darkened", (dim shr 16 and 0xFF) <= (base shr 16 and 0xFF))
-        assertTrue("should have thinned", (dim ushr 24) < (base ushr 24))
+        assertTrue("should have lightened", (dim shr 16 and 0xFF) > (base shr 16 and 0xFF))
+        assertTrue("should have thickened", (dim ushr 24) > (base ushr 24))
+    }
+
+    /** Neither end may be the quiet one. Both are where the pane has work to do. */
+    @Test fun `both ends tint, and the middle barely does`() {
+        val over = GlassLuminance.clearTint(1f) ushr 24
+        val under = GlassLuminance.clearTint(0f) ushr 24
+        val mid = GlassLuminance.clearTint(0.5f) ushr 24
+        assertEquals("the ends should tint equally hard", over, under)
+        assertTrue("the ends should tint", over > 0x20)
+        assertTrue("the middle should not", mid < 0x08)
+    }
+
+    /** And they must tint in OPPOSITE directions, or "equally hard" means nothing. */
+    @Test fun `the ends tint opposite ways`() {
+        assertEquals("over white, toward black", 0x00, GlassLuminance.clearTint(1f) shr 16 and 0xFF)
+        assertEquals("over black, toward white", 0xFF, GlassLuminance.clearTint(0f) shr 16 and 0xFF)
     }
 
     /**
