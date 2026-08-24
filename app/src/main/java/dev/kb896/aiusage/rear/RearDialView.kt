@@ -295,18 +295,22 @@ class RearDialView(context: Context) : View(context) {
             node.endRecording()
         }
 
-        // NO TINT ON IT, which is worth stating because it was tried both ways. The figure
-        // was pulled toward the liquid's colour, on the reasoning that it is the liquid's
-        // number and the two should read as one instrument. They did — and it stopped
-        // reading as glass, which is the more important of the two things it has to be.
-        // Glass has no colour of its own; everything it shows is the panel behind it, and
-        // the moment you give it a hue it becomes coloured type with a bevel.
+        // THE LIQUID'S COLOUR, because the figure is the liquid's number and the two
+        // should read as one instrument rather than as a reading beside a picture.
         //
-        // KEYED ON THE FIELD, which is to say on the number. It does not move between
-        // frames, and building a RenderEffect per frame is precisely the churn that filled
-        // the native heap the last time — a small Java object in front of a large native
-        // allocation is the one shape the collector will not hurry over.
-        val effectKey = sdfKey
+        // It is the glass that is tinted, not the type. The first attempt mixed the
+        // refracted colour toward the hue and it stopped looking like glass — see the
+        // shader, which multiplies instead, the way a coloured pane actually treats the
+        // light going through it.
+        val tint = (paint.color and 0x00FFFFFF) or
+            ((Glass.SDF_TINT * 255f).toInt().coerceIn(0, 255) shl 24)
+
+        // KEYED ON THE FIELD AND THE HUE — the number and the colour it is drawn in.
+        // Neither moves between frames, and building a RenderEffect per frame is precisely
+        // the churn that filled the native heap the last time: a small Java object in
+        // front of a large native allocation is the one shape the collector will not
+        // hurry over.
+        val effectKey = sdfKey + "|" + tint
         if (effectKey != sdfEffectKey) {
             sdfEffectKey = effectKey
             val shader = Glass.sdf
@@ -322,6 +326,7 @@ class RearDialView(context: Context) : View(context) {
             shader.setFloatUniform("sdfTexSize", w, h)
             shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
             shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
+            shader.setColorUniform("tint", tint)
             sdfEffect =
                 android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         }

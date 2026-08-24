@@ -285,6 +285,7 @@ uniform float2 size;
 uniform float2 sdfTexSize;
 uniform float refractionHeight;
 uniform float lightAngle;
+layout(color) uniform half4 tint;
 
 float circleMap(float x) {
     return 1.0 - sqrt(1.0 - x * x);
@@ -313,6 +314,18 @@ half4 main(float2 coord) {
     color.rgb *= 1.0 + 0.5 * intensity * bevelIntensity;
     bevelIntensity = clamp(dot(normal, -lightDir), 0.0, 1.0);
     color.rgb *= 1.0 + 0.5 * bevelIntensity * min(1.0, smoothstep(1.0, 0.0, abs(intensity - 0.25) * 6.0));
+
+    // A WASH OF THE LIQUID'S COLOUR, laid over the glass rather than mixed into it.
+    //
+    // This was tried once before at eighty-five per cent and it stopped reading as glass,
+    // which was a fault of the STRENGTH and not of the method: at that weight the wash is
+    // most of what you see, and the structure underneath — the highlight along the bevel,
+    // the panel bending through the middle — is averaged into a flat colour. At a fifth it
+    // is a film ON the glass, and everything the glass was doing still shows through it.
+    //
+    // Premultiplied by coverage, like the rest of this, so the wash stops at the letter's
+    // edge instead of laying a rectangle of colour over the margin.
+    color.rgb = mix(color.rgb, tint.rgb * v.a, tint.a);
     return color;
 }"""
 
@@ -387,6 +400,15 @@ half4 main(float2 coord) {
 
     /** Where the light is, for the bevel. The same 45 degrees everything else here uses. */
     const val SDF_LIGHT_ANGLE = 45f
+
+    /**
+     * How opaque the liquid's colour is, laid over the charge figure.
+     *
+     * A fifth. Eighty-five per cent was the first attempt and it buried the glass; at this
+     * weight the hue is unmistakable and every bit of refraction still reads through it,
+     * which is the whole difference between tinted glass and coloured type.
+     */
+    const val SDF_TINT = 0.20f
 
     const val LIQUID_ZOOM = 1.25f
 
