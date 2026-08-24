@@ -590,6 +590,16 @@ half4 main(float2 coord) {
      * A button and a held thumb are the same object here — a small piece of glass with
      * something on it — so they are made of the same nothing.
      */
+    /**
+     * An account card's body.
+     *
+     * Lighter than a notification's. A card that arrives, says something and leaves can
+     * afford to be a surface you read type against; these two are on the panel the whole
+     * time, behind the readings themselves, and at a notice's weight they turn the whole
+     * middle of the display milky.
+     */
+    const val CARD_TINT = 0x14FFFFFF
+
     const val DISC_TINT = 0x00000000
 
     /**

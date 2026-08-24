@@ -864,6 +864,19 @@ class RearDialView(context: Context) : View(context) {
     private val sceneNode = android.graphics.RenderNode("panel")
 
     /**
+     * Just the ground and the picture on it, for panes that sit UNDER the readout.
+     *
+     * The overlay panes bend the finished panel, which is what makes them look like glass
+     * lying on top of it. A card behind the readout cannot do that — it would be drawn
+     * over the very content it is supposed to be under — so it bends the only thing that
+     * exists before the readout does.
+     */
+    private val groundNode = android.graphics.RenderNode("ground")
+
+    /** The ground's colour, held between being worked out and being drawn. */
+    private var groundColor = 0
+
+    /**
      * Render nodes for this frame's panes, handed out in order and reused next frame.
      *
      * ONE SHARED NODE IS A BUG, and a quiet one. `drawRenderNode` puts a REFERENCE in the
@@ -1111,7 +1124,26 @@ class RearDialView(context: Context) : View(context) {
         try {
             // The backdrop, shifted so that the pane's top-left is this node's origin —
             // which is the coordinate space the shader works in.
-            pane.translate(-rect.left, -rect.top)
+            //
+            // WHOSE top-left, though. A pane's rect is in whatever space the canvas is in
+            // when it is drawn, and its source may be in a different one. The overlay
+            // panes are drawn at the top level, so the two agree and this never mattered;
+            // a pane drawn INSIDE a transform does not, and the difference is not subtle.
+            //
+            // An account card is drawn inside the page scroll. Shifted by its local rect,
+            // it samples the ground at the position it WOULD have without the scroll — so
+            // the picture inside the glass travels with the card instead of staying where
+            // the picture is, and the card looks like a photograph pasted into it rather
+            // than a window onto one. It stops being glass the moment anything moves.
+            //
+            // Only for the root-space sources. A local backdrop is recorded in the pane's
+            // own space by definition, and mapping it would break the thing that works.
+            if (source === sceneNode || source === groundNode) {
+                canvas.getMatrix().mapRect(paneAbs, rect)
+                pane.translate(-paneAbs.left, -paneAbs.top)
+            } else {
+                pane.translate(-rect.left, -rect.top)
+            }
             pane.drawRenderNode(source)
         } finally {
             paneNode.endRecording()
@@ -1747,6 +1779,11 @@ class RearDialView(context: Context) : View(context) {
 
     private val ringLensCache = HashMap<Long, android.graphics.RenderEffect>()
 
+    private val cardRect = android.graphics.RectF()
+
+    /** A pane's rect in root coordinates, for sampling a root-space backdrop. */
+    private val paneAbs = android.graphics.RectF()
+
     private val discRect = android.graphics.RectF()
     private val barRect = android.graphics.RectF()
     private val trackRect = android.graphics.RectF()
@@ -1803,9 +1840,28 @@ class RearDialView(context: Context) : View(context) {
                 if (config.showBackground) 255f else SEE_THROUGH_ALPHA.toFloat(),
             )
             val hue = colorFor("bg", config.background or (0xFF shl 24))
-            canvas.drawColor((hue and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24))
-            // Over the ground colour and under everything else.
-            drawBackdropImage(canvas)
+            val ground = (hue and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24)
+
+            // THE GROUND, PUBLISHED AS WELL AS PAINTED.
+            //
+            // A pane that sits BEHIND the readout cannot be deferred to the overlay pass
+            // the way the buttons and the rings are — that is what puts them on top of
+            // everything — and a pane drawn inside the scene can only bend what already
+            // exists when it is drawn. Which, this early, is exactly the ground and the
+            // picture on it, and that is precisely what an account card wants to refract.
+            //
+            // So the two of them go into a node of their own and are drawn back
+            // immediately. It costs one display list holding two operations; everything
+            // that wants to be glass over the background can now sample it.
+            // HELD, NOT PAINTED, when there is glass that wants to bend it. The record
+            // goes into the same node a little further down — see groundNode — and the
+            // whole thing is drawn once, there.
+            groundColor = ground
+            if (!config.theme.isGlass) {
+                canvas.drawColor(ground)
+                // Over the ground colour and under everything else.
+                drawBackdropImage(canvas)
+            }
         }
         // Partial fill, so the system's own rear-screen background shows through while
         // this surface still occludes. RearTheme's translucency does nothing on its own
@@ -1987,6 +2043,32 @@ class RearDialView(context: Context) : View(context) {
         // same reason the mark is: a 572-unit disc held still on an always-on OLED is
         // the largest burn-in target this panel has ever had.
         if (!hidden) {
+            // EVERYTHING BEHIND THE READOUT, IN ONE NODE.
+            //
+            // The account cards sit under the readings and bend what is behind them, and
+            // "behind them" is not only the ground: the record is back here too. Given
+            // just the ground to sample, a card painted a copy of the ground over the
+            // record — which looks exactly like the record being clipped to the card's
+            // edge, because that is what it was.
+            //
+            // Nothing draws between the ground and the record, so the two go into one
+            // node and it is drawn once. That node is what the cards refract.
+            val behind = canvas as? android.graphics.RecordingCanvas
+            if (behind != null && config.theme.isGlass && width > 0 && height > 0) {
+                groundNode.setPosition(0, 0, width, height)
+                val into = groundNode.beginRecording(width, height)
+                try {
+                    into.drawColor(groundColor)
+                    drawBackdropImage(into)
+                    into.save()
+                    into.translate(dx, dy + readoutPush)
+                    drawVinyl(into, paging, panelPush, geometry)
+                    into.restore()
+                } finally {
+                    groundNode.endRecording()
+                }
+                behind.drawRenderNode(groundNode)
+            } else {
             canvas.save()
             // NOT paged. The record is the one thing that does not scroll away — it
             // travels between the two pages instead, shrinking and moving to the middle
@@ -1998,6 +2080,7 @@ class RearDialView(context: Context) : View(context) {
             canvas.translate(dx, dy + readoutPush)
             drawVinyl(canvas, paging, panelPush, geometry)
             canvas.restore()
+            }
         }
 
         val order = orderedAccounts()
@@ -2958,6 +3041,9 @@ class RearDialView(context: Context) : View(context) {
         // account would make them look like part of that account's block, and would ask
         // the eye to ignore two thirds of what it is being shown.
         if (onlyAccount == null) drawTitle(canvas)
+        // Before the mascots, which stand on the bars: a card is behind everything in its
+        // block, and the animals are part of the block.
+        if (config.theme.isGlass) drawBars(canvas, cardsOnly = true)
         // MASCOTS FIRST, so the readings are drawn over them. Under GLASS a thumb stands
         // proud of its track and can reach a mascot's feet; with the figures on top, a
         // reading passed BEHIND the thing standing on it, which is the wrong way round —
@@ -5438,8 +5524,18 @@ class RearDialView(context: Context) : View(context) {
     /** Account indices in the configured display order. */
     private fun orderedAccounts(): List<Int> = config.orderedAccounts(Account.entries.size)
 
-    private fun drawBars(canvas: Canvas) {
-        sessionBars.clear()
+    /**
+     * The account blocks, in two passes over one layout.
+     *
+     * [cardsOnly] draws the glass and stops. It exists because the cards have to go down
+     * before the MASCOTS — the animals stand on the bars and are drawn ahead of them, so a
+     * card laid at the start of the readings pass paints over the very figures it is
+     * supposed to be behind. Running the same layout twice is not free, but it is a dozen
+     * lines of arithmetic against duplicating that arithmetic in a second place, which is
+     * how two things that must agree stop agreeing.
+     */
+    private fun drawBars(canvas: Canvas, cardsOnly: Boolean = false) {
+        if (!cardsOnly) sessionBars.clear()
         val left = CONTENT_LEFT
         val right = CONTENT_RIGHT
 
@@ -5498,6 +5594,41 @@ class RearDialView(context: Context) : View(context) {
             else ((regionBottom - regionTop - contentH) / (blocks.size + 1)).coerceAtLeast(0f)
 
         var y = regionTop + gap
+
+        // ---- a card per account ------------------------------------------------------
+        //
+        // ONE ACCOUNT IS ONE THING, and until now the only thing saying so was the gap
+        // between blocks. On a black panel that reads well enough; over a photograph it
+        // stops reading at all, because the background has more contrast in it than the
+        // spacing does. A card says where an account begins and ends whatever is behind
+        // it, which is the job a card has always had.
+        //
+        // Laid down in one pass BEFORE any of the content, so a card cannot land on the
+        // block above it — and bending the ground rather than the panel, because at this
+        // point in the frame the ground is all there is. See groundNode.
+        if (config.theme.isGlass) {
+            var cardY = y
+            for ((_, _, rows) in blocks) {
+                val blockH = headingAdvance + rows.size * rowPitch
+                cardRect.set(
+                    left - CARD_PAD_X,
+                    cardY - heading.textSize - CARD_PAD_TOP,
+                    right + CARD_PAD_X,
+                    cardY + blockH - rowPitch + BAR_ROW_H + CARD_PAD_BOTTOM,
+                )
+                // THE BUTTONS' OWN GLASS, which means no tint of its own: clear, with
+                // whatever the backdrop asks for at the ends of the range. A card with a
+                // body is a surface to read type against, and these are not that — they
+                // are windows with readings lying on them.
+                drawGlassPane(
+                    canvas, cardRect, CARD_RADIUS, clearReactive(cardRect),
+                    source = groundNode, held = true,
+                    aberration = Glass.BUTTON_ABERRATION,
+                )
+                cardY += blockH + gap
+            }
+        }
+        if (cardsOnly) return
 
         for ((account, status, rows) in blocks) {
             heading.color = if (status?.health == Health.OK) accentOf(account) else Panel.Palette.DIM
@@ -6712,7 +6843,10 @@ class RearDialView(context: Context) : View(context) {
         // The contents run from the glyph's own left edge to the far side of the outermost
         // wave, so the centre is the middle of THAT and the radius is half of it. Measured
         // along the direction the speaker points, then placed in the panel's coordinates.
-        val need = (soundEdge + mh / 2f) / 2f
+        // Plus air all round. Sized to exactly enclose its contents the glass sat on them,
+        // and a bubble that meets what it holds at every point reads as shrink-wrap rather
+        // than as a vessel. Symmetric, so it does not undo the centring above.
+        val need = (soundEdge + mh / 2f) / 2f * SPEAKER_BUBBLE_ROOM
         val shift = (soundEdge - mh / 2f) / 2f
         val bubbleX = hx + Math.cos(radians).toFloat() * shift
         val bubbleY = hy + Math.sin(radians).toFloat() * shift
@@ -8282,6 +8416,16 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val GAMEPAD_DISC = 1.42f
 
+        /**
+         * How much room the speaker's bubble keeps around its contents.
+         *
+         * Between the two attempts either side of it: centred on the glyph it was far too
+         * generous behind the cone, and sized to exactly enclose the contents it was too
+         * tight all round. This is the middle, and it is air rather than waste because the
+         * bubble is centred on what it holds now.
+         */
+        private const val SPEAKER_BUBBLE_ROOM = 1.40f
+
         /** Air between the outermost wave and the glass holding it. */
         private const val SPEAKER_WAVE_MARGIN = 0.12f
 
@@ -8809,6 +8953,20 @@ class RearDialView(context: Context) : View(context) {
 
         /** How tall one reading's row is. Shared with the mascots, which stand on it. */
         private const val BAR_ROW_H = 20f
+
+        /**
+         * How far an account's card reaches past the content inside it.
+         *
+         * Wider than it is tall, because the block already has air above and below it —
+         * the gap that used to be the only thing separating two accounts — and none at
+         * all at the sides: the rows run the full width of the content column.
+         */
+        private const val CARD_PAD_X = 14f
+        private const val CARD_PAD_TOP = 10f
+        private const val CARD_PAD_BOTTOM = 8f
+
+        /** Its corner. The notification cards' own, so one panel has one radius. */
+        private const val CARD_RADIUS = 18f
 
         // -- the glass bars, built as sliders -------------------------------------------
         //
