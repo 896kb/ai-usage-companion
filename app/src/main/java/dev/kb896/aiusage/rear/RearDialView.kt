@@ -3309,17 +3309,23 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * The close button: a filled disc with an X knocked out of it.
+     * The way into the game: a controller, on a disc.
      *
-     * Drawn INSIDE the readout's clip, with the rest of the panel, so the ripple sweeps
-     * it away and back exactly as it does everything else. It used to sit outside and
+     * IT USED TO BE A CROSS, which was an honest description of what the button did — it
+     * closed the readout — and a poor one of where it went. What is behind the readout is
+     * not nothing; it is the mascot's own screen, and that screen is going to be something
+     * to play with. A cross says "dismiss this", a controller says "go there", and only
+     * one of those is true.
+     *
+     * Drawn INSIDE the readout's clip, with the rest of the panel, so the ripple sweeps it
+     * away and back exactly as it does everything else. It used to sit outside and
      * cross-fade on its own — the reasoning being that the ripple came out of it and so
-     * must not eat it, which sounded right and looked wrong: one element dissolving
-     * while the surface around it was wiped reads as two different effects.
+     * must not eat it, which sounded right and looked wrong: one element dissolving while
+     * the surface around it was wiped reads as two different effects.
      *
-     * Filled rather than outlined. Two thin strokes on a dark panel, at a size meant to
-     * be hit without looking, is not a target; the solid shape is what makes it findable
-     * and the cross then reads as a hole in it rather than as more line work.
+     * Under ORIGINAL the glyph is knocked out of a filled disc, so the disc reads as
+     * missing material rather than as a second colour laid on top. Under GLASS it gets
+     * what every other control on this panel gets — the mark, and glass over it.
      */
     private fun drawClose(canvas: Canvas, dx: Float, dy: Float) {
         // Drift subtracted, for the same reason the camera's is: touches arrive in the
@@ -3329,19 +3335,33 @@ class RearDialView(context: Context) : View(context) {
             CLOSE_CX + CLOSE_R - dx, CLOSE_CY + CLOSE_R - dy,
         )
 
+        // SIZED BY ITS WIDTH, not its height. The controller is a wide glyph in one theme
+        // and a square one in the other — 22 by 13 traced, 1:1 on Material's grid — so
+        // asking for a height would give two very different marks on the same disc.
+        val aspect = Glyphs.aspect(PanelIcons.GAMEPAD, config.theme)
+        val gh = CLOSE_R * GAMEPAD_SPAN / aspect
+        val gx = CLOSE_CX - gh / 2f
+        val gy = CLOSE_CY - gh / 2f
+
+        if (config.theme.isGlass) {
+            // The disc sized so its glass lands exactly where the filled one used to,
+            // which is also where the touch target still is.
+            extras.color = colorFor("close", config.closeColor)
+            glassButton(canvas, CLOSE_CX, CLOSE_CY, gh, discH = CLOSE_R / DISC_RADIUS) { c ->
+                extras.color = colorFor("close", config.closeColor)
+                drawIcon(c, PanelIcons.GAMEPAD, gx, gy, gh)
+            }
+            return
+        }
+
         closePaint.style = Paint.Style.FILL
         closePaint.color = colorFor("close", config.closeColor)
         canvas.drawCircle(CLOSE_CX, CLOSE_CY, CLOSE_R, closePaint)
 
-        // The X in the panel's own background, so the disc reads as missing material
-        // rather than as a second colour laid on top.
-        val arm = CLOSE_R * 0.44f
-        closePaint.style = Paint.Style.STROKE
-        closePaint.strokeWidth = CLOSE_STROKE
-        closePaint.strokeCap = Paint.Cap.SQUARE
-        closePaint.color = colorFor("bg", config.background or (0xFF shl 24))
-        canvas.drawLine(CLOSE_CX - arm, CLOSE_CY - arm, CLOSE_CX + arm, CLOSE_CY + arm, closePaint)
-        canvas.drawLine(CLOSE_CX + arm, CLOSE_CY - arm, CLOSE_CX - arm, CLOSE_CY + arm, closePaint)
+        // The controller in the panel's own background, so the disc reads as missing
+        // material rather than as a second colour laid on top.
+        extras.color = colorFor("bg", config.background or (0xFF shl 24))
+        drawIcon(canvas, PanelIcons.GAMEPAD, gx, gy, gh)
     }
 
     /**
@@ -3362,6 +3382,33 @@ class RearDialView(context: Context) : View(context) {
         // the sweep was in flight — and the mascot froze mid-stride with nothing else on
         // screen to make it obvious the whole surface had stalled.
         animating = true
+
+        // ---- what this screen is going to be ---------------------------------------
+        //
+        // CENTRED ON WHAT CAN BE SEEN, not on the panel. The left 296 units are camera
+        // glass: the pixels are live and nothing drawn on them is visible, so type centred
+        // on the panel's own middle sits a third of the way under a lens. Everything here
+        // that has to be read is measured against the usable width instead — see the
+        // unlock slider, which learned it the same way.
+        //
+        // Above the mascot rather than behind it. The animal walks the bottom of this
+        // screen and is the way back out of it; type crossing its path would read as
+        // something it was carrying.
+        val wasAlign = title.textAlign
+        val wasSize = title.textSize
+        val wasColor = title.color
+        title.textAlign = Paint.Align.CENTER
+        title.textSize = typed(COMING_SIZE)
+        title.color = Panel.Palette.FG
+        canvas.drawText(
+            COMING_SOON,
+            Panel.CUTOUT_RIGHT + (Panel.WIDTH - Panel.CUTOUT_RIGHT) / 2f,
+            Panel.HEIGHT * COMING_AT,
+            title,
+        )
+        title.textAlign = wasAlign
+        title.textSize = wasSize
+        title.color = wasColor
 
         val stand = MascotFrames.CLIPS.firstOrNull { it.name == MascotMood.STAND }
         val h = MASCOT_HEIGHT * (stand?.scale ?: 1f)
@@ -7941,6 +7988,18 @@ class RearDialView(context: Context) : View(context) {
         // the 8-frame and 36-frame animations stay in step rather than one appearing to
         // play in slow motion.
         private const val MASCOT_FRAME_MS = 83L
+
+        /** What is behind the readout, for now. */
+        private const val COMING_SOON = "COMING SOON"
+
+        /** Big, because there is nothing else on this screen to be big next to. */
+        private const val COMING_SIZE = 58f
+
+        /** How far down the panel it sits — above the mascot's row, not across it. */
+        private const val COMING_AT = 0.42f
+
+        /** How much of the disc's radius the controller spans, across its widest. */
+        private const val GAMEPAD_SPAN = 1.30f
 
         /** Air between the outermost wave and the glass holding it. */
         private const val SPEAKER_WAVE_MARGIN = 0.12f

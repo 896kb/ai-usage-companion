@@ -236,29 +236,69 @@
             android:text="Choose an image"
             android:textSize="13sp" />
 
-        <TextView
-            android:id="@+id/backdrop_heading"
+        <!--
+            ONE SECTION FOR ONE THING. The panel has a single background and it is either
+            a colour or a picture, but the two used to be set in different places — the
+            colour as a row up in the toggles, the picture as its own heading down here —
+            so choosing between them meant knowing that they were the same decision.
+
+            The switch on the heading is not a third option: it is whether the panel's
+            ground is drawn at all, which is what makes the readout see-through.
+        -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="BACKGROUND"
-            android:textSize="11sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/backdrop_pick"
+            <TextView
+                android:id="@+id/backdrop_heading"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="BACKGROUND"
+                android:textSize="11sp" />
+
+            <Switch
+                android:id="@+id/backdrop_show"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Choose an image"
-            android:textSize="13sp" />
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/backdrop_clear"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Remove background"
-            android:textSize="13sp" />
+            <Button
+                android:id="@+id/backdrop_color"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="COLOR"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/backdrop_pick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="IMAGE"
+                android:textSize="13sp" />
+
+            <ImageButton
+                android:id="@+id/backdrop_clear"
+                android:layout_width="52dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:contentDescription="Remove the background image"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_trash" />
+        </LinearLayout>
 
         <View
             android:layout_width="match_parent"

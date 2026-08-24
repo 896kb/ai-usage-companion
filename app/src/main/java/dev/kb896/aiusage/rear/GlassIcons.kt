@@ -82,6 +82,10 @@ object GlassIcons {
     val NEXT = Outline(
         "M660-280v-400q0-17 11.5-28.5T700-720q17 0 28.5 11.5T740-680v400q0 17-11.5 28.5T700-240q-17 0-28.5-11.5T660-280Zm-440-35v-330q0-18 12-29t28-11q5 0 11 1t11 5l248 166q9 6 13.5 14.5T548-480q0 10-4.5 18.5T530-447L282-281q-5 4-11 5t-11 1q-16 0-28-11t-12-29Z",
     )
+    /** Material Symbols "sports_esports". */
+    val GAMEPAD = Outline(
+        "M182-200q-51 0-79-35.5T82-322l42-300q9-60 53.5-99T282-760h396q60 0 104.5 39t53.5 99l42 300q7 51-21 86.5T778-200q-21 0-39-7.5T706-230l-90-90H344l-90 90q-15 15-33 22.5t-39 7.5Zm498-240q17 0 28.5-11.5T720-480q0-17-11.5-28.5T680-520q-17 0-28.5 11.5T640-480q0 17 11.5 28.5T680-440Zm-80-120q17 0 28.5-11.5T640-600q0-17-11.5-28.5T600-640q-17 0-28.5 11.5T560-600q0 17 11.5 28.5T600-560Zm-290 50v40q0 13 8.5 21.5T340-440q13 0 21.5-8.5T370-470v-40h40q13 0 21.5-8.5T440-540q0-13-8.5-21.5T410-570h-40v-40q0-13-8.5-21.5T340-640q-13 0-21.5 8.5T310-610v40h-40q-13 0-21.5 8.5T240-540q0 13 8.5 21.5T270-510h40Z",
+    )
     /** Material Symbols "volume_mute". */
     val VOLUME_OFF = Outline(
         "M440-360H320q-17 0-28.5-11.5T280-400v-160q0-17 11.5-28.5T320-600h120l132-132q19-19 43.5-8.5T640-703v446q0 27-24.5 37.5T572-228L440-360Z",
@@ -97,7 +101,8 @@ object GlassIcons {
         PanelIcons.PAUSE to PAUSE,
         PanelIcons.PREV to PREV,
         PanelIcons.NEXT to NEXT,
-        PanelIcons.VOLUME_OFF to VOLUME_OFF,
+PanelIcons.GAMEPAD to GAMEPAD,
+                PanelIcons.VOLUME_OFF to VOLUME_OFF,
     )
 
     /** The glass counterpart of a traced glyph, or null if it has none. */

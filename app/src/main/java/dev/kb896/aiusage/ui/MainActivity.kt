@@ -599,11 +599,6 @@ class MainActivity : ComponentActivity() {
         // than described. "Camera button on the panel" was a sentence where the others
         // were labels, which made two controls of the same kind look like two kinds.
         SettingsRows.toggleWithColor(
-            container, "Background", config.showBackground, config.background,
-            onChange = { on -> write { it.copy(showBackground = on) } },
-            onPick = { c -> write { it.copy(background = c) } },
-        )
-        SettingsRows.toggleWithColor(
             container, "Camera", config.showCamera, config.cameraTint,
             onChange = { on -> write { it.copy(showCamera = on) } },
             onPick = { c -> write { it.copy(cameraColor = c) } },
@@ -672,7 +667,7 @@ class MainActivity : ComponentActivity() {
             )
         }
         SettingsRows.toggleWithColor(
-            container, "Hide", config.showClose, config.closeColor,
+            container, "Game", config.showClose, config.closeColor,
             onChange = { on -> write { it.copy(showClose = on) } },
             onPick = { c -> write { it.copy(closeColor = c) } },
         )
@@ -855,11 +850,32 @@ class MainActivity : ComponentActivity() {
                 store.save(config)
                 graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
                 refreshPreview()
+                refreshBackdropClear()
                 toast("Background set")
             })
     }
 
+    /**
+     * The background: a colour, or a picture, in one place.
+     *
+     * They used to be two controls in two sections — the colour as a row among the
+     * toggles, the picture under a heading of its own further down — which asked the user
+     * to know that they were the same decision. The panel has ONE ground and it is either
+     * of those; the section says so.
+     */
     private fun bindBackdrop() {
+        findViewById<Button>(R.id.backdrop_color).setOnClickListener {
+            ColorPickerDialog.show(this, ConfigStore(this).load().background) { picked ->
+                val store = ConfigStore(this)
+                val config = store.load().copy(background = picked)
+                store.save(config)
+                graph.bridge.update(
+                    StatePayload.encode(graph.repository.state.value, config),
+                )
+                refreshPreview()
+            }
+        }
+
         val pick = findViewById<Button>(R.id.backdrop_pick)
         pick.setOnClickListener { pickBackdrop.launch("image/*") }
         // Long-press re-crops what is already there, without going back through the
@@ -870,7 +886,21 @@ class MainActivity : ComponentActivity() {
             else cropBackdrop(path, reuseTransform = true)
             true
         }
-        findViewById<Button>(R.id.backdrop_clear).setOnClickListener {
+
+        findViewById<android.widget.Switch>(R.id.backdrop_show).apply {
+            isChecked = ConfigStore(this@MainActivity).load().showBackground
+            setOnCheckedChangeListener { _, on ->
+                val store = ConfigStore(this@MainActivity)
+                val config = store.load().copy(showBackground = on)
+                store.save(config)
+                graph.bridge.update(
+                    StatePayload.encode(graph.repository.state.value, config),
+                )
+                refreshPreview()
+            }
+        }
+
+        findViewById<android.widget.ImageButton>(R.id.backdrop_clear).setOnClickListener {
             val store = ConfigStore(this)
             val config = store.load().copy(backdrop = ArtConfig())
             store.save(config)
@@ -879,7 +909,24 @@ class MainActivity : ComponentActivity() {
             ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
             refreshPreview()
+            refreshBackdropClear()
             toast("Background removed")
+        }
+        refreshBackdropClear()
+    }
+
+    /**
+     * The bin is live only when there is something in it.
+     *
+     * A control that is always available and does nothing most of the time teaches people
+     * to ignore it. Dimmed, it also answers a question the section would otherwise leave
+     * open — whether a picture is set at all — without a line of text saying so.
+     */
+    private fun refreshBackdropClear() {
+        val has = ConfigStore(this).load().backdrop.imagePath != null
+        findViewById<android.widget.ImageButton>(R.id.backdrop_clear).apply {
+            isEnabled = has
+            alpha = if (has) 1f else 0.35f
         }
     }
 
