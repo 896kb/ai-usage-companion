@@ -3040,10 +3040,11 @@ class RearDialView(context: Context) : View(context) {
         // PANEL rather than any account on it. Drawing them into a preview of one
         // account would make them look like part of that account's block, and would ask
         // the eye to ignore two thirds of what it is being shown.
-        if (onlyAccount == null) drawTitle(canvas)
-        // Before the mascots, which stand on the bars: a card is behind everything in its
-        // block, and the animals are part of the block.
+        // The cards go down first — behind everything, including the mascots, who stand on
+        // the bars and belong to their block. It also settles where the first one starts,
+        // which is what the masthead and the controller are centred against.
         if (config.theme.isGlass) drawBars(canvas, cardsOnly = true)
+        if (onlyAccount == null) drawTitle(canvas)
         // MASCOTS FIRST, so the readings are drawn over them. Under GLASS a thumb stands
         // proud of its track and can reach a mascot's feet; with the figures on top, a
         // reading passed BEHIND the thing standing on it, which is the wrong way round —
@@ -3607,11 +3608,15 @@ class RearDialView(context: Context) : View(context) {
         // what looks pressable has to be pressable, and a rim you can see but cannot hit
         // is worse than no rim at all.
         val hit = if (config.theme.isGlass) CLOSE_R * GAMEPAD_DISC else CLOSE_R
+        // Down the middle of the same band the masthead is centred in, so the two read as
+        // one row of furniture above the accounts rather than two things at two heights.
+        // Its own radius keeps it clear of the top edge when there is no card to measure.
+        val closeCy = if (firstCardTop > 0f) firstCardTop / 2f else CLOSE_CY
         // Drift subtracted, for the same reason the camera's is: touches arrive in the
         // view's coordinates, which the burn-in translate never moves.
         closeButton = android.graphics.RectF(
-            CLOSE_CX - hit - dx, CLOSE_CY - hit - dy,
-            CLOSE_CX + hit - dx, CLOSE_CY + hit - dy,
+            CLOSE_CX - hit - dx, closeCy - hit - dy,
+            CLOSE_CX + hit - dx, closeCy + hit - dy,
         )
 
         // SIZED BY ITS WIDTH, not its height. The controller is a wide glyph in one theme
@@ -3620,13 +3625,13 @@ class RearDialView(context: Context) : View(context) {
         val aspect = Glyphs.aspect(PanelIcons.GAMEPAD, config.theme)
         val gh = CLOSE_R * GAMEPAD_SPAN / aspect
         val gx = CLOSE_CX - gh / 2f
-        val gy = CLOSE_CY - gh / 2f
+        val gy = closeCy - gh / 2f
 
         if (config.theme.isGlass) {
             // The disc sized so its glass lands exactly where the filled one used to,
             // which is also where the touch target still is.
             extras.color = colorFor("close", config.closeColor)
-            glassButton(canvas, CLOSE_CX, CLOSE_CY, gh, discH = hit / DISC_RADIUS) { c ->
+            glassButton(canvas, CLOSE_CX, closeCy, gh, discH = hit / DISC_RADIUS) { c ->
                 extras.color = colorFor("close", config.closeColor)
                 drawIcon(c, PanelIcons.GAMEPAD, gx, gy, gh)
             }
@@ -3635,7 +3640,7 @@ class RearDialView(context: Context) : View(context) {
 
         closePaint.style = Paint.Style.FILL
         closePaint.color = colorFor("close", config.closeColor)
-        canvas.drawCircle(CLOSE_CX, CLOSE_CY, CLOSE_R, closePaint)
+        canvas.drawCircle(CLOSE_CX, closeCy, CLOSE_R, closePaint)
 
         // The controller in the panel's own background, so the disc reads as missing
         // material rather than as a second colour laid on top.
@@ -5480,6 +5485,22 @@ class RearDialView(context: Context) : View(context) {
         return if (level < 0 || scale <= 0) -1 else level * 100 / scale
     }
 
+    /**
+     * The masthead's baseline: the middle of the band above the first card.
+     *
+     * Optical rather than arithmetic — text centres on its own ink, not on its line box,
+     * so the half-height used here is half the CAP height and the descenders are ignored.
+     * A title centred on its line box sits visibly low, every time.
+     */
+    private fun titleBaseline(): Float {
+        val band = firstCardTop
+        if (band <= 0f) return TITLE_BASELINE
+        return band / 2f + title.textSize * TITLE_OPTICAL
+    }
+
+    /** How far below a centre a cap-height baseline sits, as a fraction of the size. */
+    private var firstCardTop = 0f
+
     private fun drawTitle(canvas: Canvas) {
         // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
         // maker's mark follows, so the masthead and the artwork share one axis instead
@@ -5491,7 +5512,14 @@ class RearDialView(context: Context) : View(context) {
         // has to be read at a glance from across a room, and a lens over a dark panel is
         // dark. Glass is for the things you look past; this is a thing you look at.
         title.color = colorFor("title", config.titleColor)
-        canvas.drawText(config.title, (BAR_LEFT + BAR_RIGHT) / 2f, TITLE_BASELINE, title)
+        // CENTRED IN THE BAND IT HAS, rather than pinned to a baseline measured from the
+        // top of the panel. Once the accounts are on cards, the space above the first one
+        // is a real region with two edges, and type that sits in the middle of it looks
+        // placed where type at a fixed offset looks like it happens to be there. Falls
+        // back to the fixed baseline when there are no cards to measure against.
+        canvas.drawText(
+            config.title, (BAR_LEFT + BAR_RIGHT) / 2f, titleBaseline(), title,
+        )
     }
 
 
@@ -5606,8 +5634,9 @@ class RearDialView(context: Context) : View(context) {
         // Laid down in one pass BEFORE any of the content, so a card cannot land on the
         // block above it — and bending the ground rather than the panel, because at this
         // point in the frame the ground is all there is. See groundNode.
-        if (config.theme.isGlass) {
+        if (config.theme.isGlass && cardsOnly) {
             var cardY = y
+            firstCardTop = 0f
             for ((_, _, rows) in blocks) {
                 val blockH = headingAdvance + rows.size * rowPitch
                 cardRect.set(
@@ -5620,6 +5649,7 @@ class RearDialView(context: Context) : View(context) {
                 // whatever the backdrop asks for at the ends of the range. A card with a
                 // body is a surface to read type against, and these are not that — they
                 // are windows with readings lying on them.
+                if (firstCardTop == 0f) firstCardTop = cardRect.top
                 drawGlassPane(
                     canvas, cardRect, CARD_RADIUS, clearReactive(cardRect),
                     source = groundNode, held = true,
@@ -8524,7 +8554,7 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val CONTENT_EDGE = (Panel.CUTOUT_RIGHT + MARK_BOTTOM).toFloat()
 
-        private const val CLOSE_R = 16f
+        private const val CLOSE_R = 19f
         private const val CLOSE_CX = CONTENT_EDGE + CLOSE_R
 
         /**
@@ -9016,6 +9046,9 @@ class RearDialView(context: Context) : View(context) {
         private const val SINGLE_ACCOUNT_TOP = 24f
 
         private const val TITLE_BASELINE = 54f
+
+        /** Half a cap height, near enough, for centring type on its ink. */
+        private const val TITLE_OPTICAL = 0.36f
 /**
          * How long a value takes to travel from its old reading to its new one.
          *
