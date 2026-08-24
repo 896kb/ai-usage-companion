@@ -867,12 +867,25 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.backdrop_color).setOnClickListener {
             ColorPickerDialog.show(this, ConfigStore(this).load().background) { picked ->
                 val store = ConfigStore(this)
-                val config = store.load().copy(background = picked)
+                // A COLOUR REPLACES A PICTURE. The panel has one ground and these are two
+                // ways of saying what it is, so leaving the image in place would mean
+                // choosing a colour and seeing no change at all — the picture is drawn
+                // over the ground, and would go on covering it.
+                //
+                // The file goes with it, as it does from the bin: a megabyte of somebody's
+                // photograph that nothing will read again. Said out loud in the toast,
+                // because a control that quietly deletes something is worse than one that
+                // asks — and this one is one tap from a picker that puts it back.
+                val had = store.load().backdrop.imagePath != null
+                val config = store.load().copy(background = picked, backdrop = ArtConfig())
                 store.save(config)
+                if (had) ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
                 graph.bridge.update(
                     StatePayload.encode(graph.repository.state.value, config),
                 )
                 refreshPreview()
+                refreshBackdropClear()
+                if (had) toast("Colour set, image removed")
             }
         }
 

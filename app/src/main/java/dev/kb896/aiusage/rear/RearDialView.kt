@@ -3328,11 +3328,17 @@ class RearDialView(context: Context) : View(context) {
      * what every other control on this panel gets — the mark, and glass over it.
      */
     private fun drawClose(canvas: Canvas, dx: Float, dy: Float) {
+        // The glass reads as a bigger object than the filled disc did, so it IS one — a
+        // pane with a lit rim needs room around the mark, or it looks like a lens clamped
+        // onto it rather than a button the mark is sitting on. The target grows with it:
+        // what looks pressable has to be pressable, and a rim you can see but cannot hit
+        // is worse than no rim at all.
+        val hit = if (config.theme.isGlass) CLOSE_R * GAMEPAD_DISC else CLOSE_R
         // Drift subtracted, for the same reason the camera's is: touches arrive in the
         // view's coordinates, which the burn-in translate never moves.
         closeButton = android.graphics.RectF(
-            CLOSE_CX - CLOSE_R - dx, CLOSE_CY - CLOSE_R - dy,
-            CLOSE_CX + CLOSE_R - dx, CLOSE_CY + CLOSE_R - dy,
+            CLOSE_CX - hit - dx, CLOSE_CY - hit - dy,
+            CLOSE_CX + hit - dx, CLOSE_CY + hit - dy,
         )
 
         // SIZED BY ITS WIDTH, not its height. The controller is a wide glyph in one theme
@@ -3347,7 +3353,7 @@ class RearDialView(context: Context) : View(context) {
             // The disc sized so its glass lands exactly where the filled one used to,
             // which is also where the touch target still is.
             extras.color = colorFor("close", config.closeColor)
-            glassButton(canvas, CLOSE_CX, CLOSE_CY, gh, discH = CLOSE_R / DISC_RADIUS) { c ->
+            glassButton(canvas, CLOSE_CX, CLOSE_CY, gh, discH = hit / DISC_RADIUS) { c ->
                 extras.color = colorFor("close", config.closeColor)
                 drawIcon(c, PanelIcons.GAMEPAD, gx, gy, gh)
             }
@@ -8000,6 +8006,15 @@ class RearDialView(context: Context) : View(context) {
 
         /** How much of the disc's radius the controller spans, across its widest. */
         private const val GAMEPAD_SPAN = 1.30f
+
+        /**
+         * How much bigger the glass bubble is than the filled disc it replaced.
+         *
+         * A filled disc ends where its colour ends and needs no more room than the mark
+         * inside it. Glass ends at a RIM, and a rim drawn tight around a controller reads
+         * as a lens clamped to it rather than as a button it is sitting on.
+         */
+        private const val GAMEPAD_DISC = 1.42f
 
         /** Air between the outermost wave and the glass holding it. */
         private const val SPEAKER_WAVE_MARGIN = 0.12f
