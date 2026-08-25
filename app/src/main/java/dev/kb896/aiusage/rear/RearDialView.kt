@@ -5391,8 +5391,15 @@ class RearDialView(context: Context) : View(context) {
             floatArrayOf(r, r, tr, tr, r, r, r, r),
             android.graphics.Path.Direction.CW,
         )
+        // REACTIVE, like the mini one directly above it. This was the bare tint, which
+        // made the notification the one pane on the panel that ignored what was behind
+        // it — the cards, the buttons, the rings, the charging cell and the notice's own
+        // collapsed form all ask, and the full card did not. Over a photograph it sat at
+        // whatever weight suited a black panel, which is exactly the failure the
+        // luminance grid was built for.
         if (!drawGlassPane(
-                canvas, card, r, glassNoticeTint(), shape = noticeShape, held = true,
+                canvas, card, r, reactive(glassNoticeTint(), card),
+                shape = noticeShape, held = true,
             )
         ) {
             noticePaint.style = Paint.Style.FILL
