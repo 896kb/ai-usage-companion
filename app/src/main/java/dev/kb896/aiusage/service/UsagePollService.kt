@@ -263,8 +263,11 @@ class UsagePollService : Service() {
             // THE PANEL IS ASLEEP ON PURPOSE — or awake again. Neither supervisor can
             // work this out for itself; see IRearService.setDozing.
             if (intent?.action == RearActivity.ACTION_DOZING) {
-                Graph.of(this@UsagePollService).bridge
-                    .setDozing(intent.getBooleanExtra(RearActivity.EXTRA_DOZING, false))
+                val dozing = intent.getBooleanExtra(RearActivity.EXTRA_DOZING, false)
+                Graph.of(this@UsagePollService).bridge.setDozing(dozing)
+                // And anything in this process that only matters when somebody can see
+                // the panel. See PanelAwake — it releases whatever was put off.
+                PanelAwake.setDozing(dozing)
                 return
             }
             if (intent?.action == Intent.ACTION_POWER_CONNECTED) {

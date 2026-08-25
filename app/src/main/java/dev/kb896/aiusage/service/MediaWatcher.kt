@@ -315,6 +315,31 @@ class MediaWatcher(private val context: Context) {
             adoptLyrics(t.id, (cached as? dev.kb896.aiusage.data.LyricsCache.Entry.Sheet)?.lrc)
             return@Runnable
         }
+        // NOT WHILE THE PANEL IS DARK.
+        //
+        // A lyric sheet is read off the rear display and nowhere else, so fetching one
+        // for a screen that is off is a radio wake-up spent on nobody. That used to be a
+        // rare case and is now the common one: the panel sleeps thirty seconds after you
+        // stop looking at it, so most track changes happen behind a dark screen.
+        //
+        // DEFERRED, not dropped — the sheet is wanted the instant the panel comes back,
+        // and PanelAwake keeps only the most recent request, which is the only track that
+        // could still be playing by then. Checked again on the way out for the same
+        // reason the response is checked on the way in: a song that has ended does not
+        // want its words any more.
+        //
+        // The CACHE read above is deliberately NOT deferred. It is a file lookup, it
+        // touches no network, and it is what makes a track you have heard before come up
+        // with its words already on it.
+        PanelAwake.whenAwake {
+            handler.post {
+                if (lyricsPending == t.id) request(t)
+            }
+        }
+    }
+
+    /** The part that actually goes to the network. See the deferral in [resolve]. */
+    private fun request(t: Track) {
         io.execute {
             val sheet = runCatching { api.fetch(t.title, t.artist, t.album, t.durationSec) }
                 .onFailure { Log.w(TAG, "lyrics: " + it.javaClass.simpleName) }
