@@ -182,7 +182,45 @@ class RearUserService : IRearService.Stub {
         val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
         val ok = !out.contains("Error", ignoreCase = true)
         if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
+        if (ok) {
+            cameraLaunched = true
+            cameraWasOnTop = false
+        }
         return ok
+    }
+
+    /**
+     * The camera we started, and whether we have yet seen it in front of the panel.
+     *
+     * NOTHING EVER CLOSED IT. The camera was launched onto the rear display and left
+     * there: dismissing it takes its UI away and hands the display back, but the process
+     * stays resident with its task still stacked under the panel. The hardware is
+     * released — the camera service logs the DISCONNECT — so this is not a sensor left
+     * running, but it is an application kept alive for nothing and a task that can be
+     * resumed by accident.
+     *
+     * The pair of flags is what makes closing it safe. Seeing the panel on top is not on
+     * its own evidence the camera is finished with; the panel is on top for the whole
+     * time before the camera has come up too. Only a panel that is on top AFTER the
+     * camera was seen in front of it means the user has closed it.
+     */
+    private var cameraLaunched = false
+    private var cameraWasOnTop = false
+
+    /**
+     * `am kill` rather than `am force-stop`, and the difference matters here.
+     *
+     * kill declines to touch a process the system considers foreground, so if any part of
+     * the camera is still in use — its companion UI on the front screen, a recording
+     * still finishing — this does nothing at all. force-stop would take those with it.
+     * Getting this wrong costs somebody their video; getting it too gently costs one
+     * resident process until the next time.
+     */
+    private fun closeCamera() {
+        cameraLaunched = false
+        cameraWasOnTop = false
+        Log.i(TAG, "camera dismissed and the panel is back — releasing it")
+        exec("am kill $CAMERA_PACKAGE")
     }
 
     override fun ensureOnRear(displayId: Int): Boolean {
@@ -452,7 +490,12 @@ class RearUserService : IRearService.Stub {
                         // rear-screen launcher up and our panel goes on existing behind
                         // it: task alive, service running, nothing composited, every
                         // check reporting health, and the user looking at a clock.
-                        Where.DISPLACED -> replace(displayId, "rear display taken")
+                        Where.DISPLACED -> {
+                            // Something is in front of the panel. If we put it there,
+                            // note that it actually arrived — see closeCamera.
+                            if (cameraLaunched) cameraWasOnTop = true
+                            replace(displayId, "rear display taken")
+                        }
 
                         // Composited nowhere AND no task: genuinely gone, relaunch.
                         // The task check is what makes this safe — "composited nowhere"
@@ -463,7 +506,9 @@ class RearUserService : IRearService.Stub {
                             replace(displayId, "no panel and no task")
                         }
 
-                        Where.REAR -> Unit
+                        // Back in front, and the camera was ahead of us until now:
+                        // that is somebody closing it. Nothing else did.
+                        Where.REAR -> if (cameraLaunched && cameraWasOnTop) closeCamera()
                     }
                 } catch (e: InterruptedException) {
                     return@Thread
@@ -552,6 +597,9 @@ class RearUserService : IRearService.Stub {
 
         /** MIUI's camera, and the exact flags its own sub-screen launcher uses. */
         private const val CAMERA_COMPONENT = "com.android.camera/.Camera"
+
+        /** The same app, without the component, for releasing it again. */
+        private const val CAMERA_PACKAGE = "com.android.camera"
 
         /** NEW_TASK | SINGLE_TOP | EXCLUDE_FROM_RECENTS | RESET_TASK_IF_NEEDED | CLEAR_TASK */
         private const val CAMERA_FLAGS = "0x30a08000"
