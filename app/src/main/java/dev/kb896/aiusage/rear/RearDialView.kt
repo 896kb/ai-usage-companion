@@ -765,6 +765,34 @@ class RearDialView(context: Context) : View(context) {
     private var animating = false
 
     /**
+     * Whether the panel's display is in a state that takes updates at all.
+     *
+     * MEASURED, and it is the single largest thing this panel spends: with the rear
+     * display in DOZE_SUSPEND the process was burning about seventy per cent of a core,
+     * drawing a hundred and twenty frames a second into a display that is suspended and
+     * does not apply them. The record turned, the mascots walked, fifteen panes of glass
+     * resolved their backdrops, and none of it reached a pixel anybody could see.
+     *
+     * DOZE_SUSPEND and ON_SUSPEND both mean the same thing for our purposes — the last
+     * frame stays on the panel and further ones are dropped — which is exactly what an
+     * always-on display should do with a readout that has nothing new to say. Stopping
+     * is not a frame-rate cap: a capped panel still draws, this one draws nothing at all
+     * and resumes the moment the display can show it.
+     *
+     * The heartbeat deliberately keeps running. It is one frame every fifteen seconds
+     * against a hundred and twenty a second, and it is what guarantees that a state
+     * change we never hear about cannot leave the panel frozen for good.
+     */
+    var displayAwake: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            // Straight back to work, without waiting on the heartbeat: whatever moved
+            // while the panel was dark has to be caught up in the first frame after it.
+            if (value) invalidate()
+        }
+
+    /**
      * Current animated value for [key], advancing toward [target] by wall clock.
      * Flags the frame as animating so onDraw knows to schedule another one.
      */
@@ -2569,7 +2597,11 @@ class RearDialView(context: Context) : View(context) {
         // their behalf ran the whole panel at 120Hz to advance a twelve-frame walk cycle,
         // and since there is always a mascot the panel never idled at all. Measured
         // before this: 81% of a core on a static readout.
-        if (animating) postInvalidateOnAnimation()
+        //
+        // AND ONLY WHILE THE DISPLAY CAN SHOW IT. See displayAwake — a suspended panel
+        // drops every frame we hand it, so asking for the next vsync is asking to be
+        // woken up to do nothing.
+        if (animating && displayAwake) postInvalidateOnAnimation()
     }
 
     /** When the cell arrived, and what it is filling to. */

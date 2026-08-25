@@ -459,6 +459,29 @@ class RearActivity : Activity() {
      * way down is still on, and every property change on the way down handed the hold
      * straight back.
      */
+    /**
+     * Whether a display in this state will actually apply what is drawn to it.
+     *
+     * The suspended states are the point of this. MIUI parks the rear panel in
+     * DOZE_SUSPEND, which keeps the last frame lit and drops everything after it — so a
+     * panel that carries on animating into one is doing a hundred and twenty frames a
+     * second of work that ends nowhere. Measured at about seventy per cent of a core.
+     *
+     * DOZE itself is not in the list. A dozing display still takes updates, and it is
+     * what a genuine always-on mode looks like; refusing to draw to it would freeze the
+     * clock on a panel somebody is reading.
+     *
+     * An unknown state counts as awake. Being wrong that way costs power; being wrong
+     * the other way costs a panel that never draws again.
+     */
+    private fun takesUpdates(state: Int?): Boolean = when (state) {
+        android.view.Display.STATE_OFF,
+        android.view.Display.STATE_DOZE_SUSPEND,
+        android.view.Display.STATE_ON_SUSPEND,
+        -> false
+        else -> true
+    }
+
     private fun onDisplayState(on: Boolean) {
         if (!on) {
             if (!awaitingDoze) return
@@ -485,7 +508,11 @@ class RearActivity : Activity() {
         override fun onDisplayRemoved(displayId: Int) = Unit
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != display?.displayId) return
-            onDisplayState(display?.state == android.view.Display.STATE_ON)
+            val state = display?.state
+            onDisplayState(state == android.view.Display.STATE_ON)
+            // Separate from the question above, which is about the LOCK handing back.
+            // This one is about whether drawing reaches anything at all.
+            dial.displayAwake = takesUpdates(state)
         }
     }
 
@@ -651,6 +678,9 @@ class RearActivity : Activity() {
     override fun onResume() {
         super.onResume()
         armEvictionTimer()
+        // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
+        // resumed into an already-suspended display would never be told.
+        dial.displayAwake = takesUpdates(display?.state)
     }
 
     // The display move surfaces here, not necessarily as a fresh onResume — the
