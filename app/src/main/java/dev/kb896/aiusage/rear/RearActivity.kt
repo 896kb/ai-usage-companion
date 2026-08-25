@@ -174,6 +174,17 @@ class RearActivity : Activity() {
         const val STRAND_GRACE_MS = 4_000L
 
         /**
+         * How long the panel stays lit after the last thing worth looking at.
+         *
+         * MIUI's own rear-screen timeout is ten seconds — settings system
+         * subscreen_display_time — which is right for a screen you glance at and wrong
+         * for one you read. Thirty is long enough to take in three accounts and a track
+         * name without reaching for it again, and short enough that a panel left face-up
+         * on a desk is not costing a core.
+         */
+        const val AWAKE_MS = 30_000L
+
+        /**
          * The shortest gap between two requests to be moved back to the panel.
          *
          * A second is long against a looper and short against a person: a move that was
@@ -317,7 +328,10 @@ class RearActivity : Activity() {
             window.decorView.removeCallbacks(restorePanel)
             awaitingDoze = false
             holdScreen(true)
+            armSleep()
         }
+        // Somebody is looking at it. Same effect, different reason — see onInteraction.
+        dial.onInteraction = { armSleep() }
         setContentView(dial)
         // See MEDIA_SYNC: this process may have been created long after the media
         // session was, and there is no other way for it to find out.
@@ -355,6 +369,12 @@ class RearActivity : Activity() {
             val decoded = StatePayload.decode(payload)
             dial.config = decoded.config
             dial.state = decoded.state
+            // The switch may have just been thrown either way: on has to take the hold
+            // back immediately, off has to start a countdown that was never running.
+            if (keepAwake != decoded.config.keepPanelAwake) {
+                keepAwake = decoded.config.keepPanelAwake
+                armSleep()
+            }
             calibrationView.geometry = PanelGeometry.of(decoded.config.ringLayout)
         }
     }
@@ -411,6 +431,39 @@ class RearActivity : Activity() {
     }
 
     private var holding = true
+
+    /** The user's answer to whether the panel should ever sleep. See PanelConfig. */
+    private var keepAwake = false
+
+    /**
+     * Let the display go, thirty seconds after the last reason to hold it.
+     *
+     * THE HOLD IS THE EXPENSIVE THING, not the drawing — or rather, the hold is what
+     * makes the drawing happen at all. Lit, the panel costs about 110% of one core with
+     * media playing, measured over twelve minutes. Released, MIUI dozes the rear screen
+     * and the panel stops drawing into it entirely (see RearDialView.displayAwake), which
+     * takes that to nothing while leaving the last frame on the glass.
+     *
+     * Re-armed rather than one-shot: every reason to be awake — a touch, a notification,
+     * the display being lit by anything at all — pushes it back another thirty seconds,
+     * so the panel sleeps thirty seconds after you stop caring about it rather than
+     * thirty seconds after it started.
+     */
+    private val sleepPanel = Runnable { if (!keepAwake) holdScreen(false) }
+
+    /**
+     * Start the countdown again, or cancel it outright if the panel is meant to stay up.
+     *
+     * Safe to call as often as anything likes; it removes its own callback first.
+     */
+    private fun armSleep() {
+        window.decorView.removeCallbacks(sleepPanel)
+        if (keepAwake) {
+            if (!holding) holdScreen(true)
+            return
+        }
+        window.decorView.postDelayed(sleepPanel, AWAKE_MS)
+    }
 
     /**
      * The lock ran out with nobody swiping: let the display go, then put the panel back.
@@ -491,6 +544,9 @@ class RearActivity : Activity() {
             return
         }
         if (!holding && !awaitingDoze) holdScreen(true)
+        // Lit again, for whatever reason. Start the clock over rather than letting a
+        // stale countdown put it straight back to sleep.
+        armSleep()
     }
 
     /**
@@ -681,6 +737,7 @@ class RearActivity : Activity() {
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
         // resumed into an already-suspended display would never be told.
         dial.displayAwake = takesUpdates(display?.state)
+        armSleep()
     }
 
     // The display move surfaces here, not necessarily as a fresh onResume — the
@@ -701,6 +758,7 @@ class RearActivity : Activity() {
     override fun onDestroy() {
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
         window.decorView.removeCallbacks(restorePanel)
+        window.decorView.removeCallbacks(sleepPanel)
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE)
                 as android.hardware.display.DisplayManager)

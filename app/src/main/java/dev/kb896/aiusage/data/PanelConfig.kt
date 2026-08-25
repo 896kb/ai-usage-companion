@@ -224,6 +224,21 @@ data class PanelConfig(
     val showDate: Boolean = false,
 
     /**
+     * Hold the rear display awake for as long as the panel is up.
+     *
+     * OFF BY DEFAULT, and that default is a measurement rather than a taste. Held awake
+     * with music playing, the panel costs about 110% of one core, sustained — it is the
+     * single largest thing this app does. Released, MIUI drops the rear screen into its
+     * own always-on doze after ten seconds (see subscreen_display_time), where the panel
+     * stops drawing entirely; the last frame stays lit and nothing is spent keeping it
+     * there.
+     *
+     * On is for people who would rather the readout kept moving than the battery lasted,
+     * which was the original behaviour and is a perfectly reasonable thing to want.
+     */
+    val keepPanelAwake: Boolean = false,
+
+    /**
      * Mirror other apps' notifications onto the panel.
      *
      * Off by default, and [showNotificationText] is a SEPARATE opt-in, because this

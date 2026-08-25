@@ -3579,6 +3579,9 @@ class RearDialView(context: Context) : View(context) {
 
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            onInteraction?.invoke()
+        }
         if (!interactive) return false
         // LOCKED MEANS LOCKED. Every other target on this panel is skipped entirely —
         // not tested and rejected, never reached — so there is no path by which a
@@ -4869,6 +4872,15 @@ class RearDialView(context: Context) : View(context) {
      * to be locked.
      */
     var onNeedsScreen: (() -> Unit)? = null
+
+    /**
+     * A finger landed on the panel.
+     *
+     * Distinct from [onNeedsScreen], which says something ARRIVED worth lighting the
+     * display for. This says somebody is looking at it right now, which is the other
+     * reason to put off letting it sleep. See RearActivity's sleep timer.
+     */
+    var onInteraction: (() -> Unit)? = null
 
     /**
      * Something arrived that is worth being seen: keep the display, and renew the lock.

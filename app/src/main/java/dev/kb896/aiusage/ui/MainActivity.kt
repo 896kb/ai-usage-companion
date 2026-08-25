@@ -619,6 +619,12 @@ class MainActivity : ComponentActivity() {
                 container, "  ↳ background", config.notificationGround,
             ) { c -> write { it.copy(notificationBg = c) } }
         }
+        // NOT a "show" row like the ones above it — it changes nothing on the panel, only
+        // how long the panel is there. Placed with them anyway because it is the same
+        // kind of decision: one switch, one behaviour, no submenu.
+        SettingsRows.toggle(
+            container, "Keep panel awake", config.keepPanelAwake,
+        ) { on -> write { it.copy(keepPanelAwake = on) } }
         // Directly under Notifications, because it runs on the same grant — see Setup's
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.
