@@ -37,6 +37,20 @@ object Cadence {
     //     notifications both need a fresh trail, and both are wanted while the phone is
     //     in a pocket.
     //
-    // One interval, always.
+    // One interval, always — while the panel is awake.
+    //
+    // WHAT CHANGED SINCE THAT WAS WRITTEN. Both objections above were about a SLOW
+    // interval, and both still stand: panelOn() was a poor signal, and fifteen-minute-old
+    // numbers are wrong for notifications that matter in a pocket. Neither is an argument
+    // for polling a panel nobody can see.
+    //
+    // So there is still one interval and no second one. What there is now is a gate: the
+    // loop waits on the panel's own doze state before each tick and asks for nothing at
+    // all while it is dark, then asks immediately when it comes back. The signal is the
+    // panel telling us rather than us inferring it from a display that MIUI powers down
+    // on its own schedule, which is what made panelOn() untrustworthy.
+    //
+    // The cost is real and was accepted deliberately: a limit notification cannot arrive
+    // while the panel has been dark, because nothing is being fetched to notice it with.
     fun forPanelState(panelOn: Boolean): Long = FAST_MS
 }

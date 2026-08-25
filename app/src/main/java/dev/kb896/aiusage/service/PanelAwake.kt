@@ -1,5 +1,7 @@
 package dev.kb896.aiusage.service
 
+import kotlinx.coroutines.flow.first
+
 /**
  * Whether the rear panel is currently something a person could be looking at.
  *
@@ -19,14 +21,28 @@ package dev.kb896.aiusage.service
  */
 object PanelAwake {
 
-    @Volatile
-    private var awake = true
+    /**
+     * A flow rather than a flag, so a coroutine can PARK on it.
+     *
+     * This is the difference between pausing and pretending to. A loop that checks a
+     * boolean every few seconds and goes back to sleep is still waking the CPU on a
+     * schedule; one suspended on `first { it }` is not scheduled at all until the panel
+     * says otherwise. The poll loop uses the second kind — see awaitAwake.
+     */
+    private val awakeFlow = kotlinx.coroutines.flow.MutableStateFlow(true)
 
     /** Anything deferred while the panel was dark, to be run when it comes back. */
     @Volatile
     private var onWake: (() -> Unit)? = null
 
+    private val awake: Boolean get() = awakeFlow.value
+
     fun isAwake(): Boolean = awake
+
+    /** Suspends — costing nothing — until the panel is something a person could see. */
+    suspend fun awaitAwake() {
+        awakeFlow.first { it }
+    }
 
     /**
      * Told by the panel itself. [dozing] is the sense ACTION_DOZING carries.
@@ -37,8 +53,8 @@ object PanelAwake {
      */
     fun setDozing(dozing: Boolean) {
         val was = awake
-        awake = !dozing
-        if (!was && awake) {
+        awakeFlow.value = !dozing
+        if (!was && !dozing) {
             val pending = onWake
             onWake = null
             pending?.invoke()

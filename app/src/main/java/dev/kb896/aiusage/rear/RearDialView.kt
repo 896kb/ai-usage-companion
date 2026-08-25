@@ -836,8 +836,14 @@ class RearDialView(context: Context) : View(context) {
      * is what keeps both alive with no other input.
      */
     private val redrawTick: Runnable = Runnable {
-        invalidate()
-        postDelayed(redrawTick, REDRAW_INTERVAL_MS)
+        // NOT WHILE THE PANEL IS DARK. Everything this heartbeat exists for — the
+        // staleness marker appearing, the burn-in drift moving on — is about what is
+        // being LOOKED at, and none of it is true of a display that is dropping frames.
+        // It used to keep running as a guard against a doze signal we never heard about;
+        // that guard is now a touch, which cannot happen on a screen nobody has lit. See
+        // onTouchEvent.
+        if (displayAwake) invalidate()
+        postDelayed(redrawTick, if (displayAwake) REDRAW_INTERVAL_MS else DARK_TICK_MS)
     }
 
     override fun onAttachedToWindow() {
@@ -3581,6 +3587,12 @@ class RearDialView(context: Context) : View(context) {
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
             onInteraction?.invoke()
+            // A FINGER IS PROOF OF A LIT SCREEN, and it is the backstop for the whole
+            // sleeping arrangement. Everything below stops drawing on the strength of a
+            // display-state callback; if one is ever missed, the panel would sit frozen
+            // with no timer left to rescue it. Nobody taps a display they cannot see, so
+            // a touch says the callback was wrong more reliably than any heartbeat.
+            displayAwake = true
         }
         if (!interactive) return false
         // LOCKED MEANS LOCKED. Every other target on this panel is skipped entirely —
@@ -9856,6 +9868,15 @@ class RearDialView(context: Context) : View(context) {
          * A cubic in-out cannot pass its target, so there is nothing to clamp.
          */
 
+
+        /**
+         * How often the heartbeat looks up while the panel is dark.
+         *
+         * Not zero, because the runnable has to be somewhere to notice the panel is back
+         * if every other signal failed; long, because that is the only thing it does. It
+         * draws nothing at this interval — see redrawTick.
+         */
+        private const val DARK_TICK_MS = 60_000L
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 

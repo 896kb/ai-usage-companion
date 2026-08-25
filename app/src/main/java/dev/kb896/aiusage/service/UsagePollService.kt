@@ -179,8 +179,22 @@ class UsagePollService : Service() {
                 delay(initial)
             }
             while (isActive) {
+                // NOTHING IS ASKED FOR WHILE NOBODY CAN SEE IT, however long that lasts.
+                //
+                // Parked here, not polling a flag: suspended on the panel's own state,
+                // this loop is not scheduled at all until the panel comes back, so a
+                // phone in a pocket overnight costs exactly zero requests and zero
+                // wake-ups. Two hours dark is the same as two minutes dark.
+                //
+                // AND THE RATE IS UNCHANGED, which is the part worth being sure of. The
+                // delay below always runs to completion before the loop returns here, so
+                // two calls can never be closer together than FAST_MS no matter how often
+                // the panel is woken. Glancing at it ten times a minute asks for nothing
+                // extra; glancing at it after two hours asks immediately, because the
+                // delay is long finished and this is where the loop has been waiting.
+                PanelAwake.awaitAwake()
                 safeTick()
-                delay(Cadence.forPanelState(panelOn()))
+                delay(Cadence.FAST_MS)
             }
         }
 
