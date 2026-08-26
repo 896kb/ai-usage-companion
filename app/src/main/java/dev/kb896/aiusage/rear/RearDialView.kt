@@ -311,8 +311,8 @@ class RearDialView(context: Context) : View(context) {
         // front of a large native allocation is the one shape the collector will not
         // hurry over.
         val effectKey = sdfKey + "|" + tint
-        if (effectKey != sdfEffectKey) {
-            sdfEffectKey = effectKey
+        var effect = sdfEffects[effectKey]
+        if (effect == null) {
             val shader = Glass.sdf
             shader.setInputBuffer(
                 "sdfTex",
@@ -327,24 +327,43 @@ class RearDialView(context: Context) : View(context) {
             shader.setFloatUniform("refractionHeight", Glass.SDF_REFRACTION)
             shader.setFloatUniform("lightAngle", Glass.SDF_LIGHT_ANGLE)
             shader.setColorUniform("tint", tint)
-            sdfEffect =
+            effect =
                 android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+            // BOUNDED, or this is the native-heap churn again by another route. A clock
+            // needs eleven of these and a charge figure a hundred, and both are small,
+            // fixed sets — but a cache with no ceiling is one bad key away from being a
+            // leak, and the last one cost 158MB a minute before it was found.
+            if (sdfEffects.size >= SDF_CACHE_MAX) sdfEffects.clear()
+            sdfEffects[effectKey] = effect
         }
-        node.setRenderEffect(sdfEffect)
+        node.setRenderEffect(effect)
         recorder.drawRenderNode(node)
         return true
     }
 
-    private var sdfEffectKey: String? = null
-    private var sdfEffect: android.graphics.RenderEffect? = null
+    /**
+     * Measured fields and their effects, by glyph rather than by string.
+     *
+     * ONE ENTRY WAS ENOUGH FOR A CHARGE FIGURE and is not enough for a clock. A
+     * percentage changes about a hundred times in a charge and holds still between; a
+     * clock changes every second, forever. Keyed on the whole string, the seconds column
+     * would remeasure the entire time every second — which is the field rebuild that made
+     * this unusable the first time it was tried.
+     *
+     * Per GLYPH it is the opposite: there are ten digits and a colon, every one of them
+     * is measured once in the panel's life, and the clock then costs nothing per tick but
+     * a lookup.
+     */
+    private val sdfFields = HashMap<String, android.graphics.Bitmap>()
+    private val sdfEffects = HashMap<String, android.graphics.RenderEffect>()
 
     private val sdfRect = android.graphics.RectF()
 
     /** The measured field for [text] at [paint]'s size and weight, kept until it changes. */
     private fun sdfFor(text: String, paint: Paint): android.graphics.Bitmap? {
         val key = text + "|" + paint.textSize + "|" + paint.fontVariationSettings
-        if (key == sdfKey) return sdfBitmap
         sdfKey = key
+        sdfFields[key]?.let { return it }
 
         val pad = SdfText.SPREAD
         val w = (paint.measureText(text) + pad * 2f).toInt()
@@ -368,15 +387,21 @@ class RearDialView(context: Context) : View(context) {
         val coverage = FloatArray(w * h) { (pixels[it] ushr 24) / 255f }
 
         val packed = SdfText.pack(coverage, w, h)
-        sdfBitmap?.recycle()
-        sdfBitmap = android.graphics.Bitmap.createBitmap(
+        val out = android.graphics.Bitmap.createBitmap(
             packed, w, h, android.graphics.Bitmap.Config.ARGB_8888,
         )
-        return sdfBitmap
+        // Same ceiling as the effects, and cleared together with them so a key can never
+        // survive in one and not the other.
+        if (sdfFields.size >= SDF_CACHE_MAX) {
+            sdfFields.values.forEach { it.recycle() }
+            sdfFields.clear()
+            sdfEffects.clear()
+        }
+        sdfFields[key] = out
+        return out
     }
 
     private var sdfKey: String? = null
-    private var sdfBitmap: android.graphics.Bitmap? = null
 
     /** The battery glyph in panel coordinates, so the charge can be clipped to it. */
     private val batteryMatrix = android.graphics.Matrix()
@@ -7278,21 +7303,38 @@ class RearDialView(context: Context) : View(context) {
         }
 
         extras.color = (ink and 0x00FFFFFF) or (alpha(0xFF) shl 24)
-        for ((i, c) in figures.withIndex()) {
-            val w = if (c == ':') colon else slot
-            if (c == ':') {
-                canvas.drawText(":", x, clockBase, extras)
-            } else {
-                // Keyed by POSITION, not by value: the wheel at index 4 is the tens of
-                // seconds for as long as the panel is up, and a key that moved with the
-                // digit would roll the wrong column when the time carried over.
-                rolling(
-                    canvas, "clock:$i", c.toString(),
-                    x + (w - extras.measureText(c.toString())) / 2f, clockBase,
-                    android.graphics.RectF(x, clockBase - CLOCK_SIZE, x + w, clockBase + CLOCK_SIZE * 0.35f),
-                )
+        // MADE OF GLASS, the way the charge figure is: the panel is bent through the
+        // shapes of the numerals themselves rather than the type being painted on top of
+        // a pane. Deferred to the overlay pass because that is the only place it can
+        // work — a letterform can only refract a panel that has finished being drawn, and
+        // this page is drawn while the scene is still being recorded. See drawSdfText,
+        // which says so by returning false, and glassFigure, which is the same test.
+        //
+        // The wheel survives it. Each slot is clipped to its own cell and the outgoing
+        // and incoming numerals are drawn one cell apart, so a figure rolls out of the
+        // top as the next rolls in underneath — the same movement as the painted version,
+        // made of the same glass as everything else on the panel.
+        val glassClock = config.theme.isGlass &&
+            deferOver(canvas) { c -> drawGlassClock(c, figures, cx, span, slot, colon, ink, on) }
+        if (!glassClock) {
+            for ((i, ch) in figures.withIndex()) {
+                val w = if (ch == ':') colon else slot
+                if (ch == ':') {
+                    canvas.drawText(":", x, clockBase, extras)
+                } else {
+                    // Keyed by POSITION, not by value: the wheel at index 4 is the tens
+                    // of seconds for as long as the panel is up, and a key that moved
+                    // with the digit would roll the wrong column on a carry.
+                    rolling(
+                        canvas, "clock:$i", ch.toString(),
+                        x + (w - extras.measureText(ch.toString())) / 2f, clockBase,
+                        android.graphics.RectF(
+                            x, clockBase - CLOCK_SIZE, x + w, clockBase + CLOCK_SIZE * 0.35f,
+                        ),
+                    )
+                }
+                x += w
             }
-            x += w
         }
 
         // ---- the date, spelled out ---------------------------------------------------
@@ -7317,6 +7359,100 @@ class RearDialView(context: Context) : View(context) {
         canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
         extras.textSize = typed(18f)
     }
+
+    /**
+     * The clock, one glass numeral at a time.
+     *
+     * Runs in the overlay pass, where there is a finished panel behind it to bend. Each
+     * slot keeps its own roll — see clockRolls — so only the columns that actually
+     * changed move, and a numeral leaving is drawn one cell above the one arriving.
+     */
+    private fun drawGlassClock(
+        canvas: Canvas,
+        figures: String,
+        cx: Float,
+        span: Float,
+        slot: Float,
+        colon: Float,
+        ink: Int,
+        on: Float,
+    ) {
+        extras = extrasBody
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = typed(CLOCK_SIZE)
+        extras.color = (ink and 0x00FFFFFF) or ((255 * on).toInt().coerceIn(0, 255) shl 24)
+        val cell = CLOCK_SIZE * CLOCK_ROLL_CELL
+        var x = cx - span / 2f
+        for ((i, ch) in figures.withIndex()) {
+            val w = if (ch == ':') colon else slot
+            if (ch == ':') {
+                // The colon never rolls. It is punctuation, not a reading.
+                if (!drawSdfText(canvas, ":", extras, slotRight(x, w, ":"), CLOCK_BASELINE - CLOCK_SIZE / 2f)) {
+                    canvas.drawText(":", x, CLOCK_BASELINE, extras)
+                }
+                x += w
+                continue
+            }
+            val key = "clock:$i"
+            val was = clockRolls[key]
+            if (was == null || was.first != ch) {
+                clockRolls[key] = ch to (if (was == null) 0L else frameNowMs)
+            }
+            val state = clockRolls[key]!!
+            val since = frameNowMs - state.second
+            val t =
+                if (state.second == 0L) 1f
+                else (since / CLOCK_ROLL_MS).coerceIn(0f, 1f)
+            if (t < 1f) animating = true
+            // Out-cubic: fast away from the old figure, easing onto the new one. Written
+            // here rather than added to Tween because it is the only thing that wants it.
+            val eased = 1f - (1f - t) * (1f - t) * (1f - t)
+            val mid = CLOCK_BASELINE - CLOCK_SIZE / 2f
+            canvas.save()
+            canvas.clipRect(x, mid - cell / 2f, x + w, mid + cell / 2f)
+            // Arriving from below, and whatever it replaced leaving through the top.
+            val rise = (1f - eased) * cell
+            if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, w, ch.toString()), mid + rise)) {
+                canvas.drawText(ch.toString(), x, CLOCK_BASELINE + rise, extras)
+            }
+            val leaving = clockLeaving[key]
+            if (t < 1f && leaving != null && leaving != ch) {
+                if (!drawSdfText(
+                        canvas, leaving.toString(), extras,
+                        slotRight(x, w, leaving.toString()), mid + rise - cell,
+                    )
+                ) {
+                    canvas.drawText(leaving.toString(), x, CLOCK_BASELINE + rise - cell, extras)
+                }
+            }
+            canvas.restore()
+            if (t >= 1f) clockLeaving[key] = ch
+            x += w
+        }
+    }
+
+    /**
+     * Where to ask [drawSdfText] to put a glyph's right edge so it lands CENTRED in its
+     * slot rather than right-aligned in it.
+     *
+     * drawSdfText was written for a charge figure, which is one string set against a
+     * fixed right margin, so it takes the right edge of the FIELD — and a field is the
+     * glyph plus a margin for the spread to live in. Handed a slot's right edge, a narrow
+     * numeral therefore sits further right than a wide one: a 1 stood twenty-four units
+     * clear of the 2 beside it, which is the gap in a clock reading 15:2 1:42.
+     *
+     * A clock wants the opposite of a right margin. Every slot is the width of a zero and
+     * the figure belongs in the middle of it, so that a 1 rolling past does not shunt the
+     * rest of the time sideways.
+     */
+    private fun slotRight(x: Float, w: Float, glyph: String): Float =
+        x + (w + extras.measureText(glyph)) / 2f + SdfText.SPREAD
+
+    /** Per slot: the numeral shown, and when it arrived. See drawGlassClock. */
+    private val clockRolls = HashMap<String, Pair<Char, Long>>()
+
+    /** Per slot: the numeral it replaced, still rolling out. */
+    private val clockLeaving = HashMap<String, Char>()
 
     private val clockRect = android.graphics.RectF()
 
@@ -10055,8 +10191,14 @@ class RearDialView(context: Context) : View(context) {
         private const val CLOCK_BASELINE = 330f
         private const val CLOCK_PAD_X = 20f
         private const val CLOCK_PAD_Y = 16f
+        /** How tall a numeral's cell is, as a multiple of its size. The roll's travel. */
+        private const val CLOCK_ROLL_CELL = 1.25f
+        private const val CLOCK_ROLL_MS = 260f
         private const val DATE_SIZE = 26f
         private const val DATE_BASELINE = 420f
+
+        /** How many measured glyphs to keep. Eleven for a clock, a hundred for a charge. */
+        private const val SDF_CACHE_MAX = 160
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
