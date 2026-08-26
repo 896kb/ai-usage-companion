@@ -2157,8 +2157,15 @@ class RearDialView(context: Context) : View(context) {
         // be wrong.
         settlePresence(frameNowMs)
         val wantsMediaPage = onlyAccount == null && mediaPageAvailable()
+        // THE READOUT IS NO LONGER THE FIRST PAGE, and almost nothing below had to learn
+        // that. There is a notification page above it now, so the pager's own coordinates
+        // shift by one span — but `paging` is read in seventy-odd places downstream and
+        // every one of them means "how far onto the MEDIA page", so it keeps that meaning
+        // exactly and only its definition moves. What is new is `noticing`, which is the
+        // same question asked upwards.
+        val readoutAt = if (onlyAccount == null) Panel.HEIGHT.toFloat() else 0f
         if (wantsMediaPage) {
-            pager.pages = 2
+            pager.pages = 3
             // COME BACK TO THE PAGE YOU WERE ON.
             //
             // The :rear process is destroyed and recreated constantly — every recovery,
@@ -2174,19 +2181,30 @@ class RearDialView(context: Context) : View(context) {
             // make; it should simply already be there.
             if (!pageRestored) {
                 pageRestored = true
-                if (panelPrefs.getInt(KEY_PAGE, 0) == 1) {
-                    pager.goTo(1, frameNowMs)
-                    pager.advance(frameNowMs + PAGE_SETTLE_MS.toLong())
+                // Saved indices are the pager's own, and they moved when the page above
+                // arrived: what used to be 0 and 1 is 1 and 2. Anything from before is
+                // read through PAGE_BASE so an upgrade lands you where you left off
+                // rather than one page up from it.
+                val saved = panelPrefs.getInt(KEY_PAGE, PAGE_READOUT)
+                    .coerceIn(0, pager.pages - 1)
+                if (saved != PAGE_READOUT) {
+                    pager.goTo(saved, frameNowMs)
+                } else {
+                    pager.goTo(PAGE_READOUT, frameNowMs)
                 }
+                pager.advance(frameNowMs + PAGE_SETTLE_MS.toLong())
             }
-        } else if (pager.pages > 1) {
+        } else if (pager.pages > 2) {
             // The media page can vanish while you are standing on it — the music stops,
             // and the page it was about goes with it. Walk back rather than cutting: the
             // panel drops a page only once it has actually returned to the first one, so
             // what you see is the readout arriving, not the panel blinking.
-            pager.settleTo(0, frameNowMs)
-            if (pager.restingAt(0)) pager.pages = 1
+            pager.settleTo(PAGE_READOUT, frameNowMs)
+            if (pager.restingAt(PAGE_READOUT)) pager.pages = 2
         }
+        // Two pages even with nothing playing: the notifications are always there. Only a
+        // single-account preview has no paging at all, which is what it has always had.
+        if (onlyAccount == null && pager.pages < 2) pager.pages = 2
         val paged = if (onlyAccount == null) pager.advance(frameNowMs) else 0f
         // Written only when it SETTLES, not while a drag is in flight: a scroll that is
         // abandoned halfway never happened, and a file written sixty times a second
@@ -2197,9 +2215,16 @@ class RearDialView(context: Context) : View(context) {
             pageSaved = pager.page
             panelPrefs.edit().putInt(KEY_PAGE, pageSaved).apply()
         }
-        val paging = (paged / Panel.HEIGHT).coerceIn(0f, 1f)
+        // UNCHANGED IN MEANING: 0 on the readout, 1 on the media page. Measured from the
+        // readout's new resting offset rather than from zero.
+        val paging = ((paged - readoutAt) / Panel.HEIGHT).coerceIn(0f, 1f)
+        // And the same question upwards. 1 is standing on the notification page.
+        val noticing = ((readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
         pagingNow = paging
-        pagedNow = paged
+        // The transport records where it rests against this, so it has to be the offset
+        // the readout is actually displaced by — not the pager's raw position, which now
+        // counts from a page above.
+        pagedNow = paged - readoutAt
         // Re-earned every frame. The row records it as it draws, and if the row is not
         // there to record it the page falls back to its own arrangement.
         transportHomeKnown = false
@@ -2472,8 +2497,8 @@ class RearDialView(context: Context) : View(context) {
         // which is the trade: a notification is asking for attention, and for five
         // seconds it gets it.
         canvas.save()
-        canvas.translate(dx, dy + readoutPush - paged)
-        if (!hidden) drawCanvasSide(canvas, dx, dy + readoutPush - paged)
+        canvas.translate(dx, dy + readoutPush - (paged - readoutAt))
+        if (!hidden) drawCanvasSide(canvas, dx, dy + readoutPush - (paged - readoutAt))
         // The extras belong to the panel as a whole, not to an account, so a
         // single-account preview leaves them out — see onlyAccount.
         if (onlyAccount == null && !hidden) drawExtras(canvas)
@@ -2536,6 +2561,16 @@ class RearDialView(context: Context) : View(context) {
             canvas.restore()
         } else if (paging <= 0.001f) {
             volumeBar = null
+        }
+
+        // The page above the readout. Assembled in place like the media page below it and
+        // for the same reason — the readout is what moves, and a second thing sliding in
+        // from the other edge would be two animations explaining one gesture.
+        if (!hidden && onlyAccount == null && noticing > 0.001f) {
+            canvas.save()
+            canvas.translate(dx, dy)
+            drawNoticePage(canvas, noticing)
+            canvas.restore()
         }
         canvas.restore()   // the readout clip
 
@@ -7189,6 +7224,112 @@ class RearDialView(context: Context) : View(context) {
         android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
 
     /**
+     * The page above the readout: what has come in, and what time it is.
+     *
+     * [on] runs 0 at the readout to 1 standing here, the mirror of the media page's
+     * paging, and everything fades in on it rather than sliding — see drawMediaPage.
+     */
+    private fun drawNoticePage(canvas: Canvas, on: Float) {
+        // A CLOCK WITH SECONDS ON IT HAS TO KEEP ASKING. Every other moving thing here
+        // sets this when it has somewhere to move to; a clock's next frame is a fact
+        // about the time rather than about an animation, so it asks unconditionally
+        // while the page is on screen. It costs nothing off it — see displayAwake, which
+        // stops the request reaching a display that would drop it anyway.
+        animating = true
+        val ink = colorFor("clock", config.clockTint)
+        val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
+        val alpha = { a: Int -> (a * on).toInt().coerceIn(0, 255) }
+
+        // ---- the clock, one wheel per digit -----------------------------------------
+        //
+        // EACH FIGURE ON ITS OWN WHEEL, which is the whole look of it: the seconds roll
+        // every second, the tens of seconds every ten, and the hour sits still all hour.
+        // A single wheel carrying the whole string would turn all six figures over
+        // whenever any one of them changed, which reads as the time being replaced rather
+        // than running.
+        //
+        // Monospaced by construction rather than by font: every slot is measured at the
+        // width of a zero and the digit is centred in it, so a 1 does not pull the rest
+        // of the clock left as it rolls past.
+        val now = java.util.Calendar.getInstance()
+        val figures = "%02d:%02d:%02d".format(
+            now.get(java.util.Calendar.HOUR_OF_DAY),
+            now.get(java.util.Calendar.MINUTE),
+            now.get(java.util.Calendar.SECOND),
+        )
+        extras = extrasBody
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = typed(CLOCK_SIZE)
+        val slot = extras.measureText("0")
+        val colon = extras.measureText(":")
+        var span = 0f
+        for (c in figures) span += if (c == ':') colon else slot
+        val clockBase = CLOCK_BASELINE
+        var x = cx - span / 2f
+
+        // The whole clock is glass, tinted with the colour it is drawn in — the same one
+        // the readout's own clock uses, so the two are recognisably one reading.
+        if (config.theme.isGlass) {
+            clockRect.set(
+                x - CLOCK_PAD_X, clockBase - CLOCK_SIZE - CLOCK_PAD_Y,
+                x + span + CLOCK_PAD_X, clockBase + CLOCK_PAD_Y,
+            )
+            glassCard(canvas, clockRect, CARD_RADIUS, alpha = on)
+        }
+
+        extras.color = (ink and 0x00FFFFFF) or (alpha(0xFF) shl 24)
+        for ((i, c) in figures.withIndex()) {
+            val w = if (c == ':') colon else slot
+            if (c == ':') {
+                canvas.drawText(":", x, clockBase, extras)
+            } else {
+                // Keyed by POSITION, not by value: the wheel at index 4 is the tens of
+                // seconds for as long as the panel is up, and a key that moved with the
+                // digit would roll the wrong column when the time carried over.
+                rolling(
+                    canvas, "clock:$i", c.toString(),
+                    x + (w - extras.measureText(c.toString())) / 2f, clockBase,
+                    android.graphics.RectF(x, clockBase - CLOCK_SIZE, x + w, clockBase + CLOCK_SIZE * 0.35f),
+                )
+            }
+            x += w
+        }
+
+        // ---- the date, spelled out ---------------------------------------------------
+        //
+        // Longhand, unlike the corner block's WED 00. That one is a glance at a panel
+        // already full of readings and has to be small; this page has room and nothing
+        // competing, so it can say the whole thing.
+        val date = java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault())
+            .format(now.time) + ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) +
+            ", " + now.get(java.util.Calendar.YEAR)
+        extras.textSize = typed(DATE_SIZE)
+        val dateW = extras.measureText(date)
+        val dateLeft = cx - dateW / 2f
+        if (config.theme.isGlass) {
+            clockRect.set(
+                dateLeft - CARD_PAD_X, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y,
+                dateLeft + dateW + CARD_PAD_X, DATE_BASELINE + ROW_CARD_PAD_Y,
+            )
+            glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = on)
+        }
+        extras.color = (ink and 0x00FFFFFF) or (alpha(MediaLayout.ARTIST_ALPHA) shl 24)
+        canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
+        extras.textSize = typed(18f)
+    }
+
+    private val clockRect = android.graphics.RectF()
+
+    /** 1st, 2nd, 3rd, 4th — and the four teens that break the rule. */
+    private fun ordinal(day: Int): String = when {
+        day in 11..13 -> "th"
+        day % 10 == 1 -> "st"
+        day % 10 == 2 -> "nd"
+        day % 10 == 3 -> "rd"
+        else -> "th"
+    }
+
+    /**
      * The media page's furniture: type, transport, timeline and volume.
      *
      * Everything here fades in with [paging] rather than sliding. The record is already
@@ -9905,6 +10046,17 @@ class RearDialView(context: Context) : View(context) {
 
         /** How far back the notification page can be scrolled. */
         const val HISTORY_MAX = 10
+
+        /** Where the readout sits in the pager now that something is above it. */
+        const val PAGE_READOUT = 1
+
+        /** The notification page's clock: big, because the page is otherwise empty. */
+        private const val CLOCK_SIZE = 92f
+        private const val CLOCK_BASELINE = 330f
+        private const val CLOCK_PAD_X = 20f
+        private const val CLOCK_PAD_Y = 16f
+        private const val DATE_SIZE = 26f
+        private const val DATE_BASELINE = 420f
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
