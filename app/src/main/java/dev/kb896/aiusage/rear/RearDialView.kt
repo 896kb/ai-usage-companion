@@ -3794,7 +3794,7 @@ class RearDialView(context: Context) : View(context) {
                 // to the readout. Noted on the way down because that is when the finger
                 // chose, not when it has moved far enough to say so.
                 onWheel = noticing >= 0.999f && history.isNotEmpty() &&
-                    noticeWheelRect.contains(event.x, event.y)
+                    event.y < wheelGrabBottom()
                 wheelDownAt = noticeWheelAt
                 hit || pager.enabled() || onVolume || onScrub
             }
@@ -7579,6 +7579,22 @@ class RearDialView(context: Context) : View(context) {
             canvas.restore()
         }
     }
+
+    /**
+     * How far down the page a finger still belongs to the wheel.
+     *
+     * EVERYTHING ABOVE THE CLOCK, not just the card. The card is 143 units of a 572-unit
+     * panel and it is where the cards happen to be RESTING — but a carousel is a thing you
+     * reach into, and asking someone to land inside the one card that is currently in
+     * front is asking them to aim at a moving target on a screen facing away from them.
+     *
+     * The clock is the boundary because it is the next thing down that means something
+     * else: above it is the wheel and its neighbours coming and going, below it is the
+     * time and the date, which nothing scrolls. Measured from the clock's cell rather than
+     * its baseline so the grab stops where the numerals start, not where they sit.
+     */
+    private fun wheelGrabBottom(): Float =
+        CLOCK_BASELINE - CLOCK_SIZE / 2f - CLOCK_SIZE * CLOCK_ROLL_CELL / 2f
 
     /** Which of the ten the wheel is on. Whole numbers rest; the fraction is a drag. */
     private var noticeWheelAt = 0f
