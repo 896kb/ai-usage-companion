@@ -433,6 +433,16 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** One relayed notification, as much of it as the panel shows. */
+    /**
+     * The last ten notifications, newest first.
+     *
+     * Held by the panel rather than the relay because the relay is a listener service:
+     * the system starts and stops it on its own schedule, and a history that vanished
+     * whenever Android decided to reclaim it would be worse than none. This process is
+     * the one with a reason to stay alive.
+     */
+    private val history = ArrayDeque<Notice>()
+
     private data class Notice(
         val app: String,
         val pkg: String,
@@ -4036,6 +4046,23 @@ class RearDialView(context: Context) : View(context) {
         moreText: String = "",
     ) {
         val now = SystemClock.elapsedRealtime()
+        val next = Notice(app, pkg, title, text, moreTitle, moreText)
+
+        // KEPT BEFORE IT IS JUDGED, and the two decisions are genuinely different.
+        //
+        // What follows drops anything that arrived while the panel was dark, on the
+        // grounds that a strip replaying ten hours of somebody's evening is a log rather
+        // than news. That reasoning is about the STRIP. The history behind it wants
+        // exactly the opposite: the whole point of a page you can scroll back through is
+        // that it holds what you were not there to see.
+        //
+        // Duplicates are the one thing not kept. Apps re-post the same notification for
+        // their own reasons — a progress update, a re-rank — and ten copies of one
+        // message is not ten notifications.
+        if (history.firstOrNull() != next) {
+            history.addFirst(next)
+            while (history.size > HISTORY_MAX) history.removeLast()
+        }
 
         // A NOTIFICATION THAT ARRIVES WHILE THE PANEL IS DARK IS NOT NEWS, IT IS HISTORY.
         //
@@ -4056,8 +4083,6 @@ class RearDialView(context: Context) : View(context) {
         // Admitted, so it is worth keeping the display up for. After the drop check on
         // purpose: something that will never be shown is not a reason to light anything.
         keepAwakeFor()
-
-        val next = Notice(app, pkg, title, text, moreTitle, moreText)
 
         // QUEUED, not raced. Notifications arrive in bursts — a group syncing, a chat
         // catching up — and replacing on arrival meant each one was on screen for
@@ -9877,6 +9902,9 @@ class RearDialView(context: Context) : View(context) {
          * draws nothing at this interval — see redrawTick.
          */
         private const val DARK_TICK_MS = 60_000L
+
+        /** How far back the notification page can be scrolled. */
+        const val HISTORY_MAX = 10
 
         private const val REDRAW_INTERVAL_MS = 15_000L
 
