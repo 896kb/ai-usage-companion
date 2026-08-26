@@ -1092,7 +1092,11 @@ class RearDialView(context: Context) : View(context) {
             swept(canvas) { drawPendingOver(it) }
             swept(canvas) { drawPendingButtons(it) }
             drawLockOverlay(canvas)
-            drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
+            // Same rule as the glass path's: the page below already has it. See the
+            // GROUP_NOTICE guard.
+            if (noticing < 0.5f) {
+                drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
+            }
             drawCharge(canvas)
             return
         }
@@ -1124,7 +1128,11 @@ class RearDialView(context: Context) : View(context) {
         if (pendingOver.isNotEmpty()) active.add(GROUP_OVER)
         if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
         if (lockSwap(frameNowMs) > 0.001f) active.add(GROUP_LOCK)
-        if (noticeSlideHeld > 0.001f) active.add(GROUP_NOTICE)
+        // NOT WHILE THE PAGE THAT HOLDS THEM IS UP. The strip and the carousel are the
+        // same notification drawn twice — the strip slides one in over the top of a page
+        // whose whole job is showing it, and the newest card in the carousel IS that
+        // notification. Two of it is not emphasis, it is a mistake.
+        if (noticeSlideHeld > 0.001f && noticing < 0.5f) active.add(GROUP_NOTICE)
         if (chargeAt != 0L) active.add(GROUP_CHARGE)
         if (active.isEmpty()) return
 
@@ -1342,7 +1350,14 @@ class RearDialView(context: Context) : View(context) {
             //
             // Only for the root-space sources. A local backdrop is recorded in the pane's
             // own space by definition, and mapping it would break the thing that works.
-            if (source === sceneNode || source === groundNode) {
+            //
+            // ASKED OF THE NODE, not listed by name. This named the two root-space nodes
+            // it knew about, and missed the ones the overlay pass builds: every layer in
+            // that chain covers the whole panel at the origin exactly as the scene does —
+            // see layered — so a pane drawn inside a transform and sampling one of THOSE
+            // had the same frozen backdrop this branch exists to prevent. A node that
+            // spans the panel from its origin is root-space whatever it is called.
+            if (rootSpace(source)) {
                 canvas.getMatrix().mapRect(paneAbs, rect)
                 pane.translate(-paneAbs.left, -paneAbs.top)
             } else {
@@ -2021,6 +2036,11 @@ class RearDialView(context: Context) : View(context) {
 
     /** A pane's rect in root coordinates, for sampling a root-space backdrop. */
     private val paneAbs = android.graphics.RectF()
+
+    /** Whether [node] covers the whole panel from its origin, and so is in root space. */
+    private fun rootSpace(node: android.graphics.RenderNode): Boolean =
+        node.left == 0 && node.top == 0 &&
+            node.width == width && node.height == height
 
     private val discRect = android.graphics.RectF()
     private val barRect = android.graphics.RectF()
@@ -7482,26 +7502,31 @@ class RearDialView(context: Context) : View(context) {
             val away = Math.abs(d).coerceAtMost(1f)
             val scale = 1f - CAROUSEL_SHRINK * away
             val fade = 1f - CAROUSEL_FADE * away
-            canvas.save()
-            canvas.translate(0f, d * NOTICE_H * CAROUSEL_STEP)
-            canvas.scale(scale, scale, cx, cy)
+            // THE CARD'S RECT IS COMPUTED, NOT TRANSFORMED. Scaling the canvas would
+            // scale what the pane SAMPLES along with the pane: the backdrop would come out
+            // magnified inside the smaller card, which is a photograph of the panel rather
+            // than a window onto it. A pane has to sample and draw at one to one, so the
+            // shrinking is done by giving it a smaller rect in the same space.
+            val dy = d * NOTICE_H * CAROUSEL_STEP
+            val hw = noticeWheelRect.width() / 2f * scale
+            val hh = noticeWheelRect.height() / 2f * scale
+            cardRect.set(cx - hw, cy + dy - hh, cx + hw, cy + dy + hh)
+            val cr = r * scale
             val layer = fade < 0.999f
+            canvas.save()
             if (layer) {
-                canvas.saveLayerAlpha(
-                    noticeWheelRect, (255 * fade).toInt().coerceIn(0, 255),
-                )
+                canvas.saveLayerAlpha(cardRect, (255 * fade).toInt().coerceIn(0, 255))
             }
-            val tr = GlassCard.innerRadius(cornerRadius(), margin, r)
+            val tr = GlassCard.innerRadius(cornerRadius(), margin, cr)
             noticeWheelShape.rewind()
             noticeWheelShape.addRoundRect(
-                noticeWheelRect,
-                floatArrayOf(r, r, tr, tr, r, r, r, r),
+                cardRect,
+                floatArrayOf(cr, cr, tr, tr, cr, cr, cr, cr),
                 android.graphics.Path.Direction.CW,
             )
             if (!config.theme.isGlass ||
                 !drawGlassPane(
-                    canvas, noticeWheelRect, r,
-                    reactive(glassNoticeTint(), noticeWheelRect),
+                    canvas, cardRect, cr, reactive(glassNoticeTint(), cardRect),
                     shape = noticeWheelShape, held = true,
                 )
             ) {
@@ -7509,11 +7534,15 @@ class RearDialView(context: Context) : View(context) {
                 noticePaint.color = glassNoticeTint()
                 canvas.drawPath(noticeWheelShape, noticePaint)
             }
+            // The CONTENTS may scale freely — type and an icon are painted, not sampled,
+            // so nothing about them depends on where the panel is underneath.
             canvas.save()
-            canvas.clipRect(noticeWheelRect)
+            canvas.clipRect(cardRect)
+            canvas.translate(cx, cy + dy)
+            canvas.scale(scale, scale)
+            canvas.translate(-cx, -cy)
             drawNoticeRow(canvas, history[i], noticeWheelRect.top)
             canvas.restore()
-            if (layer) canvas.restore()
             canvas.restore()
         }
     }
