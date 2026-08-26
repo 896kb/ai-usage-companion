@@ -7292,15 +7292,14 @@ class RearDialView(context: Context) : View(context) {
         val clockBase = CLOCK_BASELINE
         var x = cx - span / 2f
 
-        // The whole clock is glass, tinted with the colour it is drawn in — the same one
-        // the readout's own clock uses, so the two are recognisably one reading.
-        if (config.theme.isGlass) {
-            clockRect.set(
-                x - CLOCK_PAD_X, clockBase - CLOCK_SIZE - CLOCK_PAD_Y,
-                x + span + CLOCK_PAD_X, clockBase + CLOCK_PAD_Y,
-            )
-            glassCard(canvas, clockRect, CARD_RADIUS, alpha = on)
-        }
+        // NO CARD BEHIND IT. The numerals are made of glass themselves — see
+        // drawGlassClock — and a glass sheet behind glass figures is two panes deep for
+        // no reason: the card's own refraction fights the letterforms' and both come out
+        // muddier than either alone. The figures are the object here, not something
+        // written on one.
+        //
+        // A painted clock still gets one; that is what the fallback below is for, and it
+        // has the ordinary problem of type needing something to sit on.
 
         extras.color = (ink and 0x00FFFFFF) or (alpha(0xFF) shl 24)
         // MADE OF GLASS, the way the charge figure is: the panel is bent through the
@@ -7409,7 +7408,15 @@ class RearDialView(context: Context) : View(context) {
             val eased = 1f - (1f - t) * (1f - t) * (1f - t)
             val mid = CLOCK_BASELINE - CLOCK_SIZE / 2f
             canvas.save()
-            canvas.clipRect(x, mid - cell / 2f, x + w, mid + cell / 2f)
+            // WIDE ENOUGH FOR THE FIELD, not just the figure. A signed distance field is
+            // the glyph PLUS a margin for its spread to live in, and that margin is where
+            // the bevel is — the part that makes it read as glass rather than as a hole.
+            // Clipped to the slot, every numeral lost its right-hand edge.
+            //
+            // Horizontally there is nothing to clip anyway: the slots do not overlap and
+            // only one figure is ever drawn in each. The clip exists for the ROLL, which
+            // is vertical, so it runs the width of the panel and only bounds the cell.
+            canvas.clipRect(0f, mid - cell / 2f, Panel.WIDTH.toFloat(), mid + cell / 2f)
             // Arriving from below, and whatever it replaced leaving through the top.
             val rise = (1f - eased) * cell
             if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, w, ch.toString()), mid + rise)) {
@@ -10191,8 +10198,16 @@ class RearDialView(context: Context) : View(context) {
         private const val CLOCK_BASELINE = 330f
         private const val CLOCK_PAD_X = 20f
         private const val CLOCK_PAD_Y = 16f
-        /** How tall a numeral's cell is, as a multiple of its size. The roll's travel. */
-        private const val CLOCK_ROLL_CELL = 1.25f
+        /**
+         * How tall a numeral's cell is, as a multiple of its size — and the roll's travel.
+         *
+         * Both at once, and that is what sets the number. The cell has to be taller than
+         * the FIELD or it cuts the figure's top and bottom off; a field is ascent to
+         * descent plus a spread margin at each end, which for this face comes to about
+         * 1.45 times the size. And the travel has to equal the cell exactly, or a figure
+         * rolling out is still half in view when it stops.
+         */
+        private const val CLOCK_ROLL_CELL = 1.7f
         private const val CLOCK_ROLL_MS = 260f
         private const val DATE_SIZE = 26f
         private const val DATE_BASELINE = 420f
