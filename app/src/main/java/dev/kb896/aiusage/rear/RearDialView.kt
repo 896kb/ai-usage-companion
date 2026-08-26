@@ -7490,8 +7490,16 @@ class RearDialView(context: Context) : View(context) {
         // arriving on the readout and the same one found again up here is one object seen
         // twice, so it sits exactly where it sat: same left edge, same margin, same
         // height, same corner following the display's arc.
-        val margin = GlassCard.MIN
-        val r = GLASS_NOTICE_RADIUS
+        // EACH THEME'S OWN NOTIFICATION, not one shape wearing two colours. Under glass
+        // that is a pane held clear of the edges with its top-right corner following the
+        // display's arc; under ORIGINAL it is a full-width opaque band with a single
+        // rounded corner at the bottom left, because that one hangs off the top edge of
+        // the screen rather than floating on it. Falling back to a translucent version of
+        // the glass card gave the original theme something it has never had anywhere else
+        // on the panel.
+        val glass = config.theme.isGlass
+        val margin = if (glass) GlassCard.MIN else 0f
+        val r = if (glass) GLASS_NOTICE_RADIUS else cornerRadius() / CORNER_DIVISOR
         noticeWheelRect.set(NOTICE_LEFT, margin, Panel.WIDTH - margin, NOTICE_H)
         val cx = noticeWheelRect.centerX()
         val cy = noticeWheelRect.centerY()
@@ -7554,17 +7562,26 @@ class RearDialView(context: Context) : View(context) {
             noticeWheelShape.rewind()
             noticeWheelShape.addRoundRect(
                 cardRect,
-                floatArrayOf(cr, cr, tr, tr, cr, cr, cr, cr),
+                if (glass) floatArrayOf(cr, cr, tr, tr, cr, cr, cr, cr)
+                // The strip's own corners: bottom-left only. See drawNotice.
+                else floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, cr, cr),
                 android.graphics.Path.Direction.CW,
             )
-            if (!config.theme.isGlass ||
+            if (!glass ||
                 !drawGlassPane(
                     canvas, cardRect, cr, reactive(glassNoticeTint(), cardRect),
                     shape = noticeWheelShape, held = true,
                 )
             ) {
                 noticePaint.style = Paint.Style.FILL
-                noticePaint.color = glassNoticeTint()
+                // OPAQUE, and the strip's own colour. glassNoticeTint is the ground at a
+                // fraction of its opacity, which is what a PANE wants behind type it is
+                // refracting; an original-theme card is not refracting anything and a
+                // see-through one is just a card you cannot read.
+                noticePaint.color =
+                    if (glass) glassNoticeTint()
+                    else colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
+                noticePaint.alpha = if (glass) noticePaint.alpha else 255
                 canvas.drawPath(noticeWheelShape, noticePaint)
             }
             // The CONTENTS may scale freely — type and an icon are painted, not sampled,
