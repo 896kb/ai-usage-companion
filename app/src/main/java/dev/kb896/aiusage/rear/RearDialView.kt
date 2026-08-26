@@ -7486,6 +7486,17 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNoticeWheel(canvas: Canvas) {
         if (history.isEmpty()) return
+        canvas.save()
+        // THE DRIFT COMES BACK OFF. Everything on this page rides the burn-in offset with
+        // the rest of the canvas side, which is right for type floating in the middle of a
+        // panel and wrong for a card whose whole shape is an argument about the edge it is
+        // attached to: three units of drift left three units of background showing above
+        // it and beside it, and a card held off the corner it is supposed to be growing
+        // out of is just a card in the wrong place.
+        //
+        // The strip does not drift either — it is drawn in the overlay pass, outside every
+        // translate — so this is the same decision, not a new one.
+        canvas.translate(-dxNow, -dyNow)
         // THE STRIP'S OWN RECT, not a second one that looks similar. A notification seen
         // arriving on the readout and the same one found again up here is one object seen
         // twice, so it sits exactly where it sat: same left edge, same margin, same
@@ -7538,7 +7549,12 @@ class RearDialView(context: Context) : View(context) {
             // simply ceased to exist — which is the disappearing you can see.
             val away = Math.abs(d)
             val near = away.coerceAtMost(1f)
-            val scale = 1f - CAROUSEL_SHRINK * near
+            // ORIGINAL DOES NOT SHRINK. Its card is attached to the edge of the screen and
+            // its neighbours arrive across that edge; a card that is both sliding in from
+            // the side AND getting smaller is two ideas about the same movement. Under
+            // glass, where the card floats clear of every edge, shrinking is the only
+            // thing that can say "behind".
+            val scale = if (glass) 1f - CAROUSEL_SHRINK * near else 1f
             val fade =
                 if (away <= 1f) 1f - CAROUSEL_FADE * away
                 else (1f - CAROUSEL_FADE) *
@@ -7549,9 +7565,23 @@ class RearDialView(context: Context) : View(context) {
             // than a window onto it. A pane has to sample and draw at one to one, so the
             // shrinking is done by giving it a smaller rect in the same space.
             val dy = d * NOTICE_H * CAROUSEL_STEP
-            val hw = noticeWheelRect.width() / 2f * scale
             val hh = noticeWheelRect.height() / 2f * scale
-            cardRect.set(cx - hw, cy + dy - hh, cx + hw, cy + dy + hh)
+            if (glass) {
+                // Held clear of every edge, so it shrinks about its own middle.
+                val hw = noticeWheelRect.width() / 2f * scale
+                cardRect.set(cx - hw, cy + dy - hh, cx + hw, cy + dy + hh)
+            } else {
+                // KEPT ON THE RIGHT EDGE, and arriving across it. This card is attached to
+                // the side of the screen rather than floating in the middle of it, so a
+                // neighbour that shrank about its centre would pull away from the one edge
+                // it is meant to be part of. Its right edge stays put and its LEFT edge
+                // travels, which makes the one behind read as still coming in from the
+                // side rather than as a smaller copy parked in the middle.
+                cardRect.set(
+                    noticeWheelRect.left + away.coerceAtMost(1f) * ORIGINAL_SLIDE,
+                    cy + dy - hh, noticeWheelRect.right, cy + dy + hh,
+                )
+            }
             val cr = r * scale
             val layer = fade < 0.999f
             canvas.save()
@@ -7586,15 +7616,19 @@ class RearDialView(context: Context) : View(context) {
             }
             // The CONTENTS may scale freely — type and an icon are painted, not sampled,
             // so nothing about them depends on where the panel is underneath.
+            // The CONTENTS follow the card: down by the same offset, right by however far
+            // its left edge went, and scaled about the middle when the card is. Type and
+            // an icon are painted rather than sampled, so unlike the pane they can be
+            // transformed freely.
             canvas.save()
             canvas.clipRect(cardRect)
-            canvas.translate(cx, cy + dy)
-            canvas.scale(scale, scale)
-            canvas.translate(-cx, -cy)
+            canvas.translate(cardRect.left - noticeWheelRect.left, dy)
+            if (scale < 0.999f) canvas.scale(scale, scale, cx, cy)
             drawNoticeRow(canvas, history[i], noticeWheelRect.top)
             canvas.restore()
             canvas.restore()
         }
+        canvas.restore()
     }
 
     /**
@@ -10480,6 +10514,9 @@ class RearDialView(context: Context) : View(context) {
         private const val CAROUSEL_STEP = 0.5f
 
         /** How much smaller a neighbour is, and how much of it has gone. */
+        /** How far a neighbour's left edge is pulled toward the right, under ORIGINAL. */
+        private const val ORIGINAL_SLIDE = 150f
+
         private const val CAROUSEL_SHRINK = 0.12f
         private const val CAROUSEL_FADE = 0.55f
 
