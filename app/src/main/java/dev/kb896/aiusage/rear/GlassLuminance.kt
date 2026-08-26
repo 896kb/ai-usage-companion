@@ -38,8 +38,21 @@ object GlassLuminance {
         return 0.2126f * r + 0.7152f * g + 0.0722f * b
     }
 
-    /** The grid's side. Twenty-five cells, as the reference samples. */
-    const val SIDE = 5
+    /**
+     * The grid's side.
+     *
+     * The reference samples twenty-five cells and this did too, which is right for what
+     * the reference asks of it — one pane over a whole wallpaper — and too coarse for
+     * what this panel asks. At five, a cell is 181 by 114 units: wider than most of the
+     * things that sample it, so a button and the card beside it read the same average and
+     * a pane over the edge of a bright building reads half a building.
+     *
+     * Sixteen makes a cell 57 by 36, comfortably smaller than any pane here, so each one
+     * reads what is actually behind IT rather than behind its neighbourhood. The cost is
+     * a 16x16 bitmap built once when the background changes — it is not per-frame work,
+     * which is the only reason the resolution was ever worth economising on.
+     */
+    const val SIDE = 16
 
     /**
      * The average luminance of the cells a pane covers.

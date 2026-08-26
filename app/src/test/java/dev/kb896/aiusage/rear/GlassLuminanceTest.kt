@@ -6,7 +6,9 @@ import org.junit.Test
 
 class GlassLuminanceTest {
 
-    private fun grid(vararg v: Float) = FloatArray(25) { v.getOrElse(it) { v.last() } }
+    private val n = GlassLuminance.SIDE * GlassLuminance.SIDE
+
+    private fun grid(vararg v: Float) = FloatArray(n) { v.getOrElse(it) { v.last() } }
 
     // -- luminance --------------------------------------------------------------------
 
@@ -39,16 +41,27 @@ class GlassLuminanceTest {
     // -- averaging over a region ------------------------------------------------------
 
     @Test fun `a pane over one cell reads that cell`() {
-        val cells = FloatArray(25)
+        val cells = FloatArray(n)
         cells[0] = 1f                                  // top-left cell only
-        assertEquals(1f, GlassLuminance.average(cells, 0f, 0f, 10f, 10f, 100f, 100f), 0.001f)
-        assertEquals(0f, GlassLuminance.average(cells, 50f, 50f, 60f, 60f, 100f, 100f), 0.001f)
+        // Half a cell, whatever a cell is: the point is a pane INSIDE one cell, and
+        // hardcoding ten units made that true at a five-wide grid and false at sixteen.
+        val cell = 100f / GlassLuminance.SIDE
+        assertEquals(
+            1f, GlassLuminance.average(cells, 0f, 0f, cell / 2f, cell / 2f, 100f, 100f), 0.001f,
+        )
+        assertEquals(
+            0f, GlassLuminance.average(cells, 50f, 50f, 50f + cell / 2f, 50f + cell / 2f, 100f, 100f),
+            0.001f,
+        )
     }
 
     @Test fun `a pane over the whole panel reads the mean`() {
-        val cells = FloatArray(25) { if (it < 5) 1f else 0f }   // the top row lit
+        // One row of the grid lit, whatever the grid's size: the mean over the whole
+        // panel is that row's share of it.
+        val side = GlassLuminance.SIDE
+        val cells = FloatArray(n) { if (it < side) 1f else 0f }
         assertEquals(
-            0.2f, GlassLuminance.average(cells, 0f, 0f, 100f, 100f, 100f, 100f), 0.001f,
+            1f / side, GlassLuminance.average(cells, 0f, 0f, 100f, 100f, 100f, 100f), 0.001f,
         )
     }
 
