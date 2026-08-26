@@ -461,12 +461,41 @@ class RearDialView(context: Context) : View(context) {
     /**
      * The last ten notifications, newest first.
      *
-     * Held by the panel rather than the relay because the relay is a listener service:
-     * the system starts and stops it on its own schedule, and a history that vanished
-     * whenever Android decided to reclaim it would be worse than none. This process is
-     * the one with a reason to stay alive.
+     * WRITTEN DOWN, because this process does not live long enough to remember anything.
+     *
+     * The first version of this kept the ten in memory on the grounds that the panel
+     * outlives the notification listener. It does not outlive much: the :rear process is
+     * destroyed and recreated on every recovery, every re-placement and every time
+     * HyperOS feels like it — the class comment says so — and it holds no other state for
+     * exactly that reason. A history that emptied itself several times a day is not a
+     * history, and it took an install to notice, because an install is just one more of
+     * the many ways this process dies.
+     *
+     * So it goes to the panel's own preferences, next to the page you were on, which is
+     * the one other thing here that has to survive the process that draws it.
      */
-    private val history = ArrayDeque<Notice>()
+    private val history: ArrayDeque<Notice> by lazy {
+        val out = ArrayDeque<Notice>()
+        panelPrefs.getString(KEY_HISTORY, "").orEmpty()
+            .split(RECORD_SEP)
+            .filter { it.isNotEmpty() }
+            .forEach { row ->
+                val f = row.split(FIELD_SEP)
+                if (f.size >= 6) out.addLast(Notice(f[0], f[1], f[2], f[3], f[4], f[5]))
+            }
+        out
+    }
+
+    /** The ten, flattened. Two separators no notification text will contain. */
+    private fun saveHistory() {
+        panelPrefs.edit().putString(
+            KEY_HISTORY,
+            history.joinToString(RECORD_SEP) {
+                listOf(it.app, it.pkg, it.title, it.text, it.moreTitle, it.moreText)
+                    .joinToString(FIELD_SEP) { f -> f.replace(FIELD_SEP, " ").replace(RECORD_SEP, " ") }
+            },
+        ).apply()
+    }
 
     private data class Notice(
         val app: String,
@@ -2244,7 +2273,7 @@ class RearDialView(context: Context) : View(context) {
         // readout's new resting offset rather than from zero.
         val paging = ((paged - readoutAt) / Panel.HEIGHT).coerceIn(0f, 1f)
         // And the same question upwards. 1 is standing on the notification page.
-        val noticing = ((readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
+        noticing = ((readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
         pagingNow = paging
         // The transport records where it rests against this, so it has to be the offset
         // the readout is actually displaced by — not the pager's raw position, which now
@@ -2593,8 +2622,21 @@ class RearDialView(context: Context) : View(context) {
         // from the other edge would be two animations explaining one gesture.
         if (!hidden && onlyAccount == null && noticing > 0.001f) {
             canvas.save()
-            canvas.translate(dx, dy)
-            drawNoticePage(canvas, noticing)
+            // IT REALLY IS ABOVE, so it arrives by being above and coming down.
+            //
+            // The media page below assembles in place and fades up, and that is right
+            // for it: the record is already travelling and carrying the movement, so a
+            // second thing flying in would be two animations explaining one gesture.
+            // Nothing carries the movement here. A page that materialises where it
+            // stands reads as a screen being switched rather than a surface being
+            // scrolled, and the whole point of putting this above the readout is that it
+            // IS above the readout.
+            //
+            // A full panel height up at rest on the readout, level with it at the top of
+            // the scroll — so it tracks the finger exactly, the way the thing you are
+            // dragging should.
+            canvas.translate(dx, dy - (1f - noticing) * Panel.HEIGHT)
+            drawNoticePage(canvas)
             canvas.restore()
         }
         canvas.restore()   // the readout clip
@@ -3523,6 +3565,9 @@ class RearDialView(context: Context) : View(context) {
     private var pagingNow = 0f
     private var pagedNow = 0f
 
+    /** How far onto the notification page the panel is, for the touch handler. */
+    private var noticing = 0f
+
     /**
      * This frame's burn-in drift, RAW.
      *
@@ -3722,6 +3767,15 @@ class RearDialView(context: Context) : View(context) {
                 // All three are armed on the way down; which one gets the gesture is
                 // decided on the first move that clears the slop.
                 pager.onDown(event.y, android.os.SystemClock.uptimeMillis())
+                // WHERE THE WHEEL OWNS THE AXIS. A wheel and a pager both want a vertical
+                // drag, and on this page they are inches apart — so the card decides. A
+                // finger that lands on the notifications is scrolling them; anywhere else
+                // on the page is still turning the page, which is how you get back down
+                // to the readout. Noted on the way down because that is when the finger
+                // chose, not when it has moved far enough to say so.
+                onWheel = noticing >= 0.999f && history.isNotEmpty() &&
+                    noticeWheelRect.contains(event.x, event.y)
+                wheelDownAt = noticeWheelAt
                 hit || pager.enabled() || onVolume || onScrub
             }
             android.view.MotionEvent.ACTION_MOVE -> {
@@ -3763,7 +3817,14 @@ class RearDialView(context: Context) : View(context) {
                         true
                     }
                     Drag.PAGE -> {
-                        if (pager.enabled() &&
+                        if (onWheel) {
+                            // A row per row: dragging up by one card's height moves on by
+                            // one notification, so the item follows the finger rather than
+                            // the finger asking for an item.
+                            noticeWheelAt = (wheelDownAt + (downY - event.y) / NOTICE_H)
+                                .coerceIn(0f, (history.size - 1).toFloat())
+                            invalidate()
+                        } else if (pager.enabled() &&
                             pager.onMove(event.y, android.os.SystemClock.uptimeMillis())
                         ) {
                             invalidate()
@@ -3790,6 +3851,17 @@ class RearDialView(context: Context) : View(context) {
                 // A drag is not a tap, and must not also fire whatever it started on.
                 // Without this, letting go of a page swipe that happened to begin over
                 // the close button closed the panel.
+                if (onWheel) {
+                    // Settled onto whichever it is nearest, the way a picker does. Nothing
+                    // animates it: the fraction IS the position, so rounding it is the
+                    // whole of the snap.
+                    onWheel = false
+                    noticeWheelAt = Math.round(noticeWheelAt).toFloat()
+                        .coerceIn(0f, (history.size - 1).toFloat())
+                    pager.onUp(android.os.SystemClock.uptimeMillis())
+                    invalidate()
+                    return true
+                }
                 if (pager.dragging) {
                     pager.onUp(android.os.SystemClock.uptimeMillis())
                     invalidate()
@@ -4122,6 +4194,7 @@ class RearDialView(context: Context) : View(context) {
         if (history.firstOrNull() != next) {
             history.addFirst(next)
             while (history.size > HISTORY_MAX) history.removeLast()
+            saveHistory()
         }
 
         // A NOTIFICATION THAT ARRIVES WHILE THE PANEL IS DARK IS NOT NEWS, IT IS HISTORY.
@@ -7251,10 +7324,11 @@ class RearDialView(context: Context) : View(context) {
     /**
      * The page above the readout: what has come in, and what time it is.
      *
-     * [on] runs 0 at the readout to 1 standing here, the mirror of the media page's
-     * paging, and everything fades in on it rather than sliding — see drawMediaPage.
+     * Takes no progress value, and that absence is the design: nothing here responds to
+     * HOW FAR the scroll has come, because nothing here fades or grows. The page is drawn
+     * as it will look and the scroll simply moves it — see the translate at the call site.
      */
-    private fun drawNoticePage(canvas: Canvas, on: Float) {
+    private fun drawNoticePage(canvas: Canvas) {
         // A CLOCK WITH SECONDS ON IT HAS TO KEEP ASKING. Every other moving thing here
         // sets this when it has somewhere to move to; a clock's next frame is a fact
         // about the time rather than about an animation, so it asks unconditionally
@@ -7263,7 +7337,13 @@ class RearDialView(context: Context) : View(context) {
         animating = true
         val ink = colorFor("clock", config.clockTint)
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
-        val alpha = { a: Int -> (a * on).toInt().coerceIn(0, 255) }
+        // NO FADE ON ANYTHING HERE. The page arrives by sliding down from above it — see
+        // the translate at the call site — and something that is both moving into place
+        // AND becoming visible reads as two effects where the gesture only asked for one.
+        // A sheet of paper slid over another does not also become transparent.
+
+        // ---- what has come in ---------------------------------------------------------
+        drawNoticeWheel(canvas)
 
         // ---- the clock, one wheel per digit -----------------------------------------
         //
@@ -7301,7 +7381,7 @@ class RearDialView(context: Context) : View(context) {
         // A painted clock still gets one; that is what the fallback below is for, and it
         // has the ordinary problem of type needing something to sit on.
 
-        extras.color = (ink and 0x00FFFFFF) or (alpha(0xFF) shl 24)
+        extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
         // MADE OF GLASS, the way the charge figure is: the panel is bent through the
         // shapes of the numerals themselves rather than the type being painted on top of
         // a pane. Deferred to the overlay pass because that is the only place it can
@@ -7314,7 +7394,7 @@ class RearDialView(context: Context) : View(context) {
         // top as the next rolls in underneath — the same movement as the painted version,
         // made of the same glass as everything else on the panel.
         val glassClock = config.theme.isGlass &&
-            deferOver(canvas) { c -> drawGlassClock(c, figures, cx, span, slot, colon, ink, on) }
+            deferOver(canvas) { c -> drawGlassClock(c, figures, cx, span, slot, colon, ink) }
         if (!glassClock) {
             for ((i, ch) in figures.withIndex()) {
                 val w = if (ch == ':') colon else slot
@@ -7352,12 +7432,78 @@ class RearDialView(context: Context) : View(context) {
                 dateLeft - CARD_PAD_X, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y,
                 dateLeft + dateW + CARD_PAD_X, DATE_BASELINE + ROW_CARD_PAD_Y,
             )
-            glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = on)
+            glassCard(canvas, clockRect, ROW_CARD_RADIUS)
         }
-        extras.color = (ink and 0x00FFFFFF) or (alpha(MediaLayout.ARTIST_ALPHA) shl 24)
+        extras.color = (ink and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
         canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
         extras.textSize = typed(18f)
     }
+
+    /**
+     * The last ten notifications, on a wheel.
+     *
+     * THE SAME CARD THE STRIP USES, deliberately to the unit: same left edge, same height,
+     * same corner following the display's own arc, same row renderer. A notification
+     * arriving on the readout and the same notification found again up here should be the
+     * one object seen twice, not two designs for one thing — so this asks drawNoticeRow to
+     * lay it out exactly as the strip would.
+     *
+     * Only the newest is at rest. The ones either side are drawn where they will be if you
+     * keep scrolling, which is what makes it read as a wheel rather than a slideshow: the
+     * next item is already visible at the edge, half out of the card, waiting.
+     */
+    private fun drawNoticeWheel(canvas: Canvas) {
+        if (history.isEmpty()) return
+        val top = NOTICE_WHEEL_TOP
+        val bottom = top + NOTICE_H - GlassCard.MIN
+        // The strip's own numbers, not a second set that happens to look similar.
+        val r = GLASS_NOTICE_RADIUS
+        val margin = GlassCard.MIN
+        noticeWheelRect.set(NOTICE_LEFT, top, Panel.WIDTH - margin, bottom)
+        val tr = GlassCard.innerRadius(cornerRadius(), margin, r)
+        noticeWheelShape.rewind()
+        noticeWheelShape.addRoundRect(
+            noticeWheelRect,
+            floatArrayOf(r, r, tr, tr, r, r, r, r),
+            android.graphics.Path.Direction.CW,
+        )
+        if (!config.theme.isGlass ||
+            !drawGlassPane(
+                canvas, noticeWheelRect, r, reactive(glassNoticeTint(), noticeWheelRect),
+                shape = noticeWheelShape, held = true,
+            )
+        ) {
+            noticePaint.style = Paint.Style.FILL
+            noticePaint.color = glassNoticeTint()
+            canvas.drawPath(noticeWheelShape, noticePaint)
+        }
+
+        canvas.save()
+        canvas.clipRect(noticeWheelRect)
+        // The wheel's position is a real number: whole values rest on an item, and the
+        // fraction between them is where the drag has got to. Neighbours are drawn a
+        // whole row above and below so one is always coming into view as another leaves.
+        val at = noticeWheelAt
+        val first = Math.floor(at.toDouble()).toInt()
+        for (k in -1..1) {
+            val i = first + k
+            if (i < 0 || i >= history.size) continue
+            drawNoticeRow(canvas, history[i], top + (i - at) * NOTICE_H)
+        }
+        canvas.restore()
+    }
+
+    /** Which of the ten the wheel is on. Whole numbers rest; the fraction is a drag. */
+    private var noticeWheelAt = 0f
+
+    /** Whether this gesture belongs to the wheel rather than to the pager. */
+    private var onWheel = false
+
+    /** Where the wheel stood when the finger landed, so the drag is relative to it. */
+    private var wheelDownAt = 0f
+
+    private val noticeWheelRect = android.graphics.RectF()
+    private val noticeWheelShape = android.graphics.Path()
 
     /**
      * The clock, one glass numeral at a time.
@@ -7374,12 +7520,11 @@ class RearDialView(context: Context) : View(context) {
         slot: Float,
         colon: Float,
         ink: Int,
-        on: Float,
     ) {
         extras = extrasBody
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(CLOCK_SIZE)
-        extras.color = (ink and 0x00FFFFFF) or ((255 * on).toInt().coerceIn(0, 255) shl 24)
+        extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
         val cell = CLOCK_SIZE * CLOCK_ROLL_CELL
         var x = cx - span / 2f
         for ((i, ch) in figures.withIndex()) {
@@ -9842,6 +9987,9 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val PANEL_PREFS = "rear_panel"
         private const val KEY_PAGE = "page"
+        private const val KEY_HISTORY = "notices"
+        private const val FIELD_SEP = "\u0001"
+        private const val RECORD_SEP = "\u0002"
 
         private const val PAGE_SETTLE_MS = 340f
 
@@ -10192,6 +10340,9 @@ class RearDialView(context: Context) : View(context) {
 
         /** Where the readout sits in the pager now that something is above it. */
         const val PAGE_READOUT = 1
+
+        /** Where the wheel's card sits. The strip's own height, at the top of the page. */
+        private const val NOTICE_WHEEL_TOP = 40f
 
         /** The notification page's clock: big, because the page is otherwise empty. */
         private const val CLOCK_SIZE = 92f
