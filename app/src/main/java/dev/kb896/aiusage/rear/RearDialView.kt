@@ -7343,7 +7343,13 @@ class RearDialView(context: Context) : View(context) {
         // A sheet of paper slid over another does not also become transparent.
 
         // ---- what has come in ---------------------------------------------------------
-        drawNoticeWheel(canvas)
+        //
+        // DEFERRED, for the reason the clock is. A pane can only bend a panel that has
+        // finished being drawn, and this page is drawn while the scene is still being
+        // recorded — so a card built here got a pane with nothing behind it and came out
+        // looking nothing like the notification strip, which is drawn in the overlay pass
+        // and gets the real thing. Same pass now, same glass.
+        if (!deferOver(canvas) { c -> drawNoticeWheel(c) }) drawNoticeWheel(canvas)
 
         // ---- the clock, one wheel per digit -----------------------------------------
         //
@@ -7454,43 +7460,62 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNoticeWheel(canvas: Canvas) {
         if (history.isEmpty()) return
-        val top = NOTICE_WHEEL_TOP
-        val bottom = top + NOTICE_H - GlassCard.MIN
-        // The strip's own numbers, not a second set that happens to look similar.
-        val r = GLASS_NOTICE_RADIUS
+        // THE STRIP'S OWN RECT, not a second one that looks similar. A notification seen
+        // arriving on the readout and the same one found again up here is one object seen
+        // twice, so it sits exactly where it sat: same left edge, same margin, same
+        // height, same corner following the display's arc.
         val margin = GlassCard.MIN
-        noticeWheelRect.set(NOTICE_LEFT, top, Panel.WIDTH - margin, bottom)
-        val tr = GlassCard.innerRadius(cornerRadius(), margin, r)
-        noticeWheelShape.rewind()
-        noticeWheelShape.addRoundRect(
-            noticeWheelRect,
-            floatArrayOf(r, r, tr, tr, r, r, r, r),
-            android.graphics.Path.Direction.CW,
-        )
-        if (!config.theme.isGlass ||
-            !drawGlassPane(
-                canvas, noticeWheelRect, r, reactive(glassNoticeTint(), noticeWheelRect),
-                shape = noticeWheelShape, held = true,
-            )
-        ) {
-            noticePaint.style = Paint.Style.FILL
-            noticePaint.color = glassNoticeTint()
-            canvas.drawPath(noticeWheelShape, noticePaint)
-        }
-
-        canvas.save()
-        canvas.clipRect(noticeWheelRect)
-        // The wheel's position is a real number: whole values rest on an item, and the
-        // fraction between them is where the drag has got to. Neighbours are drawn a
-        // whole row above and below so one is always coming into view as another leaves.
+        val r = GLASS_NOTICE_RADIUS
+        noticeWheelRect.set(NOTICE_LEFT, margin, Panel.WIDTH - margin, NOTICE_H)
+        val cx = noticeWheelRect.centerX()
+        val cy = noticeWheelRect.centerY()
         val at = noticeWheelAt
-        val first = Math.floor(at.toDouble()).toInt()
-        for (k in -1..1) {
-            val i = first + k
-            if (i < 0 || i >= history.size) continue
-            drawNoticeRow(canvas, history[i], top + (i - at) * NOTICE_H)
+
+        // A CAROUSEL, so each notification is its own card rather than rows sliding inside
+        // one. Furthest first, so the nearest is laid over the others: the one you are on
+        // is whole and in front, and its neighbours sit half a card behind it, a little
+        // smaller and a little faded, which is what says there is more in both directions
+        // without having to draw a scrollbar to say it.
+        for (i in history.indices.sortedByDescending { Math.abs(it - at) }) {
+            val d = i - at
+            if (Math.abs(d) > CAROUSEL_REACH) continue
+            val away = Math.abs(d).coerceAtMost(1f)
+            val scale = 1f - CAROUSEL_SHRINK * away
+            val fade = 1f - CAROUSEL_FADE * away
+            canvas.save()
+            canvas.translate(0f, d * NOTICE_H * CAROUSEL_STEP)
+            canvas.scale(scale, scale, cx, cy)
+            val layer = fade < 0.999f
+            if (layer) {
+                canvas.saveLayerAlpha(
+                    noticeWheelRect, (255 * fade).toInt().coerceIn(0, 255),
+                )
+            }
+            val tr = GlassCard.innerRadius(cornerRadius(), margin, r)
+            noticeWheelShape.rewind()
+            noticeWheelShape.addRoundRect(
+                noticeWheelRect,
+                floatArrayOf(r, r, tr, tr, r, r, r, r),
+                android.graphics.Path.Direction.CW,
+            )
+            if (!config.theme.isGlass ||
+                !drawGlassPane(
+                    canvas, noticeWheelRect, r,
+                    reactive(glassNoticeTint(), noticeWheelRect),
+                    shape = noticeWheelShape, held = true,
+                )
+            ) {
+                noticePaint.style = Paint.Style.FILL
+                noticePaint.color = glassNoticeTint()
+                canvas.drawPath(noticeWheelShape, noticePaint)
+            }
+            canvas.save()
+            canvas.clipRect(noticeWheelRect)
+            drawNoticeRow(canvas, history[i], noticeWheelRect.top)
+            canvas.restore()
+            if (layer) canvas.restore()
+            canvas.restore()
         }
-        canvas.restore()
     }
 
     /** Which of the ten the wheel is on. Whole numbers rest; the fraction is a drag. */
@@ -10341,8 +10366,15 @@ class RearDialView(context: Context) : View(context) {
         /** Where the readout sits in the pager now that something is above it. */
         const val PAGE_READOUT = 1
 
-        /** Where the wheel's card sits. The strip's own height, at the top of the page. */
-        private const val NOTICE_WHEEL_TOP = 40f
+        /** How far either side of the current card the carousel still draws. */
+        private const val CAROUSEL_REACH = 1.15f
+
+        /** How much of a card's height its neighbour is offset by — half, behind it. */
+        private const val CAROUSEL_STEP = 0.5f
+
+        /** How much smaller a neighbour is, and how much of it has gone. */
+        private const val CAROUSEL_SHRINK = 0.12f
+        private const val CAROUSEL_FADE = 0.55f
 
         /** The notification page's clock: big, because the page is otherwise empty. */
         private const val CLOCK_SIZE = 92f
