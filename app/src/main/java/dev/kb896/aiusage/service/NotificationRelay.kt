@@ -91,13 +91,12 @@ class NotificationRelay : NotificationListenerService() {
         }
         lastFingerprint = fingerprint
         lastAt = SystemClock.elapsedRealtime()
-        // The rest of the group, cascaded under the headline.
+        // The group's summary, under the headline. See cascade.
         //
-        // A grouped app posts one notification per conversation plus a summary; we drop
-        // the summary and show the newest child, which used to mean the other unread
-        // ones simply vanished. The listener can already see them — they are live
-        // notifications, not history — so the panel can show what the summary was
-        // counting instead of the count itself.
+        // A grouped app posts one notification per conversation plus a summary standing
+        // for all of them. The summary cannot be the headline — it arrives second and
+        // would replace the message you actually want — but it is the right thing to put
+        // UNDER one, because saying how much more there is is what it was written for.
         val next = cascade(sbn)
 
         Log.i(TAG, "relaying from ${sbn.packageName}${if (next != null) " (+1 in group)" else ""}")
@@ -157,30 +156,41 @@ class NotificationRelay : NotificationListenerService() {
     }
 
     /**
-     * The NEXT live notification in this one's group, or null.
+     * THIS ONE'S GROUP SUMMARY, or null.
      *
-     * One, not a list. The panel shows it as a second card under the first rather than
-     * as a stack of lines, and a card is a thing you read — two of them is a glance and
-     * five is an inbox, which is what the phone in your hand is for.
+     * The second line under the headline used to be the newest OTHER message in the
+     * group, which reads as a second notification and is the wrong thing entirely: two
+     * unrelated messages stacked on a panel look like a list you are meant to read, and
+     * the older of them is not news by the time you see it.
      *
-     * Its own title and text are kept separate so the panel can lay them out; flattening
-     * them here would decide the design in the wrong place.
+     * What belongs there is the summary — the "2 messages from 2 chats" line the app
+     * posts alongside its children. It says how much more there is without pretending to
+     * be a second event, which is exactly the job of a line under a headline.
+     *
+     * The summary is still never relayed as a headline in its own right; see the
+     * FLAG_GROUP_SUMMARY drop above, which exists because the summary arrives second and
+     * replaced the actual message. Dropped as a headline, kept as a subtitle.
+     *
+     * Title and text stay separate so the panel can lay them out; flattening them here
+     * would decide the design in the wrong place.
      */
     private fun cascade(sbn: StatusBarNotification): Pair<String, String>? {
         val group = sbn.notification.group ?: return null
         val active = runCatching { activeNotifications }.getOrNull() ?: return null
         return active
-            .filter {
+            .firstOrNull {
                 it.notification.group == group &&
-                    it.key != sbn.key &&
                     it.packageName == sbn.packageName &&
-                    it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY == 0
+                    it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0
             }
-            .maxByOrNull { it.postTime }
-            ?.let { other ->
-                val e = other.notification.extras
+            ?.let { summary ->
+                val e = summary.notification.extras
                 val h = e.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
+                // EXTRA_TEXT first, then EXTRA_SUMMARY_TEXT: apps disagree about which
+                // one carries the count, and a summary with neither is a summary worth
+                // nothing to look at.
                 val t = e.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
+                    ?: e.getCharSequence(android.app.Notification.EXTRA_SUMMARY_TEXT)?.toString()
                 if (h.isNullOrBlank() && t.isNullOrBlank()) null else (h.orEmpty() to t.orEmpty())
             }
     }
