@@ -3838,6 +3838,9 @@ class RearDialView(context: Context) : View(context) {
                     }
                     Drag.PAGE -> {
                         if (onWheel) {
+                            // A finger beats a settle. Without this the two fought each
+                            // other for the rest of the animation.
+                            wheelSettling = false
                             // A row per row: dragging up by one card's height moves on by
                             // one notification, so the item follows the finger rather than
                             // the finger asking for an item.
@@ -3876,8 +3879,11 @@ class RearDialView(context: Context) : View(context) {
                     // animates it: the fraction IS the position, so rounding it is the
                     // whole of the snap.
                     onWheel = false
-                    noticeWheelAt = Math.round(noticeWheelAt).toFloat()
+                    wheelFrom = noticeWheelAt
+                    wheelTo = Math.round(noticeWheelAt).toFloat()
                         .coerceIn(0f, (history.size - 1).toFloat())
+                    wheelSettleAt = frameNowMs
+                    wheelSettling = wheelTo != wheelFrom
                     pager.onUp(android.os.SystemClock.uptimeMillis())
                     invalidate()
                     return true
@@ -7489,6 +7495,21 @@ class RearDialView(context: Context) : View(context) {
         noticeWheelRect.set(NOTICE_LEFT, margin, Panel.WIDTH - margin, NOTICE_H)
         val cx = noticeWheelRect.centerX()
         val cy = noticeWheelRect.centerY()
+        // SETTLES, it does not snap. Letting go a little past a card used to round the
+        // position and be done with it, which lands the card in place with no travel at
+        // all — the one movement on this panel that simply cut. The pager has settled its
+        // pages since it was written; this borrows the same duration so a wheel and a page
+        // let go of a finger the same way.
+        if (wheelSettling) {
+            val t = ((frameNowMs - wheelSettleAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+            noticeWheelAt = wheelFrom + (wheelTo - wheelFrom) * Tween.easeInOut(t)
+            if (t >= 1f) {
+                wheelSettling = false
+                noticeWheelAt = wheelTo
+            } else {
+                animating = true
+            }
+        }
         val at = noticeWheelAt
 
         // A CAROUSEL, so each notification is its own card rather than rows sliding inside
@@ -7499,9 +7520,21 @@ class RearDialView(context: Context) : View(context) {
         for (i in history.indices.sortedByDescending { Math.abs(it - at) }) {
             val d = i - at
             if (Math.abs(d) > CAROUSEL_REACH) continue
-            val away = Math.abs(d).coerceAtMost(1f)
-            val scale = 1f - CAROUSEL_SHRINK * away
-            val fade = 1f - CAROUSEL_FADE * away
+            // TWO STRETCHES, because a neighbour and a departure want different things.
+            //
+            // Out to one card away it fades only a little: that one is the next
+            // notification, it is meant to be read at a glance, and its job is to say
+            // there is more. PAST one it keeps going, all the way to nothing by the time
+            // it reaches the edge of what is drawn. It used to stop at the neighbour's
+            // value and then be culled, so a card left at nearly half strength and then
+            // simply ceased to exist — which is the disappearing you can see.
+            val away = Math.abs(d)
+            val near = away.coerceAtMost(1f)
+            val scale = 1f - CAROUSEL_SHRINK * near
+            val fade =
+                if (away <= 1f) 1f - CAROUSEL_FADE * away
+                else (1f - CAROUSEL_FADE) *
+                    (1f - (away - 1f) / (CAROUSEL_REACH - 1f)).coerceIn(0f, 1f)
             // THE CARD'S RECT IS COMPUTED, NOT TRANSFORMED. Scaling the canvas would
             // scale what the pane SAMPLES along with the pane: the backdrop would come out
             // magnified inside the smaller card, which is a photograph of the panel rather
@@ -7552,6 +7585,12 @@ class RearDialView(context: Context) : View(context) {
 
     /** Whether this gesture belongs to the wheel rather than to the pager. */
     private var onWheel = false
+
+    /** The settle after a release: where it let go, where it is going, and when. */
+    private var wheelSettling = false
+    private var wheelFrom = 0f
+    private var wheelTo = 0f
+    private var wheelSettleAt = 0L
 
     /** Where the wheel stood when the finger landed, so the drag is relative to it. */
     private var wheelDownAt = 0f
@@ -10395,8 +10434,14 @@ class RearDialView(context: Context) : View(context) {
         /** Where the readout sits in the pager now that something is above it. */
         const val PAGE_READOUT = 1
 
-        /** How far either side of the current card the carousel still draws. */
-        private const val CAROUSEL_REACH = 1.15f
+        /**
+         * How far either side of the current card the carousel still draws.
+         *
+         * Comfortably past one, and that is the point: everything between one and here is
+         * a card on its way out, and it needs somewhere to fade THROUGH. At 1.15 there was
+         * barely a tenth of a card's travel to do it in, so it read as vanishing.
+         */
+        private const val CAROUSEL_REACH = 1.6f
 
         /** How much of a card's height its neighbour is offset by — half, behind it. */
         private const val CAROUSEL_STEP = 0.5f
