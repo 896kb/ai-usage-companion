@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.Account
+import dev.kb896.aiusage.data.AccountStatus
 import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.RingSpec
@@ -2522,8 +2523,13 @@ class RearDialView(context: Context) : View(context) {
         // Eased, because the volume moves in steps under a finger and a dial that jumped
         // between notches would read as a counter rather than as a control.
         val rawVolume = if (muted()) 0f else volumeLevel()
+        val demoVol = demoVolume()
         val volumeFraction =
-            if (drag == Drag.VOLUME) {
+            if (demoVol != null) {
+                // Eased like any other arriving value, so the arc is filmed MOVING to the
+                // demo's figure rather than already sitting on it.
+                animateTo("media:volume:demo", demoVol)
+            } else if (drag == Drag.VOLUME) {
                 // NO easing under the finger. Easing exists to make a value that JUMPS
                 // read as a movement; a value already being moved by hand does not jump,
                 // and smoothing it only puts the ring behind the finger dragging it. The
@@ -3215,6 +3221,7 @@ class RearDialView(context: Context) : View(context) {
         ghostFraction: Float = 0f,
     ) {
         val status = state.statuses.firstOrNull { it.account == account }
+            ?.let { demoStatus(it) }
         val kind = when (spec.window) {
             RingWindow.SESSION -> WindowKind.SESSION
             RingWindow.WEEKLY_ALL -> WindowKind.WEEKLY_ALL
@@ -4413,6 +4420,19 @@ class RearDialView(context: Context) : View(context) {
      * [active] false covers both "nothing is playing" and "the feature is off", which
      * are the same thing to the panel: give the slot back to the artwork.
      */
+    /**
+     * Whether the demo has taken the player over.
+     *
+     * Set the moment a segment pushes a track, and never cleared while the demo runs: the
+     * phone's own music does not stop just because something is being filmed, and a real
+     * update arriving mid-take would put somebody's actual listening on the panel halfway
+     * through a segment about Aphex Twin.
+     */
+    private var demoOwnsMedia = false
+
+    /** True only while the demo itself is calling showMedia. See demoOwnsMedia. */
+    private var demoPushing = false
+
     fun showMedia(
         active: Boolean,
         title: String,
@@ -4426,6 +4446,11 @@ class RearDialView(context: Context) : View(context) {
         lyricsLrc: String = "",
         lyricsFor: String = "",
     ) {
+        // THE PHONE'S OWN MUSIC DOES NOT STOP FOR A FILM. Once a segment has pushed a
+        // track the demo keeps the player, or a real update arriving mid-take puts
+        // somebody's actual listening on the panel halfway through a segment about
+        // something else. The demo's own pushes come through demoPushing.
+        if (demoOwnsMedia && !demoPushing) return
         val now = SystemClock.uptimeMillis()
         // The sheet has to NAME the recording before it is hung on it.
         //
@@ -6289,6 +6314,7 @@ class RearDialView(context: Context) : View(context) {
             .filter { onlyAccount == null || it == onlyAccount }
             .map { account ->
             val status = state.statuses.firstOrNull { it.account == account }
+            ?.let { demoStatus(it) }
             // The session window is included now. It used to be filtered out because the
             // rings already show its UTILISATION — but this row shows its TIME, which
             // nothing else on the panel did: the footer carried a single countdown for
@@ -6587,7 +6613,10 @@ class RearDialView(context: Context) : View(context) {
                 canvas.drawText("${(fraction * 100).toInt()}%", PCT_RIGHT, y + barH - 4f, value)
                 // Time-to-reset in its own column, so every window says when it turns
                 // over rather than only the session one.
-                canvas.drawText(remaining(w.resetsAt), TIME_RIGHT, y + barH - 4f, timeTag)
+                canvas.drawText(
+                    demoTime(account, rows.indexOf(w)) ?: remaining(w.resetsAt),
+                    TIME_RIGHT, y + barH - 4f, timeTag,
+                )
                 // The mascot stands on the FIRST SHOWN bar, not on the session bar.
                 //
                 // It anchored on WindowKind.SESSION, so hiding the 5-hour row left the
@@ -9712,28 +9741,71 @@ class RearDialView(context: Context) : View(context) {
     private val demoSegments = listOf(
         DemoStep(11.6f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI,
             personalBars = floatArrayOf(0.35f, 0.42f, 0.30f),
-            workBars = floatArrayOf(0.00f, 0.04f, 0.02f)),
+            workBars = floatArrayOf(0.00f, 0.04f, 0.02f),
+            personalTimes = arrayOf("4h03m", "6d13h", "6d13h"),
+            workTimes = arrayOf("4h36m", "6d21h", "6d21h")),
         DemoStep(5f, PAGE_READOUT, MascotMood.FLAG, MascotMood.MUSCLE,
             personalBars = floatArrayOf(0.94f, 0.78f, 0.61f),
-            workBars = floatArrayOf(0.52f, 0.33f, 0.24f)),
+            workBars = floatArrayOf(0.52f, 0.33f, 0.24f),
+            personalTimes = arrayOf("0h15m", "1d04h", "1d04h"),
+            workTimes = arrayOf("3h00m", "3d06h", "3d06h")),
         DemoStep(5f, PAGE_READOUT, MascotMood.STAND, MascotMood.DEAD,
             personalBars = floatArrayOf(0.66f, 0.55f, 0.40f),
-            workBars = floatArrayOf(1.00f, 1.00f, 1.00f)),
+            workBars = floatArrayOf(1.00f, 1.00f, 1.00f),
+            personalTimes = arrayOf("2h40m", "2d18h", "2d18h"),
+            workTimes = arrayOf("0h01m", "0h01m", "0h01m")),
         DemoStep(5f, PAGE_READOUT, MascotMood.SLEEP, MascotMood.GHOST,
             personalBars = floatArrayOf(0.08f, 0.12f, 0.05f),
-            workBars = floatArrayOf(0.77f, 0.88f, 0.70f)),
+            workBars = floatArrayOf(0.77f, 0.88f, 0.70f),
+            personalTimes = arrayOf("4h44m", "6d09h", "6d09h"),
+            workTimes = arrayOf("1h06m", "0d19h", "0d19h")),
+        // AN ACCOUNT THAT IS NOT ANSWERING, which is the one state where the panel stops
+        // using an account's own colour: the heading, the plan bracket, the labels and the
+        // bars all go to DIM, and AUTH puts SIGN IN where the bracket was. A film that
+        // never shows it makes the panel look like it only ever has good news.
+        DemoStep(5f, PAGE_READOUT, MascotMood.STAND, MascotMood.STAND,
+            personalBars = floatArrayOf(0.51f, 0.44f, 0.36f),
+            workBars = floatArrayOf(0.29f, 0.22f, 0.18f),
+            personalTimes = arrayOf("2h11m", "4d02h", "4d02h"),
+            workTimes = arrayOf("—", "—", "—"),
+            workHealth = Health.AUTH),
         // The pages, once the animals have been through everything they can do.
         DemoStep(6f, PAGE_NOTICES, MascotMood.WALK, MascotMood.MUSCLE,
             personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
-            workBars = floatArrayOf(0.60f, 0.41f, 0.33f)),
-        DemoStep(6f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
+            workBars = floatArrayOf(0.60f, 0.41f, 0.33f),
+            personalTimes = arrayOf("1h47m", "3d19h", "3d19h"),
+            workTimes = arrayOf("2h58m", "1d22h", "1d22h")),
+        // ---- the media page, three segments, because it does three things -------------
+        //
+        // A track playing, then the SAME track paused, then a different one: the change
+        // is the point. The record crosses, the name rolls over on its wheel and the
+        // transport shows what it is for. One long segment would have shown a record
+        // turning and nothing happening to it.
+        DemoStep(7f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
             personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
-            workBars = floatArrayOf(0.60f, 0.41f, 0.33f)),
+            workBars = floatArrayOf(0.60f, 0.41f, 0.33f),
+            personalTimes = arrayOf("1h47m", "3d19h", "3d19h"),
+            workTimes = arrayOf("2h58m", "1d22h", "1d22h"),
+            track = "Windowlicker", artist = "Aphex Twin", volume = 0.30f),
+        DemoStep(4f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
+            personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
+            workBars = floatArrayOf(0.60f, 0.41f, 0.33f),
+            personalTimes = arrayOf("1h44m", "3d19h", "3d19h"),
+            workTimes = arrayOf("2h55m", "1d22h", "1d22h"),
+            track = "Windowlicker", artist = "Aphex Twin", playing = false, volume = 0.72f),
+        DemoStep(7f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
+            personalBars = floatArrayOf(0.46f, 0.50f, 0.38f),
+            workBars = floatArrayOf(0.61f, 0.41f, 0.33f),
+            personalTimes = arrayOf("1h41m", "3d19h", "3d19h"),
+            workTimes = arrayOf("2h52m", "1d22h", "1d22h"),
+            track = "Xtal", artist = "Aphex Twin", volume = 0.55f),
         // Back to the readout for the charging cell, which is drawn over whatever page is
         // showing but belongs with the readings.
         DemoStep(7f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI, charge = true,
             personalBars = floatArrayOf(0.35f, 0.42f, 0.30f),
-            workBars = floatArrayOf(0.00f, 0.04f, 0.02f)),
+            workBars = floatArrayOf(0.00f, 0.04f, 0.02f),
+            personalTimes = arrayOf("4h58m", "6d20h", "6d20h"),
+            workTimes = arrayOf("4h58m", "6d20h", "6d20h")),
     )
 
     private class DemoStep(
@@ -9745,7 +9817,47 @@ class RearDialView(context: Context) : View(context) {
         /** 5h, 7d and scoped fills, in the order the rows are configured. */
         val personalBars: FloatArray = floatArrayOf(0.4f, 0.4f, 0.4f),
         val workBars: FloatArray = floatArrayOf(0.4f, 0.4f, 0.4f),
+        /** What each row says in its right-hand column — the time to its reset. */
+        val personalTimes: Array<String> = arrayOf("4h03m", "6d13h", "6d13h"),
+        val workTimes: Array<String> = arrayOf("3h21m", "2d08h", "2d08h"),
+        /**
+         * An account that is not answering.
+         *
+         * Worth a segment of its own, because it is the one state where the panel stops
+         * using an account's own colour: everything that was the accent goes to DIM and
+         * AUTH puts SIGN IN where the plan bracket was. A film that never shows it makes
+         * the panel look like it only has good news.
+         */
+        val personalHealth: Health = Health.OK,
+        val workHealth: Health = Health.OK,
+        /** The track, so the demo can be seen changing one. Blank leaves it alone. */
+        val track: String = "",
+        val artist: String = "",
+        val playing: Boolean = true,
+        /** Where the volume arc sits, so it can be seen being moved. */
+        val volume: Float = -1f,
     )
+
+    /** [status] as the demo wants it seen, or unchanged when the demo is off. */
+    private fun demoStatus(status: AccountStatus): AccountStatus {
+        val step = demoNow() ?: return status
+        val health =
+            if (status.account == Account.WORK) step.workHealth else step.personalHealth
+        return if (health == status.health) status else status.copy(health = health)
+    }
+
+    /** The reset column's text for this row, or null when the demo is off. */
+    private fun demoTime(account: Account, row: Int): String? {
+        val step = demoNow() ?: return null
+        val times = if (account == Account.WORK) step.workTimes else step.personalTimes
+        return times.getOrNull(row)
+    }
+
+    /** Where the volume arc should sit, or null to read the phone's own. */
+    private fun demoVolume(): Float? {
+        val step = demoNow() ?: return null
+        return if (step.volume < 0f) null else step.volume
+    }
 
     /** The fill this row should show, or null when the demo is off. */
     private fun demoBar(account: Account, row: Int): Float? {
@@ -9808,7 +9920,13 @@ class RearDialView(context: Context) : View(context) {
      * transition, not to arrive.
      */
     private fun driveDemo() {
-        val step = demoNow() ?: run { demoStep = -1; return }
+        val step = demoNow() ?: run {
+            demoStep = -1
+            // Handed straight back, so switching the demo off does not leave the panel
+            // showing a track nobody is playing.
+            demoOwnsMedia = false
+            return
+        }
         // A demo that lets the display doze halfway through a take is not a demo.
         animating = true
         keepAwakeFor()
@@ -9819,6 +9937,22 @@ class RearDialView(context: Context) : View(context) {
         // Fired on ENTERING the segment only, or the cell would restart every frame and
         // never fill.
         if (step.charge) showCharging(DEMO_CHARGE)
+        // THE TRACK, pushed through the same door a real one comes in by — so the record
+        // crosses and the name rolls over on its wheel exactly as they do for anybody
+        // else. A demo that set the fields directly would show the new title already in
+        // place, which is the one thing worth filming about a track change.
+        if (step.track.isNotEmpty()) {
+            demoOwnsMedia = true
+            demoPushing = true
+            showMedia(
+                active = true, title = step.track, artist = step.artist,
+                playing = step.playing,
+                durationMs = DEMO_TRACK_MS,
+                positionMs = (DEMO_TRACK_MS * DEMO_TRACK_AT).toLong(),
+                positionAtMs = SystemClock.elapsedRealtime(),
+            )
+            demoPushing = false
+        }
     }
 
     /**
@@ -10700,6 +10834,10 @@ class RearDialView(context: Context) : View(context) {
          * and the date have plain background under them.
          */
         private const val VINYL_PEEK = 0.15f
+
+        /** Long enough that the playback ring is visibly part-way round, not near an end. */
+        private const val DEMO_TRACK_MS = 254_000L
+        private const val DEMO_TRACK_AT = 0.38f
 
         /** A charge worth filming: past the halfway mark, so the cell is visibly full. */
         private const val DEMO_CHARGE = 68
