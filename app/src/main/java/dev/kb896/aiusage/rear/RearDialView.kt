@@ -3814,7 +3814,7 @@ class RearDialView(context: Context) : View(context) {
                 // on the page is still turning the page, which is how you get back down
                 // to the readout. Noted on the way down because that is when the finger
                 // chose, not when it has moved far enough to say so.
-                onWheel = noticing >= 0.999f && history.isNotEmpty() &&
+                onWheel = noticing >= 0.999f && shownHistory().isNotEmpty() &&
                     event.y < wheelGrabBottom()
                 wheelDownAt = noticeWheelAt
                 hit || pager.enabled() || onVolume || onScrub
@@ -3866,7 +3866,7 @@ class RearDialView(context: Context) : View(context) {
                             // one notification, so the item follows the finger rather than
                             // the finger asking for an item.
                             noticeWheelAt = (wheelDownAt + (downY - event.y) / NOTICE_H)
-                                .coerceIn(0f, (history.size - 1).toFloat())
+                                .coerceIn(0f, (shownHistory().size - 1).toFloat())
                             invalidate()
                         } else if (pager.enabled() &&
                             pager.onMove(event.y, android.os.SystemClock.uptimeMillis())
@@ -3902,7 +3902,7 @@ class RearDialView(context: Context) : View(context) {
                     onWheel = false
                     wheelFrom = noticeWheelAt
                     wheelTo = Math.round(noticeWheelAt).toFloat()
-                        .coerceIn(0f, (history.size - 1).toFloat())
+                        .coerceIn(0f, (shownHistory().size - 1).toFloat())
                     wheelSettleAt = frameNowMs
                     wheelSettling = wheelTo != wheelFrom
                     pager.onUp(android.os.SystemClock.uptimeMillis())
@@ -6498,7 +6498,10 @@ class RearDialView(context: Context) : View(context) {
                 // Keyed per account AND per window kind so each bar keeps its own
                 // momentum — one shared spring would drag every row along with
                 // whichever value moved.
-                val fraction = animateTo("bar:${account.name}:${w.kind.name}", w.utilization)
+                val fraction = animateTo(
+                    "bar:${account.name}:${w.kind.name}",
+                    demoBar(account, rows.indexOf(w)) ?: w.utilization,
+                )
                 // Same "dim when we can't vouch for it" rule as the rings: a
                 // stale/error/auth account still shows its last-known bar widths,
                 // just uniformly dimmed rather than accent/warn/crit colored.
@@ -7529,7 +7532,8 @@ class RearDialView(context: Context) : View(context) {
      * next item is already visible at the edge, half out of the card, waiting.
      */
     private fun drawNoticeWheel(canvas: Canvas) {
-        if (history.isEmpty()) return
+        val shown = shownHistory()
+        if (shown.isEmpty()) return
         canvas.save()
         // THE DRIFT COMES BACK OFF. Everything on this page rides the burn-in offset with
         // the rest of the canvas side, which is right for type floating in the middle of a
@@ -7580,7 +7584,7 @@ class RearDialView(context: Context) : View(context) {
         // is whole and in front, and its neighbours sit half a card behind it, a little
         // smaller and a little faded, which is what says there is more in both directions
         // without having to draw a scrollbar to say it.
-        for (i in history.indices.sortedByDescending { Math.abs(it - at) }) {
+        for (i in shown.indices.sortedByDescending { Math.abs(it - at) }) {
             val d = i - at
             if (Math.abs(d) > CAROUSEL_REACH) continue
             // TWO STRETCHES, because a neighbour and a departure want different things.
@@ -7668,7 +7672,7 @@ class RearDialView(context: Context) : View(context) {
             canvas.clipRect(cardRect)
             canvas.translate(cardRect.left - noticeWheelRect.left, dy)
             if (scale < 0.999f) canvas.scale(scale, scale, cx, cy)
-            drawNoticeRow(canvas, history[i], noticeWheelRect.top)
+            drawNoticeRow(canvas, shown[i], noticeWheelRect.top)
             canvas.restore()
             canvas.restore()
         }
@@ -9697,17 +9701,39 @@ class RearDialView(context: Context) : View(context) {
     // mirrored return, which reads as the animal changing its mind. The rest get long
     // enough for the bars and rings under them to finish moving, since Tween.DURATION_MS
     // is 1.8s and a segment cut inside that shows a transition rather than a state.
+    // THE READINGS MOVE WITH THE MOOD, because the mood IS a reading. A mascot is what an
+    // account's 5-hour window has earned — see MascotMood — so a demo that flipped the
+    // animal while the bars underneath it sat still would be showing the two disagreeing,
+    // which is the one thing they never do.
+    //
+    // The colours come free. Every bar runs the same continuous green-to-red ramp against
+    // its own fill, so driving the numbers drives the palette; there is nothing separate
+    // to set, and a bar's colour in the film is the colour that number really produces.
     private val demoSegments = listOf(
-        DemoStep(11.6f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI),
-        DemoStep(5f, PAGE_READOUT, MascotMood.FLAG, MascotMood.MUSCLE),
-        DemoStep(5f, PAGE_READOUT, MascotMood.STAND, MascotMood.DEAD),
-        DemoStep(5f, PAGE_READOUT, MascotMood.SLEEP, MascotMood.GHOST),
+        DemoStep(11.6f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI,
+            personalBars = floatArrayOf(0.35f, 0.42f, 0.30f),
+            workBars = floatArrayOf(0.00f, 0.04f, 0.02f)),
+        DemoStep(5f, PAGE_READOUT, MascotMood.FLAG, MascotMood.MUSCLE,
+            personalBars = floatArrayOf(0.94f, 0.78f, 0.61f),
+            workBars = floatArrayOf(0.52f, 0.33f, 0.24f)),
+        DemoStep(5f, PAGE_READOUT, MascotMood.STAND, MascotMood.DEAD,
+            personalBars = floatArrayOf(0.66f, 0.55f, 0.40f),
+            workBars = floatArrayOf(1.00f, 1.00f, 1.00f)),
+        DemoStep(5f, PAGE_READOUT, MascotMood.SLEEP, MascotMood.GHOST,
+            personalBars = floatArrayOf(0.08f, 0.12f, 0.05f),
+            workBars = floatArrayOf(0.77f, 0.88f, 0.70f)),
         // The pages, once the animals have been through everything they can do.
-        DemoStep(6f, PAGE_NOTICES, MascotMood.WALK, MascotMood.MUSCLE),
-        DemoStep(6f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE),
+        DemoStep(6f, PAGE_NOTICES, MascotMood.WALK, MascotMood.MUSCLE,
+            personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
+            workBars = floatArrayOf(0.60f, 0.41f, 0.33f)),
+        DemoStep(6f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
+            personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
+            workBars = floatArrayOf(0.60f, 0.41f, 0.33f)),
         // Back to the readout for the charging cell, which is drawn over whatever page is
         // showing but belongs with the readings.
-        DemoStep(7f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI, charge = true),
+        DemoStep(7f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI, charge = true,
+            personalBars = floatArrayOf(0.35f, 0.42f, 0.30f),
+            workBars = floatArrayOf(0.00f, 0.04f, 0.02f)),
     )
 
     private class DemoStep(
@@ -9716,7 +9742,42 @@ class RearDialView(context: Context) : View(context) {
         val personal: String,
         val work: String,
         val charge: Boolean = false,
+        /** 5h, 7d and scoped fills, in the order the rows are configured. */
+        val personalBars: FloatArray = floatArrayOf(0.4f, 0.4f, 0.4f),
+        val workBars: FloatArray = floatArrayOf(0.4f, 0.4f, 0.4f),
     )
+
+    /** The fill this row should show, or null when the demo is off. */
+    private fun demoBar(account: Account, row: Int): Float? {
+        val step = demoNow() ?: return null
+        val bars = if (account == Account.WORK) step.workBars else step.personalBars
+        return bars.getOrNull(row)
+    }
+
+    /**
+     * The ten notifications the demo shows instead of the real ones.
+     *
+     * NOT SOMEBODY'S ACTUAL MESSAGES. The whole point of the notification page is that it
+     * holds what has just come in, and the whole point of the demo is that it gets filmed
+     * — so the honest default is the one that does not publish a stranger's WhatsApp to
+     * whoever watches the video. Written rather than borrowed, and dull on purpose.
+     */
+    private val demoNotices = listOf(
+        Notice("Messages", "com.google.android.apps.messaging", "Sam", "on my way, 10 min"),
+        Notice("Calendar", "com.google.android.calendar", "Standup", "in 15 minutes"),
+        Notice("Mail", "com.google.android.gm", "Invoice #2231", "has been paid"),
+        Notice("Photos", "com.google.android.apps.photos", "3 new memories", "from last August"),
+        Notice("Maps", "com.google.android.apps.maps", "Traffic on the A3", "12 min slower than usual"),
+        Notice("Weather", "com.google.android.apps.weather", "Rain at 4pm", "18 degrees, light wind"),
+        Notice("Podcasts", "com.google.android.apps.podcasts", "New episode", "The Long Now, 42 min"),
+        Notice("Bank", "com.google.android.apps.walletnfcrel", "Card payment", "GBP 4.20 at a coffee shop"),
+        Notice("Clock", "com.google.android.deskclock", "Alarm set", "for 07:00 tomorrow"),
+        Notice("Files", "com.google.android.documentsui", "Backup finished", "1.2 GB copied"),
+    )
+
+    /** The history the page should draw: invented while filming, real otherwise. */
+    private fun shownHistory(): List<Notice> =
+        if (config.demoMode) demoNotices else history
 
     private var demoStartedAt = 0L
     private var demoStep = -1
