@@ -595,6 +595,19 @@ class RearDialView(context: Context) : View(context) {
         textSize = 18f; typeface = label.typeface
     }
 
+    /**
+     * The notification page's date, which is heavier than the panel's body.
+     *
+     * ITS OWN PAINT, and it has to be. A weight lives on the Paint and setting it builds a
+     * Typeface — see the note on fontVariationSettings — so asking for a heavier date at
+     * the point of drawing would rebuild one every frame, which is the exact churn that
+     * once had this panel rendering at a fifth of its speed. Every weight on this panel is
+     * told to a paint once, at theme time, and this is one more of them.
+     */
+    private val extrasDate = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 18f; typeface = label.typeface
+    }
+
     /** Whichever of the two is drawing. See extrasMedia. */
     private var extras = extrasBody
 
@@ -652,7 +665,7 @@ class RearDialView(context: Context) : View(context) {
         val face = PanelType.of(resources, theme)
         val axes = PanelType.variation(theme)
         for (p in listOf(label, heading, value, title, timeTag, cascadePaint,
-                         extrasBody, extrasMedia, planTag)) {
+                         extrasBody, extrasMedia, extrasDate, planTag)) {
             p.typeface = face
             // Cleared as well as set: switching back to ORIGINAL has to take the axis off
             // again, or a paint carries a weight request for a face that has no axes.
@@ -662,6 +675,10 @@ class RearDialView(context: Context) : View(context) {
         extrasMedia.fontVariationSettings = PanelType.mediaVariation(theme)
         chargeFigure.typeface = face
         chargeFigure.fontVariationSettings = PanelType.heaviestVariation(theme)
+        // The date on the notification page, at the masthead's weight. That page is read
+        // from further away than the readout is — it is a clock and a date, the things you
+        // glance at across a desk — and the body weight over a record was not enough.
+        extrasDate.fontVariationSettings = PanelType.titleVariation(theme)
         // The masthead is heavier than the body — see PanelType.titleVariation.
         title.fontVariationSettings = PanelType.titleVariation(theme)
         label.textSize = typed(18f)
@@ -7460,6 +7477,10 @@ class RearDialView(context: Context) : View(context) {
         // them a colour each — this took the clock's for both, which is the sort of thing
         // that looks deliberate until somebody changes one of them and only half the page
         // moves.
+        // Heavier, and at full strength. It was the body weight at 60% opacity over a
+        // record, which is two different ways of being quiet at once.
+        extras = extrasDate
+        extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(DATE_SIZE)
         val dateInk = colorFor("date", config.dateTint)
         val dateW = extras.measureText(date)
@@ -7471,8 +7492,9 @@ class RearDialView(context: Context) : View(context) {
             )
             glassCard(canvas, clockRect, ROW_CARD_RADIUS)
         }
-        extras.color = (dateInk and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
+        extras.color = (dateInk and 0x00FFFFFF) or (0xFF shl 24)
         canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
+        extras = extrasBody
         extras.textSize = typed(18f)
     }
 
