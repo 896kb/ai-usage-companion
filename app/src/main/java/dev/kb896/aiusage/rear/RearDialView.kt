@@ -2590,7 +2590,7 @@ class RearDialView(context: Context) : View(context) {
         val unlocked = 1f - lockSwap(frameNowMs)
         if (onlyAccount == null && config.showCamera && !hidden && unlocked > 0.004f) {
             fading(canvas, cameraFadeBounds(), unlocked) {
-                drawCamera(canvas, dx, dy + readoutPush - paged)
+                drawCamera(canvas, dx, dy + readoutPush - (paged - readoutAt))
             }
         } else {
             cameraButton = null
@@ -2602,7 +2602,7 @@ class RearDialView(context: Context) : View(context) {
         // the swipe that got you there.
         if (onlyAccount == null && config.showClose && !hidden && unlocked > 0.004f) {
             fading(canvas, closeFadeBounds(), unlocked) {
-                drawClose(canvas, dx, dy + readoutPush - paged)
+                drawClose(canvas, dx, dy + readoutPush - (paged - readoutAt))
             }
         } else {
             closeButton = null
@@ -7456,7 +7456,12 @@ class RearDialView(context: Context) : View(context) {
         val date = java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault())
             .format(now.time) + ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) +
             ", " + now.get(java.util.Calendar.YEAR)
+        // ITS OWN COLOUR. The date and the clock are two readings, and the settings give
+        // them a colour each — this took the clock's for both, which is the sort of thing
+        // that looks deliberate until somebody changes one of them and only half the page
+        // moves.
         extras.textSize = typed(DATE_SIZE)
+        val dateInk = colorFor("date", config.dateTint)
         val dateW = extras.measureText(date)
         val dateLeft = cx - dateW / 2f
         if (config.theme.isGlass) {
@@ -7466,7 +7471,7 @@ class RearDialView(context: Context) : View(context) {
             )
             glassCard(canvas, clockRect, ROW_CARD_RADIUS)
         }
-        extras.color = (ink and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
+        extras.color = (dateInk and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
         canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
         extras.textSize = typed(18f)
     }
