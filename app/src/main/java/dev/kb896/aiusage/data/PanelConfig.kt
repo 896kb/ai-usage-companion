@@ -224,6 +224,19 @@ data class PanelConfig(
     val showDate: Boolean = false,
 
     /**
+     * Walk the panel through itself, on a loop, with nobody touching it.
+     *
+     * FOR FILMING, and that is the whole of its design. The panel lives on the back of a
+     * phone, so showing what it does means either a hand in every shot or a surface that
+     * demonstrates itself — and a hand reaching across a 904-unit display hides most of
+     * what it came to show. On a loop it can be filmed in one take from a tripod.
+     *
+     * It also holds the display awake, because a demo that lets the screen doze after
+     * thirty seconds is a demo that stops halfway through the first take.
+     */
+    val demoMode: Boolean = false,
+
+    /**
      * Hold the rear display awake for as long as the panel is up.
      *
      * OFF BY DEFAULT, and that default is a measurement rather than a taste. Held awake

@@ -2296,6 +2296,10 @@ class RearDialView(context: Context) : View(context) {
         // Two pages even with nothing playing: the notifications are always there. Only a
         // single-account preview has no paging at all, which is what it has always had.
         if (onlyAccount == null && pager.pages < 2) pager.pages = 2
+        // The demo turns the page itself, and has to do it after the page COUNT is
+        // settled above — a segment asking for the media page while only two exist would
+        // be clamped to the readout and the loop would skip a beat.
+        driveDemo()
         val paged = if (onlyAccount == null) pager.advance(frameNowMs) else 0f
         // Written only when it SETTLES, not while a drag is in flight: a scroll that is
         // abandoned halfway never happened, and a file written sixty times a second
@@ -9657,7 +9661,91 @@ class RearDialView(context: Context) : View(context) {
                     else MascotRenderer.ACCENT_ORANGE)
 
     private fun accountMascot(account: Account): String =
-        state.statuses.firstOrNull { it.account == account }?.mascot ?: MascotMood.WALK
+        demoMood(account)
+            ?: state.statuses.firstOrNull { it.account == account }?.mascot
+            ?: MascotMood.WALK
+
+    // ---- demo mode -------------------------------------------------------------------
+    //
+    // WHAT IT IS FOR. This panel lives on the back of a phone, so showing what it does
+    // means either a hand in every shot or a surface that demonstrates itself — and a hand
+    // reaching across a 904-unit display covers most of what it came to show. On a loop it
+    // can be filmed in one take from a tripod.
+    //
+    // IN THE APP RATHER THAN OVER ADB, which is where the previous one lived — see
+    // tools/rear-demo.py in the notes. That drove the panel by broadcasting synthetic
+    // state, which works and has two costs: it needs a machine attached to film a phone,
+    // and it can only push things the payload can carry. It cannot turn a page. This can.
+    //
+    // THE SEGMENTS, and why each is as long as it is. Every mood the mascots have gets a
+    // turn, two at a time, because the two accounts are never in the same mood at once and
+    // seeing them differ is half of what the moods are FOR. Walk gets a full pass of
+    // WalkRig's own duration — a shorter window catches half a crossing and half the
+    // mirrored return, which reads as the animal changing its mind. The rest get long
+    // enough for the bars and rings under them to finish moving, since Tween.DURATION_MS
+    // is 1.8s and a segment cut inside that shows a transition rather than a state.
+    private val demoSegments = listOf(
+        DemoStep(11.6f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI),
+        DemoStep(5f, PAGE_READOUT, MascotMood.FLAG, MascotMood.MUSCLE),
+        DemoStep(5f, PAGE_READOUT, MascotMood.STAND, MascotMood.DEAD),
+        DemoStep(5f, PAGE_READOUT, MascotMood.SLEEP, MascotMood.GHOST),
+        // The pages, once the animals have been through everything they can do.
+        DemoStep(6f, PAGE_NOTICES, MascotMood.WALK, MascotMood.MUSCLE),
+        DemoStep(6f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE),
+        // Back to the readout for the charging cell, which is drawn over whatever page is
+        // showing but belongs with the readings.
+        DemoStep(7f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI, charge = true),
+    )
+
+    private class DemoStep(
+        val seconds: Float,
+        val page: Int,
+        val personal: String,
+        val work: String,
+        val charge: Boolean = false,
+    )
+
+    private var demoStartedAt = 0L
+    private var demoStep = -1
+
+    /** Which segment the loop is in, or null when the demo is off. */
+    private fun demoNow(): DemoStep? {
+        if (!config.demoMode) return null
+        if (demoStartedAt == 0L) demoStartedAt = frameNowMs
+        val total = demoSegments.sumOf { it.seconds.toDouble() }.toFloat()
+        var t = ((frameNowMs - demoStartedAt) / 1000f) % total
+        for (step in demoSegments) {
+            if (t < step.seconds) return step
+            t -= step.seconds
+        }
+        return demoSegments.last()
+    }
+
+    private fun demoMood(account: Account): String? {
+        val step = demoNow() ?: return null
+        return if (account == Account.WORK) step.work else step.personal
+    }
+
+    /**
+     * Turn the page, and light the cell, on the loop's own schedule.
+     *
+     * Called once a frame from the draw. The page is SETTLED rather than jumped to, so the
+     * demo shows the same movement a thumb would produce — the point is to film the
+     * transition, not to arrive.
+     */
+    private fun driveDemo() {
+        val step = demoNow() ?: run { demoStep = -1; return }
+        // A demo that lets the display doze halfway through a take is not a demo.
+        animating = true
+        keepAwakeFor()
+        val index = demoSegments.indexOf(step)
+        if (index == demoStep) return
+        demoStep = index
+        pager.settleTo(step.page, frameNowMs)
+        // Fired on ENTERING the segment only, or the cell would restart every frame and
+        // never fill.
+        if (step.charge) showCharging(DEMO_CHARGE)
+    }
 
     /**
      * Geometry of one account's 5h bar, captured by drawBars for the mascots to stand
@@ -10527,6 +10615,11 @@ class RearDialView(context: Context) : View(context) {
 
         /** Where the readout sits in the pager now that something is above it. */
         const val PAGE_READOUT = 1
+        const val PAGE_NOTICES = 0
+        const val PAGE_MEDIA = 2
+
+        /** A charge worth filming: past the halfway mark, so the cell is visibly full. */
+        private const val DEMO_CHARGE = 68
 
         /**
          * How far either side of the current card the carousel still draws.

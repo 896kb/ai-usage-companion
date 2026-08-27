@@ -625,6 +625,11 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             container, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
+        // Under it, because it implies it: a demo holds the screen awake whatever this
+        // says, and putting the two together is what makes that obvious.
+        SettingsRows.toggle(
+            container, "Demo mode", config.demoMode,
+        ) { on -> write { it.copy(demoMode = on) } }
         // Directly under Notifications, because it runs on the same grant — see Setup's
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.
