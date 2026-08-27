@@ -625,11 +625,18 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             container, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
-        // Under it, because it implies it: a demo holds the screen awake whatever this
-        // says, and putting the two together is what makes that obvious.
-        SettingsRows.toggle(
-            container, "Demo mode", config.demoMode,
-        ) { on -> write { it.copy(demoMode = on) } }
+        // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
+        // notifications with written ones — which is exactly right for filming and would
+        // be a lie in anybody else's hands. It is a tool for making the video, not a
+        // feature of the app, so it does not ship.
+        //
+        // Under "keep awake" because it implies it: a demo holds the screen up whatever
+        // that says, and putting the two together is what makes that obvious.
+        if (BuildConfig.DEBUG) {
+            SettingsRows.toggle(
+                container, "Demo mode (debug)", config.demoMode,
+            ) { on -> write { it.copy(demoMode = on) } }
+        }
         // Directly under Notifications, because it runs on the same grant — see Setup's
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.

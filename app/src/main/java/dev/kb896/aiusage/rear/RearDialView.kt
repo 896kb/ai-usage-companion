@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
 import androidx.core.content.ContextCompat
+import dev.kb896.aiusage.BuildConfig
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.Account
@@ -7591,6 +7592,19 @@ class RearDialView(context: Context) : View(context) {
         noticeWheelRect.set(NOTICE_LEFT, margin, Panel.WIDTH - margin, NOTICE_H)
         val cx = noticeWheelRect.centerX()
         val cy = noticeWheelRect.centerY()
+        // TURNED BY THE DEMO, when there is one. A page of notifications that never moves
+        // says the panel holds ten and shows one; the whole point of the wheel is that it
+        // goes back through them, and a film that does not do it leaves the feature
+        // invisible. Paced so the neighbours are legible on the way past rather than
+        // flicked through.
+        val step = demoNow()
+        if (step != null && step.page == PAGE_NOTICES) {
+            val into = ((frameNowMs - demoStartedAt) / 1000f) % DEMO_WHEEL_PERIOD
+            noticeWheelAt = (into / DEMO_WHEEL_PERIOD * (shown.size - 1))
+                .coerceIn(0f, (shown.size - 1).toFloat())
+            wheelSettling = false
+        }
+
         // SETTLES, it does not snap. Letting go a little past a card used to round the
         // position and be done with it, which lands the card in place with no travel at
         // all — the one movement on this panel that simply cut. The pager has settled its
@@ -9874,6 +9888,43 @@ class RearDialView(context: Context) : View(context) {
      * — so the honest default is the one that does not publish a stranger's WhatsApp to
      * whoever watches the video. Written rather than borrowed, and dull on purpose.
      */
+    /**
+     * REAL ICONS, WITHOUT IMPORTING ANY.
+     *
+     * drawNoticeRow already asks the PackageManager for an app's icon by package name —
+     * that is how a real notification gets its badge — so a written notification only
+     * needs to claim a package that is actually on the phone and the icon arrives by
+     * itself. Nothing to bundle, nothing to keep in step with a rebrand, and nothing that
+     * puts somebody else's trademark in this repository.
+     *
+     * Each entry names a first choice and falls back through the alternatives until one
+     * is installed, because no two phones carry the same apps. If none of them are, the
+     * row draws without a badge exactly as it does for an app that has been uninstalled
+     * since its notification arrived — which is a real case, and already handled.
+     */
+    private val demoPackages = listOf(
+        listOf("com.google.android.apps.messaging", "com.android.mms", "com.samsung.android.messaging"),
+        listOf("com.google.android.calendar", "com.android.calendar", "com.miui.calendar"),
+        listOf("com.google.android.gm", "com.android.email", "com.microsoft.office.outlook"),
+        listOf("com.google.android.apps.photos", "com.miui.gallery", "com.android.gallery3d"),
+        listOf("com.google.android.apps.maps", "com.waze"),
+        listOf("com.google.android.deskclock", "com.android.deskclock"),
+        listOf("com.spotify.music", "com.google.android.apps.youtube.music", "com.miui.player"),
+        listOf("com.android.chrome", "com.brave.browser", "org.mozilla.firefox"),
+        listOf("com.android.settings"),
+        listOf("com.android.vending", "com.xiaomi.market"),
+    )
+
+    /** The first of [demoPackages]'s candidates that this phone actually has. */
+    private val demoResolved: List<String> by lazy {
+        val pm = context.packageManager
+        demoPackages.map { candidates ->
+            candidates.firstOrNull { pkg ->
+                runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess
+            } ?: candidates.first()
+        }
+    }
+
     private val demoNotices = listOf(
         Notice("Messages", "com.google.android.apps.messaging", "Sam", "on my way, 10 min"),
         Notice("Calendar", "com.google.android.calendar", "Standup", "in 15 minutes"),
@@ -9889,14 +9940,21 @@ class RearDialView(context: Context) : View(context) {
 
     /** The history the page should draw: invented while filming, real otherwise. */
     private fun shownHistory(): List<Notice> =
-        if (config.demoMode) demoNotices else history
+        if (demoNow() != null) demoNotices.mapIndexed { i, n ->
+            n.copy(pkg = demoResolved.getOrElse(i) { n.pkg })
+        } else history
 
     private var demoStartedAt = 0L
     private var demoStep = -1
 
     /** Which segment the loop is in, or null when the demo is off. */
     private fun demoNow(): DemoStep? {
-        if (!config.demoMode) return null
+        // BOTH ENDS, not just the switch. The setting is written to a file that survives
+        // an upgrade, so a panel that had the demo on in a debug build and was then given
+        // a release one would come up inventing its readings with no way to turn it off —
+        // the switch that set it is not in that build. Refused here as well, which makes
+        // the flag inert rather than merely unreachable.
+        if (!BuildConfig.DEBUG || !config.demoMode) return null
         if (demoStartedAt == 0L) demoStartedAt = frameNowMs
         val total = demoSegments.sumOf { it.seconds.toDouble() }.toFloat()
         var t = ((frameNowMs - demoStartedAt) / 1000f) % total
@@ -10834,6 +10892,9 @@ class RearDialView(context: Context) : View(context) {
          * and the date have plain background under them.
          */
         private const val VINYL_PEEK = 0.15f
+
+        /** How long the demo takes to walk the whole wheel once. */
+        private const val DEMO_WHEEL_PERIOD = 6f
 
         /** Long enough that the playback ring is visibly part-way round, not near an end. */
         private const val DEMO_TRACK_MS = 254_000L
