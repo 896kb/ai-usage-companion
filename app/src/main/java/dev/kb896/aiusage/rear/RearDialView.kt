@@ -7054,9 +7054,22 @@ class RearDialView(context: Context) : View(context) {
         val base = discAt(paging, notice)
         // Slides out of the bottom when the music stops. It arrived as an object and it
         // leaves as one, the way a record comes off a deck.
+        // AND IT GETS OUT OF THE WAY OF THE PAGE ABOVE. The record is drawn behind every
+        // page, which is right for the two that were built around it and wrong for the
+        // notification page: a clock, a date and a card of somebody's messages, all laid
+        // over a black disc with grooves in it. The date in particular was unreadable
+        // wherever it crossed the label.
+        //
+        // It goes DOWN rather than fading, and it goes down with the scroll, because that
+        // is what the gesture is already saying: the readout is sliding off the bottom and
+        // the record is part of the readout. Sunk until only a slice of its top edge shows
+        // along the bottom of the panel — enough to say what is still down there, not
+        // enough to read anything through.
+        val sunk = noticing *
+            (Panel.HEIGHT * (1f - VINYL_PEEK) - (base.cy - base.radius))
         val resting = MediaLayout.Disc(
             base.cx,
-            base.cy + (1f - swap) * (Panel.HEIGHT + base.radius),
+            base.cy + (1f - swap) * (Panel.HEIGHT + base.radius) + maxOf(0f, sunk),
             base.radius,
         )
 
@@ -10617,6 +10630,15 @@ class RearDialView(context: Context) : View(context) {
         const val PAGE_READOUT = 1
         const val PAGE_NOTICES = 0
         const val PAGE_MEDIA = 2
+
+        /**
+         * How much of the panel the record still occupies from the notification page.
+         *
+         * A slice along the bottom, and no more. Enough that the page reads as sitting
+         * above something rather than floating on nothing; little enough that the clock
+         * and the date have plain background under them.
+         */
+        private const val VINYL_PEEK = 0.15f
 
         /** A charge worth filming: past the halfway mark, so the cell is visibly full. */
         private const val DEMO_CHARGE = 68
