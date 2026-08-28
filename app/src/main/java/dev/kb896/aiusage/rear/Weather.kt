@@ -94,7 +94,20 @@ object Weather {
          * one is roughly the three seconds a wiped window takes to fog back up.
          */
         const float FOG_RETURN = 0.66;
-        const float FOG = 0.30;
+        /**
+         * OFF, and it is not the fog that is broken.
+         *
+         * The condensation looked right and brought the artefacts back with it — but the
+         * same artefacts survive without it, hidden. A glass pane bends what is behind it
+         * by sampling that node at a DISPLACED coordinate, which is the tile hazard this
+         * has hit all along; over a detailed photograph a mismatched tile is invisible,
+         * and over a large flat wash of mist it is a block. The fog did not create them,
+         * it gave them somewhere to show.
+         *
+         * Turning this up again without moving the weather in front of the panes will
+         * bring them straight back. See the note in RearDialView.drawWeatheredGround.
+         */
+        const float FOG = 0.0;
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
         const float SNOW_SPREAD = 0.5;
@@ -106,16 +119,30 @@ object Weather {
             return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
         }
 
+        // A HASH THAT DOES NOT FALL APART. hash1 is a sine folded to its fraction, which
+        // is fine for scattering drops around a grid and is not fine here: at larger
+        // coordinates neighbouring cells start returning correlated values, and correlated
+        // value noise is not noise, it is blocks. Over a fog that is being wiped by moving
+        // water those blocks move too, which is exactly what was seen.
+        //
+        // This one is all multiplies and fractions with no trigonometry, so it has no
+        // precision cliff to fall off.
+        float hash2(float2 p) {
+            float3 q = fract(float3(p.x, p.y, p.x) * 0.1031);
+            q += dot(q, float3(q.y, q.z, q.x) + 33.33);
+            return fract((q.x + q.y) * q.z);
+        }
+
         // Smooth value noise, for the mottle in the condensation. Four corners and a
         // cubic blend — the cheapest thing that does not look like static.
         float vnoise(float2 p) {
             float2 i = floor(p);
             float2 f = fract(p);
             f = f * f * (3.0 - 2.0 * f);
-            float a = hash1(i);
-            float b = hash1(i + float2(1.0, 0.0));
-            float c = hash1(i + float2(0.0, 1.0));
-            float d = hash1(i + float2(1.0, 1.0));
+            float a = hash2(i);
+            float b = hash2(i + float2(1.0, 0.0));
+            float c = hash2(i + float2(0.0, 1.0));
+            float d = hash2(i + float2(1.0, 1.0));
             return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
         }
 
