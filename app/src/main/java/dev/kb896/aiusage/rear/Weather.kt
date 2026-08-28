@@ -278,10 +278,22 @@ object Weather {
             // cycle is a trail that lasts about two seconds.
             float since = max(0.0, st.y - y);
             float linger = smoothstep(TRAIL_LIFE, 0.0, since);
-            // HOW RECENTLY THIS PIXEL WAS WET, which outlasts the trail you can see. The
-            // glass keeps clear for a while after the water has gone and only then mists
-            // over again — see the fog in main. Same subtraction, longer memory.
-            float dry = smoothstep(FOG_RETURN, 0.0, since) * vis;
+            // HOW RECENTLY THIS PIXEL WAS WET, which outlasts the trail you can see: the
+            // glass stays clear a while after the water has gone and only then mists over
+            // again. Same subtraction as the trail, longer memory.
+            //
+            // AND IT HAS TO KNOW ABOUT X. This asked only how far ABOVE the drop a pixel
+            // was — nothing about how far to the side — so it came out constant across the
+            // full width of the cell and wiped the mist in a band an eighth of the panel
+            // wide and two thirds tall. That is the rectangle that has been chased through
+            // half a dozen wrong explanations: not tiling, not the effect, not the noise,
+            // not the compositing. A missing term.
+            //
+            // A drop wipes a PATH. The same distance the trail is drawn against bounds the
+            // clearing, so the glass is clear where the water actually went and misted
+            // everywhere it did not.
+            float dry = smoothstep(FOG_RETURN, 0.0, since) * vis
+                * smoothstep(0.26, 0.06, cd);
             return float3(head + beads * linger, trail * linger, max(head, dry));
         }
 
