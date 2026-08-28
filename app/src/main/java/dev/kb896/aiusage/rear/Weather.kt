@@ -79,6 +79,10 @@ object Weather {
         // is: there is no blur behind it any more — a downscaled one went blocky and was
         // taken out — so the bending has to carry the whole illusion on its own.
         const float REFRACT = 52.0;
+
+        // How much of a fall's cycle a wet path survives. The cycle runs about four and a
+        // half seconds, so this is roughly two.
+        const float TRAIL_LIFE = 0.45;
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
         const float SNOW_SPREAD = 0.5;
@@ -134,20 +138,33 @@ object Weather {
             // no two wander alike — and pinned at the edges so none leaves its column.
             float x = n.x - 0.5;
             float y = UV.y * 20.0;
-            x += sin(y + sin(y)) * (0.5 - abs(x)) * (n.z - 0.5);
+            // WIDER WANDER. This was barely a tenth of a cell — true to the reference and
+            // invisible on a panel this size. A drop catches on something, slips sideways,
+            // and carries on; if that cannot be seen it may as well be falling straight.
+            x += sin(y + sin(y)) * (0.5 - abs(x)) * (n.z - 0.5) * 2.4;
             x *= 0.7;
 
+            // MONOTONIC, so it can only ever go down. The position came from the same
+            // rise-and-fall curve the fading uses — and a curve that comes back DOES come
+            // back: for the last sixth of every cycle each drop climbed to where it
+            // started. Fast enough to look like a reset most of the time, which is why it
+            // read as "some of them float up" rather than as all of them doing it.
+            //
+            // A plain ramp instead, with the arrival and departure handled by fading
+            // rather than by moving. In flipped space the top of a cell is 1, so falling
+            // is counting down.
             float ti = fract(t + n.z);
-            y = (life(0.85, ti) - 0.5) * 0.9 + 0.5;
+            y = 1.0 - ti;
+            float vis = smoothstep(0.0, 0.07, ti) * smoothstep(1.0, 0.90, ti);
 
             float d = length((st - float2(x, y)) * float2(1.0, 6.0));
-            float head = smoothstep(0.4, 0.0, d);
+            float head = smoothstep(0.4, 0.0, d) * vis;
 
             // The trail narrows behind the drop and only exists above it.
             float r = sqrt(smoothstep(1.0, y, st.y));
             float cd = abs(st.x - x);
             float trail = smoothstep(0.23 * r, 0.15 * r * r, cd)
-                * smoothstep(-0.02, 0.02, st.y - y) * r * r;
+                * smoothstep(-0.02, 0.02, st.y - y) * r * r * vis;
 
             // THE PATTERN IT LEAVES. Water breaks up behind a runner into a chain of small
             // beads; a smooth streak reads as a scratch. Folding the height into repeats is
@@ -156,7 +173,17 @@ object Weather {
             float beads = smoothstep(0.3, 0.0, length(st - float2(x, by)))
                 * r * smoothstep(-0.02, 0.02, st.y - y);
 
-            return float2(head + beads, trail);
+            // IT STAYS WET BEHIND THEM. A drop leaves a path and the path takes a while
+            // to go — but the trail was tied to where the drop is NOW, so it vanished the
+            // instant the drop reached the bottom, taking the whole streak with it.
+            //
+            // A shader has no memory, and does not need one here: how long ago the drop
+            // passed THIS pixel is just how far above it the pixel is, in cycle units. One
+            // subtraction gives every pixel its own age, and fading over TRAIL_LIFE of a
+            // cycle is a trail that lasts about two seconds.
+            float since = max(0.0, st.y - y);
+            float linger = smoothstep(TRAIL_LIFE, 0.0, since);
+            return float2(head + beads * linger, trail * linger);
         }
 
         // Everything on the glass at this point: coverage, and trail.
