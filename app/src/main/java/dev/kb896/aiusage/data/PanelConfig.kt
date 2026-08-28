@@ -224,6 +224,15 @@ data class PanelConfig(
     val showDate: Boolean = false,
 
     /**
+     * Weather on the panel's glass: [Weather.OFF], [Weather.RAIN] or [Weather.SNOW].
+     *
+     * A STRING RATHER THAN A BOOLEAN PAIR, because it is one choice with three answers
+     * and two switches would let somebody ask for rain and snow at once. Stored as the
+     * shader's own names so the setting reads the same in the file as it does in the code.
+     */
+    val weather: String = "off",
+
+    /**
      * Walk the panel through itself, on a loop, with nobody touching it.
      *
      * FOR FILMING, and that is the whole of its design. The panel lives on the back of a

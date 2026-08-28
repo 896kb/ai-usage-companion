@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import dev.kb896.aiusage.BuildConfig
+import dev.kb896.aiusage.rear.Weather
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -625,6 +626,26 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             container, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
+        // One choice with three answers rather than two switches, which would let
+        // somebody ask for rain and snow at once.
+        SettingsRows.choice(
+            container, "Weather", listOf("None", "Rain", "Snow"),
+            when (config.weather) {
+                Weather.RAIN -> 1
+                Weather.SNOW -> 2
+                else -> 0
+            },
+        ) { i ->
+            write {
+                it.copy(
+                    weather = when (i) {
+                        1 -> Weather.RAIN
+                        2 -> Weather.SNOW
+                        else -> Weather.OFF
+                    },
+                )
+            }
+        }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
         // notifications with written ones — which is exactly right for filming and would
         // be a lie in anybody else's hands. It is a tool for making the video, not a

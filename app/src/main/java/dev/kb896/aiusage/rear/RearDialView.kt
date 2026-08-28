@@ -2164,10 +2164,15 @@ class RearDialView(context: Context) : View(context) {
         // Unconditional, and that is deliberate beyond this bug: this fill is the one
         // that occludes, and an occluding fill that can be clipped away is one the
         // SubScreenLauncher can find a gap in.
-        canvas.drawColor(groundColor)
-        // Under glass the picture is already in groundNode, panel-wide, so a second blit
+        // Under glass the picture is already in groundNode, panel-wide, so a second pass
         // buys nothing except while the sweep is carving a hole this one has to fill.
-        if (!config.theme.isGlass || front != null) drawBackdropImage(canvas)
+        // ORIGINAL has no groundNode at all, so this IS its ground — and therefore the
+        // only place its weather can go.
+        if (!config.theme.isGlass || front != null) {
+            drawWeatheredGround(canvas)
+        } else {
+            canvas.drawColor(groundColor)
+        }
 
         // Held for the overlay pass, which draws outside every clip in here. See
         // drawOverlayGroup: the glass belongs to the readout and has to leave with it.
@@ -2406,8 +2411,7 @@ class RearDialView(context: Context) : View(context) {
                 groundNode.setPosition(0, 0, width, height)
                 val into = groundNode.beginRecording(width, height)
                 try {
-                    into.drawColor(groundColor)
-                    drawBackdropImage(into)
+                    drawWeatheredGround(into)
                     // The record is contents, so it goes when the panel does. The two
                     // lines above are ground, so they stay. See the run block's note.
                     if (!hidden) {
@@ -9653,6 +9657,64 @@ class RearDialView(context: Context) : View(context) {
      * Under GLASS it is also the best thing that has ever been behind a pane: the lenses
      * have had almost nothing but flat black to bend until now.
      */
+    /**
+     * The ground, with whatever is falling on it.
+     *
+     * The colour and the picture go into a node of their own so a shader can be hung on
+     * it — an effect can only be applied to a node, and the ground is drawn straight onto
+     * a canvas otherwise. With no weather this is one extra display list holding two
+     * operations, which is why it is not worth branching around.
+     *
+     * ONLY THE GROUND GOES IN. The record is drawn after this and the readout after that,
+     * so the rain runs behind everything and in front of nothing: drops crossing the
+     * account headings would make the numbers harder to read, and the numbers are why the
+     * panel exists. The account cards refract this node, so they bend the rain too, which
+     * is a window seen through a window and costs nothing — they were sampling it anyway.
+     */
+    private fun drawWeatheredGround(canvas: Canvas) {
+        // A node can only be drawn into a recording canvas. Everywhere the panel draws
+        // for real is one; the preview on the front screen is not, and falls through to
+        // the plain ground rather than losing its background entirely.
+        val recorder = canvas as? android.graphics.RecordingCanvas
+        val falling = config.weather != Weather.OFF
+        if (recorder == null || !falling || width <= 0 || height <= 0) {
+            canvas.drawColor(groundColor)
+            drawBackdropImage(canvas)
+            return
+        }
+        weatherNode.setPosition(0, 0, width, height)
+        val into = weatherNode.beginRecording(width, height)
+        try {
+            into.drawColor(groundColor)
+            drawBackdropImage(into)
+        } finally {
+            weatherNode.endRecording()
+        }
+        // Rebuilt only when the KIND changes, never per frame. The clock is a uniform, so
+        // the drops fall by being asked for a different time rather than by the effect
+        // being made again — which is the churn that filled the native heap once already.
+        if (config.weather != weatherKey) {
+            weatherKey = config.weather
+            val shader = Weather.shader
+            shader.setFloatUniform("size", width.toFloat(), height.toFloat())
+            shader.setFloatUniform("mode", if (config.weather == Weather.SNOW) 1f else 0f)
+            shader.setFloatUniform("amount", Weather.AMOUNT)
+            weatherEffect =
+                android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+        }
+        Weather.shader.setFloatUniform(
+            "time", (frameNowMs % (Weather.PERIOD_S * 1000L).toLong()) / 1000f,
+        )
+        weatherNode.setRenderEffect(weatherEffect)
+        recorder.drawRenderNode(weatherNode)
+        // Rain that only moves when something else does is not falling.
+        animating = true
+    }
+
+    private val weatherNode = android.graphics.RenderNode("weather")
+    private var weatherKey: String? = null
+    private var weatherEffect: android.graphics.RenderEffect? = null
+
     private fun drawBackdropImage(canvas: Canvas) {
         val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
