@@ -77,8 +77,17 @@ object Weather {
                     float2 id = floor(st);
                     float2 f = fract(st) - 0.5;
                     float n = hash1(id + i * 17.0);
+                    // DOWNWARD. A cell's y runs the way the screen's does — positive is
+                    // toward the bottom — and this had the drop at 0.5 minus its progress,
+                    // which walks it up the glass. Rain that rises is the one mistake an
+                    // audience does not need explaining.
                     float fall = fract(time * (0.16 + n * 0.26) + n * 7.3);
-                    float2 dp = float2((n - 0.5) * 0.55, 0.5 - fall);
+                    // IT ARRIVES, it does not enter. A drop on a window appears where it
+                    // lands and swells to its size in an instant; one that slides in from
+                    // the edge already full-size reads as a bead on a wire. The first
+                    // twelfth of its life is the landing, and the rest is the slide.
+                    float pop = smoothstep(0.0, 0.08, fall);
+                    float2 dp = float2((n - 0.5) * 0.55, -0.5 + fall);
                     float2 rel = f - dp;
                     // ONE length, reused. It was measured twice per drop — once squashed
                     // for the drop's shape and once plain for the direction to push in —
@@ -86,22 +95,24 @@ object Weather {
                     // loop of a full-panel shader.
                     float len = max(length(rel), 0.0001);
                     float d = len * (1.0 + 0.35 * abs(rel.y) / len);
-                    float drop = smoothstep(0.17, 0.02, d);
+                    float drop = smoothstep(0.23, 0.02, d);
                     // The trail: narrow, behind the drop, and fading with distance from
                     // it. Water leaves the glass wet where it has been.
-                    float trail = smoothstep(0.055, 0.0, abs(rel.x))
-                        * smoothstep(0.45, 0.0, rel.y)
-                        * step(0.0, rel.y) * 0.4;
+                    // BEHIND it, which is now above it. Water leaves the glass wet where
+                    // it has been, and where it has been is up.
+                    float trail = smoothstep(0.075, 0.0, abs(rel.x))
+                        * smoothstep(0.45, 0.0, -rel.y)
+                        * step(0.0, -rel.y) * 0.45;
                     // MASKED, NOT BRANCHED. Only some cells hold a drop — a drop in every
                     // one is a grid, and a grid is the one thing rain never looks like —
                     // but `continue` makes neighbouring pixels take different paths, and a
                     // fragment shader runs them in lockstep: every pixel pays for the
                     // longest path any of its neighbours took. A multiply by zero costs
                     // the same for all of them.
-                    float has = step(0.55, n);
+                    float has = step(0.55, n) * pop;
                     float m = max(drop, trail) * amount * has;
-                    off += (rel / len) * m * (0.05 - i * 0.015);
-                    lit += drop * amount * has * 0.22;
+                    off += (rel / len) * m * (0.095 - i * 0.03);
+                    lit += drop * amount * has * 0.38;
                 }
             } else {
                 for (float i = 0.0; i < 3.0; i += 1.0) {
@@ -110,14 +121,18 @@ object Weather {
                     float2 id = floor(st);
                     float2 f = fract(st) - 0.5;
                     float n = hash1(id + i * 31.0);
-                    float has = step(0.5, n);
+                    float has = step(0.5, n) * edge;
                     float fall = fract(time * (0.05 + n * 0.07) + n * 4.1);
                     // Flakes wander sideways as they come down. Falling straight reads as
                     // dust rather than snow.
                     float sway = sin(time * 0.6 + n * 6.283) * 0.22;
-                    float2 rel = f - float2(sway, 0.5 - fall);
+                    // Downward, for the reason the rain is. A flake does not pop: it is
+                    // already falling when it crosses the window, so it fades at both ends
+                    // of its travel instead of arriving at one of them.
+                    float edge = smoothstep(0.0, 0.12, fall) * smoothstep(1.0, 0.88, fall);
+                    float2 rel = f - float2(sway, -0.5 + fall);
                     float d = length(rel);
-                    lit += smoothstep(0.085 - i * 0.018, 0.0, d) * amount * has * (0.9 - i * 0.2);
+                    lit += smoothstep(0.125 - i * 0.022, 0.0, d) * amount * has * (1.25 - i * 0.25);
                 }
             }
 
@@ -131,12 +146,15 @@ object Weather {
     /**
      * How hard it comes down.
      *
-     * Deliberately short of what looks impressive in isolation. This sits behind a
-     * readout somebody is trying to read at a glance from across a room, and the moment
-     * the drops start competing with the numbers the panel has stopped doing its job. It
-     * should be the sort of thing you notice second.
+     * Tuned UP from where it started. The first pass was deliberately restrained, on the
+     * argument that this sits behind a readout somebody reads at a glance and must not
+     * compete with the numbers — which is still true, and was still the wrong starting
+     * point: at 0.85, with drops a fifth the size and a third the bend they have now, the
+     * effect was not restrained, it was invisible. Something nobody notices is not subtle.
+     *
+     * It should be the thing you see second. Not the thing you have to be told is there.
      */
-    const val AMOUNT = 0.85f
+    const val AMOUNT = 1.0f
 
     /** Seconds per full cycle of the shader's clock, kept small so floats stay precise. */
     const val PERIOD_S = 600f

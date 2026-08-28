@@ -9690,30 +9690,34 @@ class RearDialView(context: Context) : View(context) {
         } finally {
             weatherNode.endRecording()
         }
-        // Rebuilt only when the KIND changes, never per frame. The clock is a uniform, so
-        // the drops fall by being asked for a different time rather than by the effect
-        // being made again — which is the churn that filled the native heap once already.
-        if (config.weather != weatherKey) {
-            weatherKey = config.weather
-            val shader = Weather.shader
-            shader.setFloatUniform("size", width.toFloat(), height.toFloat())
-            shader.setFloatUniform("mode", if (config.weather == Weather.SNOW) 1f else 0f)
-            shader.setFloatUniform("amount", Weather.AMOUNT)
-            weatherEffect =
-                android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-        }
-        Weather.shader.setFloatUniform(
+        // REBUILT EVERY FRAME, and it has to be.
+        //
+        // This cached the effect and updated the shader's clock afterwards, on the
+        // reasoning that building a RenderEffect per frame is the churn that filled the
+        // native heap once already. The reasoning is sound and the code did not work:
+        // createRuntimeShaderEffect SNAPSHOTS the shader's uniforms. An effect made once
+        // never sees a later setFloatUniform, so the clock advanced, nothing read it, and
+        // the rain hung motionless on the glass.
+        //
+        // The leak it was avoiding was fifteen panes rebuilding an effect apiece every
+        // frame. This is one, for the whole panel, and there is no version of an animated
+        // shader that avoids it: the uniform is the animation.
+        val shader = Weather.shader
+        shader.setFloatUniform("size", width.toFloat(), height.toFloat())
+        shader.setFloatUniform("mode", if (config.weather == Weather.SNOW) 1f else 0f)
+        shader.setFloatUniform("amount", Weather.AMOUNT)
+        shader.setFloatUniform(
             "time", (frameNowMs % (Weather.PERIOD_S * 1000L).toLong()) / 1000f,
         )
-        weatherNode.setRenderEffect(weatherEffect)
+        weatherNode.setRenderEffect(
+            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
+        )
         recorder.drawRenderNode(weatherNode)
         // Rain that only moves when something else does is not falling.
         animating = true
     }
 
     private val weatherNode = android.graphics.RenderNode("weather")
-    private var weatherKey: String? = null
-    private var weatherEffect: android.graphics.RenderEffect? = null
 
     private fun drawBackdropImage(canvas: Canvas) {
         val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
