@@ -195,14 +195,6 @@ object Weather {
             // slips sideways, and carries on. The wiggle is a sine of a sine, so the
             // sideways bumps do not land on a regular beat, and it is scaled per drop so
             // no two wander alike — and pinned at the edges so none leaves its column.
-            float x = n.x - 0.5;
-            float y = UV.y * 20.0;
-            // WIDER WANDER. This was barely a tenth of a cell — true to the reference and
-            // invisible on a panel this size. A drop catches on something, slips sideways,
-            // and carries on; if that cannot be seen it may as well be falling straight.
-            x += sin(y + sin(y)) * (0.5 - abs(x)) * (n.z - 0.5) * 2.4;
-            x *= 0.7;
-
             // MONOTONIC, so it can only ever go down. The position came from the same
             // rise-and-fall curve the fading uses — and a curve that comes back DOES come
             // back: for the last sixth of every cycle each drop climbed to where it
@@ -218,7 +210,41 @@ object Weather {
             // linear spread puts too many in the middle, and a field of drops all going
             // at roughly one speed is what this was trying to escape.
             float speed = 0.38 + n.y * n.y * 2.9;
-            float ti = fract(t * speed + n.z);
+            float tt = t * speed + n.z;
+            float pass = floor(tt);
+            float ti = fract(tt);
+
+            // A DIFFERENT DROP EVERY TIME DOWN. Everything that shaped a drop — where it
+            // started across the cell, how hard it wandered, where it shed beads — was
+            // hashed from the CELL, so a cell ran the same drop down the same path at the
+            // same speed forever. Cycle lengths here are a third of a second to under
+            // three, which is exactly the "couple of seconds" that read as a video on
+            // loop: not one animation repeating, eight hundred short ones each repeating
+            // in place.
+            //
+            // So the seed takes the pass number too, and the drop is redrawn from scratch
+            // each time round. The swap lands where vis is zero at both ends of a cycle,
+            // so nothing is seen to change; what is seen is that the next one down is not
+            // the last one again.
+            //
+            // Bounded by mod because the argument goes through sin: unbounded it climbs
+            // past a hundred thousand within the ten-minute wrap and the hash degrades to
+            // noise, which would make every drop identical again by a different route.
+            // Forty-seven passes is a minute or two per cell, and no two cells are in
+            // phase, so there is no moment where the field as a whole comes back round.
+            float3 m = hash3(id.x * 35.2 + id.y * 2376.1 + mod(pass, 47.0) * 113.7);
+
+            float x = m.x - 0.5;
+            float y = UV.y * 20.0;
+            // WIDER WANDER. This was barely a tenth of a cell — true to the reference and
+            // invisible on a panel this size. A drop catches on something, slips sideways,
+            // and carries on; if that cannot be seen it may as well be falling straight.
+            // Frequency and phase come from the pass as well, so a drop does not merely
+            // start somewhere else — it takes a different route down.
+            x += sin(y * (0.78 + m.z * 0.6) + sin(y) + m.y * 6.2831)
+                * (0.5 - abs(x)) * (m.z - 0.5) * 2.4;
+            x *= 0.7;
+
 
             // IT SLOWS WHERE IT SLIPS. A drop does not wander for no reason — it catches
             // on something, hangs, tears sideways off it and drops again. So the sideways
@@ -229,7 +255,13 @@ object Weather {
             // must never decrease, so the wobble's slope has to stay under the ramp's. At
             // three cycles a fall that puts the ceiling near 0.053, and 0.045 sits under
             // it with room to spare.
-            float wob = sin(ti * 18.85 + n.z * 6.2831);
+            // AND IT DOES NOT ALWAYS FALL AT THE SAME RATE. The speed itself has to hold
+            // for a whole cycle or the drop would jump when it changed, but the SHAPE of
+            // the fall is free: bending the ramp gives one pass that breaks away and
+            // slows near the bottom and the next that hangs then goes. Monotonic, and it
+            // pins 0 to 0 and 1 to 1, so the cycle still starts and ends where it must.
+            ti = pow(ti, 0.62 + m.y * 0.9);
+            float wob = sin(ti * 18.85 + m.z * 6.2831);
             y = 1.0 - (ti + 0.045 * wob);
             // IT WAITS FOR ITS OWN WATER. The fade-out was crammed into the last tenth of
             // the cycle, so a drop blinked out while the trail it had just laid was still
@@ -264,7 +296,7 @@ object Weather {
             //
             // The spacing is the drop's own now, and sparser: fewer beads, further apart,
             // and no two runners leaving them at the same heights.
-            float by = fract(UV.y * (5.0 + n.x * 6.0) + n.z) + (st.y - 0.5);
+            float by = fract(UV.y * (5.0 + m.x * 6.0) + m.z) + (st.y - 0.5);
             float beads = smoothstep(0.11, 0.0, length(st - float2(x, by)))
                 * r * smoothstep(-0.02, 0.02, st.y - y) * 0.7;
 
@@ -292,7 +324,19 @@ object Weather {
             // A drop wipes a PATH. The same distance the trail is drawn against bounds the
             // clearing, so the glass is clear where the water actually went and misted
             // everywhere it did not.
-            float dry = smoothstep(FOG_RETURN, 0.0, since) * vis
+            //
+            // AND ONLY WHERE IT HAS ALREADY BEEN. `since` is clamped at zero, which is
+            // right for asking how long ago — but it means every pixel the drop has NOT
+            // reached yet also reads zero, and zero is "wet this instant". So the whole
+            // route ahead was wiped clear the moment the drop appeared, and then fogged
+            // back over as the drop caught up with it: the path arriving before the drop
+            // and receding behind it, which is precisely backwards.
+            //
+            // The trail never had this because it carries a forward gate. This is that
+            // gate, on the same subtraction: nothing is dry until the water has passed.
+            float dry = smoothstep(FOG_RETURN, 0.0, since)
+                * smoothstep(-0.02, 0.02, st.y - y)
+                * vis
                 * smoothstep(0.26, 0.06, cd);
             return float3(head + beads * linger, trail * linger, max(head, dry));
         }

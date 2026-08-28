@@ -1050,24 +1050,17 @@ class RearDialView(context: Context) : View(context) {
             }
             recorder.drawRenderNode(sceneNode)
             drawOverlays(canvas)
-            drawMist(canvas)
             return
         }
         drawFrame(canvas, overlays = true)
-        drawMist(canvas)
     }
 
     /**
-     * The condensation, over everything.
+     * The condensation, on the same glass as the drops.
      *
-     * LAST, AND ON THE OUTSIDE. Mist sits on the outer face of the glass with the whole
-     * panel behind it, so drawing it last is not a workaround, it is where it belongs —
-     * and it happens to be the only place it works. Underneath, it was a wide flat field
-     * for the panes to bend, and every place a pane's displaced read landed slightly wrong
-     * showed up as a block against it. Nothing samples what is drawn here.
-     *
-     * It needs no backdrop either. Mist is white with holes in it, so the shader paints
-     * its own alpha and there is nothing to hand it.
+     * Drawn by drawWeatheredGround immediately after the water, so the two are one surface
+     * and everything on the panel is in front of both. It needs no backdrop of its own:
+     * mist is white with holes in it, so the shader paints its own alpha.
      */
     private fun drawMist(canvas: Canvas) {
         if (config.weather != Weather.RAIN || width <= 0 || height <= 0) return
@@ -9794,6 +9787,16 @@ class RearDialView(context: Context) : View(context) {
             val layer = canvas.saveLayer(panelRect, null)
             canvas.drawRect(panelRect, weatherPaint)
             canvas.restoreToCount(layer)
+            // WITH THE WATER, NOT IN FRONT OF THE PANEL. The fog was drawn last, over
+            // everything, while the drops are part of the ground and sit behind the vinyl
+            // and the cards — so the weather was on both sides of the panel at once, half
+            // of it behind the record and half of it painted across the label.
+            //
+            // It was put out there while the rectangles were being blamed on the panes
+            // bending it. They were not; they were a missing term in the water itself, and
+            // with that fixed there is no reason for the fog to be anywhere but on the
+            // same pane of glass as the drops running down it.
+            drawMist(canvas)
             return
         }
         canvas.drawColor(groundColor)
