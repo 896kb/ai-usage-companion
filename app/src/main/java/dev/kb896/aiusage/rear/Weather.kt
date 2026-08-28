@@ -78,7 +78,10 @@ object Weather {
         // HOW HARD THE WATER BENDS WHAT IS UNDER IT. This is most of how visible a drop
         // is: there is no blur behind it any more — a downscaled one went blocky and was
         // taken out — so the bending has to carry the whole illusion on its own.
-        const float REFRACT = 52.0;
+        // Halved with the drops. A smaller lens bends less: kept where it was, the
+        // displacement would have been reaching further than the drop it belongs to,
+        // which smears rather than refracts.
+        const float REFRACT = 30.0;
 
         // How much of a fall's cycle a wet path survives. The cycle runs about four and a
         // half seconds, so this is roughly two.
@@ -116,19 +119,24 @@ object Weather {
             float3 n = hash3(id.x * 107.45 + id.y * 3543.654);
             float2 at = (n.xy - 0.5) * 0.7;
             float d = length(f - at);
-            return smoothstep(0.3, 0.0, d) * fract(n.z * 10.0) * life(0.06, fract(t + n.z));
+            return smoothstep(0.15, 0.0, d) * fract(n.z * 10.0) * life(0.06, fract(t + n.z));
         }
 
         // THE ONES THAT RUN. Returns how much water is here, and how much of it is trail.
         float2 running(float2 uv, float t) {
             float2 UV = uv;
-            uv.y += t * 0.72;
+            // NO SCROLLING GRID. The whole field slid at one rate, and that one rate was
+            // every drop's speed. The per-column offset underneath it — which the comment
+            // here used to claim gave them different speeds — staggers when a drop STARTS,
+            // not how fast it goes, so they arrived in step however much the phases were
+            // shuffled. Uniform motion is the thing that gives a shader away, and it was
+            // baked in at the top of this function.
+            //
+            // The lanes are still staggered, just not by the clock: a fixed offset per
+            // column, so the cells do not line up as rows.
             float2 grid = float2(8.0, 1.5);
+            uv.y += hash1(float2(floor(uv.x * grid.x), 0.0)) * 0.7;
             float2 id = floor(uv * grid);
-            // EVERY COLUMN ON ITS OWN CLOCK. Shifting each column by its own amount is
-            // what gives the drops different speeds and stops them arriving in ranks.
-            uv.y += hash1(float2(id.x, 0.0));
-            id = floor(uv * grid);
             float3 n = hash3(id.x * 35.2 + id.y * 2376.1);
             float2 st = fract(uv * grid) - float2(0.5, 0.0);
 
@@ -153,24 +161,48 @@ object Weather {
             // A plain ramp instead, with the arrival and departure handled by fading
             // rather than by moving. In flipped space the top of a cell is 1, so falling
             // is counting down.
-            float ti = fract(t + n.z);
-            y = 1.0 - ti;
+            // ITS OWN SPEED, spanning about eight to one — the slowest barely creeping,
+            // the fastest crossing while you watch it. SQUARED, so the spread leans slow:
+            // most water on a window is hardly moving and the occasional one runs. A
+            // linear spread puts too many in the middle, and a field of drops all going
+            // at roughly one speed is what this was trying to escape.
+            float speed = 0.38 + n.y * n.y * 2.9;
+            float ti = fract(t * speed + n.z);
+
+            // IT SLOWS WHERE IT SLIPS. A drop does not wander for no reason — it catches
+            // on something, hangs, tears sideways off it and drops again. So the sideways
+            // movement and the loss of speed are the SAME event, and driving both from one
+            // wobble is what makes it read as a cause rather than as two effects.
+            //
+            // The amplitude is bounded by the maths, not by taste: the vertical position
+            // must never decrease, so the wobble's slope has to stay under the ramp's. At
+            // three cycles a fall that puts the ceiling near 0.053, and 0.045 sits under
+            // it with room to spare.
+            float wob = sin(ti * 18.85 + n.z * 6.2831);
+            y = 1.0 - (ti + 0.045 * wob);
             float vis = smoothstep(0.0, 0.07, ti) * smoothstep(1.0, 0.90, ti);
 
             float d = length((st - float2(x, y)) * float2(1.0, 6.0));
-            float head = smoothstep(0.4, 0.0, d) * vis;
+            float head = smoothstep(0.2, 0.0, d) * vis;
 
             // The trail narrows behind the drop and only exists above it.
             float r = sqrt(smoothstep(1.0, y, st.y));
             float cd = abs(st.x - x);
-            float trail = smoothstep(0.23 * r, 0.15 * r * r, cd)
-                * smoothstep(-0.02, 0.02, st.y - y) * r * r * vis;
+            // Wider and wetter than it was. The trail is the part that lingers after the
+            // drop has gone, so it is most of what a wet window actually looks like, and
+            // it was drawn as though it were an afterthought of the drop.
+            float trail = smoothstep(0.15 * r, 0.08 * r * r, cd)
+                * smoothstep(-0.02, 0.02, st.y - y) * r * r * vis * 1.35;
 
             // THE PATTERN IT LEAVES. Water breaks up behind a runner into a chain of small
             // beads; a smooth streak reads as a scratch. Folding the height into repeats is
             // what makes the chain.
-            float by = fract(UV.y * 10.0) + (st.y - 0.5);
-            float beads = smoothstep(0.3, 0.0, length(st - float2(x, by)))
+            // MORE OF THEM, and smaller. What a runner leaves is not a stripe, it is a
+            // broken line of beads with gaps — and the gaps are what say it is water
+            // rather than a scratch. Ten repeats over a cell was a dotted line; fourteen
+            // with the drop's own wander threaded through reads as a path.
+            float by = fract(UV.y * 14.0) + (st.y - 0.5);
+            float beads = smoothstep(0.15, 0.0, length(st - float2(x, by)))
                 * r * smoothstep(-0.02, 0.02, st.y - y);
 
             // IT STAYS WET BEHIND THEM. A drop leaves a path and the path takes a while
@@ -203,6 +235,7 @@ object Weather {
         half4 main(float2 pos) {
             float2 uv = pos / size;
             float lit = 0.0;
+            float dim = 0.0;
             float2 off = float2(0.0, 0.0);
 
             if (mode < 0.5) {
@@ -224,10 +257,33 @@ object Weather {
                 float cy = water(wuv + float2(0.0, e), t).x;
                 // The y gradient is measured in flipped space, so it is negated on the way
                 // out — or the drops would bend light upward while falling down.
-                off = float2(cx - c.x, -(cy - c.x)) * REFRACT;
-                // The bright rim where the surface turns over. Raised well past where it
-                // started: at a fifth it was a suggestion of a highlight rather than one.
-                lit = c.x * amount * 0.22;
+                float2 nrm = float2(cx - c.x, -(cy - c.x));
+                off = nrm * REFRACT;
+                // LIT BY A DIRECTION, NOT BY HOW MUCH WATER IS THERE.
+                //
+                // Every drop looked like every other drop because the light was coverage
+                // times a constant: the middle of a drop is the middle of a drop, so they
+                // all came out the same shade of white with the same shape. Nothing in
+                // that says which way any surface is facing, which is the only thing that
+                // makes one bead look unlike its neighbour.
+                //
+                // The gradient computed above IS the surface normal — it is already being
+                // used to decide which way to bend the light — so the highlight is what it
+                // costs to ask where that normal points. A drop's left shoulder catches
+                // the light and its right does not; a fat slow one and a thin quick one
+                // face differently and now look it.
+                float slope = length(nrm) * 260.0;
+                float2 L = float2(-0.55, -0.83);
+                float ndl = dot(normalize(nrm + float2(1e-6, 1e-6)), L);
+                // Tight power, so it is a glint rather than a wash.
+                float spec = pow(max(ndl, 0.0), 5.0) * smoothstep(0.03, 0.25, slope);
+                // And no two regions of the glass are lit quite alike.
+                float vary = 0.55 + hash1(floor(uv * 7.0)) * 0.9;
+                lit = (spec * 1.15 * vary + c.x * 0.05) * amount;
+                // THE FAR SIDE GOES DARK. A steep edge throws light away from the eye, and
+                // a drop with a bright side and no dark side is a sticker.
+                dim = smoothstep(0.08, 0.45, slope) * 0.34 * amount
+                    * (1.0 - max(ndl, 0.0));
             } else {
                 for (float i = 0.0; i < 14.0; i += 1.0) {
                     float layer = 1.0 + i * 0.5 / (SNOW_SIZE * 2.0);
@@ -253,7 +309,8 @@ object Weather {
             }
 
             half4 c = ground.eval(pos + off * amount);
-            return half4(c.rgb + half3(lit, lit, lit) * c.a, c.a);
+            half3 rgb = c.rgb * half(1.0 - dim) + half3(lit, lit, lit) * c.a;
+            return half4(rgb, c.a);
         }
     """
 
