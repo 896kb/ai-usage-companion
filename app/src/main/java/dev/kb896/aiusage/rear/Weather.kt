@@ -56,6 +56,7 @@ object Weather {
      */
     private val WEATHER = """
         uniform shader content;
+        uniform shader blurred;
         uniform float2 size;
         uniform float time;
         uniform float mode;
@@ -69,6 +70,8 @@ object Weather {
             float2 uv = pos / size;
             float2 off = float2(0.0, 0.0);
             float lit = 0.0;
+            // How much water is over this pixel. Drives the focus, not just the bend.
+            float wet = 0.0;
 
             if (mode < 0.5) {
                 for (float i = 0.0; i < 2.0; i += 1.0) {
@@ -113,15 +116,20 @@ object Weather {
                     float m = max(drop, trail) * amount * has;
                     off += (rel / len) * m * (0.095 - i * 0.03);
                     lit += drop * amount * has * 0.38;
+                    // A drop is sharp; its trail is only half so, because the film it
+                    // leaves is thin and still scatters.
+                    wet = max(wet, has * max(drop, trail * 0.55));
                 }
             } else {
+                // Snow does not wet the glass, so nothing comes into focus. The pane is
+                // left exactly as sharp as it was.
+                wet = 1.0;
                 for (float i = 0.0; i < 3.0; i += 1.0) {
                     float scale = 9.0 + i * 7.0;
                     float2 st = uv * scale + float2(i * 5.1, 0.0);
                     float2 id = floor(st);
                     float2 f = fract(st) - 0.5;
                     float n = hash1(id + i * 31.0);
-                    float has = step(0.5, n) * edge;
                     float fall = fract(time * (0.05 + n * 0.07) + n * 4.1);
                     // Flakes wander sideways as they come down. Falling straight reads as
                     // dust rather than snow.
@@ -130,13 +138,30 @@ object Weather {
                     // already falling when it crosses the window, so it fades at both ends
                     // of its travel instead of arriving at one of them.
                     float edge = smoothstep(0.0, 0.12, fall) * smoothstep(1.0, 0.88, fall);
+                    float has = step(0.5, n) * edge;
                     float2 rel = f - float2(sway, -0.5 + fall);
                     float d = length(rel);
                     lit += smoothstep(0.125 - i * 0.022, 0.0, d) * amount * has * (1.25 - i * 0.25);
                 }
             }
 
-            half4 c = content.eval(pos + off * size);
+            // THE GLASS IS OUT OF FOCUS AND THE DROPS ARE NOT.
+            //
+            // This is the whole illusion, and it was the thing missing. Looking through a
+            // wet window, the pane itself is soft — you are not focused on it — while each
+            // droplet is a tiny sharp lens holding a bright inverted picture of what is
+            // behind it. Without the contrast the drops are only gentle distortions of an
+            // already-sharp image, which reads as smudges on the screen rather than water
+            // on a window.
+            //
+            // The blur is not computed here. Blurring per pixel means many taps and rain
+            // already costs six milliseconds a frame; instead the ground is blurred ONCE,
+            // when it changes, and handed in as a second input. Sharp where the water is,
+            // soft where it is not, for one extra lookup.
+            float water = clamp(wet, 0.0, 1.0);
+            half4 sharp = content.eval(pos + off * size);
+            half4 soft = blurred.eval(pos);
+            half4 c = mix(soft, sharp, half(water));
             return half4(c.rgb + half3(lit, lit, lit) * c.a, c.a);
         }
     """

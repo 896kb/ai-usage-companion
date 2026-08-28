@@ -9703,6 +9703,7 @@ class RearDialView(context: Context) : View(context) {
         // frame. This is one, for the whole panel, and there is no version of an animated
         // shader that avoids it: the uniform is the animation.
         val shader = Weather.shader
+        shader.setInputShader("blurred", blurredGround())
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
         shader.setFloatUniform("mode", if (config.weather == Weather.SNOW) 1f else 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
@@ -9718,6 +9719,58 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private val weatherNode = android.graphics.RenderNode("weather")
+
+    private var blurKey: String? = null
+    private var blurShader: android.graphics.BitmapShader? = null
+    private var blurBitmap: android.graphics.Bitmap? = null
+
+    /**
+     * The ground, out of focus — the pane a drop is sitting on.
+     *
+     * BLURRED BY BEING SMALL. Drawing the background into a bitmap a sixth of the panel's
+     * size and letting the sampler stretch it back is a box blur that the hardware does
+     * for free, and it is the only kind this can afford: a real blur means many taps per
+     * pixel, and rain already costs six milliseconds a frame with one.
+     *
+     * BUILT WHEN THE BACKGROUND CHANGES, not per frame — which is the same trick, and the
+     * same justification, as the luminance grid a few hundred lines up. The picture behind
+     * the rain is a photograph and a colour; neither moves between frames, so neither does
+     * this.
+     */
+    private fun blurredGround(): android.graphics.BitmapShader {
+        val key = (config.backdrop.imagePath ?: "-") + "|" + groundColor + "|" +
+            config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom +
+            "|" + width + "x" + height
+        blurShader?.let { if (key == blurKey) return it }
+        blurKey = key
+        val w = (width / BLUR_DIVISOR).coerceAtLeast(1)
+        val h = (height / BLUR_DIVISOR).coerceAtLeast(1)
+        blurBitmap?.recycle()
+        val bmp = android.graphics.Bitmap.createBitmap(
+            w, h, android.graphics.Bitmap.Config.ARGB_8888,
+        )
+        val into = Canvas(bmp)
+        into.scale(w / width.toFloat(), h / height.toFloat())
+        into.drawColor(groundColor)
+        drawBackdropImage(into)
+        blurBitmap = bmp
+        val made = android.graphics.BitmapShader(
+            bmp,
+            android.graphics.Shader.TileMode.CLAMP,
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+        // Stretched back to the panel's size, and stretched SMOOTHLY: nearest-neighbour
+        // here would give the blur visible square edges, which is a mosaic rather than a
+        // pane out of focus.
+        made.filterMode = android.graphics.BitmapShader.FILTER_MODE_LINEAR
+        made.setLocalMatrix(
+            android.graphics.Matrix().apply {
+                setScale(width.toFloat() / w, height.toFloat() / h)
+            },
+        )
+        blurShader = made
+        return made
+    }
 
     private fun drawBackdropImage(canvas: Canvas) {
         val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
@@ -11006,6 +11059,13 @@ class RearDialView(context: Context) : View(context) {
         private const val CLOCK_ROLL_MS = 260f
         private const val DATE_SIZE = 26f
         private const val DATE_BASELINE = 420f
+
+        /**
+         * How far down the ground is scaled before being stretched back, which IS the
+         * blur. Six is soft enough to read as out of focus and coarse enough that a drop
+         * sitting on it looks sharp by comparison.
+         */
+        private const val BLUR_DIVISOR = 6
 
         /** How many measured glyphs to keep. Eleven for a clock, a hundred for a charge. */
         private const val SDF_CACHE_MAX = 160
