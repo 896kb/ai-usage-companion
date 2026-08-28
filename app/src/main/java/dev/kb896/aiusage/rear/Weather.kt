@@ -37,7 +37,14 @@ object Weather {
      *
      * Drawn flat — as a colour with a shape — they look like dirt on the lens.
      *
-     * THREE LAYERS, at different scales and speeds. One grid of drops all the same size
+     * TWO LAYERS FOR RAIN, THREE FOR SNOW, and the difference is measured rather than
+     * chosen. Rain refracts and snow does not: rain's sample coordinate varies per pixel,
+     * which is a dependent read the GPU cannot prefetch, and it does more arithmetic per
+     * drop besides. Measured on the panel at three layers each, snow cost about a
+     * millisecond a frame and rain cost sixteen. Snow keeps its third layer because it is
+     * free; rain gives one up because it is not.
+     *
+     * LAYERS, at different scales and speeds. One grid of drops all the same size
      * falling at the same rate reads as a pattern, because it is one; the depth comes from
      * the near ones being larger and quicker than the far ones, which is parallax and the
      * cheapest convincing thing a shader can do.
@@ -64,29 +71,37 @@ object Weather {
             float lit = 0.0;
 
             if (mode < 0.5) {
-                for (float i = 0.0; i < 3.0; i += 1.0) {
-                    float scale = 7.0 + i * 5.0;
+                for (float i = 0.0; i < 2.0; i += 1.0) {
+                    float scale = 7.0 + i * 6.0;
                     float2 st = uv * float2(scale, scale * 0.62) + float2(i * 3.7, 0.0);
                     float2 id = floor(st);
                     float2 f = fract(st) - 0.5;
                     float n = hash1(id + i * 17.0);
-                    // Only some cells hold a drop. A drop in every one is a grid, and a
-                    // grid is the one thing rain never looks like.
-                    if (n < 0.55) { continue; }
                     float fall = fract(time * (0.16 + n * 0.26) + n * 7.3);
                     float2 dp = float2((n - 0.5) * 0.55, 0.5 - fall);
                     float2 rel = f - dp;
-                    float d = length(rel * float2(1.0, 1.35));
+                    // ONE length, reused. It was measured twice per drop — once squashed
+                    // for the drop's shape and once plain for the direction to push in —
+                    // and a square root is not the thing to buy twice in the innermost
+                    // loop of a full-panel shader.
+                    float len = max(length(rel), 0.0001);
+                    float d = len * (1.0 + 0.35 * abs(rel.y) / len);
                     float drop = smoothstep(0.17, 0.02, d);
                     // The trail: narrow, behind the drop, and fading with distance from
                     // it. Water leaves the glass wet where it has been.
                     float trail = smoothstep(0.055, 0.0, abs(rel.x))
                         * smoothstep(0.45, 0.0, rel.y)
                         * step(0.0, rel.y) * 0.4;
-                    float m = max(drop, trail) * amount;
-                    float len = max(length(rel), 0.0001);
-                    off += (rel / len) * m * (0.05 - i * 0.012);
-                    lit += drop * amount * 0.22;
+                    // MASKED, NOT BRANCHED. Only some cells hold a drop — a drop in every
+                    // one is a grid, and a grid is the one thing rain never looks like —
+                    // but `continue` makes neighbouring pixels take different paths, and a
+                    // fragment shader runs them in lockstep: every pixel pays for the
+                    // longest path any of its neighbours took. A multiply by zero costs
+                    // the same for all of them.
+                    float has = step(0.55, n);
+                    float m = max(drop, trail) * amount * has;
+                    off += (rel / len) * m * (0.05 - i * 0.015);
+                    lit += drop * amount * has * 0.22;
                 }
             } else {
                 for (float i = 0.0; i < 3.0; i += 1.0) {
@@ -95,14 +110,14 @@ object Weather {
                     float2 id = floor(st);
                     float2 f = fract(st) - 0.5;
                     float n = hash1(id + i * 31.0);
-                    if (n < 0.5) { continue; }
+                    float has = step(0.5, n);
                     float fall = fract(time * (0.05 + n * 0.07) + n * 4.1);
                     // Flakes wander sideways as they come down. Falling straight reads as
                     // dust rather than snow.
                     float sway = sin(time * 0.6 + n * 6.283) * 0.22;
                     float2 rel = f - float2(sway, 0.5 - fall);
                     float d = length(rel);
-                    lit += smoothstep(0.085 - i * 0.018, 0.0, d) * amount * (0.9 - i * 0.2);
+                    lit += smoothstep(0.085 - i * 0.018, 0.0, d) * amount * has * (0.9 - i * 0.2);
                 }
             }
 
