@@ -1050,10 +1050,40 @@ class RearDialView(context: Context) : View(context) {
             }
             recorder.drawRenderNode(sceneNode)
             drawOverlays(canvas)
+            drawMist(canvas)
             return
         }
         drawFrame(canvas, overlays = true)
+        drawMist(canvas)
     }
+
+    /**
+     * The condensation, over everything.
+     *
+     * LAST, AND ON THE OUTSIDE. Mist sits on the outer face of the glass with the whole
+     * panel behind it, so drawing it last is not a workaround, it is where it belongs —
+     * and it happens to be the only place it works. Underneath, it was a wide flat field
+     * for the panes to bend, and every place a pane's displaced read landed slightly wrong
+     * showed up as a block against it. Nothing samples what is drawn here.
+     *
+     * It needs no backdrop either. Mist is white with holes in it, so the shader paints
+     * its own alpha and there is nothing to hand it.
+     */
+    private fun drawMist(canvas: Canvas) {
+        if (config.weather != Weather.RAIN || width <= 0 || height <= 0) return
+        val shader = Weather.mist
+        shader.setFloatUniform("size", width.toFloat(), height.toFloat())
+        shader.setFloatUniform("mode", 0f)
+        shader.setFloatUniform("amount", Weather.AMOUNT)
+        shader.setFloatUniform(
+            "time", (frameNowMs % (Weather.PERIOD_S * 1000L).toLong()) / 1000f,
+        )
+        mistPaint.shader = shader
+        panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        canvas.drawRect(panelRect, mistPaint)
+    }
+
+    private val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /** The panel behind the panes, so they have something to bend. */
     private val sceneNode = android.graphics.RenderNode("panel")

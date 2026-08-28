@@ -63,7 +63,16 @@ object Weather {
      * than its forty, which is a desktop budget; the rest is as written, retimed for a
      * panel the size of a postcard.
      */
-    private val WEATHER = """
+    /**
+     * The uniforms and the water field, shared by both shaders below.
+     *
+     * TWO SHADERS, ONE FIELD. The drops and the mist are drawn in different passes — the
+     * drops behind the readout where they bend the background, the mist in front of
+     * everything where nothing samples it — but they have to agree exactly about where the
+     * water is, or the glass would be wiped clear somewhere the drops are not. Sharing the
+     * source is how they agree; it is the same function compiled into both.
+     */
+    private val COMMON = """
         uniform shader ground;
         uniform float2 size;
         uniform float time;
@@ -95,19 +104,12 @@ object Weather {
          */
         const float FOG_RETURN = 0.66;
         /**
-         * OFF, and it is not the fog that is broken.
+         * How thick the mist gets where nothing has wiped it.
          *
-         * The condensation looked right and brought the artefacts back with it — but the
-         * same artefacts survive without it, hidden. A glass pane bends what is behind it
-         * by sampling that node at a DISPLACED coordinate, which is the tile hazard this
-         * has hit all along; over a detailed photograph a mismatched tile is invisible,
-         * and over a large flat wash of mist it is a block. The fog did not create them,
-         * it gave them somewhere to show.
-         *
-         * Turning this up again without moving the weather in front of the panes will
-         * bring them straight back. See the note in RearDialView.drawWeatheredGround.
+         * Back on, now that it is drawn in front of the panes instead of underneath them
+         * — see MIST for why that is what made the difference.
          */
-        const float FOG = 0.0;
+        const float FOG = 0.26;
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
         const float SNOW_SPREAD = 0.5;
@@ -310,6 +312,9 @@ object Weather {
             );
         }
 
+    """
+
+    private val WEATHER = COMMON + """
         half4 main(float2 pos) {
             float2 uv = pos / size;
             float lit = 0.0;
@@ -393,21 +398,44 @@ object Weather {
             half4 col = ground.eval(pos + off * amount);
             half3 rgb = col.rgb * half(1.0 - dim) + half3(lit, lit, lit) * col.a;
 
-            // CONDENSATION, CLEARED BY THE WATER. A cold window mists over, and anything
-            // running down it wipes a clear path that slowly closes again — which is the
-            // detail that makes the drops look like they are ON something rather than
-            // floating in front of it.
-            //
-            // Mottled rather than even, because breath does not settle uniformly; two
-            // octaves is enough to stop it reading as a flat wash.
-            float haze = 0.55 * vnoise(uv * 9.0) + 0.45 * vnoise(uv * 23.0);
-            float fog = FOG * (0.55 + 0.75 * haze) * (1.0 - clear) * amount;
-            rgb = mix(rgb, half3(0.86, 0.90, 0.94) * col.a, half(fog));
+            // No fog here any more; it is drawn in front of the panes instead. See MIST.
             return half4(rgb, col.a);
         }
     """
 
+    /**
+     * The condensation, drawn in front of the panes rather than behind them.
+     *
+     * IT SAMPLES NOTHING, and that is the whole point of moving it. A pane bends what is
+     * behind it by reading that node at a displaced coordinate, and anything flat and
+     * wide underneath shows every place that read lands slightly wrong — which is what a
+     * wash of mist is, and why putting the fog in the ground made blocks appear that a
+     * detailed photograph had been hiding all along.
+     *
+     * Mist needs no backdrop. It is white with holes in it: opaque where the glass has
+     * fogged, clear where water has run. So it is its own shader, painting its own alpha,
+     * laid over the finished panel — which is also where condensation actually is, on the
+     * outer face of the glass with everything else behind it.
+     */
+    private val MIST = COMMON + """
+        half4 main(float2 pos) {
+            if (mode > 0.5) { return half4(0.0, 0.0, 0.0, 0.0); }
+            float2 uv = pos / size;
+            float2 wuv = float2(uv.x, 1.0 - uv.y);
+            float clear = water(wuv, time * 0.22).z;
+            // Mottled, because breath does not settle evenly and a flat wash reads as a
+            // filter over the panel rather than as something on the glass.
+            float haze = 0.55 * vnoise(uv * 9.0) + 0.45 * vnoise(uv * 23.0);
+            float a = FOG * (0.55 + 0.75 * haze) * (1.0 - clear) * amount;
+            a = clamp(a, 0.0, 1.0);
+            return half4(half3(0.88, 0.92, 0.96) * half(a), half(a));
+        }
+    """
+
+
     val shader: RuntimeShader by lazy { RuntimeShader(WEATHER) }
+
+    val mist: RuntimeShader by lazy { RuntimeShader(MIST) }
 
     /**
      * How hard it comes down.
