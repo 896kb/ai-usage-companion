@@ -75,7 +75,10 @@ object Weather {
             21.1212, 28.7312, 11.9312,
             21.8112, 14.7212, 61.3934
         );
-        const float REFRACT = 34.0;
+        // HOW HARD THE WATER BENDS WHAT IS UNDER IT. This is most of how visible a drop
+        // is: there is no blur behind it any more — a downscaled one went blocky and was
+        // taken out — so the bending has to carry the whole illusion on its own.
+        const float REFRACT = 78.0;
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
         const float SNOW_SPREAD = 0.5;
@@ -162,7 +165,12 @@ object Weather {
             float2 a = running(uv, t);
             float2 b = running(uv * 1.85 + float2(3.1, 0.0), t * 1.17);
             float c = still + a.x + b.x;
-            return float2(smoothstep(0.3, 1.0, c), max(a.y, b.y));
+            // A LOWER SILL, so the faint ones survive. This asked coverage to reach 0.3
+            // before it counted for anything and 1.0 before it counted fully — which threw
+            // away every drop that was merely present, and most of them are merely
+            // present. What was left was the handful of direct hits, which is why there
+            // seemed to be so little water.
+            return float2(smoothstep(0.10, 0.70, c), max(a.y, b.y));
         }
 
         half4 main(float2 pos) {
@@ -182,7 +190,9 @@ object Weather {
                 float cx = water(uv + float2(e, 0.0), t).x;
                 float cy = water(uv + float2(0.0, e), t).x;
                 off = float2(cx - c.x, cy - c.x) * REFRACT;
-                lit = c.x * amount * 0.20;
+                // The bright rim where the surface turns over. Raised well past where it
+                // started: at a fifth it was a suggestion of a highlight rather than one.
+                lit = c.x * amount * 0.55;
             } else {
                 for (float i = 0.0; i < 14.0; i += 1.0) {
                     float layer = 1.0 + i * 0.5 / (SNOW_SIZE * 2.0);
