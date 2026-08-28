@@ -64,8 +64,7 @@ object Weather {
      * panel the size of a postcard.
      */
     private val WEATHER = """
-        uniform shader content;
-        uniform shader blurred;
+        uniform shader ground;
         uniform float2 size;
         uniform float time;
         uniform float mode;
@@ -76,6 +75,9 @@ object Weather {
             21.1212, 28.7312, 11.9312,
             21.8112, 14.7212, 61.3934
         );
+
+        // How far a drop shifts what is behind it, in pixels at its strongest.
+        const float REFRACT = 46.0;
 
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
@@ -92,7 +94,6 @@ object Weather {
             float2 uv = pos / size;
             float2 off = float2(0.0, 0.0);
             float lit = 0.0;
-            float wet = 0.0;
 
             if (mode < 0.5) {
                 for (float L = 0.0; L < 2.0; L += 1.0) {
@@ -102,47 +103,64 @@ object Weather {
                     float2 id = floor(g);
                     float2 gv = fract(g) - 0.5;
                     float n = hash1(id + L * 19.0);
-                    float t = time * (0.55 + L * 0.25) + n * 6.2831;
+                    float n2 = hash1(id + L * 19.0 + 57.0);
+                    float t = time * (0.5 + L * 0.2) + n * 6.2831;
 
-                    // IT STICKS, THEN SLIDES. A drop on a window does not fall at a
-                    // constant rate: it clings, gathers, breaks loose, runs, and catches
-                    // again. A sine of a sine of a sine is a cheap way to say that — the
-                    // rate is never constant and never repeats on an obvious beat, which
-                    // is the whole difference between water and a bead on a wire.
-                    float y = -sin(t + sin(t + sin(t) * 0.5)) * 0.42;
+                    // TWO KINDS OF DROP, because a window has two. Most of what you see is
+                    // not moving: drops that landed, clung, and will sit there until
+                    // something knocks them loose. A minority are running. One behaviour
+                    // for both was the mistake — everything moved, so nothing read as
+                    // stuck, and a window where every drop slides is a windscreen at speed.
+                    float sliding = step(0.55, n2);
 
-                    // AND IT WANDERS. As it runs it is pulled sideways by whatever it
-                    // meets. The wander is strongest mid-cell and pinned at the edges, so
-                    // neighbouring drops do not all lean the same way.
+                    // DOWNWARD, ALWAYS. This was a sine, which is what made them float up
+                    // as well as down: a sine comes back. Water does not. The fall is a
+                    // sawtooth split into three runs, each one a pause and then a rush —
+                    // a drop gathers until its weight beats the surface tension holding
+                    // it, breaks loose, runs, and catches again. Strictly increasing, so
+                    // it can vary its speed as much as it likes and never reverse.
+                    float phase = fract(t * 0.11);
+                    float u = phase * 3.0;
+                    float slide = (floor(u) + smoothstep(0.42, 1.0, fract(u))) / 3.0;
+                    float y = mix((n2 - 0.5) * 0.7, -0.45 + slide * 0.9, sliding);
+
+                    // AND TWO LIVES. A clinging drop arrives all at once — it is there
+                    // before you noticed it land — and then goes slowly, drying or being
+                    // absorbed by a neighbour. Fast in, slow out. A runner simply enters
+                    // at the top and leaves at the bottom.
+                    float life = fract(t * 0.17 + n2 * 3.1);
+                    float alpha = mix(
+                        smoothstep(0.0, 0.04, life) * (1.0 - smoothstep(0.30, 1.0, life)),
+                        smoothstep(0.0, 0.05, phase) * (1.0 - smoothstep(0.88, 1.0, phase)),
+                        sliding
+                    );
+
+                    // It wanders as it runs, pulled sideways by whatever it meets —
+                    // strongest mid-cell and pinned at the edges, so neighbours do not all
+                    // lean the same way. A drop that is not going anywhere does not wander.
                     float w = uv.y * 9.0;
                     float x = (n - 0.5) * 0.75;
-                    x += (0.4 - abs(x)) * sin(3.0 * w) * pow(sin(w), 6.0) * 0.45;
+                    x += (0.4 - abs(x)) * sin(3.0 * w) * pow(sin(w), 6.0) * 0.45 * sliding;
 
                     float2 dropPos = (gv - float2(x, y)) / aspect;
-                    // Squashed along the direction of travel: a running drop is not round.
-                    dropPos.y *= 0.85;
-                    float drop = smoothstep(0.06, 0.028, length(dropPos));
+                    // Squashed along its travel: a running drop is not round, a sitting
+                    // one nearly is.
+                    dropPos.y *= mix(0.95, 0.82, sliding);
+                    float drop = smoothstep(0.062, 0.028, length(dropPos)) * alpha;
 
-                    // THE TRAIL IS BEADS, NOT A STREAK. Water left behind does not stay a
-                    // smooth line; it breaks into a chain of small drops. Folding the
-                    // trail's y into eight repeats per cell is what makes that chain, and
-                    // it is the detail that reads as rain rather than as scratches.
+                    // The trail is a chain of beads, and only a runner leaves one. Water
+                    // left behind breaks up; it does not stay a line.
                     float2 trailPos = (gv - float2(x, time * 0.25 * (1.0 + L * 0.3))) / aspect;
                     trailPos.y = (fract(trailPos.y * 8.0) - 0.5) / 8.0;
-                    float trail = smoothstep(0.035, 0.012, length(trailPos));
-
-                    // The wet path itself — where the drop has been, the glass is clear.
-                    // Bounded above by the drop so the trail cannot run ahead of it.
-                    float path = smoothstep(-0.05, 0.05, dropPos.y) * smoothstep(0.5, y, gv.y);
-                    trail *= path;
-                    float clear = path * smoothstep(0.055, 0.04, abs(dropPos.x));
+                    float trail = smoothstep(0.035, 0.012, length(trailPos))
+                        * smoothstep(-0.05, 0.05, dropPos.y)
+                        * smoothstep(0.5, y, gv.y)
+                        * sliding * alpha;
 
                     off += (drop * dropPos + trail * trailPos) * amount * (1.0 - L * 0.25);
-                    wet = max(wet, max(drop, max(clear * 0.75, trail * 0.6)) * amount);
                     lit += drop * amount * 0.30;
                 }
             } else {
-                wet = 1.0;
                 for (float i = 0.0; i < 14.0; i += 1.0) {
                     float layer = 1.0 + i * 0.5 / (SNOW_SIZE * 2.0);
                     float2 sc = uv * layer * SNOW_SCALE;
@@ -166,15 +184,32 @@ object Weather {
                 lit = clamp(lit, 0.0, 1.4);
             }
 
-            // THE PANE IS OUT OF FOCUS AND THE WATER IS NOT. Looking through a wet window
-            // the glass is soft — you are not focused on it — and every drop and every
-            // bead of its trail is a small sharp lens. That contrast is the effect; the
-            // displacement alone only smudges. The blur is prepared once when the
-            // background changes and handed in, so it costs one lookup rather than many.
-            float water = clamp(wet, 0.0, 1.0);
-            half4 sharp = content.eval(pos + off * size);
-            half4 soft = blurred.eval(pos);
-            half4 c = mix(soft, sharp, half(water));
+            // NO BLUR BEHIND IT, and the reason is worth keeping. An out-of-focus pane
+            // with sharp drops on it IS how a wet window reads, and it was built — but
+            // the only blur affordable per frame is a downscale stretched back, which is
+            // a box blur, and a box blur over a detailed picture does not go soft, it
+            // goes blocky. Pixelation is a worse lie than no blur at all.
+            //
+            // A real one would be a separable gaussian into a second node, prepared when
+            // the background changes rather than per frame. That is the way back to it if
+            // the focus contrast is ever wanted again.
+            // SAMPLED FROM A TEXTURE, NOT THROUGH A RENDER EFFECT.
+            //
+            // This read the backdrop through the effect's own input, which is what a
+            // RenderEffect is for and is wrong for anything that displaces. Skia renders
+            // an effect in TILES, and a sample taken away from the current pixel can land
+            // outside the tile's guaranteed region — where it returns nothing. That is
+            // where the artefacts came from, and the two symptoms told the same story in
+            // order: black blocks while the displacement was large and unclamped, flat
+            // bands once it was clamped to an edge.
+            //
+            // Snow never showed it because snow does not displace: its sample is always
+            // the pixel it is standing on, which is always inside the tile.
+            //
+            // The ground is handed in as an ordinary texture instead. A BitmapShader can
+            // be read anywhere, clamps at its edges by itself, and does not care how the
+            // work is tiled.
+            half4 c = ground.eval(pos + off * REFRACT);
             return half4(c.rgb + half3(lit, lit, lit) * c.a, c.a);
         }
     """
