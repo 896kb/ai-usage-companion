@@ -49,10 +49,19 @@ object Weather {
      * the near ones being larger and quicker than the far ones, which is parallax and the
      * cheapest convincing thing a shader can do.
      *
-     * Snow refracts almost nothing on purpose. A flake is opaque and dry — it sits ON the
-     * glass rather than wetting it — so it is drawn as a soft lit dot and the backdrop
-     * behind it is left alone. Making snow refract like rain was tried first and looked
-     * like rain that had forgotten how to fall.
+     * Snow refracts nothing on purpose. A flake is opaque and dry — it sits ON the glass
+     * rather than wetting it — so the backdrop behind it is left alone and nothing comes
+     * into focus. Making snow refract like rain was tried first and looked like rain that
+     * had forgotten how to fall.
+     *
+     * THE SNOWFALL IS ADAPTED FROM LUMINE'S MULTILAYER SNOWFALL, CC0, on Godot Shaders:
+     * https://godotshaders.com/shader/multilayer-snowfall-shader/ — public domain, so no
+     * obligation attaches, but it is worth saying where it came from. Three ideas in it
+     * are better than what was here: flakes shaped as diamonds rather than dots, a fall
+     * that slants differently per layer so the layers do not read as one, and a focal
+     * depth that drifts so the sharp plane moves through the fall. Fourteen layers rather
+     * than its forty, which is a desktop budget; the rest is as written, retimed for a
+     * panel the size of a postcard.
      */
     private val WEATHER = """
         uniform shader content;
@@ -62,6 +71,19 @@ object Weather {
         uniform float mode;
         uniform float amount;
 
+        const float3x3 NOISE = float3x3(
+            13.323122, 23.5112, 21.71123,
+            21.1212, 28.7312, 11.9312,
+            21.8112, 14.7212, 61.3934
+        );
+
+        const float SNOW_SIZE = 0.55;
+        const float SNOW_SCALE = 2.6;
+        const float SNOW_SPREAD = 0.5;
+        const float SNOW_WIND = 0.12;
+        const float SNOW_FALL = 0.22;
+        const float SNOW_WEIGHT = 1.25;
+
         float hash1(float2 p) {
             return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
         }
@@ -70,94 +92,85 @@ object Weather {
             float2 uv = pos / size;
             float2 off = float2(0.0, 0.0);
             float lit = 0.0;
-            // How much water is over this pixel. Drives the focus, not just the bend.
             float wet = 0.0;
 
             if (mode < 0.5) {
-                for (float i = 0.0; i < 2.0; i += 1.0) {
-                    float scale = 7.0 + i * 6.0;
-                    float2 st = uv * float2(scale, scale * 0.62) + float2(i * 3.7, 0.0);
-                    float2 id = floor(st);
-                    float2 f = fract(st) - 0.5;
-                    float n = hash1(id + i * 17.0);
-                    // DOWNWARD. A cell's y runs the way the screen's does — positive is
-                    // toward the bottom — and this had the drop at 0.5 minus its progress,
-                    // which walks it up the glass. Rain that rises is the one mistake an
-                    // audience does not need explaining.
-                    float fall = fract(time * (0.16 + n * 0.26) + n * 7.3);
-                    // IT ARRIVES, it does not enter. A drop on a window appears where it
-                    // lands and swells to its size in an instant; one that slides in from
-                    // the edge already full-size reads as a bead on a wire. The first
-                    // twelfth of its life is the landing, and the rest is the slide.
-                    float pop = smoothstep(0.0, 0.08, fall);
-                    float2 dp = float2((n - 0.5) * 0.55, -0.5 + fall);
-                    float2 rel = f - dp;
-                    // ONE length, reused. It was measured twice per drop — once squashed
-                    // for the drop's shape and once plain for the direction to push in —
-                    // and a square root is not the thing to buy twice in the innermost
-                    // loop of a full-panel shader.
-                    float len = max(length(rel), 0.0001);
-                    float d = len * (1.0 + 0.35 * abs(rel.y) / len);
-                    float drop = smoothstep(0.23, 0.02, d);
-                    // The trail: narrow, behind the drop, and fading with distance from
-                    // it. Water leaves the glass wet where it has been.
-                    // BEHIND it, which is now above it. Water leaves the glass wet where
-                    // it has been, and where it has been is up.
-                    float trail = smoothstep(0.075, 0.0, abs(rel.x))
-                        * smoothstep(0.45, 0.0, -rel.y)
-                        * step(0.0, -rel.y) * 0.45;
-                    // MASKED, NOT BRANCHED. Only some cells hold a drop — a drop in every
-                    // one is a grid, and a grid is the one thing rain never looks like —
-                    // but `continue` makes neighbouring pixels take different paths, and a
-                    // fragment shader runs them in lockstep: every pixel pays for the
-                    // longest path any of its neighbours took. A multiply by zero costs
-                    // the same for all of them.
-                    float has = step(0.55, n) * pop;
-                    float m = max(drop, trail) * amount * has;
-                    off += (rel / len) * m * (0.095 - i * 0.03);
-                    lit += drop * amount * has * 0.38;
-                    // A drop is sharp; its trail is only half so, because the film it
-                    // leaves is thin and still scatters.
-                    wet = max(wet, has * max(drop, trail * 0.55));
+                for (float L = 0.0; L < 2.0; L += 1.0) {
+                    float2 aspect = float2(1.7, 1.0);
+                    float cells = 5.0 + L * 3.0;
+                    float2 g = uv * cells * aspect + float2(L * 4.3, 0.0);
+                    float2 id = floor(g);
+                    float2 gv = fract(g) - 0.5;
+                    float n = hash1(id + L * 19.0);
+                    float t = time * (0.55 + L * 0.25) + n * 6.2831;
+
+                    // IT STICKS, THEN SLIDES. A drop on a window does not fall at a
+                    // constant rate: it clings, gathers, breaks loose, runs, and catches
+                    // again. A sine of a sine of a sine is a cheap way to say that — the
+                    // rate is never constant and never repeats on an obvious beat, which
+                    // is the whole difference between water and a bead on a wire.
+                    float y = -sin(t + sin(t + sin(t) * 0.5)) * 0.42;
+
+                    // AND IT WANDERS. As it runs it is pulled sideways by whatever it
+                    // meets. The wander is strongest mid-cell and pinned at the edges, so
+                    // neighbouring drops do not all lean the same way.
+                    float w = uv.y * 9.0;
+                    float x = (n - 0.5) * 0.75;
+                    x += (0.4 - abs(x)) * sin(3.0 * w) * pow(sin(w), 6.0) * 0.45;
+
+                    float2 dropPos = (gv - float2(x, y)) / aspect;
+                    // Squashed along the direction of travel: a running drop is not round.
+                    dropPos.y *= 0.85;
+                    float drop = smoothstep(0.06, 0.028, length(dropPos));
+
+                    // THE TRAIL IS BEADS, NOT A STREAK. Water left behind does not stay a
+                    // smooth line; it breaks into a chain of small drops. Folding the
+                    // trail's y into eight repeats per cell is what makes that chain, and
+                    // it is the detail that reads as rain rather than as scratches.
+                    float2 trailPos = (gv - float2(x, time * 0.25 * (1.0 + L * 0.3))) / aspect;
+                    trailPos.y = (fract(trailPos.y * 8.0) - 0.5) / 8.0;
+                    float trail = smoothstep(0.035, 0.012, length(trailPos));
+
+                    // The wet path itself — where the drop has been, the glass is clear.
+                    // Bounded above by the drop so the trail cannot run ahead of it.
+                    float path = smoothstep(-0.05, 0.05, dropPos.y) * smoothstep(0.5, y, gv.y);
+                    trail *= path;
+                    float clear = path * smoothstep(0.055, 0.04, abs(dropPos.x));
+
+                    off += (drop * dropPos + trail * trailPos) * amount * (1.0 - L * 0.25);
+                    wet = max(wet, max(drop, max(clear * 0.75, trail * 0.6)) * amount);
+                    lit += drop * amount * 0.30;
                 }
             } else {
-                // Snow does not wet the glass, so nothing comes into focus. The pane is
-                // left exactly as sharp as it was.
                 wet = 1.0;
-                for (float i = 0.0; i < 3.0; i += 1.0) {
-                    float scale = 9.0 + i * 7.0;
-                    float2 st = uv * scale + float2(i * 5.1, 0.0);
-                    float2 id = floor(st);
-                    float2 f = fract(st) - 0.5;
-                    float n = hash1(id + i * 31.0);
-                    float fall = fract(time * (0.05 + n * 0.07) + n * 4.1);
-                    // Flakes wander sideways as they come down. Falling straight reads as
-                    // dust rather than snow.
-                    float sway = sin(time * 0.6 + n * 6.283) * 0.22;
-                    // Downward, for the reason the rain is. A flake does not pop: it is
-                    // already falling when it crosses the window, so it fades at both ends
-                    // of its travel instead of arriving at one of them.
-                    float edge = smoothstep(0.0, 0.12, fall) * smoothstep(1.0, 0.88, fall);
-                    float has = step(0.5, n) * edge;
-                    float2 rel = f - float2(sway, -0.5 + fall);
-                    float d = length(rel);
-                    lit += smoothstep(0.125 - i * 0.022, 0.0, d) * amount * has * (1.25 - i * 0.25);
+                for (float i = 0.0; i < 14.0; i += 1.0) {
+                    float layer = 1.0 + i * 0.5 / (SNOW_SIZE * 2.0);
+                    float2 sc = uv * layer * SNOW_SCALE;
+                    float2 mv = float2(
+                        sc.y * (SNOW_SPREAD * fract(i * 7.238917) - SNOW_SPREAD * 0.5)
+                            - SNOW_WIND * time * 0.5,
+                        -time * SNOW_FALL / (1.0 + i * 0.015)
+                    );
+                    float2 fc = sc + mv;
+                    float3 ni = float3(floor(fc), 31.189 + i);
+                    float3 nv = floor(ni) * 0.00001 + fract(ni);
+                    float3 rnd = fract((31415.9 + nv) / fract(NOISE * nv));
+                    float2 sh = abs(fract(fc) - 0.5 + 0.9 * rnd.xy - 0.45);
+                    sh += 0.01 * abs(2.0 * fract(10.0 * fc.yx) - 1.0);
+                    float focal = 5.0 * sin(time * 0.1);
+                    float soft = 0.005 + 0.05 * min(0.5 * abs(i - 5.0 - focal), 1.0);
+                    float v = 0.6 * max(sh.x - sh.y, sh.x + sh.y) + max(sh.x, sh.y) - 0.01;
+                    lit += smoothstep(soft, -soft, v)
+                        * (rnd.x / (1.0 + 0.01 * i)) * amount * SNOW_WEIGHT;
                 }
+                lit = clamp(lit, 0.0, 1.4);
             }
 
-            // THE GLASS IS OUT OF FOCUS AND THE DROPS ARE NOT.
-            //
-            // This is the whole illusion, and it was the thing missing. Looking through a
-            // wet window, the pane itself is soft — you are not focused on it — while each
-            // droplet is a tiny sharp lens holding a bright inverted picture of what is
-            // behind it. Without the contrast the drops are only gentle distortions of an
-            // already-sharp image, which reads as smudges on the screen rather than water
-            // on a window.
-            //
-            // The blur is not computed here. Blurring per pixel means many taps and rain
-            // already costs six milliseconds a frame; instead the ground is blurred ONCE,
-            // when it changes, and handed in as a second input. Sharp where the water is,
-            // soft where it is not, for one extra lookup.
+            // THE PANE IS OUT OF FOCUS AND THE WATER IS NOT. Looking through a wet window
+            // the glass is soft — you are not focused on it — and every drop and every
+            // bead of its trail is a small sharp lens. That contrast is the effect; the
+            // displacement alone only smudges. The blur is prepared once when the
+            // background changes and handed in, so it costs one lookup rather than many.
             float water = clamp(wet, 0.0, 1.0);
             half4 sharp = content.eval(pos + off * size);
             half4 soft = blurred.eval(pos);
