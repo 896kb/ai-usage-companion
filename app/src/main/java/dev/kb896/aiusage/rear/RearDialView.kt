@@ -9771,22 +9771,19 @@ class RearDialView(context: Context) : View(context) {
     private fun drawWeatheredGround(canvas: Canvas) {
         if (weatherReady) {
             panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
-            // FLATTENED BEFORE ANYTHING SAMPLES IT.
+            // NO LAYER HERE, ANY MORE.
             //
-            // This is what the artefacts were. A glass pane bends whatever node is behind
-            // it by sampling that node — and the node now contained a rect painted with a
-            // RuntimeShader that DISPLACES its own reads. Asked to resolve a displaced
-            // shader from inside another sample, Skia gives up on whole tiles and leaves
-            // flat blocks the colour of whatever it had. Which is exactly what was seen:
-            // rectangles, taking their colour from their surroundings, only under GLASS,
-            // and never with snow — because snow is the one mode that does not displace.
+            // There was one, on the theory that a glass pane sampling a node that contains
+            // a self-displacing RuntimeShader makes Skia abandon whole tiles — which would
+            // have explained rectangles that appeared only under GLASS and never under
+            // snow, snow being the one mode that does not displace. It explained the
+            // evidence and it was wrong: the rectangles were a missing horizontal term in
+            // the water, and they outlived this layer by several commits.
             //
-            // A layer forces the weather to be rasterised into pixels at this point, so a
-            // pane that samples it afterwards is sampling an ordinary image. It costs one
-            // full-panel layer per frame, which is the price of the effect working at all.
-            val layer = canvas.saveLayer(panelRect, null)
+            // It cost a full-panel saveLayer every frame, which is the sort of thing that
+            // gets left behind when a fix is kept "just in case" — so it goes, and the
+            // weather paints straight onto the ground.
             canvas.drawRect(panelRect, weatherPaint)
-            canvas.restoreToCount(layer)
             // WITH THE WATER, NOT IN FRONT OF THE PANEL. The fog was drawn last, over
             // everything, while the drops are part of the ground and sit behind the vinyl
             // and the cards — so the weather was on both sides of the panel at once, half
