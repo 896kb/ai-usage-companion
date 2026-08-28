@@ -78,7 +78,7 @@ object Weather {
         // HOW HARD THE WATER BENDS WHAT IS UNDER IT. This is most of how visible a drop
         // is: there is no blur behind it any more — a downscaled one went blocky and was
         // taken out — so the bending has to carry the whole illusion on its own.
-        const float REFRACT = 78.0;
+        const float REFRACT = 52.0;
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
         const float SNOW_SPREAD = 0.5;
@@ -106,7 +106,7 @@ object Weather {
         // pop in fast, hold, and fade — and every third one barely shows at all, because a
         // window is not evenly wet.
         float clinging(float2 uv, float t) {
-            float2 g = uv * 34.0;
+            float2 g = uv * 21.0;
             float2 id = floor(g);
             float2 f = fract(g) - 0.5;
             float3 n = hash3(id.x * 107.45 + id.y * 3543.654);
@@ -119,7 +119,7 @@ object Weather {
         float2 running(float2 uv, float t) {
             float2 UV = uv;
             uv.y += t * 0.72;
-            float2 grid = float2(12.0, 2.0);
+            float2 grid = float2(8.0, 1.5);
             float2 id = floor(uv * grid);
             // EVERY COLUMN ON ITS OWN CLOCK. Shifting each column by its own amount is
             // what gives the drops different speeds and stops them arriving in ranks.
@@ -170,7 +170,7 @@ object Weather {
             // away every drop that was merely present, and most of them are merely
             // present. What was left was the handful of direct hits, which is why there
             // seemed to be so little water.
-            return float2(smoothstep(0.10, 0.70, c), max(a.y, b.y));
+            return float2(smoothstep(0.16, 0.85, c), max(a.y, b.y));
         }
 
         half4 main(float2 pos) {
@@ -180,19 +180,27 @@ object Weather {
 
             if (mode < 0.5) {
                 float t = time * 0.22;
-                float2 c = water(uv, t);
+                // Y IS UPSIDE DOWN BETWEEN THE TWO WORLDS. Every reference for this is
+                // written in GL, where the origin is bottom-left and y counts upward.
+                // AGSL puts the origin top-left and counts down, so the maths was carried
+                // over inverted and a fall came out as a rise. Flipped once here, so
+                // everything downstream reads the way it was written.
+                float2 wuv = float2(uv.x, 1.0 - uv.y);
+                float2 c = water(wuv, t);
                 // THE SURFACE OF THE WATER, BY DIFFERENCE. A drop bends light along its
                 // slope, and the slope is how fast coverage changes — so the normal is the
                 // gradient of the coverage field, taken by sampling it a step to each side.
                 // It is three evaluations rather than one, and it is what makes the drops
                 // read as rounded rather than as holes.
                 float e = 1.0 / max(size.x, 1.0);
-                float cx = water(uv + float2(e, 0.0), t).x;
-                float cy = water(uv + float2(0.0, e), t).x;
-                off = float2(cx - c.x, cy - c.x) * REFRACT;
+                float cx = water(wuv + float2(e, 0.0), t).x;
+                float cy = water(wuv + float2(0.0, e), t).x;
+                // The y gradient is measured in flipped space, so it is negated on the way
+                // out — or the drops would bend light upward while falling down.
+                off = float2(cx - c.x, -(cy - c.x)) * REFRACT;
                 // The bright rim where the surface turns over. Raised well past where it
                 // started: at a fifth it was a suggestion of a highlight rather than one.
-                lit = c.x * amount * 0.55;
+                lit = c.x * amount * 0.22;
             } else {
                 for (float i = 0.0; i < 14.0; i += 1.0) {
                     float layer = 1.0 + i * 0.5 / (SNOW_SIZE * 2.0);

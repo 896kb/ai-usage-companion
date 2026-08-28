@@ -9748,7 +9748,22 @@ class RearDialView(context: Context) : View(context) {
     private fun drawWeatheredGround(canvas: Canvas) {
         if (weatherReady) {
             panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+            // FLATTENED BEFORE ANYTHING SAMPLES IT.
+            //
+            // This is what the artefacts were. A glass pane bends whatever node is behind
+            // it by sampling that node — and the node now contained a rect painted with a
+            // RuntimeShader that DISPLACES its own reads. Asked to resolve a displaced
+            // shader from inside another sample, Skia gives up on whole tiles and leaves
+            // flat blocks the colour of whatever it had. Which is exactly what was seen:
+            // rectangles, taking their colour from their surroundings, only under GLASS,
+            // and never with snow — because snow is the one mode that does not displace.
+            //
+            // A layer forces the weather to be rasterised into pixels at this point, so a
+            // pane that samples it afterwards is sampling an ordinary image. It costs one
+            // full-panel layer per frame, which is the price of the effect working at all.
+            val layer = canvas.saveLayer(panelRect, null)
             canvas.drawRect(panelRect, weatherPaint)
+            canvas.restoreToCount(layer)
             return
         }
         canvas.drawColor(groundColor)
