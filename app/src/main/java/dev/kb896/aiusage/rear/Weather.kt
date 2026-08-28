@@ -229,7 +229,14 @@ object Weather {
             // it with room to spare.
             float wob = sin(ti * 18.85 + n.z * 6.2831);
             y = 1.0 - (ti + 0.045 * wob);
-            float vis = smoothstep(0.0, 0.07, ti) * smoothstep(1.0, 0.90, ti);
+            // IT WAITS FOR ITS OWN WATER. The fade-out was crammed into the last tenth of
+            // the cycle, so a drop blinked out while the trail it had just laid was still
+            // draining down toward it — the head gone and its own stream still arriving.
+            //
+            // A long tail instead: it arrives quickly, runs, and then goes over most of a
+            // quarter of the cycle, which is longer than the trail above it takes to
+            // finish coming down. Nothing pops out while something is still feeding it.
+            float vis = smoothstep(0.0, 0.05, ti) * smoothstep(1.0, 0.76, ti);
 
             float d = length((st - float2(x, y)) * float2(1.0, 6.0));
             float head = smoothstep(0.2, 0.0, d) * vis;
@@ -246,13 +253,18 @@ object Weather {
             // THE PATTERN IT LEAVES. Water breaks up behind a runner into a chain of small
             // beads; a smooth streak reads as a scratch. Folding the height into repeats is
             // what makes the chain.
-            // MORE OF THEM, and smaller. What a runner leaves is not a stripe, it is a
-            // broken line of beads with gaps — and the gaps are what say it is water
-            // rather than a scratch. Ten repeats over a cell was a dotted line; fourteen
-            // with the drop's own wander threaded through reads as a path.
-            float by = fract(UV.y * 14.0) + (st.y - 0.5);
-            float beads = smoothstep(0.15, 0.0, length(st - float2(x, by)))
-                * r * smoothstep(-0.02, 0.02, st.y - y);
+            // BEADS ON THE DROP'S OWN SPACING, not on the panel's.
+            //
+            // The interval was a fixed multiple of screen height, so every drop dropped a
+            // bead at the same heights — and since the drop is wandering sideways as it
+            // passes each one, what came out looked like a fresh static droplet planted at
+            // every turn. It was one grid pretending to be many trails.
+            //
+            // The spacing is the drop's own now, and sparser: fewer beads, further apart,
+            // and no two runners leaving them at the same heights.
+            float by = fract(UV.y * (5.0 + n.x * 6.0) + n.z) + (st.y - 0.5);
+            float beads = smoothstep(0.11, 0.0, length(st - float2(x, by)))
+                * r * smoothstep(-0.02, 0.02, st.y - y) * 0.7;
 
             // IT STAYS WET BEHIND THEM. A drop leaves a path and the path takes a while
             // to go — but the trail was tied to where the drop is NOW, so it vanished the
