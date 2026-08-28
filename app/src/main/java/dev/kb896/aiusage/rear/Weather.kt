@@ -86,6 +86,15 @@ object Weather {
         // How much of a fall's cycle a wet path survives. The cycle runs about four and a
         // half seconds, so this is roughly two.
         const float TRAIL_LIFE = 0.45;
+
+        /**
+         * How much of a cycle the glass stays clear before misting over again.
+         *
+         * A cycle is about four and a half seconds at the middle speed, so two thirds of
+         * one is roughly the three seconds a wiped window takes to fog back up.
+         */
+        const float FOG_RETURN = 0.66;
+        const float FOG = 0.30;
         const float SNOW_SIZE = 0.55;
         const float SNOW_SCALE = 2.6;
         const float SNOW_SPREAD = 0.5;
@@ -95,6 +104,19 @@ object Weather {
 
         float hash1(float2 p) {
             return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+        }
+
+        // Smooth value noise, for the mottle in the condensation. Four corners and a
+        // cubic blend — the cheapest thing that does not look like static.
+        float vnoise(float2 p) {
+            float2 i = floor(p);
+            float2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float a = hash1(i);
+            float b = hash1(i + float2(1.0, 0.0));
+            float c = hash1(i + float2(0.0, 1.0));
+            float d = hash1(i + float2(1.0, 1.0));
+            return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
         }
 
         float3 hash3(float n) {
@@ -123,7 +145,7 @@ object Weather {
         }
 
         // THE ONES THAT RUN. Returns how much water is here, and how much of it is trail.
-        float2 running(float2 uv, float t) {
+        float3 running(float2 uv, float t) {
             float2 UV = uv;
             // NO SCROLLING GRID. The whole field slid at one rate, and that one rate was
             // every drop's speed. The per-column offset underneath it — which the comment
@@ -215,27 +237,47 @@ object Weather {
             // cycle is a trail that lasts about two seconds.
             float since = max(0.0, st.y - y);
             float linger = smoothstep(TRAIL_LIFE, 0.0, since);
-            return float2(head + beads * linger, trail * linger);
+            // HOW RECENTLY THIS PIXEL WAS WET, which outlasts the trail you can see. The
+            // glass keeps clear for a while after the water has gone and only then mists
+            // over again — see the fog in main. Same subtraction, longer memory.
+            float dry = smoothstep(FOG_RETURN, 0.0, since) * vis;
+            return float3(head + beads * linger, trail * linger, max(head, dry));
         }
 
         // Everything on the glass at this point: coverage, and trail.
-        float2 water(float2 uv, float t) {
+        float3 water(float2 uv, float t) {
             float still = clinging(uv, t);
-            float2 a = running(uv, t);
-            float2 b = running(uv * 1.85 + float2(3.1, 0.0), t * 1.17);
-            float c = still + a.x + b.x;
+            float3 a = running(uv, t);
+            float3 b = running(uv * 1.85 + float2(3.1, 0.0), t * 1.17);
+            // THE TRAIL COUNTS AS WATER. It was computed by both layers, returned, and
+            // then never read — coverage took only the heads and the beads, so the streak
+            // a drop leaves had no way of reaching the screen at all. That is why there
+            // was no trail: not too faint, simply not connected.
+            //
+            // Weighted below the heads, because a trail is a film rather than a bead: it
+            // should bend the light and catch a little of it, not sit there looking like
+            // a drop that has been stretched.
+            float c = still + a.x + b.x + (a.y + b.y) * 0.65;
             // A LOWER SILL, so the faint ones survive. This asked coverage to reach 0.3
             // before it counted for anything and 1.0 before it counted fully — which threw
             // away every drop that was merely present, and most of them are merely
             // present. What was left was the handful of direct hits, which is why there
             // seemed to be so little water.
-            return float2(smoothstep(0.16, 0.85, c), max(a.y, b.y));
+            // A clinging drop clears the glass under it for as long as it sits there.
+            return float3(
+                smoothstep(0.16, 0.85, c),
+                max(a.y, b.y),
+                clamp(max(still * 3.0, max(a.z, b.z)), 0.0, 1.0)
+            );
         }
 
         half4 main(float2 pos) {
             float2 uv = pos / size;
             float lit = 0.0;
             float dim = 0.0;
+            // How clear the glass is here: 1 where water has just been, 0 where it has
+            // had time to mist over. Snow leaves it alone entirely.
+            float clear = 1.0;
             float2 off = float2(0.0, 0.0);
 
             if (mode < 0.5) {
@@ -246,7 +288,7 @@ object Weather {
                 // over inverted and a fall came out as a rise. Flipped once here, so
                 // everything downstream reads the way it was written.
                 float2 wuv = float2(uv.x, 1.0 - uv.y);
-                float2 c = water(wuv, t);
+                float3 c = water(wuv, t);
                 // THE SURFACE OF THE WATER, BY DIFFERENCE. A drop bends light along its
                 // slope, and the slope is how fast coverage changes — so the normal is the
                 // gradient of the coverage field, taken by sampling it a step to each side.
@@ -280,6 +322,7 @@ object Weather {
                 // And no two regions of the glass are lit quite alike.
                 float vary = 0.55 + hash1(floor(uv * 7.0)) * 0.9;
                 lit = (spec * 1.15 * vary + c.x * 0.05) * amount;
+                clear = c.z;
                 // THE FAR SIDE GOES DARK. A steep edge throws light away from the eye, and
                 // a drop with a bright side and no dark side is a sticker.
                 dim = smoothstep(0.08, 0.45, slope) * 0.34 * amount
@@ -308,9 +351,20 @@ object Weather {
                 lit = clamp(lit, 0.0, 1.4);
             }
 
-            half4 c = ground.eval(pos + off * amount);
-            half3 rgb = c.rgb * half(1.0 - dim) + half3(lit, lit, lit) * c.a;
-            return half4(rgb, c.a);
+            half4 col = ground.eval(pos + off * amount);
+            half3 rgb = col.rgb * half(1.0 - dim) + half3(lit, lit, lit) * col.a;
+
+            // CONDENSATION, CLEARED BY THE WATER. A cold window mists over, and anything
+            // running down it wipes a clear path that slowly closes again — which is the
+            // detail that makes the drops look like they are ON something rather than
+            // floating in front of it.
+            //
+            // Mottled rather than even, because breath does not settle uniformly; two
+            // octaves is enough to stop it reading as a flat wash.
+            float haze = 0.55 * vnoise(uv * 9.0) + 0.45 * vnoise(uv * 23.0);
+            float fog = FOG * (0.55 + 0.75 * haze) * (1.0 - clear) * amount;
+            rgb = mix(rgb, half3(0.86, 0.90, 0.94) * col.a, half(fog));
+            return half4(rgb, col.a);
         }
     """
 
