@@ -27,8 +27,8 @@ class InkTest {
     }
 
     @Test fun `mix moves each channel toward the target by t`() {
-        // 0x1D1F21 toward white by 0.08: 0x1D=29 -> 29 + (255-29)*0.08 = 47.08 -> 47
-        assertEquals(0xFF2F3134.toInt(), Ink.mix(0xFF1D1F21.toInt(), 0xFFFFFFFF.toInt(), 0.08f))
+        // 0x1D1F21 toward white by 0.08: 0x1D=29 -> 29 + (255-29)*0.08 = 47.08 -> 47; B: 33 + 222*0.08 = 50.76 -> 51
+        assertEquals(0xFF2F3133.toInt(), Ink.mix(0xFF1D1F21.toInt(), 0xFFFFFFFF.toInt(), 0.08f))
         // toward black by 0.12: 29 * 0.88 = 25.52 -> 26 (rounded)
         assertEquals(0xFF1A1B1D.toInt(), Ink.mix(0xFF1D1F21.toInt(), 0xFF000000.toInt(), 0.12f))
     }
