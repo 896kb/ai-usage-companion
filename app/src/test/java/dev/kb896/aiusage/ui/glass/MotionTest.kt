@@ -66,4 +66,15 @@ class MotionTest {
         assertEquals(1f, d.targetValue, 0f)
         assertTrue(d.value <= 1.001f)
     }
+
+    @Test fun `animateTo squashes while the value moves and lets go when it settles`() {
+        val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
+        d.animateTo(1f)
+        d.motion.advance(1f / 120f)
+        assertTrue("scale should be rising: ${d.scaleX}", d.scaleX > 1f)
+        settle(d.motion)
+        assertEquals(1f, d.value, 0.01f)
+        assertEquals(1f, d.scaleX, 0.01f)
+        assertEquals(0f, d.pressProgress, 0.01f)
+    }
 }

@@ -16,6 +16,9 @@ class Motion(private val view: View) {
     private var last = 0L
     private var running = false
 
+    /** Runs after every frame's stepping, before the view is invalidated. A control uses it to react to a spring arriving. */
+    var onFrame: (() -> Unit)? = null
+
     fun spring(stiffness: Float, dampingRatio: Float, threshold: Float, initial: Float): Spring =
         Spring(stiffness, dampingRatio, threshold, initial).also { springs += it }
 
@@ -32,6 +35,9 @@ class Motion(private val view: View) {
     fun advance(dt: Float): Boolean {
         var moving = false
         for (s in springs) if (s.step(dt)) moving = true
+        onFrame?.invoke()
+        // The hook may have set new targets — a release after an arrival — so ask again.
+        if (!moving) moving = springs.any { !it.settled }
         return moving
     }
 
@@ -112,6 +118,14 @@ class DampedDrag(
     private val scaleXSpring = motion.spring(250f, 0.6f, 0.001f, initialScale)
     private val scaleYSpring = motion.spring(250f, 0.7f, 0.001f, initialScale)
 
+    private var pendingRelease = false
+
+    init {
+        motion.onFrame = {
+            if (pendingRelease && valueSpring.settled) { pendingRelease = false; release() }
+        }
+    }
+
     private val span get() = range.endInclusive - range.start
 
     val value: Float get() = valueSpring.value
@@ -140,9 +154,10 @@ class DampedDrag(
     }
 
     fun animateTo(v: Float) {
+        // A tap is a press, a move, and a let-go; the let-go has to wait for the move.
         press()
         motion.animate(valueSpring, v.coerceIn(range))
-        release()
+        pendingRelease = true
     }
 
     fun snap(v: Float) { valueSpring.snap(v.coerceIn(range)) }
