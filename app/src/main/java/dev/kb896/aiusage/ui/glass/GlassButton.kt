@@ -56,6 +56,9 @@ open class GlassButton @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         if (!glass) { super.onDraw(canvas); return }
         val w = width.toFloat(); val h = height.toFloat(); val r = h / 2f
+        // A view mid-collapse or before its first layout has no height, and the press
+        // scale divides by it. Pane declines to draw at zero size; so does this.
+        if (w <= 0f || h <= 0f) return
         val scale = 1f + (4 * density / h) * press.progress
         canvas.save()
         canvas.scale(scale, scale, w / 2f, h / 2f)
@@ -106,6 +109,9 @@ class GlassIconButton @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         if (!glass) { super.onDraw(canvas); return }
         val w = width.toFloat(); val h = height.toFloat(); val r = h / 2f
+        // A view mid-collapse or before its first layout has no height, and the press
+        // scale divides by it. Pane declines to draw at zero size; so does this.
+        if (w <= 0f || h <= 0f) return
         val scale = 1f + (4 * density / h) * press.progress
         canvas.save()
         canvas.scale(scale, scale, w / 2f, h / 2f)
