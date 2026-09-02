@@ -1,0 +1,47 @@
+package dev.kb896.aiusage.ui.glass
+
+/**
+ * Colours keyed on what is behind a control, not on the system theme.
+ *
+ * The catalog keys light and dark on isSystemInDarkTheme(). Here the backdrop is a
+ * photograph, so one screen has light and dark regions at once; each control reads its
+ * own luminance cell and takes the catalog's light or dark value for it.
+ */
+object Ink {
+    const val LIGHT = 0.5f
+
+    fun isLight(luminance: Float) = luminance >= LIGHT
+
+    fun primary(luminance: Float): Int =
+        if (isLight(luminance)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+
+    fun secondary(luminance: Float): Int =
+        if (isLight(luminance)) 0x99000000.toInt() else 0x99FFFFFF.toInt()
+
+    /** The toggle's on colour. LiquidToggle.kt:56-57. */
+    fun on(luminance: Float): Int =
+        if (isLight(luminance)) 0xFF34C759.toInt() else 0xFF30D158.toInt()
+
+    /** The slider fill and the segmented selection. LiquidSlider.kt:59-60. */
+    fun accent(luminance: Float): Int =
+        if (isLight(luminance)) 0xFF0088FF.toInt() else 0xFF0091FF.toInt()
+
+    /** An inactive track. LiquidToggle.kt:59-60: grey at 0.2 light, 0.36 dark. */
+    fun track(luminance: Float): Int =
+        if (isLight(luminance)) 0x33787878 else 0x5C787880
+
+    /** The dialog scrim. DialogContent.kt:46-47. */
+    fun scrimAlpha(luminance: Float): Float = if (isLight(luminance)) 0.23f else 0.56f
+    fun scrimColor(luminance: Float): Int =
+        if (isLight(luminance)) 0xFF29293A.toInt() else 0xFF121212.toInt()
+
+    /** [colour] moved [t] of the way toward [toward], per channel, alpha kept. */
+    fun mix(colour: Int, toward: Int, t: Float): Int {
+        fun ch(shift: Int): Int {
+            val a = (colour shr shift) and 0xFF
+            val b = (toward shr shift) and 0xFF
+            return Math.round(a + (b - a) * t).coerceIn(0, 255)
+        }
+        return (colour and 0xFF000000.toInt()) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+    }
+}
