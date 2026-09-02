@@ -23,4 +23,11 @@ class PaneTest {
         val lum = Pane.draw(canvas, view, 0f, 0f, 10f, 10f, 4f, 0x14FFFFFF)
         assertEquals(Pane.FALLBACK_LUMINANCE, lum, 0f)
     }
+
+    /** RadialGradient rejects a zero radius; a glow on an unlaid-out pane must not reach it. */
+    @Test fun `glow on a zero-size rect does not throw`() {
+        val canvas = Canvas(Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888))
+        Pane.glow(canvas, 5f, 5f, 5f, 5f, 2f, progress = 1f, x = 5f, y = 5f)
+        Pane.glow(canvas, 0f, 0f, 10f, 0f, 2f, progress = 1f, x = 5f, y = 0f)
+    }
 }

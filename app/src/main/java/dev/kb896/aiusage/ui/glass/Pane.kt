@@ -101,8 +101,10 @@ object Pane {
      */
     fun glow(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float,
              radius: Float, progress: Float, x: Float, y: Float) {
-        if (progress <= 0f) return
         val w = right - left; val h = bottom - top
+        // A RadialGradient with no radius throws, and a pane mid-collapse or before its
+        // first layout has none — the same case draw already declines to draw.
+        if (progress <= 0f || w <= 0f || h <= 0f) return
         rect.set(left, top, right, bottom)
         paint.blendMode = BlendMode.PLUS
         paint.shader = null; paint.style = Paint.Style.FILL
