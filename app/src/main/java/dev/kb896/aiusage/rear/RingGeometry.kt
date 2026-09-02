@@ -34,7 +34,8 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
          * The lens radius, also measured — the calibration ruler was aligned to the
          * lens *outline*, so this is the edge of the camera itself.
          */
-        private const val LENS_RADIUS = 108f
+        /** Public so the weather can steer round the lens; see Weather. */
+        const val LENS_RADIUS = 108f
 
         /**
          * How far outside the lens edge the ring's centreline sits.

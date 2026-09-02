@@ -1062,12 +1062,29 @@ class RearDialView(context: Context) : View(context) {
      * and everything on the panel is in front of both. It needs no backdrop of its own:
      * mist is white with holes in it, so the shader paints its own alpha.
      */
+    /**
+     * Where the cameras are, for the water to go round.
+     *
+     * The ring layout's centres ARE the lens centres — that is what the calibration
+     * measured — and the lens radius is the measured one, not the ring's: the ring is
+     * drawn around the lens, and the drops ride it. Not drifted with the readout,
+     * because the cameras do not drift; they are the one thing on this panel that is
+     * exactly where it is.
+     */
+    private fun setLenses(shader: android.graphics.RuntimeShader) {
+        val lay = config.ringLayout
+        val r = PanelGeometry.LENS_RADIUS
+        shader.setFloatUniform("lensA", lay.cx.toFloat(), lay.cyFirst.toFloat(), r)
+        shader.setFloatUniform("lensB", lay.cx.toFloat(), lay.cySecond.toFloat(), r)
+    }
+
     private fun drawMist(canvas: Canvas) {
         if (config.weather != Weather.RAIN || width <= 0 || height <= 0) return
         val shader = Weather.mist
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
         shader.setFloatUniform("mode", 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
+        setLenses(shader)
         shader.setFloatUniform(
             "time", (frameNowMs % (Weather.PERIOD_S * 1000L).toLong()) / 1000f,
         )
@@ -9748,6 +9765,7 @@ class RearDialView(context: Context) : View(context) {
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
         shader.setFloatUniform("mode", if (config.weather == Weather.SNOW) 1f else 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
+        setLenses(shader)
         shader.setFloatUniform(
             "time", (frameNowMs % (Weather.PERIOD_S * 1000L).toLong()) / 1000f,
         )
