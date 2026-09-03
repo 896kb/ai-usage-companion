@@ -1276,8 +1276,7 @@ GLASS — both SIL Open Font License 1.1.
 GLASS is built on [AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) by
 Kyant0, Apache 2.0. Its AGSL is vendored rather than depended on — the shaders are used
 directly against a Canvas here, where the library is written for Compose — with the licence
-notice kept alongside. Its glyphs are **Material Symbols Rounded** and the front screen's
-are **Material Icons**, both Apache 2.0, from
+notice kept alongside. The front screen's glass controls — the card, toggle, segmented choice, button, slider and dialog sheet under `ui/glass/` — are ports of the components in its catalog app, rebuilt as Views; each file names the catalog file it came from. Its glyphs are **Material Symbols Rounded** and the front screen's are **Material Icons**, both Apache 2.0, from
 [material-design-icons](https://github.com/google/material-design-icons). ORIGINAL's glyphs
 are traced from Nerd Fonts into pixel rectangles rather than bundled.
 
