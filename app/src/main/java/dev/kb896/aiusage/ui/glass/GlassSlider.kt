@@ -1,0 +1,77 @@
+package dev.kb896.aiusage.ui.glass
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.util.AttributeSet
+import android.view.MotionEvent
+import android.widget.SeekBar
+
+/**
+ * The advanced sliders, ported from catalog/components/LiquidSlider.kt (Apache 2.0).
+ *
+ * SeekBar keeps the progress, the range and the touch handling — those are right and
+ * tested by the platform. Under GLASS it is only asked to stop drawing: a 6dp capsule
+ * track with the filled part in the accent, and a 40x24dp thumb of glass that swells
+ * to 1.5x while held. Under ORIGINAL nothing here runs and the PanelSeekBar style applies.
+ */
+class GlassSlider @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null,
+) : SeekBar(context, attrs), Glassy {
+
+    val glass = UiTheme.isGlass(context)
+    private val density = context.resources.displayMetrics.density
+    private val press = PressSpring(this)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val track = RectF()
+    private val fill = RectF()
+
+    init {
+        if (glass) {
+            thumb = null
+            progressDrawable = null
+            splitTrack = false
+            val side = (20 * density).toInt(); val vert = (14 * density).toInt()
+            setPadding(side, vert, side, vert)
+            minimumHeight = (48 * density).toInt()
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (glass) press.onTouch(event)
+        return super.onTouchEvent(event)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (!glass) { super.onDraw(canvas); return }
+        // The track/fill colours read the backdrop directly, the same way GlassCard's
+        // ink() does — Pane.draw below only wants a shader lens for the thumb itself.
+        val lum = if (Backdrop.bitmap == null) Pane.FALLBACK_LUMINANCE else Backdrop.luminanceOf(this)
+        val left = paddingLeft.toFloat(); val right = (width - paddingRight).toFloat()
+        val cy = height / 2f
+        val th = 6 * density
+        track.set(left, cy - th / 2f, right, cy + th / 2f)
+        paint.color = Ink.track(lum)
+        canvas.drawRoundRect(track, th / 2f, th / 2f, paint)
+        // max == 0 would divide by zero; a slider with no range is drawn empty.
+        val frac = if (max == 0) 0f else progress.toFloat() / max
+        val x = left + (right - left) * frac
+        fill.set(left, track.top, x, track.bottom)
+        paint.color = Ink.accent(lum)
+        canvas.drawRoundRect(fill, th / 2f, th / 2f, paint)
+
+        val tw = 40 * density; val ht = 24 * density
+        val scale = 1f + 0.5f * press.progress
+        canvas.save()
+        canvas.scale(scale, scale, x, cy)
+        Pane.draw(canvas, this, x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f, tint = 0, clear = true)
+        // A white overlay that fades out under the finger — clear glass at rest, plain
+        // white the instant it is grabbed — same trick as GlassSwitch's thumb.
+        paint.color = 0xFFFFFF or (((1f - press.progress) * 255).toInt() shl 24)
+        canvas.drawRoundRect(x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f, ht / 2f, paint)
+        canvas.restore()
+    }
+}
