@@ -54,7 +54,9 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
         setMeasuredDimension((64 * density).toInt(), (28 * density).toInt())
     }
 
-    override fun performClick(): Boolean { super.performClick(); toggle(); return true }
+    // Toggle before the click listeners run, as CompoundButton does, so a listener that
+    // reads isChecked sees the state the click produced.
+    override fun performClick(): Boolean { toggle(); super.performClick(); return true }
 
     // A cached local bitmap is sized to the view at the moment it was first drawn; if the
     // view is ever resized (the switch measures itself fixed, so this rarely fires) a

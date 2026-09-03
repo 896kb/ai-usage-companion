@@ -44,4 +44,12 @@ class GlassSwitchTest {
         s.layout(0, 0, 0, 0)
         s.draw(Canvas(Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)))
     }
+
+    @Test fun `a click listener sees the state the click produced`() {
+        val s = GlassSwitch(context)
+        var seen: Boolean? = null
+        s.setOnClickListener { seen = s.isChecked }
+        s.performClick()
+        assertEquals(true, seen)
+    }
 }
