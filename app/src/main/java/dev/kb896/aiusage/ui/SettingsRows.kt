@@ -12,6 +12,7 @@ import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
+import dev.kb896.aiusage.ui.glass.*
 
 /**
  * Builds settings controls in code rather than in XML.
@@ -26,6 +27,10 @@ object SettingsRows {
 
     /** Swatches per row. Three fits the names and keeps related colours on one line. */
     private const val COLUMNS = 3
+
+    /** Which set of controls a row builds. Read once per row, not cached, so a theme
+     *  change picked up on rebuild needs nothing here to invalidate. */
+    private fun glass(context: Context) = UiTheme.isGlass(context)
 
     private fun label(context: Context, text: String) = TextView(context).apply {
         this.text = text
@@ -83,10 +88,21 @@ object SettingsRows {
             layoutParams = LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(context, 8) }
         }
-        val block = View(context).apply {
-            setBackgroundColor(swatch.color)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34))
+        // Declared as View, not GlassChip: under ORIGINAL this is a plain background-colour
+        // View exactly as before, and the two shapes only meet again at the click listener
+        // below, which branches on the runtime type.
+        val block: View = if (glass(context)) {
+            GlassChip(context).apply {
+                colour = swatch.color
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34))
+            }
+        } else {
+            View(context).apply {
+                setBackgroundColor(swatch.color)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34))
+            }
         }
         // Reopen on the CURRENT colour, not the one this row was built with.
         //
@@ -98,7 +114,7 @@ object SettingsRows {
         block.setOnClickListener {
             ColorPickerDialog.show(context, current) { picked ->
                 current = picked
-                block.setBackgroundColor(picked)
+                if (block is GlassChip) block.colour = picked else block.setBackgroundColor(picked)
                 swatch.onChange(picked)
             }
         }
@@ -144,6 +160,18 @@ object SettingsRows {
      * away from the TIME toggle is a puzzle rather than a control.
      */
     private fun swatch(context: Context, colour: Int, onPick: (Int) -> Unit): View {
+        if (glass(context)) {
+            val chip = GlassChip(context).apply {
+                this.colour = colour
+                layoutParams = LinearLayout.LayoutParams(dp(context, 44), dp(context, 26))
+                    .apply { marginStart = dp(context, 12) }
+            }
+            var current = colour
+            chip.setOnClickListener {
+                ColorPickerDialog.show(context, current) { picked -> current = picked; chip.colour = picked; onPick(picked) }
+            }
+            return chip
+        }
         val chip = View(context).apply {
             setBackgroundColor(colour)
             layoutParams = LinearLayout.LayoutParams(dp(context, 44), dp(context, 26))
@@ -273,7 +301,10 @@ object SettingsRows {
         onClick: () -> Unit,
     ): android.widget.Button {
         val context = parent.context
-        return android.widget.Button(context).apply {
+        // GlassButton IS-A Button, so callers that stash the return value as
+        // android.widget.Button (AccountSettingsSheet's reveal toggle) keep working under
+        // either theme without knowing which one built it.
+        return (if (glass(context)) GlassButton(context) else android.widget.Button(context)).apply {
             text = "$name  ›"
             textSize = 14f
             setTextColor(Panel.Palette.FG)
@@ -308,7 +339,9 @@ object SettingsRows {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        row.addView(android.widget.Button(context).apply {
+        // Same GlassButton-under-GLASS substitution as navigationButton, for both the
+        // row's own button and its move handle.
+        row.addView((if (glass(context)) GlassButton(context) else android.widget.Button(context)).apply {
             text = "$name  ›"
             textSize = 14f
             setTextColor(Panel.Palette.FG)
@@ -317,7 +350,7 @@ object SettingsRows {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { onClick() }
         })
-        row.addView(android.widget.Button(context).apply {
+        row.addView((if (glass(context)) GlassButton(context) else android.widget.Button(context)).apply {
             text = "↑"
             textSize = 15f
             isEnabled = canMoveUp
@@ -335,25 +368,46 @@ object SettingsRows {
         onChange: (Boolean) -> Unit,
     ) {
         val context = parent.context
-        // A Switch, not a CheckBox. These are settings that take effect immediately and
-        // stay that way, which is what a switch means; a checkbox reads as one of several
-        // selections waiting to be confirmed, and there is nothing here to confirm.
-        parent.addView(android.widget.Switch(context).apply {
+        if (!glass(context)) {
+            // A Switch, not a CheckBox. These are settings that take effect immediately
+            // and stay that way, which is what a switch means; a checkbox reads as one of
+            // several selections waiting to be confirmed, and there is nothing here to
+            // confirm.
+            parent.addView(android.widget.Switch(context).apply {
+                text = name
+                textSize = 13f
+                isChecked = initial
+                setTextColor(Panel.Palette.FG)
+                typeface = context.resources.getFont(R.font.departure_mono)
+                // Boxy and green, matching the sliders and the panel. The platform's pill
+                // and circle are the only rounded things in an app made of rectangles.
+                thumbDrawable = context.getDrawable(R.drawable.switch_thumb)
+                trackDrawable = context.getDrawable(R.drawable.switch_track)
+                // The tints would multiply over drawables that already carry their own
+                // colours, turning the green muddy.
+                thumbTintList = null
+                trackTintList = null
+                setOnCheckedChangeListener { _, checked -> onChange(checked) }
+            }, rowParams(dp(context, 6)))
+            return
+        }
+        // Under GLASS the platform Switch is a GlassSwitch beside its own label instead
+        // of using its built-in text — the liquid track has no room in its 64x28dp frame
+        // for a label the way the platform switch draws one inline.
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(TextView(context).apply {
             text = name
             textSize = 13f
-            isChecked = initial
-            setTextColor(Panel.Palette.FG)
             typeface = context.resources.getFont(R.font.departure_mono)
-            // Boxy and green, matching the sliders and the panel. The platform's pill
-            // and circle are the only rounded things in an app made of rectangles.
-            thumbDrawable = context.getDrawable(R.drawable.switch_thumb)
-            trackDrawable = context.getDrawable(R.drawable.switch_track)
-            // The tints would multiply over drawables that already carry their own
-            // colours, turning the green muddy.
-            thumbTintList = null
-            trackTintList = null
-            setOnCheckedChangeListener { _, checked -> onChange(checked) }
-        }, rowParams(dp(context, 6)))
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(GlassSwitch(context).apply {
+            setCheckedSilently(initial)
+            onCheckedChange = onChange
+        })
+        parent.addView(row, rowParams(dp(context, 8)))
     }
 
     /**
@@ -371,6 +425,15 @@ object SettingsRows {
         onChange: (Int) -> Unit,
     ) {
         val context = parent.context
+        // GlassSegmented replaces the Spinner outright under GLASS: a dropdown menu opens
+        // an opaque platform overlay that the theme has no way to make of glass, and with
+        // three or four options a segmented control reads faster than a menu anyway.
+        if (glass(context)) {
+            parent.addView(label(context, name), rowParams(dp(context, 10)))
+            parent.addView(GlassSegmented(context, options, selected).apply { this.onChange = onChange },
+                rowParams(dp(context, 4)))
+            return
+        }
         val spinner = Spinner(context).apply {
             // A custom adapter, because a Spinner inflates its rows from a SYSTEM layout
             // — the closed view and every dropdown item — so neither the palette nor the
