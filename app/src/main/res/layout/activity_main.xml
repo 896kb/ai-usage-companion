@@ -67,6 +67,14 @@
             android:orientation="vertical"
             android:padding="24dp">
 
+        <!-- Section: recovery instructions, sliders and text unchanged, only the card
+             that groups them is new. -->
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_recovery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <!-- Recovery instructions, shown only for the failure state that applies.
              recovery_command is deliberately an EditText inside a HorizontalScrollView,
              not a wrapping TextView: it must stay selectable, on one line, and
@@ -109,6 +117,8 @@
             android:textSize="13sp"
             android:visibility="gone" />
 
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <View
             android:id="@+id/rule_1"
             android:layout_width="match_parent"
@@ -123,17 +133,31 @@
             android:textSize="12sp"
             android:visibility="gone" />
 
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_setup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <LinearLayout
             android:id="@+id/setup_rows"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
 
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <View
             android:id="@+id/rule_2"
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginTop="16dp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_control"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -142,7 +166,7 @@
             android:baselineAligned="false"
             android:orientation="horizontal">
 
-            <Button
+            <dev.kb896.aiusage.ui.glass.GlassButton
                 android:id="@+id/show_button"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -151,7 +175,7 @@
                 android:text="Show on back"
                 android:textSize="13sp" />
 
-            <Button
+            <dev.kb896.aiusage.ui.glass.GlassButton
                 android:id="@+id/hide_button"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -160,6 +184,8 @@
                 android:text="Hide"
                 android:textSize="13sp" />
         </LinearLayout>
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
 
 
         <View
@@ -175,6 +201,12 @@
             android:layout_marginTop="16dp"
             android:text="PANEL"
             android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
         <TextView
             android:id="@+id/settings_title_label"
@@ -220,6 +252,8 @@
             android:layout_height="wrap_content"
             android:orientation="vertical" />
 
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <TextView
             android:id="@+id/settings_art_label"
             android:layout_width="match_parent"
@@ -228,13 +262,21 @@
             android:text="BOTTOM ARTWORK"
             android:textSize="11sp" />
 
-        <Button
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_art"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <dev.kb896.aiusage.ui.glass.GlassButton
             android:id="@+id/art_pick"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="Choose an image"
             android:textSize="13sp" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
 
         <!--
             ONE SECTION FOR ONE THING. The panel has a single background and it is either
@@ -255,6 +297,12 @@
             android:text="BACKGROUND"
             android:textSize="11sp" />
 
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_backdrop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -262,7 +310,7 @@
             android:baselineAligned="false"
             android:orientation="horizontal">
 
-            <Button
+            <dev.kb896.aiusage.ui.glass.GlassButton
                 android:id="@+id/backdrop_color"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -270,7 +318,7 @@
                 android:text="COLOR"
                 android:textSize="13sp" />
 
-            <Button
+            <dev.kb896.aiusage.ui.glass.GlassButton
                 android:id="@+id/backdrop_pick"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -279,7 +327,7 @@
                 android:text="IMAGE"
                 android:textSize="13sp" />
 
-            <ImageButton
+            <dev.kb896.aiusage.ui.glass.GlassIconButton
                 android:id="@+id/backdrop_clear"
                 android:layout_width="52dp"
                 android:layout_height="match_parent"
@@ -289,10 +337,19 @@
                 android:src="@drawable/ic_trash" />
         </LinearLayout>
 
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <View
+            android:id="@+id/rule_advanced"
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginTop="16dp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_advanced"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
         <TextView
             android:id="@+id/geo_heading"
@@ -331,7 +388,7 @@
             android:text="RING X"
             android:textSize="11sp" />
 
-        <SeekBar
+        <dev.kb896.aiusage.ui.glass.GlassSlider
             style="@style/PanelSeekBar"
             android:id="@+id/geo_cx"
             android:layout_width="match_parent"
@@ -345,7 +402,7 @@
             android:text="PERSONAL Y"
             android:textSize="11sp" />
 
-        <SeekBar
+        <dev.kb896.aiusage.ui.glass.GlassSlider
             style="@style/PanelSeekBar"
             android:id="@+id/geo_cy1"
             android:layout_width="match_parent"
@@ -359,7 +416,7 @@
             android:text="WORK Y"
             android:textSize="11sp" />
 
-        <SeekBar
+        <dev.kb896.aiusage.ui.glass.GlassSlider
             style="@style/PanelSeekBar"
             android:id="@+id/geo_cy2"
             android:layout_width="match_parent"
@@ -373,7 +430,7 @@
             android:text="RADIUS"
             android:textSize="11sp" />
 
-        <SeekBar
+        <dev.kb896.aiusage.ui.glass.GlassSlider
             style="@style/PanelSeekBar"
             android:id="@+id/geo_radius"
             android:layout_width="match_parent"
@@ -387,13 +444,13 @@
             android:text="STROKE"
             android:textSize="11sp" />
 
-        <SeekBar
+        <dev.kb896.aiusage.ui.glass.GlassSlider
             style="@style/PanelSeekBar"
             android:id="@+id/geo_stroke"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
-        <Button
+        <dev.kb896.aiusage.ui.glass.GlassButton
             android:id="@+id/geo_reset"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -402,6 +459,8 @@
             android:textSize="13sp" />
 
         </LinearLayout>
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
 
         <!--
           Diagnostics slot. Empty here and filled only by the debug variant — the views

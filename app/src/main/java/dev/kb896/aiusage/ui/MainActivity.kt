@@ -20,6 +20,7 @@ import dev.kb896.aiusage.auth.OAuthClient
 import dev.kb896.aiusage.auth.PkceChallenge
 import dev.kb896.aiusage.auth.TokenImport
 import dev.kb896.aiusage.data.Account
+import androidx.core.view.doOnLayout
 import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.ArtConfig
@@ -154,7 +155,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyPalette() {
-        findViewById<View>(R.id.root_host).setBackgroundColor(Panel.Palette.BG)
+        val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
+        val host = findViewById<View>(R.id.root_host)
+        if (glass) {
+            dev.kb896.aiusage.ui.glass.Backdrop.install(host)
+            dev.kb896.aiusage.ui.glass.Backdrop.track(findViewById(R.id.root_scroll))
+        } else {
+            host.setBackgroundColor(Panel.Palette.BG)
+        }
         // THE THEME'S FACE, not the panel's original one. This screen describes the panel,
         // and describing it in a face the panel does not use is the same mistake as a
         // preview drawn in the wrong colours.
@@ -180,6 +188,15 @@ class MainActivity : ComponentActivity() {
         }
         applyFont(findViewById(R.id.root_host))
 
+        if (glass) {
+            // The hairlines are the ORIGINAL screen's structure; cards are this one's.
+            listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings, R.id.rule_pinned, R.id.rule_advanced)
+                .forEach { findViewById<View>(it).visibility = View.GONE }
+            // Headings sit over the wallpaper, outside any card, so each takes its own cell.
+            host.doOnLayout { inkHeadings() }
+            return
+        }
+
         recoveryNote.setTextColor(Panel.Palette.FG)
         recoveryCommand.setTextColor(Panel.Palette.FG)
         recoveryDisplayAbsent.setTextColor(Panel.Palette.FG)
@@ -199,6 +216,15 @@ class MainActivity : ComponentActivity() {
         }
         findViewById<TextView>(R.id.geo_heading).setTextColor(Panel.Palette.WORK)
         findViewById<TextView>(R.id.geo_hint).setTextColor(Panel.Palette.DIM)
+    }
+
+    private fun inkHeadings() {
+        listOf(R.id.preview_heading, R.id.setup_heading, R.id.settings_heading,
+            R.id.settings_art_label, R.id.backdrop_heading).forEach { id ->
+            val v = findViewById<TextView>(id)
+            v.setTextColor(dev.kb896.aiusage.ui.glass.Ink.secondary(
+                dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(v)))
+        }
     }
 
     private fun wireActions() {
@@ -497,6 +523,7 @@ class MainActivity : ComponentActivity() {
      * is more code than throwing them away, and this list is short.
      */
     private fun buildSettingsRows() {
+        val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
         val container = findViewById<LinearLayout>(R.id.settings_rows)
         val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
         container.removeAllViews()
@@ -538,8 +565,10 @@ class MainActivity : ComponentActivity() {
             // The front screen is themed too, and it is already on screen. Everything
             // else here redraws through the preview; this has to re-run the sweep that
             // sets the face on views that were built under the previous theme.
-            applyPalette()
-            buildSettingsRows()
+            //
+            // The widgets differ in kind between the two themes; re-inflating under the
+            // new one is one path instead of two.
+            recreate()
         }
 
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
@@ -733,7 +762,7 @@ class MainActivity : ComponentActivity() {
         // easier to start over than to unpick, and "reinstall the app" was the only
         // way out. What made it dangerous was being one tap from a colour swatch, and
         // that is what the confirmation fixes.
-        Button(this).apply {
+        dev.kb896.aiusage.ui.glass.GlassButton(this).apply {
             text = "Reset every setting to its default"
             textSize = 14f
             // The one filled button in the app. Everything else is text on the panel's
@@ -741,8 +770,15 @@ class MainActivity : ComponentActivity() {
             // matters for the only control here that destroys something. Red text alone
             // said the same thing far too quietly, in a list where a dim label and a
             // bright one are both just labels.
-            setTextColor(android.graphics.Color.WHITE)
-            background = getDrawable(R.drawable.button_danger)
+            //
+            // Under GLASS the capsule takes CRIT as its tint, the same hue-blend every
+            // other tinted button uses; under ORIGINAL it stays the flat red block.
+            if (glass) {
+                tint = Panel.Palette.CRIT
+            } else {
+                setTextColor(android.graphics.Color.WHITE)
+                background = getDrawable(R.drawable.button_danger)
+            }
             setCompoundDrawablesRelativeWithIntrinsicBounds(
                 R.drawable.ic_reset, 0, 0, 0)
             compoundDrawablePadding = (10 * resources.displayMetrics.density).toInt()
@@ -887,6 +923,7 @@ class MainActivity : ComponentActivity() {
                 val config = store.load().copy(backdrop = ArtConfig(
                     imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom))
                 store.save(config)
+                dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
                 graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
                 refreshPreview()
                 refreshBackdropClear()
@@ -923,6 +960,7 @@ class MainActivity : ComponentActivity() {
                     StatePayload.encode(graph.repository.state.value, config),
                 )
                 refreshPreview()
+                dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
                 refreshBackdropClear()
                 if (had) toast("Colour set, image removed")
             }
@@ -948,6 +986,7 @@ class MainActivity : ComponentActivity() {
             ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
             refreshPreview()
+            dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
             refreshBackdropClear()
             toast("Background removed")
         }

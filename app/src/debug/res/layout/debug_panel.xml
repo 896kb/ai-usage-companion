@@ -5,7 +5,7 @@
   tools for whoever is building this. This file lives in src/debug, so a release build
   has no reference to MascotStripView and cannot inflate it.
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<dev.kb896.aiusage.ui.glass.GlassCard xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical">
@@ -31,7 +31,7 @@
         android:orientation="vertical"
         android:visibility="gone">
 
-    <Button
+    <dev.kb896.aiusage.ui.glass.GlassButton
         android:id="@+id/debug_reset_art"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -100,4 +100,4 @@
 
 
     </LinearLayout>
-</LinearLayout>
+</dev.kb896.aiusage.ui.glass.GlassCard>
