@@ -47,6 +47,9 @@ class GlassSlider @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         if (!glass) { super.onDraw(canvas); return }
+        // The thumb's rect is a fixed size, so Pane's own zero-size guard never sees a
+        // view that has not been laid out; decline here, as GlassButton does.
+        if (width <= 0 || height <= 0) return
         // The track/fill colours read the backdrop directly, the same way GlassCard's
         // ink() does — Pane.draw below only wants a shader lens for the thumb itself.
         val lum = if (Backdrop.bitmap == null) Pane.FALLBACK_LUMINANCE else Backdrop.luminanceOf(this)
@@ -68,8 +71,9 @@ class GlassSlider @JvmOverloads constructor(
         canvas.save()
         canvas.scale(scale, scale, x, cy)
         Pane.draw(canvas, this, x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f, tint = 0, clear = true)
-        // A white overlay that fades out under the finger — clear glass at rest, plain
-        // white the instant it is grabbed — same trick as GlassSwitch's thumb.
+        // Plain white at rest, fading to clear glass as it is grabbed (press.progress
+        // 0 -> 1): the lens underneath is only worth paying for while a finger is on
+        // it. Same formula as GlassSwitch's thumb.
         paint.color = 0xFFFFFF or (((1f - press.progress) * 255).toInt() shl 24)
         canvas.drawRoundRect(x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f, ht / 2f, paint)
         canvas.restore()

@@ -1,6 +1,8 @@
 package dev.kb896.aiusage.ui.glass
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.widget.SeekBar
 import androidx.test.core.app.ApplicationProvider
 import dev.kb896.aiusage.data.ConfigStore
@@ -39,5 +41,12 @@ class GlassSliderTest {
         assertNull(ours.progressDrawable)
         val d = context.resources.displayMetrics.density
         assertEquals((20 * d).toInt(), ours.paddingLeft)
+    }
+
+    @Test fun `under GLASS a slider with no size draws without throwing`() {
+        ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
+        val s = GlassSlider(context)
+        s.layout(0, 0, 0, 0)
+        s.draw(Canvas(Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)))
     }
 }
