@@ -227,6 +227,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A card with nothing showing is not a card, it is an empty pane of glass on the
+     * wallpaper — which is exactly what the recovery and onboarding sections became
+     * once their content was hidden. Under ORIGINAL the card is inert and an empty one
+     * has no height anyway, so this changes nothing there.
+     */
+    private fun collapseEmptyCards() {
+        for (id in intArrayOf(R.id.card_recovery, R.id.card_setup)) {
+            val card = findViewById<ViewGroup>(id)
+            val showing = (0 until card.childCount).any { card.getChildAt(it).visibility != View.GONE }
+            card.visibility = if (showing) View.VISIBLE else View.GONE
+        }
+    }
+
     private fun wireActions() {
         // Renders whatever the repository already holds — no network call. Placing
         // the panel is a display action, not a data action, so it must not spend a
@@ -1241,6 +1255,8 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dpPx(4) })
         }
+
+        collapseEmptyCards()
     }
 
     private fun dpPx(value: Int) = (value * resources.displayMetrics.density).toInt()
@@ -1289,6 +1305,7 @@ class MainActivity : ComponentActivity() {
         }
         recoveryDisplayAbsent.text = "Rear panel not found — this build only supports the Xiaomi 17 Pro."
         recoveryDisplayAbsent.visibility = if (s.rearDisplayId < 0) View.VISIBLE else View.GONE
+        collapseEmptyCards()
     }
 
 
