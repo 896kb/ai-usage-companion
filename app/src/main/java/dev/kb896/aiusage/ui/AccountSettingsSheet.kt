@@ -64,7 +64,13 @@ object AccountSettingsSheet {
 
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Panel.Palette.BG)
+            // The sheet is added to root_host and covers the same bounds as the
+            // activity's root, so the wallpaper Backdrop already built for that root
+            // lines up here too — this just paints it a second time rather than
+            // rebuilding it.
+            if (dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context))
+                background = dev.kb896.aiusage.ui.glass.BackdropDrawable()
+            else setBackgroundColor(Panel.Palette.BG)
         }
 
         val preview = AccountPreviewView(context).apply {
@@ -93,7 +99,12 @@ object AccountSettingsSheet {
             }
         }
 
-        val rows = LinearLayout(context).apply {
+        // A card under GLASS — the sheet's one section, over the wallpaper root now
+        // paints. Under ORIGINAL it is the same inert LinearLayout it always was. Under
+        // GLASS the card sets its own 16dp padding in init, before this apply block
+        // runs; the setPadding below still overrides it with the sheet's 20/12 inset,
+        // which is fine — that inset is what this screen has always used.
+        val rows = dev.kb896.aiusage.ui.glass.GlassCard(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(context, 20), dp(context, 12), dp(context, 20), dp(context, 12))
         }
@@ -101,7 +112,13 @@ object AccountSettingsSheet {
         // scrolls inside it. Without the weight a ScrollView wraps its content, grows
         // past the screen, and never scrolls — the rows below the fold are unreachable
         // and it looks like a bug because it is one.
-        root.addView(ScrollView(context).apply { addView(rows) },
+        val scroller = ScrollView(context).apply { addView(rows) }
+        // The card scrolls under a still wallpaper, so its ink and its pane both have to
+        // redraw as it moves — the same tracking the main settings screen registers on
+        // its own ScrollView.
+        if (dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context))
+            dev.kb896.aiusage.ui.glass.Backdrop.track(scroller)
+        root.addView(scroller,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         // Rebuilt after every edit, because a change to the label renames the rows below

@@ -42,7 +42,12 @@ object ColorPickerDialog {
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(context, 20), dp(context, 16), dp(context, 20), dp(context, 4))
-            setBackgroundColor(Panel.Palette.BG)
+            // Under GLASS this view is the content of a Modal, and the sheet drawable
+            // from Task 12 already paints the pane behind it — a second, opaque fill
+            // here would hide that pane rather than sit on it. Under ORIGINAL there is
+            // no sheet to show through, so the flat panel colour stays.
+            if (!dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context))
+                setBackgroundColor(Panel.Palette.BG)
         }
 
         val preview = View(context).apply {
