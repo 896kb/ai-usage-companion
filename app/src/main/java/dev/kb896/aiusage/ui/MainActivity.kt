@@ -1189,6 +1189,9 @@ class MainActivity : ComponentActivity() {
                 val show = container.visibility != View.VISIBLE
                 container.visibility = if (show) View.VISIBLE else View.GONE
                 heading.text = if (show) "ONBOARDING  ▾" else "ONBOARDING  ▸"
+                // The card collapsed when its content hid; it has to come back the
+                // moment that content is shown again, or the arrow flips over nothing.
+                collapseEmptyCards()
             }
         } else {
             // Outstanding: shown expanded with no heading, because a collapsed accordion
