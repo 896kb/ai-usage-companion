@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.core.view.doOnLayout
+import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.Glass
 
 /**
@@ -38,7 +39,7 @@ class GlassSheetDrawable : Drawable() {
 
 object GlassSheet {
     /** Turn a shown dialog to glass. False, and nothing done, under ORIGINAL. */
-    fun dress(dialog: AlertDialog): Boolean {
+    fun dress(dialog: AlertDialog, danger: Boolean): Boolean {
         if (!UiTheme.isGlass(dialog.context)) return false
         val window = dialog.window ?: return false
         val content = window.decorView.findViewById<ViewGroup>(android.R.id.content) ?: return false
@@ -51,10 +52,32 @@ object GlassSheet {
         val sheet = GlassSheetDrawable()
         panel.background = sheet
         // After layout, not before: the panel has no size yet when dress() runs, and a
-        // pane drawn at zero size returns the fallback luminance forever.
-        panel.doOnLayout { ink(panel, Backdrop.luminanceOf(panel)) }
+        // pane drawn at zero size returns the fallback luminance forever. The buttons'
+        // colours are decided inside paint(), after the sweep, not here — a sweep that
+        // ran first would have its confirm colour immediately painted over by ink().
+        panel.doOnLayout { paint(dialog, panel, Backdrop.luminanceOf(panel), danger) }
         return true
     }
+
+    /**
+     * Ink the sheet's text from its cell, then the buttons LAST — the sweep would
+     * otherwise paint over them. The confirm keeps the danger red or the accent, through
+     * a state list that goes dim while disabled, as the reset dialog's confirm is for
+     * five seconds; the way out is dim, as it is under ORIGINAL.
+     */
+    fun paint(dialog: AlertDialog, panel: View, lum: Float, danger: Boolean) {
+        ink(panel, lum)
+        val confirm = if (danger) Panel.Palette.CRIT else Panel.Palette.WORK
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(stateList(confirm, Ink.secondary(lum)))
+        for (which in intArrayOf(AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
+            dialog.getButton(which)?.setTextColor(Ink.secondary(lum))
+        }
+    }
+
+    private fun stateList(enabled: Int, disabled: Int) = android.content.res.ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(disabled, enabled),
+    )
 
     /** Recolour every TextView under [view] — title, message, buttons — from [lum]. */
     private fun ink(view: View, lum: Float) {

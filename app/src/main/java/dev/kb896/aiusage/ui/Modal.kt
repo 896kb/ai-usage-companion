@@ -75,13 +75,8 @@ object Modal {
         }
         dialog.window?.decorView?.let(::walk)
 
-        // GLASS recolours per cell after layout and paints its own scrim and sheet; the
-        // colours below are ORIGINAL's and would be overwritten a frame later anyway.
-        if (dev.kb896.aiusage.ui.glass.GlassSheet.dress(dialog)) {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
-                if (danger) Panel.Palette.CRIT else Panel.Palette.WORK)
-            return
-        }
+        // GLASS owns its own colours, buttons included, after layout — see GlassSheet.
+        if (dev.kb896.aiusage.ui.glass.GlassSheet.dress(dialog, danger)) return
 
         // The buttons again, explicitly. They are inside the decor and the sweep already
         // reached them, but the positive one needs its colour decided here and reading it
