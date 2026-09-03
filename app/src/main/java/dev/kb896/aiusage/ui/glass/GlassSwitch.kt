@@ -170,10 +170,15 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
         // magnitude of the velocity. Signed, it stretched a thumb flicking right and
         // pinched one flicking left — half a squash, and the half that reads as a fault.
         val v = abs(drag.velocity)
-        // And no larger than the room the view has: at 1.5x pressed plus the flick's
-        // 1.25x the thumb would be back over the edge the padding just gave it.
-        val sx = min(drag.scaleX / (1f - (v * 0.75f).coerceIn(0f, 0.2f)), w / tw)
-        val sy = min(drag.scaleY * (1f - (v * 0.25f).coerceIn(0f, 0.2f)), h / th)
+        var sx = drag.scaleX / (1f - (v * 0.75f).coerceIn(0f, 0.2f))
+        var sy = drag.scaleY * (1f - (v * 0.25f).coerceIn(0f, 0.2f))
+        // The cap is the thumb's own clearance: at either end of the track it is nearer one
+        // edge than the view's centre, and a cap measured from the centre lets a pressed
+        // flick past the edge by a few dp there.
+        val roomX = thumbCap(thumb.centerX(), w, tw)
+        val roomY = thumbCap(thumb.centerY(), h, th)
+        sx = min(sx, roomX)
+        sy = min(sy, roomY)
         canvas.save()
         canvas.scale(sx, sy, thumb.centerX(), thumb.centerY())
         Pane.draw(canvas, this, thumb.left, thumb.top, thumb.right, thumb.bottom, th / 2f,
@@ -195,6 +200,16 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
          */
         const val PAD_X = 12f
         const val PAD_Y = 8f
+
+        /**
+         * How far the thumb may be scaled about its own centre before it reaches an edge.
+         *
+         * [centre] is where its centre sits along an axis of an [extent]-long view and
+         * [size] is how long the thumb is on that axis. The nearer edge is what decides
+         * it: the thumb travels, so most of the time it is not in the middle of anything.
+         */
+        internal fun thumbCap(centre: Float, extent: Float, size: Float): Float =
+            min(centre, extent - centre) / (size / 2f)
     }
 
     private fun blend(a: Int, b: Int, t: Float) = Ink.mix(

@@ -128,4 +128,19 @@ class GlassSwitchTest {
         assertTrue(seen.isEmpty())
         assertEquals(0f, s.dragTarget, 0f)
     }
+
+    /**
+     * The pressed thumb is capped by the clearance it has, not by the view's centre.
+     *
+     * At rest the thumb's centre sits 34dp into the 88dp view, so a 40dp thumb may grow
+     * to 1.7x before its leading edge reaches the view's — measured from the centre the
+     * cap would read 2.2x, which a press plus a flick can exceed, and the thumb clipped
+     * at either end of its travel.
+     */
+    @Test fun `the thumb's cap is its clearance at the nearer edge`() {
+        val d = context.resources.displayMetrics.density
+        assertEquals(1.7f, GlassSwitch.thumbCap(34 * d, 88 * d, 40 * d), 0.01f)
+        // Only in the middle of its travel does the thumb have the whole view to grow into.
+        assertEquals(2.2f, GlassSwitch.thumbCap(44 * d, 88 * d, 40 * d), 0.01f)
+    }
 }
