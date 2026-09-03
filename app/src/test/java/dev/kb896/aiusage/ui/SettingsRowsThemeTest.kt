@@ -43,12 +43,14 @@ class SettingsRowsThemeTest {
         SettingsRows.choice(parent, "C", listOf("a", "b"), 0) {}
         val nav = SettingsRows.navigationButton(parent, "N") {}
         SettingsRows.colorRow(parent, "K", 0xFF112233.toInt()) {}
+        SettingsRows.reorderable(parent, "R", canMoveUp = true, onMoveUp = {}) {}
         assertNotNull(find(parent, Switch::class.java))
         assertNotNull(find(parent, Spinner::class.java))
         assertEquals(Button::class.java, nav.javaClass)
         assertNull(find(parent, GlassSwitch::class.java))
         assertNull(find(parent, GlassSegmented::class.java))
         assertNull(find(parent, GlassChip::class.java))
+        assertNull(find(parent, GlassButton::class.java))
     }
 
     @Test fun `GLASS builds the glass controls and they report through the same callbacks`() {
@@ -71,5 +73,16 @@ class SettingsRowsThemeTest {
         assertEquals(1, seg.selected)
         seg.select(2)
         assertEquals(2, chosen)
+        SettingsRows.reorderable(parent, "R", canMoveUp = true, onMoveUp = {}) {}
+        SettingsRows.colorGrid(parent, listOf(SettingsRows.Swatch("S", 0xFF445566.toInt()) {}))
+        val buttons = ArrayList<View>()
+        fun collect(v: View) { if (v is GlassButton) buttons += v; if (v is android.view.ViewGroup) for (i in 0 until v.childCount) collect(v.getChildAt(i)) }
+        collect(parent)
+        assertTrue("reorderable's two buttons are glass: ${buttons.size}", buttons.size >= 3)  // nav + 2
+        val chips = ArrayList<GlassChip>()
+        fun chipsIn(v: View) { if (v is GlassChip) chips += v; if (v is android.view.ViewGroup) for (i in 0 until v.childCount) chipsIn(v.getChildAt(i)) }
+        chipsIn(parent)
+        assertTrue("colorRow and colorGrid chips: ${chips.size}", chips.size >= 2)
+        assertTrue(chips.any { it.colour == 0xFF445566.toInt() })
     }
 }

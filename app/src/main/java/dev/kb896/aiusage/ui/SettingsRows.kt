@@ -335,13 +335,17 @@ object SettingsRows {
         onClick: () -> Unit,
     ) {
         val context = parent.context
+        // Read once per row, as the helper's own doc comment says — UiTheme.isGlass hits
+        // ConfigStore.load, which decodes a SharedPreferences string, so a call per button
+        // is a needless decode of the same value twice for one row.
+        val isGlass = glass(context)
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         // Same GlassButton-under-GLASS substitution as navigationButton, for both the
         // row's own button and its move handle.
-        row.addView((if (glass(context)) GlassButton(context) else android.widget.Button(context)).apply {
+        row.addView((if (isGlass) GlassButton(context) else android.widget.Button(context)).apply {
             text = "$name  ›"
             textSize = 14f
             setTextColor(Panel.Palette.FG)
@@ -350,7 +354,7 @@ object SettingsRows {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { onClick() }
         })
-        row.addView((if (glass(context)) GlassButton(context) else android.widget.Button(context)).apply {
+        row.addView((if (isGlass) GlassButton(context) else android.widget.Button(context)).apply {
             text = "↑"
             textSize = 15f
             isEnabled = canMoveUp
