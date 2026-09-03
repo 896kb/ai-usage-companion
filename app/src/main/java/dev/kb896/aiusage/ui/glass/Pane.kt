@@ -1,6 +1,5 @@
 package dev.kb896.aiusage.ui.glass
 
-import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
@@ -33,11 +32,22 @@ object Pane {
     private val matrix = Matrix()
     private val loc = IntArray(2)
 
+    /**
+     * One disc, made once and moved. A RadialGradient is defined at a centre and a radius,
+     * so a press on a control of a different size used to mean a new one every frame; a
+     * unit disc at the origin plus a local matrix is the same picture with no allocation,
+     * and the fade comes off the paint's alpha rather than being baked into the colours.
+     */
+    private val disc = RadialGradient(0f, 0f, 1f,
+        intArrayOf(Color.WHITE, Color.WHITE, Color.TRANSPARENT),
+        floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+
     fun draw(
         canvas: Canvas, view: View,
         left: Float, top: Float, right: Float, bottom: Float,
         radius: Float, tint: Int,
         clear: Boolean = false, rim: Boolean = true, content: Shader? = null,
+        lens: Boolean = true,
     ): Float {
         val w = right - left; val h = bottom - top
         if (w <= 0f || h <= 0f) return FALLBACK_LUMINANCE
@@ -53,21 +63,28 @@ object Pane {
         canvas.translate(left, top)
         rect.set(0f, 0f, w, h)
 
-        if (backdrop != null) {
-            val source = content ?: BitmapShader(backdrop, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
-                matrix.setTranslate(-sx, -sy)
-                it.setLocalMatrix(matrix)
-            }
+        // A caller that draws its own colour over the pane and then comes back for the
+        // rim asks for [lens] = false: running the refraction a second time repaints the
+        // backdrop over the colour that was the whole point of the first pass.
+        val source = content ?: Backdrop.shader
+        if (lens && backdrop != null && source != null) {
+            // A shader carries its own coordinates and the canvas is in PANE space, so
+            // both kinds need moving: the backdrop's are the root's, and a supplied one's
+            // are the VIEW's — the difference is the pane's origin. Setting a local matrix
+            // is a dirty flag rather than an allocation; Paint.getNativeInstance() re-syncs
+            // it when the draw is recorded, the same way these uniforms already are.
+            if (content != null) matrix.setTranslate(-left, -top) else matrix.setTranslate(-sx, -sy)
+            source.setLocalMatrix(matrix)
             val short = min(w, h)
-            val lens = Glass.refraction
-            lens.setInputShader("content", source)
-            lens.setFloatUniform("size", w, h)
-            lens.setFloatUniform("offset", 0f, 0f)
-            lens.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-            lens.setFloatUniform("refractionHeight", min(short * Glass.HEIGHT, Glass.HEIGHT_MAX * density))
-            lens.setFloatUniform("refractionAmount", -min(short * Glass.AMOUNT, Glass.AMOUNT_MAX * density))
-            lens.setFloatUniform("depthEffect", Glass.DEPTH)
-            paint.shader = lens; paint.style = Paint.Style.FILL; paint.alpha = 255
+            val refraction = Glass.refraction
+            refraction.setInputShader("content", source)
+            refraction.setFloatUniform("size", w, h)
+            refraction.setFloatUniform("offset", 0f, 0f)
+            refraction.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+            refraction.setFloatUniform("refractionHeight", min(short * Glass.HEIGHT, Glass.HEIGHT_MAX * density))
+            refraction.setFloatUniform("refractionAmount", -min(short * Glass.AMOUNT, Glass.AMOUNT_MAX * density))
+            refraction.setFloatUniform("depthEffect", Glass.DEPTH)
+            paint.shader = refraction; paint.style = Paint.Style.FILL; paint.alpha = 255
             canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = null
         }
@@ -111,9 +128,11 @@ object Pane {
         paint.color = Color.argb((0.08f * progress * 255).toInt(), 255, 255, 255)
         canvas.drawRoundRect(rect, radius, radius, paint)
         val r = min(w, h) * 1.5f
-        val c = Color.argb((0.15f * progress * 255).toInt(), 255, 255, 255)
-        paint.shader = RadialGradient(x.coerceIn(left, right), y.coerceIn(top, bottom), r,
-            intArrayOf(c, c, 0), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+        matrix.setTranslate(x.coerceIn(left, right), y.coerceIn(top, bottom))
+        matrix.preScale(r, r)
+        disc.setLocalMatrix(matrix)
+        paint.shader = disc
+        paint.alpha = (0.15f * progress * 255).toInt()
         canvas.drawRoundRect(rect, radius, radius, paint)
         paint.shader = null; paint.blendMode = null
     }

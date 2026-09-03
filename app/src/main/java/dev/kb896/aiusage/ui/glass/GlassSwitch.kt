@@ -34,6 +34,7 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
     private val thumb = RectF()
     private var local: Bitmap? = null
     private var localCanvas: Canvas? = null
+    private var localShader: BitmapShader? = null
     private var downX = 0f
     private var dragged = false
     private val loc = IntArray(2)
@@ -62,8 +63,12 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
     // view is ever resized (the switch measures itself fixed, so this rarely fires) a
     // stale one would draw the track at the wrong scale. Drop it and let onDraw remake it.
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // Dropped, not recycled: a bitmap a queued draw still holds throws the moment
+        // that draw runs, and the reference going away is all the collector needs.
         local = null
         localCanvas = null
+        localShader = null
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -104,7 +109,15 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
         thumb.set(x, inset, x + tw, inset + th)
 
         // The thumb's own view of the world: the wallpaper under this switch, then the track.
-        val content = local ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { local = it; localCanvas = Canvas(it) }
+        if (local == null) {
+            val b = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            local = b
+            localCanvas = Canvas(b)
+            // Made with the bitmap and kept with it. The contents change every frame of a
+            // drag, but a BitmapShader is a handle on the bitmap, not a copy of it, so the
+            // one made here goes on showing whatever the canvas above last drew.
+            localShader = BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        }
         val lc = localCanvas!!
         val backdrop = Backdrop.bitmap
         if (backdrop != null) {
@@ -112,7 +125,7 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
             lc.drawBitmap(backdrop, -(loc[0] - Backdrop.origin[0]).toFloat(), -(loc[1] - Backdrop.origin[1]).toFloat(), null)
         } else lc.drawColor(dev.kb896.aiusage.Panel.Palette.BG)
         lc.drawRoundRect(track, h / 2f, h / 2f, paint)
-        val shader = BitmapShader(content, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        val shader = localShader!!
 
         val p = drag.pressProgress
         var sx = drag.scaleX; var sy = drag.scaleY

@@ -100,7 +100,10 @@ class GlassSegmented(
 
         val ink = Ink.primary(lum)
         val baseline = h / 2f - (text.descent() + text.ascent()) / 2f
-        options.forEachIndexed { i, label ->
+        // An indexed loop rather than forEachIndexed: the inline function is fine on an
+        // array and allocates an Iterator on a List, which this is, once per frame.
+        for (i in options.indices) {
+            val label = options[i]
             text.color = ink
             text.alpha = if (i == selected) 255 else 153
             canvas.drawText(label, pad + slot * i + slot / 2f, baseline, text)

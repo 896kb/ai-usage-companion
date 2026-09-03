@@ -239,7 +239,7 @@
                 android:maxLines="1"
                 android:textSize="14sp" />
 
-            <View
+            <dev.kb896.aiusage.ui.glass.GlassChip
                 android:id="@+id/settings_title_color"
                 android:layout_width="44dp"
                 android:layout_height="26dp"

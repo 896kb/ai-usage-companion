@@ -3,6 +3,7 @@ package dev.kb896.aiusage.ui.glass
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.LinearGradient
@@ -30,6 +31,15 @@ import java.io.File
  */
 object Backdrop {
     var bitmap: Bitmap? = null; private set
+    /**
+     * The same bitmap as a shader, made once with it.
+     *
+     * Pane used to build one of these per draw — per pane, per frame, on a screen that
+     * can hold a dozen. A BitmapShader is only a bitmap plus a tile mode plus a local
+     * matrix, and the matrix is the only part that changes between panes, so one shader
+     * with the matrix set per draw is the same picture for no allocation.
+     */
+    var shader: BitmapShader? = null; private set
     var cells: FloatArray = FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE); private set
     var width = 0; private set
     var height = 0; private set
@@ -49,6 +59,10 @@ object Backdrop {
 
     /** The image or colour changed. */
     fun rebuild(context: Context) {
+        // Under ORIGINAL nothing samples this. It still ran on every background edit,
+        // decoding the picture and allocating a window-sized bitmap for a view that will
+        // never draw a pane — and, after a GLASS -> ORIGINAL switch, for a dead one.
+        if (!UiTheme.isGlass(context)) return
         val r = root ?: return
         build(r)
         r.invalidate()
@@ -62,8 +76,44 @@ object Backdrop {
         val config = ConfigStore(root.context).load()
         val image = config.backdrop.imagePath?.let { decodeNear(it, w, h) }
         val built = paint(w, h, config, image)
-        bitmap = built; width = w; height = h
+        // The outgoing bitmap is dropped, never recycled: a draw already queued may still
+        // hold it, and drawing a recycled bitmap throws where letting go of one costs a GC.
+        bitmap = built
+        shader = BitmapShader(built, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        width = w; height = h
         cells = cellsOf(built)
+    }
+
+    /**
+     * Let go of everything: the root, the window-sized bitmap and the grid.
+     *
+     * This is an object, so it outlives the activity that filled it. A GLASS -> ORIGINAL
+     * switch recreates the activity and nothing here would ever be asked for again, while
+     * a stale [root] keeps the whole dead view tree — and its 13 MB of wallpaper — alive.
+     */
+    fun release() {
+        root = null
+        bitmap = null
+        shader = null
+        width = 0
+        height = 0
+        cells = FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE)
+    }
+
+    /**
+     * A backdrop with no window behind it, for tests.
+     *
+     * Robolectric has no laid-out root to build from, and half of what a control does
+     * only happens once [bitmap] is non-null. Leaves the fields exactly as [build] would,
+     * at the origin. A member rather than an extension because the setters are private.
+     */
+    internal fun installForTest(bitmap: Bitmap) {
+        this.bitmap = bitmap
+        shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        width = bitmap.width
+        height = bitmap.height
+        origin[0] = 0; origin[1] = 0
+        cells = cellsOf(bitmap)
     }
 
     /** Draw the window's wallpaper: the picture centre-cropped, or the colour as a gradient. */
@@ -125,9 +175,17 @@ object Backdrop {
 
     fun meanLuminance(): Float = if (width <= 0) 0f else cells.average().toFloat()
 
-    /** Glass moving over a still wallpaper has to redraw as it moves. */
-    fun track(scroll: ViewGroup) {
-        scroll.setOnScrollChangeListener { v, _, _, _, _ -> invalidateGlass(v) }
+    /**
+     * Glass moving over a still wallpaper has to redraw as it moves.
+     *
+     * [also] is for what a scroll changes that is not a Glassy view — the headings, which
+     * are plain TextViews over the wallpaper and re-ink from the cell they are over.
+     */
+    fun track(scroll: ViewGroup, also: (() -> Unit)? = null) {
+        scroll.setOnScrollChangeListener { v, _, _, _, _ ->
+            invalidateGlass(v)
+            also?.invoke()
+        }
     }
 
     fun invalidateGlass(view: View) {

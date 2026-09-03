@@ -20,6 +20,9 @@ class ConfigStore(private val context: Context) {
 
     fun load(): PanelConfig = PanelConfig.decode(prefs.getString(KEY, null))
 
+    /** The stored blob itself, undecoded — what UiTheme compares to know it may skip one. */
+    fun raw(): String? = prefs.getString(KEY, null)
+
     fun save(config: PanelConfig) =
         prefs.edit().putString(KEY, PanelConfig.encode(config)).apply()
 

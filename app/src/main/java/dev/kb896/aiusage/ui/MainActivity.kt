@@ -159,8 +159,14 @@ class MainActivity : ComponentActivity() {
         val host = findViewById<View>(R.id.root_host)
         if (glass) {
             dev.kb896.aiusage.ui.glass.Backdrop.install(host)
-            dev.kb896.aiusage.ui.glass.Backdrop.track(findViewById(R.id.root_scroll))
+            // The headings are not Glassy, so invalidating the glass does not reach them;
+            // they are plain text over the wallpaper and have to re-ink as it moves past.
+            dev.kb896.aiusage.ui.glass.Backdrop.track(findViewById(R.id.root_scroll)) { inkHeadings() }
         } else {
+            // Switching to ORIGINAL recreates the activity, and the backdrop is an object:
+            // without this it would go on holding the dead activity's root view and its
+            // window-sized bitmap for as long as the process lives.
+            dev.kb896.aiusage.ui.glass.Backdrop.release()
             host.setBackgroundColor(Panel.Palette.BG)
         }
         // THE THEME'S FACE, not the panel's original one. This screen describes the panel,
@@ -218,12 +224,21 @@ class MainActivity : ComponentActivity() {
         findViewById<TextView>(R.id.geo_hint).setTextColor(Panel.Palette.DIM)
     }
 
+    /**
+     * The headings that sit outside any card. Held as a field, not built per call: this
+     * now runs on every scroll frame, and a list built there is a per-frame allocation.
+     */
+    private val headingIds = intArrayOf(R.id.preview_heading, R.id.setup_heading,
+        R.id.settings_heading, R.id.settings_art_label, R.id.backdrop_heading)
+
     private fun inkHeadings() {
-        listOf(R.id.preview_heading, R.id.setup_heading, R.id.settings_heading,
-            R.id.settings_art_label, R.id.backdrop_heading).forEach { id ->
+        for (id in headingIds) {
             val v = findViewById<TextView>(id)
-            v.setTextColor(dev.kb896.aiusage.ui.glass.Ink.secondary(
-                dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(v)))
+            val ink = dev.kb896.aiusage.ui.glass.Ink.secondary(
+                dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(v))
+            // setTextColor invalidates whether or not the colour moved, and a heading
+            // crosses the light/dark line perhaps twice in a whole scroll.
+            if (ink != v.currentTextColor) v.setTextColor(ink)
         }
     }
 
@@ -441,6 +456,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(previewRelay) }
+        // A recreate() hands the backdrop a new root on the way back in; a finish does
+        // not, so the last activity out turns the wallpaper off behind it. isFinishing
+        // tells the two apart — releasing on a rotation would just cost a rebuild.
+        if (isFinishing) dev.kb896.aiusage.ui.glass.Backdrop.release()
         super.onDestroy()
     }
 
@@ -463,8 +482,10 @@ class MainActivity : ComponentActivity() {
         field.filters = TitleLimits.filter(max)
         findViewById<TextView>(R.id.settings_title_label).text = "TITLE  (max $max)"
 
-        val swatch = findViewById<View>(R.id.settings_title_color)
-        fun paintSwatch() = swatch.setBackgroundColor(store.load().titleColor)
+        val swatch = findViewById<dev.kb896.aiusage.ui.glass.GlassChip>(R.id.settings_title_color)
+        // Under ORIGINAL the chip's setter IS setBackgroundColor, so this is the same
+        // flat rectangle it always was; under GLASS the colour is drawn over the pane.
+        fun paintSwatch() { swatch.colour = store.load().titleColor }
         paintSwatch()
         swatch.setOnClickListener {
             ColorPickerDialog.show(this, store.load().titleColor) { picked ->
@@ -1162,6 +1183,7 @@ class MainActivity : ComponentActivity() {
      * be worse than none.
      */
     private fun buildSetupRows() {
+        val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
         val container = findViewById<LinearLayout>(R.id.setup_rows) ?: return
         val heading = findViewById<TextView>(R.id.setup_heading) ?: return
         container.removeAllViews()
@@ -1178,8 +1200,15 @@ class MainActivity : ComponentActivity() {
         // Green, like every other accordion title, and without the rule that used to
         // sit above it — a heading and a divider one line apart draw the same line
         // twice, and the heading is already the thing that says a section starts here.
-        heading.setTextColor(Panel.Palette.WORK)
-        findViewById<View>(R.id.rule_1)?.visibility = if (done) View.GONE else View.VISIBLE
+        //
+        // Under GLASS neither applies and both had to be undone every time: the heading
+        // takes its ink from the cell it is over (inkHeadings), and every hairline is
+        // gone. This runs on every resume, so it was repainting the heading green and
+        // bringing rule_1 back after applyPalette had settled both.
+        if (!glass) {
+            heading.setTextColor(Panel.Palette.WORK)
+            findViewById<View>(R.id.rule_1)?.visibility = if (done) View.GONE else View.VISIBLE
+        }
         if (done) {
             // Expanded state is not remembered across launches: the reason to open this
             // is to fix something, and that is a fresh decision each time.

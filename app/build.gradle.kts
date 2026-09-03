@@ -96,6 +96,8 @@ dependencies {
     // JVM mockable-android.jar throws "not mocked" for it, same trap as org.json (see
     // UsageParser.kt). Scoped to that one test class via @RunWith(RobolectricTestRunner).
     testImplementation("org.robolectric:robolectric:4.13")
+    // ApplicationProvider, which is how every Robolectric test here gets the Context the
+    // glass views need in their constructors — Robolectric alone does not supply one.
     testImplementation("androidx.test:core:1.5.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

@@ -26,4 +26,19 @@ class UiThemeTest {
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         assertTrue(UiTheme.isGlass(context))
     }
+
+    /**
+     * The answer is cached on the stored blob, so the cache has to follow the store both
+     * ways: a stale `true` after a switch back to ORIGINAL would leave the whole screen
+     * drawing glass over a background nothing built.
+     */
+    @Test fun `the cached answer follows the store in both directions`() {
+        val store = ConfigStore(context)
+        store.save(PanelConfig())
+        assertFalse(UiTheme.isGlass(context))
+        store.save(PanelConfig(theme = PanelTheme.GLASS))
+        assertTrue(UiTheme.isGlass(context))
+        store.save(PanelConfig())
+        assertFalse(UiTheme.isGlass(context))
+    }
 }
