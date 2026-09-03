@@ -36,4 +36,15 @@
         <item name="android:textColor">#B5BD68</item>
         <item name="android:textSize">15sp</item>
     </style>
+
+    <!--
+      GLASS: the window itself is transparent and the sheet is a drawable on the dialog's
+      own panel, so the glass samples the wallpaper at the dialog's place on screen. The
+      accent and text colours still come from here so the framework's title and buttons
+      are never stock; the ink sweep in GlassSheet then recolours them per cell.
+    -->
+    <style name="PanelDialog.Glass">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">true</item>
+    </style>
 </resources>

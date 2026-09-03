@@ -28,7 +28,14 @@ import dev.kb896.aiusage.R
 object Modal {
 
     fun builder(context: Context): AlertDialog.Builder =
-        AlertDialog.Builder(context, R.style.PanelDialog)
+        AlertDialog.Builder(
+            context,
+            // GLASS gets a transparent-window style so GlassSheet can paint the panel
+            // itself; picking it here, at construction, keeps this the only place a
+            // caller has to know a themed style exists at all.
+            if (dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context)) R.style.PanelDialog_Glass
+            else R.style.PanelDialog,
+        )
 
     /**
      * Show it, then repaint what the theme could not.
@@ -67,6 +74,14 @@ object Modal {
             }
         }
         dialog.window?.decorView?.let(::walk)
+
+        // GLASS recolours per cell after layout and paints its own scrim and sheet; the
+        // colours below are ORIGINAL's and would be overwritten a frame later anyway.
+        if (dev.kb896.aiusage.ui.glass.GlassSheet.dress(dialog)) {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
+                if (danger) Panel.Palette.CRIT else Panel.Palette.WORK)
+            return
+        }
 
         // The buttons again, explicitly. They are inside the decor and the sweep already
         // reached them, but the positive one needs its colour decided here and reading it
