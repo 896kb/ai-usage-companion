@@ -50,8 +50,13 @@ class GlassCard @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         if (!glass) { super.onDraw(canvas); return }
+        // interior = false: a card is the largest pane on the screen and nearly all of it
+        // is middle, where the lens hands the backdrop straight through — the same
+        // wallpaper the root has already painted behind it. Drawing the refraction only
+        // in the rim band is the same picture for a fraction of the shader's work, which
+        // is what a 18ms scroll frame under GLASS was mostly made of.
         luminance = Pane.draw(canvas, this, 0f, 0f, width.toFloat(), height.toFloat(),
-            28 * density, Glass.CARD_TINT)
+            28 * density, Glass.CARD_TINT, interior = false)
         // A card sliding from a dark region of the picture into a light one flips its
         // ink; only when the side changes, or every frame would restyle every row.
         if (inkedLight != Ink.isLight(luminance)) ink()

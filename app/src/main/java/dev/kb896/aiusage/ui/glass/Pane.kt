@@ -29,6 +29,8 @@ object Pane {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
+    /** The part of a pane the lens does nothing to. Reused: this is on the scroll path. */
+    private val inner = RectF()
     private val matrix = Matrix()
     private val loc = IntArray(2)
 
@@ -47,7 +49,7 @@ object Pane {
         left: Float, top: Float, right: Float, bottom: Float,
         radius: Float, tint: Int,
         clear: Boolean = false, rim: Boolean = true, content: Shader? = null,
-        lens: Boolean = true,
+        lens: Boolean = true, interior: Boolean = true,
     ): Float {
         val w = right - left; val h = bottom - top
         if (w <= 0f || h <= 0f) return FALLBACK_LUMINANCE
@@ -85,7 +87,21 @@ object Pane {
             refraction.setFloatUniform("refractionAmount", -min(short * Glass.AMOUNT, Glass.AMOUNT_MAX * density))
             refraction.setFloatUniform("depthEffect", Glass.DEPTH)
             paint.shader = refraction; paint.style = Paint.Style.FILL; paint.alpha = 255
+            // [interior] = false spends the shader only where it bends anything. Away
+            // from the edge band the refraction samples straight through, so the fill
+            // reproduces the wallpaper — which the root's BackdropDrawable has already
+            // painted behind the card. Clipping the middle out of the lens pass drops a
+            // full-area shader fill and changes no pixel. The tint and the rim, which do
+            // cover the whole pane, are left alone.
+            val clipped = !interior && content == null && clipsInterior(w, h, density)
+            if (clipped) {
+                val inset = interiorInset(short, density)
+                inner.set(inset, inset, w - inset, h - inset)
+                canvas.save()
+                canvas.clipOutRect(inner)
+            }
             canvas.drawRoundRect(rect, radius, radius, paint)
+            if (clipped) canvas.restore()
             paint.shader = null
         }
 
@@ -109,6 +125,19 @@ object Pane {
         }
         canvas.restore()
         return lum
+    }
+
+    /**
+     * How far in from a pane's edge the lens still bends the backdrop: the refraction
+     * height the shader is actually given, plus 2dp so the clip never eats into the band.
+     */
+    fun interiorInset(short: Float, density: Float): Float =
+        (min(short * Glass.HEIGHT, Glass.HEIGHT_MAX * density) + 2 * density).coerceAtLeast(0f)
+
+    /** Whether a pane of this size has an interior left to clip out. A small one has not. */
+    fun clipsInterior(w: Float, h: Float, density: Float): Boolean {
+        val inset = interiorInset(min(w, h), density)
+        return w - 2 * inset > 0f && h - 2 * inset > 0f
     }
 
     /**

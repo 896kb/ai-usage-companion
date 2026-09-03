@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import dev.kb896.aiusage.ui.UiType
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -43,7 +44,14 @@ class GlassSegmented(
     // 120Hz screen is the one cost this project refuses.
     private val sel = RectF()
     private var downX = 0f
+    private var downY = 0f
     private var dragged = false
+    // The platform's own figure, which is what the enclosing ScrollView measures the same
+    // gesture against; a threshold of this view's own invention would only disagree with it.
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+
+    /** Where the value spring is headed. Tests read it to see that a cancel put it back. */
+    internal val dragTarget: Float get() = drag.targetValue
 
     init { isClickable = true }
 
@@ -68,16 +76,37 @@ class GlassSegmented(
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = e.x; dragged = false; drag.press(); parent?.requestDisallowInterceptTouchEvent(true); return true }
+            // Nothing is disallowed here. Taking the gesture on DOWN is what stopped the
+            // ScrollView from ever getting a drag that starts on the control — and this
+            // one spans the row, so most touches that land on it are scrolls.
+            MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; dragged = false; drag.press(); return true }
             MotionEvent.ACTION_MOVE -> {
-                if (abs(e.x - downX) > 6 * density) dragged = true
-                if (dragged) drag.updateValue((e.x - pad - slot / 2f) / slot)
+                if (!dragged) {
+                    val dx = e.x - downX; val dy = e.y - downY
+                    // Whichever axis clears the slop first owns the gesture. Sideways is
+                    // ours, and only now is it worth asking the scroller to keep out;
+                    // downwards is the ScrollView's, and it will intercept and send this
+                    // view an ACTION_CANCEL without being asked.
+                    if (abs(dx) > slop && abs(dx) > abs(dy)) {
+                        dragged = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    } else return true
+                }
+                drag.updateValue((e.x - pad - slot / 2f) / slot)
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 drag.release()
                 if (!dragged) { select(optionAt(e.x)); performClick() }
                 else select(drag.targetValue.roundToInt())
+                return true
+            }
+            // A cancel is the scroller taking the gesture away, not a choice: slide the
+            // selection back onto the option that is still selected and report nothing.
+            MotionEvent.ACTION_CANCEL -> {
+                drag.release()
+                drag.animateTo(selected.toFloat())
+                dragged = false
                 return true
             }
         }

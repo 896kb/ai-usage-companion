@@ -10,8 +10,10 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.Checkable
 import kotlin.math.abs
+import kotlin.math.min
 
 /**
  * The toggle, ported from catalog/components/LiquidToggle.kt (Apache 2.0).
@@ -21,6 +23,9 @@ import kotlin.math.abs
  * white at 1 - pressProgress over it), and while it is glass it refracts the track and
  * the wallpaper beneath — the catalog's nested backdrop, done by drawing both into one
  * small bitmap and handing that to the lens as its content. Drag with squash, or tap.
+ *
+ * The view is larger than the track by [PAD_X] and [PAD_Y], which is where the pressed
+ * thumb goes.
  */
 class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
 
@@ -36,8 +41,15 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
     private var localCanvas: Canvas? = null
     private var localShader: BitmapShader? = null
     private var downX = 0f
+    private var downY = 0f
     private var dragged = false
+    // The platform's own figure, which is what the enclosing ScrollView measures the same
+    // gesture against; a threshold of this view's own invention would only disagree with it.
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val loc = IntArray(2)
+
+    /** Where the value spring is headed. Tests read it to see that a cancel put it back. */
+    internal val dragTarget: Float get() = drag.targetValue
 
     init { isClickable = true }
 
@@ -52,7 +64,7 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
     fun setCheckedSilently(b: Boolean) { checked = b; drag.snap(if (b) 1f else 0f); invalidate() }
 
     override fun onMeasure(w: Int, h: Int) {
-        setMeasuredDimension((64 * density).toInt(), (28 * density).toInt())
+        setMeasuredDimension(((64 + 2 * PAD_X) * density).toInt(), ((28 + 2 * PAD_Y) * density).toInt())
     }
 
     // Toggle before the click listeners run, as CompoundButton does, so a listener that
@@ -75,19 +87,41 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         val travel = 20 * density
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = e.x; dragged = false; drag.press(); parent?.requestDisallowInterceptTouchEvent(true); return true }
+            // Nothing is disallowed here. Taking the gesture on DOWN is what stopped the
+            // ScrollView from ever getting a drag that starts on a switch, and most of
+            // those drags are the user scrolling the settings past a row that happens to
+            // have a toggle at the end of it.
+            MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; dragged = false; drag.press(); return true }
             MotionEvent.ACTION_MOVE -> {
                 val dx = e.x - downX
-                if (abs(dx) > 4 * density) dragged = true
-                if (dragged) drag.updateValue((if (checked) 1f else 0f) + dx / travel)
+                if (!dragged) {
+                    val dy = e.y - downY
+                    // Whichever axis clears the slop first owns the gesture. Sideways is
+                    // ours, and only now is it worth asking the scroller to keep out;
+                    // downwards is the ScrollView's, and it will intercept and send this
+                    // view an ACTION_CANCEL without being asked.
+                    if (abs(dx) > slop && abs(dx) > abs(dy)) {
+                        dragged = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    } else return true
+                }
+                drag.updateValue((if (checked) 1f else 0f) + dx / travel)
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 drag.release()
                 if (!dragged) { performClick(); return true }
                 val on = drag.targetValue >= 0.5f
                 if (on != checked) { checked = on; onCheckedChange?.invoke(on) }
                 drag.animateTo(if (on) 1f else 0f)
+                return true
+            }
+            // A cancel is the scroller taking the gesture away, not a choice: put the
+            // thumb back where the state says it belongs and report nothing.
+            MotionEvent.ACTION_CANCEL -> {
+                drag.release()
+                drag.animateTo(if (checked) 1f else 0f)
+                dragged = false
                 return true
             }
         }
@@ -99,14 +133,18 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
         // createBitmap throws at zero size, and a view before its first layout has none.
         if (w <= 0f || h <= 0f) return
         val lum = Backdrop.luminanceOf(this).let { if (Backdrop.bitmap == null) Pane.FALLBACK_LUMINANCE else it }
-        track.set(0f, 0f, w, h)
+        // The track is inset into the view by the padding; everything else is measured
+        // from the track, so the 64x28dp capsule and its 20dp of travel are unchanged.
+        val px = PAD_X * density; val py = PAD_Y * density
+        track.set(px, py, w - px, h - py)
+        val tr = track.height() / 2f
         paint.color = blend(Ink.track(lum), Ink.on(lum), drag.progress)
-        canvas.drawRoundRect(track, h / 2f, h / 2f, paint)
+        canvas.drawRoundRect(track, tr, tr, paint)
 
         val inset = 2 * density
         val tw = 40 * density; val th = 24 * density
-        val x = inset + (w - 2 * inset - tw) * drag.progress
-        thumb.set(x, inset, x + tw, inset + th)
+        val x = track.left + inset + (track.width() - 2 * inset - tw) * drag.progress
+        thumb.set(x, track.top + inset, x + tw, track.top + inset + th)
 
         // The thumb's own view of the world: the wallpaper under this switch, then the track.
         if (local == null) {
@@ -124,13 +162,18 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
             getLocationOnScreen(loc)
             lc.drawBitmap(backdrop, -(loc[0] - Backdrop.origin[0]).toFloat(), -(loc[1] - Backdrop.origin[1]).toFloat(), null)
         } else lc.drawColor(dev.kb896.aiusage.Panel.Palette.BG)
-        lc.drawRoundRect(track, h / 2f, h / 2f, paint)
+        lc.drawRoundRect(track, tr, tr, paint)
         val shader = localShader!!
 
         val p = drag.pressProgress
-        var sx = drag.scaleX; var sy = drag.scaleY
-        sx /= 1f - (drag.velocity * 0.75f).coerceIn(-0.2f, 0.2f)
-        sy *= 1f - (drag.velocity * 0.25f).coerceIn(-0.2f, 0.2f)
+        // The squash is a stretch ALONG the direction of travel, so it goes on the
+        // magnitude of the velocity. Signed, it stretched a thumb flicking right and
+        // pinched one flicking left — half a squash, and the half that reads as a fault.
+        val v = abs(drag.velocity)
+        // And no larger than the room the view has: at 1.5x pressed plus the flick's
+        // 1.25x the thumb would be back over the edge the padding just gave it.
+        val sx = min(drag.scaleX / (1f - (v * 0.75f).coerceIn(0f, 0.2f)), w / tw)
+        val sy = min(drag.scaleY * (1f - (v * 0.25f).coerceIn(0f, 0.2f)), h / th)
         canvas.save()
         canvas.scale(sx, sy, thumb.centerX(), thumb.centerY())
         Pane.draw(canvas, this, thumb.left, thumb.top, thumb.right, thumb.bottom, th / 2f,
@@ -138,6 +181,20 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
         paint.color = (0xFFFFFF) or (((1f - p) * 255).toInt() shl 24)
         canvas.drawRoundRect(thumb, th / 2f, th / 2f, paint)
         canvas.restore()
+    }
+
+    companion object {
+        /**
+         * Room around the track for the pressed thumb.
+         *
+         * The thumb is drawn scaled about its centre — 1.5x while held, more with a
+         * flick — and a view measured to the track's own 64x28dp clipped it against its
+         * bounds. The switch sits at the right end of its row, so the 12dp of side
+         * padding is why the visible track now starts 12dp in from where the platform
+         * switch's did.
+         */
+        const val PAD_X = 12f
+        const val PAD_Y = 8f
     }
 
     private fun blend(a: Int, b: Int, t: Float) = Ink.mix(
