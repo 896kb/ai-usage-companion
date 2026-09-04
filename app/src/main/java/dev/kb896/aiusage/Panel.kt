@@ -1,12 +1,26 @@
 package dev.kb896.aiusage
 
-/** Measured hardware facts and the arch_rice palette. Single source of truth. */
+/**
+ * The arch_rice palette and utilisation ramp (the design, shared by every device), plus
+ * a read-through to the per-device hardware facts in [DeviceProfiles.current].
+ *
+ * The geometry members below are no longer compile-time constants: they resolve, at
+ * runtime, to the profile for the phone this build runs on — the Xiaomi rear display or a
+ * Galaxy Z Flip cover screen. Call sites are unchanged (`Panel.WIDTH`, `Panel.DISPLAY_ID`,
+ * …); only their source moved. See [DeviceProfile].
+ */
 object Panel {
-    const val DISPLAY_ID = 1
-    const val WIDTH = 904
-    const val HEIGHT = 572
+    private val device: DeviceProfile get() = DeviceProfiles.current
+
+    val DISPLAY_ID: Int get() = device.displayId
+    val WIDTH: Int get() = device.width
+    val HEIGHT: Int get() = device.height
     /** Camera cutout bounding box is x in [0, CUTOUT_RIGHT). Display is LIVE inside it. */
-    const val CUTOUT_RIGHT = 296
+    val CUTOUT_RIGHT: Int get() = device.cutoutRight
+    /** Tail of the panel display's physical id in dumpsys — see [DeviceProfile]. */
+    val PHYSICAL_ID_SUFFIX: String get() = device.physicalIdSuffix
+    /** Whether this device draws the lens rings — see [DeviceProfile.hasRings]. */
+    val HAS_RINGS: Boolean get() = device.hasRings
 
     object Palette {
         const val BG = 0xFF1D1F21.toInt()

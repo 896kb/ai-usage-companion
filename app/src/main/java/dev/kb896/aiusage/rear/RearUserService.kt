@@ -3,6 +3,7 @@ package dev.kb896.aiusage.rear
 import android.content.Context
 import android.util.Log
 import dev.kb896.aiusage.IRearService
+import dev.kb896.aiusage.Panel
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.system.exitProcess
@@ -563,11 +564,15 @@ class RearUserService : IRearService.Stub {
 
     private companion object {
         /**
-         * Tail of the rear panel's physical display id (local:4630946949513469332).
-         * Matched as a suffix so the constant does not have to track the full 19-digit
-         * value appearing in two different formats across dumpsys outputs.
+         * Tail of the rear panel's physical display id, per device — see
+         * [dev.kb896.aiusage.DeviceProfile]. Matched as a suffix so the value does not
+         * have to track the full 19-digit id, which appears in two different formats
+         * across dumpsys outputs. (Xiaomi "332", Flip 6 cover "900".)
+         *
+         * This service runs in Shizuku's process, but it is the same APK, so `Build.MODEL`
+         * and the profile resolve to the same device here as in the app.
          */
-        const val REAR_PHYSICAL_ID_SUFFIX = "332"
+        val REAR_PHYSICAL_ID_SUFFIX: String get() = Panel.PHYSICAL_ID_SUFFIX
 
         /**
          * Keep-alive period. Matches UsagePollService's watchdog rather than racing it:

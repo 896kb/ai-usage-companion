@@ -95,5 +95,5 @@ object TitleLimits {
     )
 
     /** Panel width, kept here so the constants above can be checked against it. */
-    const val PANEL_WIDTH = Panel.WIDTH
+    val PANEL_WIDTH = Panel.WIDTH
 }

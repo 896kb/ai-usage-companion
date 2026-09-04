@@ -2007,6 +2007,7 @@ class RearDialView(context: Context) : View(context) {
 
     /** Lay the glass over every ring noted during the scene. */
     private fun drawPendingRings(canvas: Canvas) {
+        if (!Panel.HAS_RINGS) return
         val recorder = canvas as? android.graphics.RecordingCanvas ?: return
         val source = paneBackdrop
         if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return
@@ -3268,6 +3269,9 @@ class RearDialView(context: Context) : View(context) {
          */
         ghostFraction: Float = 0f,
     ) {
+        // No lens under this device's panel to frame — see Panel.HAS_RINGS. The bars
+        // carry every reading the rings did, so drawing nothing here is not a loss.
+        if (!Panel.HAS_RINGS) return
         val status = state.statuses.firstOrNull { it.account == account }
             ?.let { demoStatus(it) }
         val kind = when (spec.window) {
@@ -6330,8 +6334,16 @@ class RearDialView(context: Context) : View(context) {
         return text[0].uppercaseChar() + text.substring(1).lowercase()
     }
 
-    /** Account indices in the configured display order. */
+    /**
+     * Account indices in the configured display order, minus any switched off.
+     *
+     * The work account, disabled, is dropped here — the panel's single enumeration point,
+     * so its heading, its block and (where they exist) its ring all go with it, and the
+     * panel is genuinely personal-only rather than showing an empty WORK heading. See
+     * PanelConfig.showWork.
+     */
     private fun orderedAccounts(): List<Int> = config.orderedAccounts(Account.entries.size)
+        .filter { config.showWork || it != Account.WORK.ordinal }
 
     /**
      * The account blocks, in two passes over one layout.
@@ -9636,8 +9648,20 @@ class RearDialView(context: Context) : View(context) {
             return
         }
         ray.setTint(Panel.Palette.PERSONAL)
-        ray.setBounds(region.left.toInt(), region.top.toInt(),
-            region.right.toInt(), region.bottom.toInt())
+        if (Panel.HAS_RINGS) {
+            ray.setBounds(region.left.toInt(), region.top.toInt(),
+                region.right.toInt(), region.bottom.toInt())
+        } else {
+            // Without the lens rings, the mark is the panel's one purely decorative
+            // element, and spanning the full bar column let it dominate the near-square
+            // cover. Draw it at half width, LEFT-aligned to the bar column and
+            // bottom-aligned in the slot, with the aspect taken from the 405x102 artwork
+            // so the fan never stretches.
+            val w = region.width() * 0.5f
+            val h = w * 102f / 405f
+            ray.setBounds(region.left.toInt(), (region.bottom - h).toInt(),
+                (region.left + w).toInt(), region.bottom.toInt())
+        }
         ray.draw(canvas)
     }
 
@@ -10303,8 +10327,8 @@ class RearDialView(context: Context) : View(context) {
          * a fact of the layout rather than a coincidence that survives until someone
          * retunes one of the margins.
          */
-        private const val CONTENT_LEFT = Panel.CUTOUT_RIGHT + 34f
-        private const val CONTENT_RIGHT = Panel.WIDTH - 34f
+        private val CONTENT_LEFT = Panel.CUTOUT_RIGHT + 34f
+        private val CONTENT_RIGHT = Panel.WIDTH - 34f
         /**
          * 112, not 92. The column was sized for "5H"/"7D"/"FABLE"; once the labels
          * gained their scope and window ("ALL 5H", "FABLE 7D") the longest of them ran
@@ -10312,7 +10336,7 @@ class RearDialView(context: Context) : View(context) {
          * one — and that one is only as long as the model name the API returns, so
          * leave slack for a longer name than FABLE.
          */
-        private const val BAR_LEFT = CONTENT_LEFT + 112f
+        private val BAR_LEFT = CONTENT_LEFT + 112f
         /**
          * Each row is four columns: label, bar, percentage, time-to-reset. The last two
          * are derived backwards from the panel edge so the bar absorbs the remaining
@@ -10322,9 +10346,9 @@ class RearDialView(context: Context) : View(context) {
          * Widths are sized against the worst case each column can hold: "100%" at 21f
          * for the percentage, "3d17h" at 18f for the time.
          */
-        private const val TIME_RIGHT = CONTENT_RIGHT
-        private const val PCT_RIGHT = CONTENT_RIGHT - 82f
-        private const val BAR_RIGHT = PCT_RIGHT - 68f
+        private val TIME_RIGHT = CONTENT_RIGHT
+        private val PCT_RIGHT = CONTENT_RIGHT - 82f
+        private val BAR_RIGHT = PCT_RIGHT - 68f
 
         /**
          * Maker's mark. Spans exactly the bar column (BAR_LEFT..BAR_RIGHT) at the
@@ -10335,7 +10359,7 @@ class RearDialView(context: Context) : View(context) {
          * also hand-picking a height is exactly how an aspect-ratio distortion gets
          * baked in unnoticed.
          */
-        private const val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
+        private val MARK_H = (BAR_RIGHT - BAR_LEFT) * 102f / 405f
         private const val MARK_BOTTOM = 26
 
         /**
@@ -10486,10 +10510,10 @@ class RearDialView(context: Context) : View(context) {
          * digitizer — so this is the cutout plus the margin the rest of the panel keeps
          * from its edges.
          */
-        private const val CONTENT_EDGE = (Panel.CUTOUT_RIGHT + MARK_BOTTOM).toFloat()
+        private val CONTENT_EDGE = (Panel.CUTOUT_RIGHT + MARK_BOTTOM).toFloat()
 
         private const val CLOSE_R = 19f
-        private const val CLOSE_CX = CONTENT_EDGE + CLOSE_R
+        private val CLOSE_CX = CONTENT_EDGE + CLOSE_R
 
         /**
          * TOP left, not bottom left, and it moved there to make room.
@@ -10832,7 +10856,7 @@ class RearDialView(context: Context) : View(context) {
         private const val MINI_SHADOW_SPAN = 0.5f
 
         /** A quarter of the panel, which is what the strip was asked for. */
-        private const val NOTICE_H = Panel.HEIGHT / 4f
+        private val NOTICE_H = Panel.HEIGHT / 4f
         /**
          * The cards' left edge: clear of the cutout, not flush against it.
          *

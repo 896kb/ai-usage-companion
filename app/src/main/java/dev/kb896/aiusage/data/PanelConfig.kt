@@ -246,6 +246,18 @@ data class PanelConfig(
     val demoMode: Boolean = false,
 
     /**
+     * Whether the second (work) account is shown at all.
+     *
+     * Off by choice, not by circumstance: a work account with no token already shows a
+     * ghost, which says "sign in here". Someone who cannot or will not put a work token
+     * on the phone — an organisation that would object to a credential leaving its
+     * tooling — does not want that standing invitation, they want the account gone. With
+     * this off the panel is personal-only and the work account is never polled, so no
+     * work token is ever asked for or used.
+     */
+    val showWork: Boolean = true,
+
+    /**
      * Hold the rear display awake for as long as the panel is up.
      *
      * OFF BY DEFAULT, and that default is a measurement rather than a taste. Held awake

@@ -43,8 +43,8 @@ object LockSlider {
     const val WIDTH_FRACTION = 0.8f
 
     /** The panel that can actually be seen and touched: everything right of the lenses. */
-    const val USABLE_LEFT = Panel.CUTOUT_RIGHT.toFloat()
-    const val USABLE_WIDTH = Panel.WIDTH - Panel.CUTOUT_RIGHT.toFloat()
+    val USABLE_LEFT = Panel.CUTOUT_RIGHT.toFloat()
+    val USABLE_WIDTH = Panel.WIDTH - Panel.CUTOUT_RIGHT.toFloat()
 
     fun left(): Float = USABLE_LEFT + USABLE_WIDTH * (1f - WIDTH_FRACTION) / 2f
     fun right(): Float = left() + USABLE_WIDTH * WIDTH_FRACTION
