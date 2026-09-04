@@ -24,6 +24,18 @@ class StatePayloadTest {
         assertEquals(state, StatePayload.decode(StatePayload.encode(state)).state)
     }
 
+    @Test fun `omits the work account when showWork is off`() {
+        val json = StatePayload.encode(state, PanelConfig.DEFAULT.copy(showWork = false))
+        val accounts = StatePayload.decode(json).state.statuses
+        assertEquals(1, accounts.size)
+        assertEquals(Account.PERSONAL, accounts[0].account)
+    }
+
+    @Test fun `keeps the work account when showWork is on`() {
+        val json = StatePayload.encode(state, PanelConfig.DEFAULT.copy(showWork = true))
+        assertEquals(2, StatePayload.decode(json).state.statuses.size)
+    }
+
     @Test fun `preserves a null resetsAt`() {
         val back = StatePayload.decode(StatePayload.encode(state))
         assertNull(back.state.statuses[0].snapshot!!.windows[2].resetsAt)

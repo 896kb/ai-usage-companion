@@ -18,6 +18,7 @@ import android.util.Log
 import android.view.Display
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
+import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.RearActivity
@@ -406,6 +407,11 @@ class UsagePollService : Service() {
 
     private suspend fun tick() {
         val app = Graph.of(this)
+        // Personal-only when the work account is switched off — the work token is then
+        // never used. See PanelConfig.showWork. Set every tick so toggling it takes
+        // effect on the next poll without restarting the service.
+        app.repository.enabledAccounts =
+            if (config().showWork) Account.entries.toSet() else setOf(Account.PERSONAL)
         app.repository.refresh()
         // UsageRepository.refresh() keeps each account's last good snapshot when a
         // fetch degrades (see its KDoc), so this is never a blank/empty payload

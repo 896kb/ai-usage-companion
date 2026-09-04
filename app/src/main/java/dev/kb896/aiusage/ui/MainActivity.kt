@@ -341,6 +341,9 @@ class MainActivity : ComponentActivity() {
      * is the one case where waiting out the floor would look like a failed import.
      */
     private fun refreshNow() = lifecycleScope.launch {
+        val cfg = ConfigStore(this@MainActivity).load()
+        graph.repository.enabledAccounts =
+            if (cfg.showWork) Account.entries.toSet() else setOf(Account.PERSONAL)
         graph.repository.refresh(force = true)
         graph.bridge.update(
             StatePayload.encode(graph.repository.state.value, ConfigStore(this@MainActivity).load()))
@@ -637,6 +640,18 @@ class MainActivity : ComponentActivity() {
                     refreshPreview()
                     buildSettingsRows()
                 }
+            }
+        }
+
+        // The work account is optional. Someone who cannot put a work token on the phone
+        // turns this off: the panel goes personal-only and that account is never polled,
+        // so no work token is ever asked for or used. Named by the account's own label so
+        // it reads as "this account" rather than a feature. Its configuration row above
+        // stays put, so the account can still be signed into and set up while hidden.
+        run {
+            val workLabel = config.styleFor(Account.WORK.ordinal).label ?: Account.WORK.label
+            SettingsRows.toggle(container, "Show the $workLabel account", config.showWork) { on ->
+                write { it.copy(showWork = on) }
             }
         }
 

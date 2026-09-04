@@ -67,6 +67,14 @@ class UsageRepository(
     private var lastRefreshAtElapsed = 0L
 
     /**
+     * Which accounts a refresh actually polls. Set by the caller from config before a
+     * refresh — see PanelConfig.showWork. A disabled account is never fetched (so its
+     * token is never used) and drops out of [state], which is what carries through to
+     * the payload and the panel. Defaults to all, so nothing changes until told.
+     */
+    @Volatile var enabledAccounts: Set<Account> = Account.entries.toSet()
+
+    /**
      * @param force skips the burst floor. Reserved for the two moments a user has just
      * supplied a credential and is watching for it to take effect — an imported work
      * token and a completed personal sign-in. Never pass true from an automatic path.
@@ -79,7 +87,7 @@ class UsageRepository(
         }
         lastRefreshAtElapsed = android.os.SystemClock.elapsedRealtime()
         val previous = _state.value.statuses.associateBy { it.account }
-        val statuses = Account.entries.map { account ->
+        val statuses = Account.entries.filter { it in enabledAccounts }.map { account ->
             fetchOne(account, previous[account]?.snapshot)
         }
         _state.value = DashboardState(System.currentTimeMillis(), statuses)

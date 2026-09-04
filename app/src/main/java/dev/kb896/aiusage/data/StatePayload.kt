@@ -41,7 +41,12 @@ object StatePayload {
         put("fetchedAt", state.fetchedAt)
         put("config", Json.parseToJsonElement(PanelConfig.encode(config)))
         putJsonArray("accounts") {
+            // The work account, switched off, is omitted here as well as being skipped by
+            // the poll — so the panel reflects the toggle immediately, on the next push,
+            // rather than only once a poll has dropped it from state. See
+            // PanelConfig.showWork.
             for (s in state.statuses) {
+                if (!config.showWork && s.account == Account.WORK) continue
                 addJsonObject {
                     put("id", s.account.slug)
                     put("label", s.account.label)
