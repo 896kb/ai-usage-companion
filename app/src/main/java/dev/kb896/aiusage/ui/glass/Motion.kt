@@ -127,6 +127,10 @@ class DampedDrag(
     private val scaleYSpring = motion.spring(250f, 0.7f, 0.001f, initialScale)
 
     private var pendingRelease = false
+    // Whether the squash is the finger's to have. A tap is a move the control makes on
+    // its own, and the catalog zeroes the velocity for it; a drag is the finger's, and
+    // the squash is its.
+    private var followsVelocity = true
 
     init {
         motion.onFrame = {
@@ -138,7 +142,9 @@ class DampedDrag(
             // frame of the value animation for the same reason. Set, not animate(): this
             // is already inside a frame, and Motion.advance asks again afterwards whether
             // anything is still moving.
-            velocitySpring.target = if (span == 0f) 0f else valueSpring.velocity / span
+            if (followsVelocity) {
+                velocitySpring.target = if (span == 0f) 0f else valueSpring.velocity / span
+            }
             if (pendingRelease && valueSpring.settled) { pendingRelease = false; release() }
         }
     }
@@ -165,11 +171,20 @@ class DampedDrag(
         motion.animate(scaleYSpring, initialScale)
     }
 
-    fun updateValue(v: Float) { motion.animate(valueSpring, v.coerceIn(range)) }
+    /** The finger moved it: from here the squash is the value spring's own speed. */
+    fun updateValue(v: Float) {
+        followsVelocity = true
+        motion.animate(valueSpring, v.coerceIn(range))
+    }
 
     fun animateTo(v: Float) {
         // A tap is a press, a move, and a let-go; the let-go has to wait for the move.
         press()
+        // And the move is the control's own, not a finger's, so it carries no squash:
+        // animateToValue animates the velocity to zero in the catalog, which is this
+        // spring snapped there and left alone until a drag asks for it again.
+        followsVelocity = false
+        velocitySpring.snap(0f)
         motion.animate(valueSpring, v.coerceIn(range))
         pendingRelease = true
     }

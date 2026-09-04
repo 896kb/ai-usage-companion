@@ -69,11 +69,9 @@ class MotionTest {
     }
 
     /**
-     * The report: the squash outlived the drag.
-     *
-     * The velocity spring was only retargeted from updateValue, so a lifted finger left
-     * its target at the last drag frame's figure and it settled there instead of at zero.
-     * A drag has to leave every one of these springs where it found it.
+     * The whole end state of the touch path's own order: release, then animate to the end
+     * the drag chose. The velocity's own decay is the drag test below's to guard — here
+     * animateTo zeroes it outright, being a move the control makes rather than a finger.
      */
     @Test fun `a drag that ends puts the velocity back with everything else`() {
         val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
@@ -90,6 +88,40 @@ class MotionTest {
         assertEquals(1f, d.scaleY, 0.01f)
         assertEquals(0f, d.pressProgress, 0.01f)
         assertEquals(1f, d.value, 0.01f)
+    }
+
+    /**
+     * A tap is the control moving itself, and the catalog animates the velocity to zero
+     * for it: the thumb swells and travels, but carries none of a flick's stretch.
+     */
+    @Test fun `a tap moves the value with no squash on it`() {
+        val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
+        d.animateTo(1f)
+        d.motion.advance(1f / 120f)
+        assertTrue("the tap should be under way: ${d.value}", d.value > 0f)
+        assertEquals(0f, d.velocity, 0.001f)
+        // More than one frame, and the fastest ones: a frame retargets the velocity after
+        // stepping it, so the first frame reads zero whether or not the tap is following
+        // the value. It is the frames over the value's own peak speed that tell them apart.
+        repeat(20) {
+            d.motion.advance(1f / 120f)
+            assertEquals("a tap carries no squash at any point: ${d.value}", 0f, d.velocity, 0.001f)
+        }
+    }
+
+    /**
+     * A drag is the finger's, and the squash is its: it builds while the finger moves and
+     * is gone once everything has come to rest.
+     */
+    @Test fun `a drag squashes while it moves and lets go of it afterwards`() {
+        val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
+        d.press()
+        var v = 0f
+        repeat(4) { v += 0.2f; d.updateValue(v); d.motion.advance(1f / 120f) }
+        assertTrue("a moving finger squashes it: ${d.velocity}", abs(d.velocity) > 0.1f)
+        d.release()
+        settle(d.motion)
+        assertEquals(0f, d.velocity, 0.001f)
     }
 
     @Test fun `animateTo squashes while the value moves and lets go when it settles`() {
