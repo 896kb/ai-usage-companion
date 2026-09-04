@@ -201,6 +201,40 @@ right across most of the panel and wrong at the ends: over black there is nothin
 through them and the disc disappears; over a bright photograph they are a hole with a rim.
 They are given a tint *only* where clear glass stops working, and none in the middle.
 
+### The settings screen is glass too
+
+Under GLASS the app you set the panel from is made of the same thing the panel is. The
+picture you chose for the panel's background becomes the wallpaper behind the settings —
+or, with no picture, a soft gradient of the ground colour, because a flat colour gives a
+lens nothing to bend — and every section sits on it as a card of glass, drawn by the same
+vendored shaders with the same luminance grid deciding whether its text is black or white.
+The toggles, the choices, the buttons, the sliders, the colour chips and the dialogs are
+ports of the components in AndroidLiquidGlass's catalog app, rebuilt as Views because the
+catalog is Compose and this app is not. The dropdowns became segmented controls, which is
+what the catalog has for a choice.
+
+**ORIGINAL does not change by a pixel.** Every glass control that is declared in the layout
+is an inert twin of the platform widget it replaced until the theme says otherwise, and
+that is tested rather than promised: a suite of tests inflates the layout under ORIGINAL
+and checks that not one of them added a margin, a padding, a background or a drawing.
+
+Every pane samples the wallpaper, not what is actually beneath it — a toggle inside a card
+sees the picture, not the card. That is deliberate. Nothing reads the screen back, ever:
+the wallpaper is one bitmap built once at the window's size, and its sixteen-by-sixteen
+luminance grid is what every control asks. A still screen costs nothing, because a View
+only redraws when it is invalidated. Scrolling redraws every visible pane over a new slice
+of the picture, so the glass reads as sliding across it; to make that affordable, a card
+refracts only its rim band — the shader passes straight through everywhere else and the
+wallpaper is already painted behind — and a toggle at rest, which is an opaque white pill,
+draws nothing under itself. Measured on the phone with a finger on it, a scroll went from
+a median of 18ms a frame to 14ms after the rim change, which is still more than a 120Hz
+screen allows; the two fixes after that are not measured yet.
+
+Two things to know. The stored background is capped at 1024px on its long edge, which is
+right for the panel and an upscale on the front, so the wallpaper there is softer than the
+panel's — recorded, not fixed. And changing the theme rebuilds the settings screen rather
+than restyling it, because the controls differ in kind.
+
 ## The preview shows what the panel shows
 
 The preview on the front screen is the same view class as the panel, drawing the same
@@ -243,7 +277,9 @@ off a live trace of doing it by hand; the camera app then brings up its own comp
 on the front by itself.
 
 Closing the camera returns to the panel. Not an assumption — panel, camera on top, back,
-panel again, measured.
+panel again, measured. It also stops the camera: closing used to take its viewfinder off
+the display and leave the camera app running behind the panel, lens open. It is asked to
+die now rather than force-stopped, and the difference is that it actually goes.
 
 ### Game
 
@@ -310,6 +346,20 @@ cannot use should not be sitting there looking usable.
 If nobody swipes, the panel waits for the notice or the charger to be gone, lets the
 display go dark again, and puts the artwork back — all animated, including the record
 spinning back up.
+
+### And when nobody is looking
+
+Thirty seconds after the last touch the rear display goes dark, unless **Keep panel awake**
+is on. Dark is not dimmed: while it sleeps the panel draws nothing, fetches no reading, and
+asks for no lyric sheet. The poll loop does not check a flag every few seconds and go back
+to sleep — it parks on the panel's own signal and is not scheduled at all until the panel
+says it is visible, so a phone in a pocket overnight costs exactly zero requests and zero
+wake-ups. Two hours dark is the same as two minutes dark. The moment it lights, a reading
+is asked for at once, and never more often than the normal cadence: glancing at it ten
+times a minute asks for nothing extra.
+
+Before this the frame loop was measured at 72% of a core, drawing into a display that
+threw every frame away. A notification or a charger still wakes it, as above.
 
 ## Media controls
 
@@ -913,6 +963,29 @@ that a message arrived and broadcasting what it said are different decisions, so
 different switches, and both start off. With the body switched off the group cascade
 lists **senders** rather than falling silent — the panel still says who is waiting.
 
+## The page above the readout
+
+Scroll up from the readout — the media page is below it, this is above — and the panel
+slides to a page with the time on it. Not fades: slides, the way the readout does, so the
+pages are things stacked on the display rather than states of one thing. The clock has
+seconds, and every digit turns over on its own the way a wheel picker turns, so a second
+ticking is one numeral rolling and not a whole clock redrawing. Under GLASS the numerals
+are made of glass, the way the charging percentage is; the date is spelled out in full —
+`Thursday, September 3rd, 2026` — in a shell of glass, and both take the colours the
+readout's own clock and date use. Under ORIGINAL they are the original traced glyphs.
+
+Under the clock are the **last ten notifications**, on a wheel. The current one is whole
+and in front; its neighbours sit half a card behind it, smaller and faded, and the wheel
+settles on a card the way the pager settles on a page. The ten are kept, so the message
+that woke the panel at three in the morning is still there when you look at it at seven —
+the display lit for it and went dark again, but the notification did not leave with it.
+Under ORIGINAL the cards are the original opaque ones; under GLASS they are the same
+glass cards the strip uses, and each reads the panel behind its own place on the wheel.
+
+The small line under a notification is its group's summary — WhatsApp's "3 messages from
+2 chats" — not an older notification pretending to be related. The record sinks to the
+bottom of this page so the cards have the room.
+
 ## Charging
 
 Plug the phone in and a cell slides in from the right edge and fills with liquid.
@@ -951,6 +1024,41 @@ of whatever colour you chose for the liquid. That wash is a fifth opaque, not mo
 higher strengths the tint becomes most of what you see and the refraction underneath is
 averaged into a flat colour, which is coloured type rather than tinted glass.
 
+## Weather on the glass
+
+A setting, **None, Rain or Snow**, draws weather on the ground behind everything — on the
+colour or the picture, and in front of nothing, so the readout stays readable and the
+cards bend the weather along with whatever else is behind them.
+
+**Rain is water, not sprites.** A drop is drawn as displacement: it bends what is under it
+and only then gets a lit edge, because a lens is what the eye recognises long before it
+notices a highlight. Drops cling, run, wander sideways when they catch on something and
+slow where they slip, leave beads behind on their own spacing and a trail that lingers a
+couple of seconds, and wipe the condensation clear along their path, which mists back over
+in about three. Each trip down a cell is a different drop — a different start, a different
+route, a different rate — because a cell that ran the same drop forever read as a video on
+loop, which is exactly what it was. They are lit by which way their surface faces, so no
+two look alike, and a running drop takes the smaller ones it crosses and grows a little for
+it. And the water goes round the cameras. A drop cannot do that on its own, since it lives
+in a cell narrower than the lens; so the panel is folded along the line through both lens
+centres by the rim's width at each row, the columns part around it, and a straight fall
+comes out on the screen as a curve that hugs the ring. The trail and the wiped path follow,
+because they are drawn along the same route.
+
+**Snow is dry.** A flake sits on the glass rather than wetting it, so it bends nothing —
+snow that refracted looked like rain that had forgotten how to fall. It is adapted from
+Lumine's multilayer snowfall: diamond flakes, a fall that slants differently per layer,
+and a focal depth that drifts so the sharp plane moves through it. Fourteen layers rather
+than its forty, which is a desktop budget.
+
+Rain costs more than snow because it refracts, which is a dependent read the GPU cannot
+prefetch; measured at three layers each, snow was a millisecond a frame and rain sixteen,
+so rain gives up a layer. There is no blur under either: a downscaled blur went blocky and
+came out, and the bending carries the whole illusion on its own. The rectangles that
+appeared on the condensation for a while were chased through six explanations — tiling,
+the effect, the noise, the compositing — and were a missing term in the water field: the
+clearing knew how far *above* the drop a pixel was and nothing about how far to the side.
+
 ## Customisation
 
 Almost everything on the panel is editable, and the settings screen shows a **live
@@ -967,7 +1075,10 @@ drift from what the back of the phone is doing.
 | **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
 | **Background picture** | A photograph behind the whole readout, cropped the same way the artwork is. Under GLASS it is also the best thing that has ever been behind a pane — the lenses had almost nothing but flat black to bend until it arrived. |
 | **Extras** | A clock, a date and a battery readout, stacked in the corner with pixel-traced glyphs, each its own toggle and its own colour. |
-| **Background** | One section, three columns: a colour, a picture, and a bin that is live only when there is a picture to empty. They are exclusive — choosing a colour clears the image, because the picture is drawn *over* the ground and would otherwise go on covering whatever you picked. The switch beside the heading is not a third option: it is whether the ground is drawn at all, and off does not mean gone — it drops to a low alpha so the system's rear screen shows through. |
+| **Background** | One section, three columns: a colour, a picture, and a bin that is live only when there is a picture to empty. They are exclusive — choosing a colour clears the image, because the picture is drawn *over* the ground and would otherwise go on covering whatever you picked. There is no switch for the ground itself: a panel with no ground is the one state that hands the display back to the system's own launcher. |
+| **Theme** | ORIGINAL or GLASS — the face, the glyphs, the material, and the settings screen with it. First in the list, because it is the one setting that changes what every other setting looks like. |
+| **Weather** | None, rain or snow, on the ground behind everything. |
+| **Keep panel awake** | Off by default: the panel goes dark thirty seconds after you stop touching it and does no work while it is dark. On, it stays lit. |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
 Each account gets **its own settings screen**, reached from a row on the main one and
@@ -993,6 +1104,16 @@ handed to someone else should not show whose accounts these are.
 **ADVANCED → Reset every setting to its default** puts everything back. It asks first,
 and the confirm button stays shut for five seconds — the one action in the app with
 nothing behind it and no undo. Your connected accounts stay signed in.
+
+### The demo, in debug builds only
+
+A debug build has one more switch, **Demo mode**, and the panel then performs itself on a
+loop for the camera: every mascot state in turn, the bars and their colours and reset times
+driven per segment, an account that is not answering, the volume and the playback position
+swept and a track change, and ten invented notifications wearing the icons of apps that are
+actually installed — written rather than borrowed, and dull on purpose, because the whole
+point of filming a notification page is not publishing a stranger's messages. The wheel
+turns itself. None of it is in a release build.
 
 ## Future plans
 
@@ -1279,6 +1400,11 @@ directly against a Canvas here, where the library is written for Compose — wit
 notice kept alongside. The front screen's glass controls — the card, toggle, segmented choice, button, slider and dialog sheet under `ui/glass/` — are ports of the components in its catalog app, rebuilt as Views; each file names the catalog file it came from. Its glyphs are **Material Symbols Rounded** and the front screen's are **Material Icons**, both Apache 2.0, from
 [material-design-icons](https://github.com/google/material-design-icons). ORIGINAL's glyphs
 are traced from Nerd Fonts into pixel rectangles rather than bundled.
+
+The snow is adapted from **Lumine's multilayer snowfall** on
+[Godot Shaders](https://godotshaders.com/shader/multilayer-snowfall-shader/), CC0 — public
+domain, so nothing is owed, but it is worth saying where it came from. The rain is this
+repository's own.
 
 The record is a stock photograph, cropped to the disc and with its label flattened out —
 the album art always covers that part, and an orange label underneath would have tinted
