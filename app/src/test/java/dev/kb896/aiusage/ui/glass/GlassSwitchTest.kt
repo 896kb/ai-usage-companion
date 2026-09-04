@@ -38,6 +38,20 @@ class GlassSwitchTest {
 
     private val slop get() = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 
+    /** A frame of the view's animation, which is what advances the thumb between touches. */
+    private fun frame(s: GlassSwitch) { s.motion.advance(1f / 120f) }
+
+    /** Frames until nothing is moving, as the view's own ticker would run them. */
+    private fun settle(s: GlassSwitch, seconds: Float = 2f) {
+        var t = 0f
+        while (t < seconds && s.motion.advance(1f / 120f)) t += 1f / 120f
+    }
+
+    private fun laidOut(): GlassSwitch = GlassSwitch(context).apply {
+        measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        layout(0, 0, measuredWidth, measuredHeight)
+    }
+
     @Test fun `it measures the catalog's 64 by 28 with room around it for the pressed thumb`() {
         val s = GlassSwitch(context)
         s.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
@@ -127,6 +141,50 @@ class GlassSwitchTest {
         assertFalse(s.isChecked)
         assertTrue(seen.isEmpty())
         assertEquals(0f, s.dragTarget, 0f)
+    }
+
+    /**
+     * The report: after a drag the thumb stayed very wide, or a circle.
+     *
+     * The squash reads a velocity that was only ever retargeted from updateValue, so the
+     * finger lifting froze it at whatever the last drag frame set, and the thumb sat at
+     * rest wearing that flick's stretch for good: 50 by 19dp, saturated at the clamp,
+     * turning the switch on. Turning it off it was the same freeze on a negative
+     * velocity, which — while the squash was still signed — pinched instead of stretched
+     * and left a 33 by 29dp thumb with no straight edge on it. That is the circle.
+     */
+    @Test fun `the thumb is its own size again once a drag has settled`() {
+        val host = Host(context)
+        val s = laidOut()
+        host.addView(s)
+        val d = context.resources.displayMetrics.density
+        send(s, MotionEvent.ACTION_DOWN, 20f, 20f)
+        // A frame between the moves: without one the value spring never steps, and a
+        // velocity that was never built cannot be left behind.
+        send(s, MotionEvent.ACTION_MOVE, 20f + slop + 2f, 20f); frame(s)
+        send(s, MotionEvent.ACTION_MOVE, 20f + 12f * d, 20f); frame(s)
+        send(s, MotionEvent.ACTION_MOVE, 20f + 22f * d, 20f); frame(s)
+        send(s, MotionEvent.ACTION_UP, 20f + 22f * d, 20f)
+        settle(s)
+        assertTrue("a drag across the travel turns it on", s.isChecked)
+        val (sx, sy) = s.thumbScales()
+        assertEquals("the thumb is no wider than itself", 1f, sx, 0.01f)
+        assertEquals("nor any flatter", 1f, sy, 0.01f)
+    }
+
+    /**
+     * A thumb at rest is opaque white, and nothing under it is worth drawing: no bitmap
+     * of its own backdrop, and none of the lens that would refract it.
+     */
+    @Test fun `a switch at rest composes nothing behind its thumb`() {
+        val s = laidOut()
+        val canvas = Canvas(Bitmap.createBitmap(s.width, s.height, Bitmap.Config.ARGB_8888))
+        s.draw(canvas)
+        assertFalse("nothing under an opaque thumb is worth a bitmap", s.hasLocalBitmap)
+        send(s, MotionEvent.ACTION_DOWN, 40f, 20f)
+        settle(s)
+        s.draw(canvas)
+        assertTrue("a pressed thumb turns to glass and needs one", s.hasLocalBitmap)
     }
 
     /**

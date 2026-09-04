@@ -70,7 +70,12 @@ class GlassSlider @JvmOverloads constructor(
         val scale = 1f + 0.5f * press.progress
         canvas.save()
         canvas.scale(scale, scale, x, cy)
-        Pane.draw(canvas, this, x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f, tint = 0, clear = true)
+        // At rest the white below is opaque, and an opaque fill hides whatever the lens
+        // refracted under it — a shader pass per slider per frame for pixels nobody can
+        // see. The rim and the body are drawn either way, so the thumb at rest is the
+        // same picture; only the pass that could not be seen goes.
+        Pane.draw(canvas, this, x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f,
+            tint = 0, clear = true, lens = press.progress > REST_PRESS)
         // Plain white at rest, fading to clear glass as it is grabbed (press.progress
         // 0 -> 1): the lens underneath is only worth paying for while a finger is on
         // it. Same formula as GlassSwitch's thumb.

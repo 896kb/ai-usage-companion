@@ -54,6 +54,14 @@ class Motion(private val view: View) {
 }
 
 /**
+ * Below this a press has let go.
+ *
+ * It is the press springs' own visibility threshold, and a settled spring is snapped
+ * exactly onto its target, so a control nobody is touching reads 0 and not merely small.
+ */
+const val REST_PRESS = 0.001f
+
+/**
  * The press of a glass button: a highlight that lands under the finger, follows it, and
  * springs back on release. Ported from catalog/utils/InteractiveHighlight.kt (Apache 2.0):
  * progress spring(0.5, 300), position spring(0.5, 300).
@@ -122,6 +130,15 @@ class DampedDrag(
 
     init {
         motion.onFrame = {
+            // The velocity the squash reads follows the value spring's own, and it has to
+            // be taken every frame. Retargeted only from updateValue it stopped being
+            // taken the moment the finger left: the value settled, the velocity settled
+            // on whatever the last drag frame had handed it, and the control sat at rest
+            // with a flick's stretch still on it. The catalog reads its tracker on every
+            // frame of the value animation for the same reason. Set, not animate(): this
+            // is already inside a frame, and Motion.advance asks again afterwards whether
+            // anything is still moving.
+            velocitySpring.target = if (span == 0f) 0f else valueSpring.velocity / span
             if (pendingRelease && valueSpring.settled) { pendingRelease = false; release() }
         }
     }
@@ -148,10 +165,7 @@ class DampedDrag(
         motion.animate(scaleYSpring, initialScale)
     }
 
-    fun updateValue(v: Float) {
-        motion.animate(valueSpring, v.coerceIn(range))
-        motion.animate(velocitySpring, if (span == 0f) 0f else valueSpring.velocity / span)
-    }
+    fun updateValue(v: Float) { motion.animate(valueSpring, v.coerceIn(range)) }
 
     fun animateTo(v: Float) {
         // A tap is a press, a move, and a let-go; the let-go has to wait for the move.

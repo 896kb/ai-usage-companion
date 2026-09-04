@@ -22,7 +22,9 @@ import kotlin.math.min
  * The thumb is white at rest and turns to glass as it is pressed (the catalog draws
  * white at 1 - pressProgress over it), and while it is glass it refracts the track and
  * the wallpaper beneath — the catalog's nested backdrop, done by drawing both into one
- * small bitmap and handing that to the lens as its content. Drag with squash, or tap.
+ * small bitmap and handing that to the lens as its content. Only while it is glass: at
+ * rest the white is opaque and neither the bitmap nor the lens is made at all. Drag with
+ * squash, or tap.
  *
  * The view is larger than the track by [PAD_X] and [PAD_Y], which is where the pressed
  * thumb goes.
@@ -43,6 +45,10 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
     private var downX = 0f
     private var downY = 0f
     private var dragged = false
+    // The thumb's squash for the frame being drawn. Fields rather than a returned pair:
+    // this runs on every frame of a scroll and nothing on that path may allocate.
+    private var thumbSx = 1f
+    private var thumbSy = 1f
     // The platform's own figure, which is what the enclosing ScrollView measures the same
     // gesture against; a threshold of this view's own invention would only disagree with it.
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -50,6 +56,19 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
 
     /** Where the value spring is headed. Tests read it to see that a cancel put it back. */
     internal val dragTarget: Float get() = drag.targetValue
+
+    /** The thumb's springs, so a test can step a gesture's frames the way the view does. */
+    internal val motion: Motion get() = drag.motion
+
+    /** Whether the thumb has ever been pressed hard enough to want its own backdrop. */
+    internal val hasLocalBitmap: Boolean get() = local != null
+
+    /** Exactly the (x, y) scale [onDraw] would draw the thumb at, for a test to read. */
+    internal fun thumbScales(): Pair<Float, Float> {
+        place()
+        squash()
+        return thumbSx to thumbSy
+    }
 
     init { isClickable = true }
 
@@ -133,20 +152,66 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
         // createBitmap throws at zero size, and a view before its first layout has none.
         if (w <= 0f || h <= 0f) return
         val lum = Backdrop.luminanceOf(this).let { if (Backdrop.bitmap == null) Pane.FALLBACK_LUMINANCE else it }
-        // The track is inset into the view by the padding; everything else is measured
-        // from the track, so the 64x28dp capsule and its 20dp of travel are unchanged.
-        val px = PAD_X * density; val py = PAD_Y * density
-        track.set(px, py, w - px, h - py)
+        place()
         val tr = track.height() / 2f
         paint.color = blend(Ink.track(lum), Ink.on(lum), drag.progress)
         canvas.drawRoundRect(track, tr, tr, paint)
 
+        val p = drag.pressProgress
+        // The thumb is opaque white until a finger is on it, and an opaque fill hides
+        // everything under it: at rest the little bitmap and the lens that refracts it
+        // are a view-sized blit and a shader pass, per switch, per frame, for pixels
+        // nobody can see. A screen of settings being scrolled is when they cost most.
+        val pressed = p > REST_PRESS
+        // Before the colour changes to the thumb's: the local bitmap wants the track's.
+        val content = if (pressed) localContent(tr) else null
+        squash()
+        val r = thumb.height() / 2f
+        canvas.save()
+        canvas.scale(thumbSx, thumbSy, thumb.centerX(), thumb.centerY())
+        Pane.draw(canvas, this, thumb.left, thumb.top, thumb.right, thumb.bottom, r,
+            tint = 0, clear = true, rim = true, content = content, lens = pressed)
+        paint.color = (0xFFFFFF) or (((1f - p) * 255).toInt() shl 24)
+        canvas.drawRoundRect(thumb, r, r, paint)
+        canvas.restore()
+    }
+
+    /** Where the track and the thumb sit at the value the drag is holding. */
+    private fun place() {
+        val w = width.toFloat(); val h = height.toFloat()
+        // The track is inset into the view by the padding; everything else is measured
+        // from the track, so the 64x28dp capsule and its 20dp of travel are unchanged.
+        val px = PAD_X * density; val py = PAD_Y * density
+        track.set(px, py, w - px, h - py)
         val inset = 2 * density
         val tw = 40 * density; val th = 24 * density
         val x = track.left + inset + (track.width() - 2 * inset - tw) * drag.progress
         thumb.set(x, track.top + inset, x + tw, track.top + inset + th)
+    }
 
-        // The thumb's own view of the world: the wallpaper under this switch, then the track.
+    /** The scale the thumb is drawn at, into [thumbSx] and [thumbSy]. Wants [place] first. */
+    private fun squash() {
+        // The squash is a stretch ALONG the direction of travel, so it goes on the
+        // magnitude of the velocity. Signed, it stretched a thumb flicking right and
+        // pinched one flicking left — half a squash, and the half that reads as a fault.
+        val v = abs(drag.velocity)
+        val sx = drag.scaleX / (1f - (v * 0.75f).coerceIn(0f, 0.2f))
+        val sy = drag.scaleY * (1f - (v * 0.25f).coerceIn(0f, 0.2f))
+        // The cap is the thumb's own clearance: at either end of the track it is nearer one
+        // edge than the view's centre, and a cap measured from the centre lets a pressed
+        // flick past the edge by a few dp there.
+        thumbSx = min(sx, thumbCap(thumb.centerX(), width.toFloat(), thumb.width()))
+        thumbSy = min(sy, thumbCap(thumb.centerY(), height.toFloat(), thumb.height()))
+    }
+
+    /**
+     * The thumb's own view of the world, as a shader: the wallpaper under this switch and
+     * then the track, drawn into one small bitmap — the catalog's nested backdrop.
+     *
+     * Only a pressed thumb has any use for it, and this is the only place that makes it,
+     * so a switch that is never touched never allocates the bitmap at all.
+     */
+    private fun localContent(tr: Float): Shader {
         if (local == null) {
             val b = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             local = b
@@ -163,29 +228,7 @@ class GlassSwitch(context: Context) : View(context), Checkable, Glassy {
             lc.drawBitmap(backdrop, -(loc[0] - Backdrop.origin[0]).toFloat(), -(loc[1] - Backdrop.origin[1]).toFloat(), null)
         } else lc.drawColor(dev.kb896.aiusage.Panel.Palette.BG)
         lc.drawRoundRect(track, tr, tr, paint)
-        val shader = localShader!!
-
-        val p = drag.pressProgress
-        // The squash is a stretch ALONG the direction of travel, so it goes on the
-        // magnitude of the velocity. Signed, it stretched a thumb flicking right and
-        // pinched one flicking left — half a squash, and the half that reads as a fault.
-        val v = abs(drag.velocity)
-        var sx = drag.scaleX / (1f - (v * 0.75f).coerceIn(0f, 0.2f))
-        var sy = drag.scaleY * (1f - (v * 0.25f).coerceIn(0f, 0.2f))
-        // The cap is the thumb's own clearance: at either end of the track it is nearer one
-        // edge than the view's centre, and a cap measured from the centre lets a pressed
-        // flick past the edge by a few dp there.
-        val roomX = thumbCap(thumb.centerX(), w, tw)
-        val roomY = thumbCap(thumb.centerY(), h, th)
-        sx = min(sx, roomX)
-        sy = min(sy, roomY)
-        canvas.save()
-        canvas.scale(sx, sy, thumb.centerX(), thumb.centerY())
-        Pane.draw(canvas, this, thumb.left, thumb.top, thumb.right, thumb.bottom, th / 2f,
-            tint = 0, clear = true, rim = true, content = shader)
-        paint.color = (0xFFFFFF) or (((1f - p) * 255).toInt() shl 24)
-        canvas.drawRoundRect(thumb, th / 2f, th / 2f, paint)
-        canvas.restore()
+        return localShader!!
     }
 
     companion object {

@@ -9,6 +9,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -65,6 +66,30 @@ class MotionTest {
         settle(d.motion)
         assertEquals(1f, d.targetValue, 0f)
         assertTrue(d.value <= 1.001f)
+    }
+
+    /**
+     * The report: the squash outlived the drag.
+     *
+     * The velocity spring was only retargeted from updateValue, so a lifted finger left
+     * its target at the last drag frame's figure and it settled there instead of at zero.
+     * A drag has to leave every one of these springs where it found it.
+     */
+    @Test fun `a drag that ends puts the velocity back with everything else`() {
+        val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
+        d.press()
+        var v = 0f
+        repeat(5) { v += 0.2f; d.updateValue(v); d.motion.advance(1f / 120f) }
+        assertTrue("the drag should have built up speed: ${d.velocity}", abs(d.velocity) > 0.1f)
+        // The touch path's own order: let go of the press, then animate to the end it chose.
+        d.release()
+        d.animateTo(1f)
+        settle(d.motion)
+        assertEquals(0f, d.velocity, 0.001f)
+        assertEquals(1f, d.scaleX, 0.01f)
+        assertEquals(1f, d.scaleY, 0.01f)
+        assertEquals(0f, d.pressProgress, 0.01f)
+        assertEquals(1f, d.value, 0.01f)
     }
 
     @Test fun `animateTo squashes while the value moves and lets go when it settles`() {
