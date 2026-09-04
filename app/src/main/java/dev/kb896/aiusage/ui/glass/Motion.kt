@@ -180,11 +180,13 @@ class DampedDrag(
     fun animateTo(v: Float) {
         // A tap is a press, a move, and a let-go; the let-go has to wait for the move.
         press()
-        // And the move is the control's own, not a finger's, so it carries no squash:
-        // animateToValue animates the velocity to zero in the catalog, which is this
-        // spring snapped there and left alone until a drag asks for it again.
+        // And the move is the control's own, not a finger's, so it stops following the
+        // value's speed and is sent to zero instead — the catalog's animateToValue(0f)
+        // on the velocity, animated rather than snapped. A tap starts from stillness, so
+        // the target of zero costs it nothing; a drag arrives here with speed still on
+        // it, at the lift of a flick, and rides it down rather than dropping it.
         followsVelocity = false
-        velocitySpring.snap(0f)
+        motion.animate(velocitySpring, 0f)
         motion.animate(valueSpring, v.coerceIn(range))
         pendingRelease = true
     }

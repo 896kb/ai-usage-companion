@@ -124,6 +124,33 @@ class MotionTest {
         assertEquals(0f, d.velocity, 0.001f)
     }
 
+    /**
+     * The lift of a flick, as the touch path actually plays it: release() and animateTo()
+     * with no frame between them, so the velocity animateTo sends to zero is still the
+     * drag's own. Sent, not snapped — dropped in the one frame at the lift, the squash
+     * fell from a flick's stretch to the press's plain swell in a single frame, which is
+     * a pop where round 1 meant it to decay.
+     */
+    @Test fun `a released flick eases its squash out instead of dropping it`() {
+        val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
+        d.press()
+        var v = 0f
+        repeat(5) { v += 0.2f; d.updateValue(v); d.motion.advance(1f / 120f) }
+        val v0 = d.velocity
+        assertTrue("the flick should have built up speed: $v0", abs(v0) > 0.1f)
+        d.release()
+        d.animateTo(1f)
+        d.motion.advance(1f / 120f)
+        assertTrue("the squash eases out, it does not come off: ${d.velocity} from $v0",
+            abs(d.velocity) > 0.5f * abs(v0))
+        settle(d.motion)
+        assertEquals(0f, d.velocity, 0.001f)
+        assertEquals(1f, d.scaleX, 0.01f)
+        assertEquals(1f, d.scaleY, 0.01f)
+        assertEquals(0f, d.pressProgress, 0.01f)
+        assertEquals(1f, d.value, 0.01f)
+    }
+
     @Test fun `animateTo squashes while the value moves and lets go when it settles`() {
         val d = DampedDrag(view, 0f, 0f..1f, 0.001f, 1f, 1.5f)
         d.animateTo(1f)
