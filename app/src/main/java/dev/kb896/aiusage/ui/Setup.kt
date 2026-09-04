@@ -85,24 +85,7 @@ object Setup {
                     .contains(context.packageName),
                 open = { Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS") },
             ),
-            Step(
-                title = "Autostart",
-                why = "HyperOS will not let this app start itself otherwise — not after a " +
-                    "reboot, and not after it has killed the process. This is the setting " +
-                    "that makes the panel come back on its own instead of waiting for you " +
-                    "to open the app.",
-                // Not readable. MIUI keeps autostart in its own security centre and
-                // exposes no permission, setting or dumpsys field for it — checked. So
-                // this is advice with a button, not a box that could ever tick, and it
-                // is shown as such rather than as a step the user keeps failing.
-                satisfied = null,
-                open = {
-                    Intent().setClassName(
-                        "com.miui.securitycenter",
-                        "com.miui.permcenter.autostart.AutoStartManagementActivity",
-                    )
-                },
-            ),
+            autostartStep(context),
             Step(
                 title = "Rear display",
                 why = "Found by the system. If this is missing, the phone is not one " +
@@ -122,6 +105,57 @@ object Setup {
                 open = null,
             ),
         )
+
+    /**
+     * The autostart step, which has no one answer: what stops a vendor's OS from
+     * restarting a killed app, and where the setting for it lives, is different per
+     * vendor and unrelated to the panel's own hardware — so this branches on
+     * [android.os.Build.MANUFACTURER] directly rather than through DeviceProfile, which
+     * is about the display the panel draws on, not the OS running it.
+     *
+     * MIUI keeps a dedicated autostart manager with no readable state — see the comment
+     * inline. Samsung's One UI has no equivalent screen: it folds this behaviour into the
+     * ordinary per-app Battery permission (Allow background activity) already covered by
+     * the app's own details page, so that page is the honest answer here too, rather
+     * than a component name guessed at and likely wrong across One UI versions — the
+     * MIUI class name has already moved once, in a security centre that at least does
+     * not change per OEM skin the way a hardcoded Samsung one would.
+     */
+    private fun autostartStep(context: Context): Step = if (android.os.Build.MANUFACTURER
+            .equals("samsung", ignoreCase = true)
+    ) {
+        Step(
+            title = "Autostart",
+            why = "One UI has no separate autostart manager — it is the same Battery " +
+                "permission as above. \"Allow background activity\" there is what lets " +
+                "this app restart itself after being killed or after a reboot; if " +
+                "Device care > Battery ever lists it under Sleeping apps, remove it.",
+            satisfied = null,
+            open = {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.fromParts("package", context.packageName, null))
+            },
+        )
+    } else {
+        Step(
+            title = "Autostart",
+            why = "HyperOS will not let this app start itself otherwise — not after a " +
+                "reboot, and not after it has killed the process. This is the setting " +
+                "that makes the panel come back on its own instead of waiting for you " +
+                "to open the app.",
+            // Not readable. MIUI keeps autostart in its own security centre and
+            // exposes no permission, setting or dumpsys field for it — checked. So
+            // this is advice with a button, not a box that could ever tick, and it
+            // is shown as such rather than as a step the user keeps failing.
+            satisfied = null,
+            open = {
+                Intent().setClassName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                )
+            },
+        )
+    }
 
     /**
      * Whether everything the user can actually DO is done.
