@@ -291,7 +291,18 @@ class RearDialView(context: Context) : View(context) {
         )
         val into = node.beginRecording()
         try {
-            into.translate(-sdfRect.left, -sdfRect.top)
+            // IN ROOT SPACE, as drawGlassPane does. The numeral's rect is in the canvas's
+            // space, and on the page above the readout that canvas is translated by the
+            // slide — so copying the backdrop at the rect's own coordinates took the
+            // ground from where the glyph WOULD be at rest. The picture inside the glass
+            // then travelled with the numeral instead of staying where the picture is,
+            // which is the frozen backdrop the panes were cured of and the clock was not.
+            if (rootSpace(source)) {
+                canvas.getMatrix().mapRect(sdfAbs, sdfRect)
+                into.translate(-sdfAbs.left, -sdfAbs.top)
+            } else {
+                into.translate(-sdfRect.left, -sdfRect.top)
+            }
             into.drawRenderNode(source)
         } finally {
             node.endRecording()
@@ -360,6 +371,8 @@ class RearDialView(context: Context) : View(context) {
     private val sdfEffects = HashMap<String, android.graphics.RenderEffect>()
 
     private val sdfRect = android.graphics.RectF()
+    /** [sdfRect] mapped to root space, when the backdrop is root-space. */
+    private val sdfAbs = android.graphics.RectF()
 
     /** The measured field for [text] at [paint]'s size and weight, kept until it changes. */
     private fun sdfFor(text: String, paint: Paint): android.graphics.Bitmap? {
