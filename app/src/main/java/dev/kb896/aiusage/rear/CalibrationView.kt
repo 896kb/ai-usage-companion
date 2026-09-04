@@ -25,6 +25,10 @@ class CalibrationView(context: Context) : View(context) {
     private val label = Paint().apply {
         color = Panel.Palette.DIM; textSize = 13f; isAntiAlias = true
     }
+    /** The hundreds among the coordinate labels, brighter — see onDraw. */
+    private val labelBright = Paint().apply {
+        color = Panel.Palette.FG; textSize = 13f; isAntiAlias = true
+    }
     private val ringPersonal = Paint().apply {
         color = Panel.Palette.PERSONAL; style = Paint.Style.STROKE
         strokeWidth = 1.5f; isAntiAlias = true
@@ -44,15 +48,39 @@ class CalibrationView(context: Context) : View(context) {
         while (y <= h) { canvas.drawLine(0f, y, w, y, if (y % 100f == 0f) coarse else fine); y += 50f }
 
         canvas.drawLine(Panel.CUTOUT_RIGHT.toFloat(), 0f, Panel.CUTOUT_RIGHT.toFloat(), h, edge)
-        // y=34, not 20: the x=300 grid-coordinate label already sits at y=14, six px away —
-        // any closer and the two labels overlap right where they matter most.
-        canvas.drawText("x=${Panel.CUTOUT_RIGHT} reported cutout edge", Panel.CUTOUT_RIGHT + 8f, 34f, label)
+        // y=44, not 20: pulled further down from the top edge — see the label loop below
+        // for why the row it used to sit six px from moved too.
+        canvas.drawText("x=${Panel.CUTOUT_RIGHT} reported cutout edge", Panel.CUTOUT_RIGHT + 8f, 44f, label)
 
-        for (gx in 100..800 step 100) canvas.drawText("$gx", gx + 4f, 14f, label)
-        for (gy in 100..500 step 100) canvas.drawText("$gy", 4f, gy - 4f, label)
+        // One label per FINE line (every 50, not just every 100) — a corner cutout needs
+        // reading to the nearest tick, not the nearest hundred. The hundreds stay bright so
+        // the coarse scale still reads at a glance; the fifties between them are dimmer.
+        //
+        // Both axes pulled inward from the physical edge — a Flip cover's rounded corners
+        // and its own camera cutout eat into exactly the row/column a flush label would
+        // have sat in, which is the one part of this screen precision matters most.
+        var gx = 0
+        while (gx <= w.toInt()) {
+            if (gx > 0) {
+                val tx = (gx - 14f).coerceAtMost(w - 32f)
+                canvas.drawText("$gx", tx, 24f, if (gx % 100 == 0) labelBright else label)
+            }
+            gx += 50
+        }
+        var gy = 50
+        while (gy <= h.toInt()) {
+            val ty = gy.toFloat().coerceAtLeast(38f)
+            canvas.drawText("$gy", 10f, ty, if (gy % 100 == 0) labelBright else label)
+            gy += 50
+        }
 
-        drawRuler(canvas, geometry.personal, ringPersonal, "PERSONAL")
-        drawRuler(canvas, geometry.work, ringWork, "WORK")
+        // No lens to rule against on a device with no rings — see Panel.HAS_RINGS. Drawing
+        // them anyway would overlay Xiaomi-tuned positions that mean nothing here and just
+        // clutter the one screen meant to be read cleanly.
+        if (Panel.HAS_RINGS) {
+            drawRuler(canvas, geometry.personal, ringPersonal, "PERSONAL")
+            drawRuler(canvas, geometry.work, ringWork, "WORK")
+        }
     }
 
     private fun drawRuler(canvas: Canvas, g: RingGeometry, paint: Paint, name: String) {
