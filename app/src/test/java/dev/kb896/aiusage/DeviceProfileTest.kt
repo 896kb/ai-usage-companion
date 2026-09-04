@@ -19,6 +19,8 @@ class DeviceProfileTest {
             assertEquals(296, cutoutRight)
             assertEquals("332", physicalIdSuffix)
             assertEquals(true, hasRings)
+            assertEquals(0, cameraLift)
+            assertEquals(30f, cameraSize, 0f)
         }
     }
 
@@ -32,6 +34,8 @@ class DeviceProfileTest {
             assertEquals(0, cutoutRight)
             assertEquals("900", physicalIdSuffix)
             assertEquals(false, hasRings)
+            assertEquals(18, cameraLift)
+            assertEquals(45f, cameraSize, 0f)
         }
     }
 

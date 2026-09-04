@@ -47,6 +47,27 @@ interface DeviceProfile {
      * did. Gated at the device level, so config can never turn them back on there.
      */
     val hasRings: Boolean
+
+    /**
+     * How far to lift the camera button off the panel's bottom-right corner, in pixels.
+     *
+     * A fixed offset, not a fraction of [height]: this briefly existed as a fraction on
+     * the theory that the Flip's reported cutout (see [cutoutRight]'s doc) sat inside
+     * the drawable canvas the way the Xiaomi's does, and needed clearing proportionally.
+     * A photo of the actual hardware settled that theory — the Flip's lenses sit entirely
+     * below the glass, in the case's own bezel, past whatever this canvas can draw — but
+     * the button still read as sitting a little too hard against the trim at 0. What is
+     * being asked for now is a small, fixed breathing-room nudge, not a scaled clearance,
+     * so a constant pixel value is the honest unit for it.
+     */
+    val cameraLift: Int
+
+    /**
+     * Camera button glyph height, in pixels. 30 on the Xiaomi, the size it was designed
+     * at. On the Flip, tuned larger against the actual hardware — the button read small
+     * on a cover screen this size relative to the rest of the panel's type.
+     */
+    val cameraSize: Float
 }
 
 /** Xiaomi 17 Pro (`25098PN5AC`) rear display. The values the panel was first built for. */
@@ -58,6 +79,8 @@ object XiaomiRearProfile : DeviceProfile {
     // physical id local:4630946949513469332
     override val physicalIdSuffix = "332"
     override val hasRings = true
+    override val cameraLift = 0
+    override val cameraSize = 30f
 }
 
 /**
@@ -75,6 +98,10 @@ object Flip6CoverProfile : DeviceProfile {
     override val physicalIdSuffix = "900"
     // No lens under the cover to frame — the bars carry the readings instead.
     override val hasRings = false
+    // A small breathing-room nudge, not a clearance — see cameraLift's doc.
+    override val cameraLift = 18
+    // 50% bigger than the Xiaomi's 30 — see cameraSize's doc.
+    override val cameraSize = 45f
 }
 
 object DeviceProfiles {

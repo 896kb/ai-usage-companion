@@ -21,6 +21,10 @@ object Panel {
     val PHYSICAL_ID_SUFFIX: String get() = device.physicalIdSuffix
     /** Whether this device draws the lens rings — see [DeviceProfile.hasRings]. */
     val HAS_RINGS: Boolean get() = device.hasRings
+    /** Camera button lift, as a fraction of HEIGHT — see [DeviceProfile.cameraLift]. */
+    val CAMERA_LIFT: Int get() = device.cameraLift
+    /** Camera button glyph height in pixels — see [DeviceProfile.cameraSize]. */
+    val CAMERA_SIZE: Float get() = device.cameraSize
 
     object Palette {
         const val BG = 0xFF1D1F21.toInt()
