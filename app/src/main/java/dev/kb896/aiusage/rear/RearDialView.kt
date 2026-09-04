@@ -2639,7 +2639,6 @@ class RearDialView(context: Context) : View(context) {
                 ghostFraction = mediaGhost.getOrElse(at) { 0f },
             )
         }
-
         // The strip pushes the readout down and the RINGS DO NOT MOVE. They are drawn
         // concentric with the phone's actual lenses, so shifting them would put two
         // circles a hundred pixels away from the hardware they trace. Everything else on
@@ -3763,11 +3762,41 @@ class RearDialView(context: Context) : View(context) {
         return true
     }
 
+    /**
+     * Whether the media row has relocated to sit under the first account block, rather
+     * than at its ordinary fixed spot at the panel's bottom.
+     *
+     * The ONE condition every one of [mediaSlotBottom], [drawBars]'s extra gap, and
+     * [mediaRegion]/[mediaClip]'s width all key off — kept as a single function instead
+     * of the same two-part check repeated at each call site, which is exactly how the
+     * camera ended up following the row it was never supposed to: one of its call sites
+     * got the condition and the others did not, and they silently disagreed. The camera
+     * itself does NOT read this — see [drawCamera]'s KDoc for why it stays fixed instead.
+     */
+    private fun mediaMoved(): Boolean = !Panel.HAS_RINGS && mediaPageAvailable()
+
+    /**
+     * Where the artwork/media slot sits, bottom edge. Fixed to the panel's own bottom
+     * margin normally — there is nothing else to anchor the static mark to, and moving it
+     * would relitigate a position already tuned against the real hardware.
+     *
+     * Follows [firstBlockBottom] instead (set earlier in the same frame by [drawBars])
+     * ONLY while [mediaMoved]: a track playing puts the player right under the first
+     * account rather than stranded at the panel's bottom past a second account that may
+     * be mostly empty — see the request this closes. The static mark, with nothing
+     * playing, stays where it was tuned.
+     */
+    private fun mediaSlotBottom(): Float = if (!mediaMoved()) {
+        (Panel.HEIGHT - MARK_BOTTOM).toFloat()
+    } else {
+        (firstBlockBottom + MARK_H).coerceAtMost(Panel.HEIGHT - MARK_BOTTOM.toFloat())
+    }
+
     /** The artwork slot, which is also the band the slider is drawn in. */
-    private fun markRegion() = android.graphics.RectF(
-        BAR_LEFT, Panel.HEIGHT - MARK_BOTTOM - MARK_H,
-        BAR_RIGHT, (Panel.HEIGHT - MARK_BOTTOM).toFloat(),
-    )
+    private fun markRegion(): android.graphics.RectF {
+        val bottom = mediaSlotBottom()
+        return android.graphics.RectF(BAR_LEFT, bottom - MARK_H, BAR_RIGHT, bottom)
+    }
 
     private fun mediaAt(x: Float, y: Float): String? {
         val strip = mediaStrip ?: return null
@@ -4068,9 +4097,15 @@ class RearDialView(context: Context) : View(context) {
         canvas.restore()
     }
 
-    /** Room for the camera glyph, its margin and the drift. See [fading]. */
+    /**
+     * Room for the camera glyph, its margin and the drift. See [fading].
+     *
+     * Fixed, like [drawCamera]'s own centreY now is — not [mediaSlotBottom]. The two
+     * must agree, or the fade layer clips a button that no longer moves with it.
+     */
     private fun cameraFadeBounds() = android.graphics.RectF(
-        Panel.WIDTH - FADE_PAD, Panel.HEIGHT - MARK_BOTTOM - MARK_H - FADE_PAD,
+        Panel.WIDTH - FADE_PAD,
+        (Panel.HEIGHT - MARK_BOTTOM).toFloat() - MARK_H - FADE_PAD - Panel.CAMERA_LIFT,
         Panel.WIDTH.toFloat() + FADE_PAD, Panel.HEIGHT.toFloat() + FADE_PAD,
     )
 
@@ -4081,7 +4116,7 @@ class RearDialView(context: Context) : View(context) {
     )
 
     private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
-        val h = CAMERA_H
+        val h = Panel.CAMERA_SIZE
         val w = h * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
         // Vertically centred on the bottom artwork, and then inset from the right edge
         // by exactly the gap that centring leaves BELOW it.
@@ -4091,10 +4126,20 @@ class RearDialView(context: Context) : View(context) {
         // larger leaves 46 units under it while the artwork keeps 26. Matching the
         // artwork's number therefore looked cramped — 26 beside it, 46 below it, on a
         // glyph small enough for the difference to read as a mistake.
-        val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
-        val bottom = centreY + h / 2f
-        val margin = Panel.HEIGHT - bottom
+        // Fixed at the panel's own bottom margin — NOT mediaSlotBottom(). The camera
+        // button is a permanent fixture, tuned once against the real hardware; it must
+        // not travel with the media row when that relocates for a playing track, or it
+        // reads as the button itself having moved rather than the music having a home
+        // elsewhere on the page.
+        val centreY = (Panel.HEIGHT - MARK_BOTTOM).toFloat() - MARK_H / 2f
+        val unliftedBottom = centreY + h / 2f
+        // The right inset is measured from the UNLIFTED position, so lifting the button
+        // off the corner (see Panel.CAMERA_LIFT) moves it straight up rather than up and
+        // left — the two margins would otherwise stay equal and drag it off the corner
+        // diagonally, away from the icon it exists to open.
+        val margin = Panel.HEIGHT - unliftedBottom
         val right = Panel.WIDTH - margin
+        val bottom = unliftedBottom - Panel.CAMERA_LIFT
         // Positioned by its own left edge rather than by a square cell: drawIcon centres
         // within a cell of side h, which is right for the clock and battery sitting in a
         // column and wrong for something pinned to the panel's right margin. Undo the
@@ -6253,6 +6298,15 @@ class RearDialView(context: Context) : View(context) {
     /** How far below a centre a cap-height baseline sits, as a fraction of the size. */
     private var firstCardTop = 0f
 
+    /**
+     * Where the first account block's content ends (its trailing gap included), set
+     * during [drawBars] and read afterward in the same frame by [mediaSlotBottom] — the
+     * same same-frame field-passing [firstCardTop] already uses.
+     *
+     * Only meaningful when [Panel.HAS_RINGS] is false — see [mediaSlotBottom].
+     */
+    private var firstBlockBottom = 0f
+
     private fun drawTitle(canvas: Canvas) {
         // Centred over the BAR COLUMN, not the whole canvas side — the same rule the
         // maker's mark follows, so the masthead and the artwork share one axis instead
@@ -6341,9 +6395,24 @@ class RearDialView(context: Context) : View(context) {
      * so its heading, its block and (where they exist) its ring all go with it, and the
      * panel is genuinely personal-only rather than showing an empty WORK heading. See
      * PanelConfig.showWork.
+     *
+     * On a device with no rings, ALSO dropped: any account that has never been signed
+     * into at all. That account has nothing to show — no bars, no history, just a ghost
+     * and a permanent "sign in" prompt nobody asked to keep looking at — distinct from
+     * one that IS signed in but currently degraded (AUTH from an expired token still
+     * carries its last-known snapshot, and stays, showing those last real numbers).
+     * Scoped to !HAS_RINGS rather than changed for both devices: this changes what the
+     * Xiaomi build has always shown, which was not part of the request that prompted it.
      */
     private fun orderedAccounts(): List<Int> = config.orderedAccounts(Account.entries.size)
         .filter { config.showWork || it != Account.WORK.ordinal }
+        .filter { index ->
+            Panel.HAS_RINGS || run {
+                val account = Account.entries.getOrNull(index) ?: return@run true
+                val status = state.statuses.firstOrNull { it.account == account }
+                status == null || status.snapshot != null || status.health != Health.AUTH
+            }
+        }
 
     /**
      * The account blocks, in two passes over one layout.
@@ -6525,6 +6594,7 @@ class RearDialView(context: Context) : View(context) {
         }
         if (cardsOnly) return
 
+        var capturedFirstBlockBottom = false
         for ((account, status, rows) in blocks) {
             heading.color = if (status?.health == Health.OK) accentOf(account) else Panel.Palette.DIM
             canvas.drawText(labelOf(account), left, y, heading)
@@ -6689,6 +6759,17 @@ class RearDialView(context: Context) : View(context) {
                 y += rowPitch
             }
             y += gap
+            if (!capturedFirstBlockBottom) {
+                firstBlockBottom = y
+                capturedFirstBlockBottom = true
+                // Room for the media slot the next block would otherwise be drawn
+                // straight through — see mediaSlotBottom(). Only when there IS a next
+                // block: with one account alone, nothing follows to protect from an
+                // overlap, and the slot already claims its own height independently.
+                if (mediaMoved() && blocks.size > 1) {
+                    y += MARK_H + gap
+                }
+            }
         }
     }
 
@@ -7977,10 +8058,17 @@ class RearDialView(context: Context) : View(context) {
         // ten-minute cycle: sometimes clear, sometimes touching, sometimes overlapping.
         // That is the "some look aligned and some do not" of it, and the answer is that
         // anything attached to a ring has to keep the ring's frame.
-        canvas.save()
-        canvas.translate(-dx, -dy)
-        drawMediaRings(canvas, rings, paging, tint, volumeShown)
-        canvas.restore()
+        if (Panel.HAS_RINGS) {
+            canvas.save()
+            canvas.translate(-dx, -dy)
+            drawMediaRings(canvas, rings, paging, tint, volumeShown)
+            canvas.restore()
+        } else {
+            // No lens to keep concentric with here (see Panel.HAS_RINGS), so unlike
+            // drawMediaRings above, this rides the drift with the rest of the page
+            // instead of undoing it — the same reason title/transport below do too.
+            drawMediaBars(canvas, paging, tint, volumeShown, dx, dy)
+        }
 
         // ---- title and artist, centred under the disc -------------------------
         // Centred while it fits, scrolling when it does not — and left-aligned once it
@@ -8200,9 +8288,11 @@ class RearDialView(context: Context) : View(context) {
         val waves = if (isMuted) 0 else MediaPage.volumeWaves(level)
         val ring = rings.work
         // In the RING's frame, not the page's — see the note by drawMediaRings. This
-        // orbits a ring that does not drift, so it must not drift either.
+        // orbits a ring that does not drift, so it must not drift either. With no ring to
+        // orbit (see Panel.HAS_RINGS) there is nothing pinned to the hardware here, so it
+        // rides the drift with the rest of the page and the correction is skipped.
         canvas.save()
-        canvas.translate(-dx, -dy)
+        if (Panel.HAS_RINGS) canvas.translate(-dx, -dy)
         // OUTSIDE the arc. Inside is the camera lens — there is no display in the hole a
         // ring encircles, so a glyph put there is drawn onto glass.
         //
@@ -8216,11 +8306,18 @@ class RearDialView(context: Context) : View(context) {
         // twenty units past the edge — it rides the head to about four fifths of the
         // range and then holds while the arc carries on. See MediaPage.speakerLimit,
         // which works that limit out from the sizes rather than stating an angle.
-        val head = (MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP * volumeShown)
-            .coerceAtMost(MediaPage.speakerLimit(ring.cy, orbit, Panel.HEIGHT.toFloat()))
+        val head = if (!Panel.HAS_RINGS) 0f else {
+            (MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP * volumeShown)
+                .coerceAtMost(MediaPage.speakerLimit(ring.cy, orbit, Panel.HEIGHT.toFloat()))
+        }
         val radians = Math.toRadians(head.toDouble())
-        val hx = ring.cx + orbit * Math.cos(radians).toFloat()
-        val hy = ring.cy + orbit * Math.sin(radians).toFloat()
+        // With no arc to ride, the speaker parks under the volume bar it belongs to —
+        // upright (head is 0, so the rotation below is a no-op) and clear of the title,
+        // which is where the ring's own Xiaomi-tuned geometry was putting it instead.
+        val hx = if (Panel.HAS_RINGS) ring.cx + orbit * Math.cos(radians).toFloat()
+            else volumeBar?.let { (it.left + it.right) / 2f + dx } ?: ring.cx
+        val hy = if (Panel.HAS_RINGS) ring.cy + orbit * Math.sin(radians).toFloat()
+            else MediaPage.dragAreaBottom() + MediaPage.MUTE_GAP
         val mh = MediaPage.MUTE_H
         val speakerW = mh * speaker.aspect
 
@@ -8406,11 +8503,29 @@ class RearDialView(context: Context) : View(context) {
             )
             // The scrub area starts below whatever a notification is occupying, so a drag
             // meant for the position cannot begin on a card.
-            scrubBar = android.graphics.RectF(
-                Panel.CUTOUT_RIGHT - dx, notice - dy,
-                MediaPage.volumeStripLeft(Panel.WIDTH.toFloat()) - dx,
-                MediaPage.dragAreaBottom() - dy,
-            )
+            //
+            // With no rings, the timeline is a BAR drawn below the transport row rather
+            // than an arc around a lens, and the region has to be where that bar is: a
+            // control you can see and cannot drag is worse than one you cannot see at
+            // all. The band runs from just under the buttons to the panel's bottom edge —
+            // empty panel either way, so it is as generous as it can be without taking
+            // taps from the transport row. See scrubBarY/scrubBarLeft/scrubBarRight,
+            // which drawMediaBars draws from, so the two cannot end up in different
+            // places (which is exactly what happened when only the drawing moved).
+            scrubBar = if (!Panel.HAS_RINGS) {
+                android.graphics.RectF(
+                    scrubBarLeft() - dx,
+                    MediaPage.TRANSPORT_CY + MediaPage.TRANSPORT_H / 2f + 6f - dy,
+                    scrubBarRight() - dx,
+                    Panel.HEIGHT - dy,
+                )
+            } else {
+                android.graphics.RectF(
+                    Panel.CUTOUT_RIGHT - dx, notice - dy,
+                    MediaPage.volumeStripLeft(Panel.WIDTH.toFloat()) - dx,
+                    MediaPage.dragAreaBottom() - dy,
+                )
+            }
             // Mute is a BUTTON again, not the whole area. Tap-anywhere-to-mute meant
             // every stray touch on two thirds of the page silenced the music, which is
             // the one thing on this panel you would not want to happen by accident.
@@ -8436,6 +8551,107 @@ class RearDialView(context: Context) : View(context) {
             muteButton = null
         }
         if (m.playing) animating = true
+    }
+
+    /**
+     * The scrub position and the volume level, as bars — this device's answer to
+     * [drawMediaRings] below, on a device with no lens for a ring to mean anything about
+     * (see [Panel.HAS_RINGS]).
+     *
+     * Reads exactly the state the rings would have: [media]'s own elapsed time, [scrubTo]
+     * / [seekedTo] for a position currently held under a finger, [muted] and the eased
+     * [volumeShown] the caller already computed for its label. [scrubBar] and [volumeBar]
+     * — the actual drag TARGETS, already correct and already working on this device
+     * before this function existed, since neither was ever built from ring geometry —
+     * give the bars their bounds, so the drawing and the touch region can never disagree
+     * about where the control is.
+     *
+     * [dx]/[dy] undo the burn-in drift that [scrubBar]/[volumeBar] were stored WITHOUT
+     * (they are compared against raw touch coordinates, which the drift never moves —
+     * see [cameraButton]'s own KDoc for the same rule) so their bounds line up with a
+     * canvas that, unlike [drawMediaRings]'s, is not drift-corrected: nothing here is
+     * meant to stay concentric with anything physical, so it rides the drift like the
+     * title and transport row it sits beside.
+     */
+    private fun drawMediaBars(
+        canvas: Canvas,
+        paging: Float,
+        tint: Int,
+        volumeShown: Float,
+        dx: Float,
+        dy: Float,
+    ) {
+        val m = media ?: departing ?: return
+        val alpha = (255 * paging).toInt().coerceIn(0, 255)
+        if (alpha <= 0) return
+
+        val held = scrubTo ?: seekedTo
+        val elapsed = m.elapsed(SystemClock.elapsedRealtime())
+        val shownElapsed =
+            if (held != null && m.durationMs > 0L) (held * m.durationMs).toLong() else elapsed
+        val elapsedFraction = if (m.durationMs > 0L) {
+            (shownElapsed.toFloat() / m.durationMs).coerceIn(0f, 1f)
+        } else 0f
+
+        val fillColor = (tint and 0x00FFFFFF) or (alpha shl 24)
+        val trackColor = (Panel.Palette.TRACK and 0x00FFFFFF) or (alpha shl 24)
+        val labelAlpha = (MediaLayout.ARTIST_ALPHA * paging).toInt().coerceIn(0, 255)
+        val labelColor = (Panel.Palette.DIM and 0x00FFFFFF) or (labelAlpha shl 24)
+        val barH = MEDIA_BAR_H
+        val labelSize = typed(MediaPage.LABEL_SIZE)
+
+        if (m.durationMs > 0L) {
+            // UNDER the transport row, not above it. Above is where the title and artist
+            // are — a bar drawn there runs straight through the artist line. Below the
+            // buttons is empty panel, is where every other player puts a timeline, and is
+            // where this project's own earlier linear-bar design had it (see
+            // MediaPage.BAR_CY, left over from before the rings took the reading over).
+            //
+            // Straight from the shared helpers rather than from scrubBar's own rect: the
+            // region is a generous BAND around this bar, not the bar itself, so reading
+            // its bounds here would draw a timeline as tall as the touch target.
+            val left = scrubBarLeft()
+            val right = scrubBarRight()
+            val barY = scrubBarY()
+            barTrack.color = trackColor
+            canvas.drawRoundRect(left, barY, right, barY + barH, barH / 2f, barH / 2f, barTrack)
+            barFill.color = fillColor
+            canvas.drawRoundRect(
+                left, barY, left + (right - left) * elapsedFraction, barY + barH,
+                barH / 2f, barH / 2f, barFill,
+            )
+            // Below the bar, for the same reason the bar is below the buttons: above it is
+            // spoken for.
+            val clockBase = barY + barH + MEDIA_LABEL_GAP + labelSize
+            label.color = labelColor
+            label.textSize = labelSize
+            label.textAlign = Paint.Align.LEFT
+            canvas.drawText(MediaPage.clock(shownElapsed), left, clockBase, label)
+            label.textAlign = Paint.Align.RIGHT
+            canvas.drawText(MediaPage.clock(m.durationMs), right, clockBase, label)
+        }
+
+        volumeBar?.let { area ->
+            val barX = (area.left + area.right) / 2f + dx
+            val top = MediaPage.DISC_MARGIN
+            val bottom = MediaPage.dragAreaBottom()
+            val level = if (muted()) 0f else volumeShown.coerceIn(0f, 1f)
+            barTrack.color = trackColor
+            canvas.drawRoundRect(
+                barX - barH / 2f, top, barX + barH / 2f, bottom, barH / 2f, barH / 2f, barTrack,
+            )
+            barFill.color = fillColor
+            val fillTop = bottom - (bottom - top) * level
+            canvas.drawRoundRect(
+                barX - barH / 2f, fillTop, barX + barH / 2f, bottom, barH / 2f, barH / 2f, barFill,
+            )
+            label.color = labelColor
+            label.textSize = labelSize
+            label.textAlign = Paint.Align.CENTER
+            canvas.drawText("${(level * 100).toInt()}%", barX, top - MEDIA_LABEL_GAP, label)
+        }
+        label.textAlign = Paint.Align.LEFT
+        label.textSize = 18f
     }
 
     /**
@@ -9112,7 +9328,7 @@ class RearDialView(context: Context) : View(context) {
                 val half = MARK_H / 2f
                 MediaLayout.Disc(
                     cx = CONTENT_EDGE + half,
-                    cy = Panel.HEIGHT - MARK_BOTTOM - half,
+                    cy = mediaSlotBottom() - half,
                     radius = half,
                 )
             }
@@ -9337,7 +9553,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun mediaRegion(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, mediaRight(config.theme), mark.bottom,
+        CONTENT_EDGE, mark.top, mediaRight(config.theme, mark.bottom, mediaMoved()), mark.bottom,
     )
 
     /**
@@ -9348,7 +9564,12 @@ class RearDialView(context: Context) : View(context) {
      * room for the progress bar would have quietly stretched both.
      */
     private fun mediaClip(mark: android.graphics.RectF) = android.graphics.RectF(
-        CONTENT_EDGE, mark.top, mediaRight(config.theme),
+        // CONTENT_EDGE on the Xiaomi, where it clears the lens strip; on the Flip that
+        // same value was only ever the bottom margin reused as a left one, with no lens
+        // to clear, and it was silently clipping the mark's own bounds — flush at
+        // Panel.CUTOUT_RIGHT — a further ~26px in from where they actually started.
+        if (Panel.HAS_RINGS) CONTENT_EDGE else Panel.CUTOUT_RIGHT.toFloat(),
+        mark.top, mediaRight(config.theme, mark.bottom, mediaMoved()),
         // ROOM FOR THE PLAY BAR'S THUMB. The clip used to stop at the progress bar's own
         // bottom edge, which is right for a four-unit line and wrong for a thumb standing
         // proud of it — the lower half was cut off against a panel that had twenty units
@@ -9654,13 +9875,19 @@ class RearDialView(context: Context) : View(context) {
         } else {
             // Without the lens rings, the mark is the panel's one purely decorative
             // element, and spanning the full bar column let it dominate the near-square
-            // cover. Draw it at half width, LEFT-aligned to the bar column and
-            // bottom-aligned in the slot, with the aspect taken from the 405x102 artwork
-            // so the fan never stretches.
-            val w = region.width() * 0.5f
+            // cover. Tuned against the actual hardware, in this order: 0.8x the bar
+            // column rather than the full column (still narrower, not as wide as
+            // HAS_RINGS draws it); flush with the panel's own live edge rather than
+            // indented to the bar column, which is where the account labels and bars
+            // start but left this looking oddly indented on its own; nudged a few px
+            // further toward the bottom trim. Height is not an independent choice — it
+            // follows width via the 405x102 artwork's own aspect ratio, same as before,
+            // so the fan is never stretched.
+            val w = region.width() * 0.8f
             val h = w * 102f / 405f
-            ray.setBounds(region.left.toInt(), (region.bottom - h).toInt(),
-                (region.left + w).toInt(), region.bottom.toInt())
+            val left = Panel.CUTOUT_RIGHT.toFloat()
+            val bottom = region.bottom + 13f
+            ray.setBounds(left.toInt(), (bottom - h).toInt(), (left + w).toInt(), bottom.toInt())
         }
         ray.draw(canvas)
     }
@@ -10531,9 +10758,6 @@ class RearDialView(context: Context) : View(context) {
         private const val CLOSE_CY = MARK_BOTTOM + CLOSE_R
 
 
-        /** Camera button height in panel units; its width follows the glyph's aspect. */
-        private const val CAMERA_H = 30f
-
         /**
          * The media row's right edge: where the camera button starts, less a gap.
          *
@@ -10543,13 +10767,27 @@ class RearDialView(context: Context) : View(context) {
          * track title was being clipped at thirteen characters.
          *
          * Derived from the camera's own placement rather than measured against it, so
-         * the two cannot drift apart. Held whether or not the camera is drawn — a row
-         * whose width depended on another switch would resize when that was toggled.
+         * the two cannot drift apart — true whenever the row and the camera are actually
+         * adjacent, which is everywhere except one case: [moved], where the row has
+         * relocated to sit under the first account block (see [mediaSlotBottom]) while
+         * the camera stays fixed at the panel's bottom (see [drawCamera]'s KDoc on why it
+         * does not follow). There the two are nowhere near each other, so deriving the
+         * row's edge from the camera's position would just be measuring a stretch of
+         * empty panel between them — the row gets the ordinary content margin instead.
+         *
+         * [slotBottom] is the media slot's own bottom edge — [mediaSlotBottom] in the
+         * instance scope this companion object function cannot reach, passed in by both
+         * callers from the same `mark` RectF that already carries it.
          */
-        private fun mediaRight(theme: dev.kb896.aiusage.data.PanelTheme): Float {
-            val bottom = (Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f) + CAMERA_H / 2f
+        private fun mediaRight(
+            theme: dev.kb896.aiusage.data.PanelTheme,
+            slotBottom: Float,
+            moved: Boolean,
+        ): Float {
+            if (moved) return CONTENT_RIGHT
+            val bottom = (slotBottom - MARK_H / 2f) + Panel.CAMERA_SIZE / 2f
             val right = Panel.WIDTH - (Panel.HEIGHT - bottom)
-            return right - CAMERA_H * Glyphs.aspect(PanelIcons.CAMERA, theme) - MEDIA_CAMERA_GAP
+            return right - Panel.CAMERA_SIZE * Glyphs.aspect(PanelIcons.CAMERA, theme) - MEDIA_CAMERA_GAP
         }
 
         /**
@@ -10561,6 +10799,34 @@ class RearDialView(context: Context) : View(context) {
          * button. The three belong together; this says the next thing does not.
          */
         private const val MEDIA_CAMERA_GAP = 44f
+
+        /** Thickness of the media page's scrub and volume bars — see drawMediaBars. */
+        private const val MEDIA_BAR_H = 6f
+
+        /**
+         * The scrub bar's span and height on a device with no rings.
+         *
+         * ONE definition, read by both the drawing (drawMediaBars) and the hit region
+         * (scrubBar's assignment). They were computed separately at first and the bar was
+         * drawn below the transport row while its region stayed above it — a timeline you
+         * could see and could not drag.
+         *
+         * Symmetric margins, full panel width: the bar sits BELOW the volume strip's own
+         * vertical span, so unlike the ring layout it has no reason to stop short of the
+         * right-hand side, and stopping there just left it visibly off-centre.
+         */
+        private fun scrubBarLeft(): Float = MediaPage.MARGIN
+
+        private fun scrubBarRight(): Float = Panel.WIDTH - MediaPage.MARGIN
+
+        private fun scrubBarY(): Float =
+            MediaPage.TRANSPORT_CY + MediaPage.TRANSPORT_H / 2f + MEDIA_BAR_GAP
+
+        /** How far the scrub bar sits above the transport row it runs under. */
+        private const val MEDIA_BAR_GAP = 26f
+
+        /** Between a bar and the reading naming it. */
+        private const val MEDIA_LABEL_GAP = 10f
 
         /**
          * How far outside the drawn glyph a touch still counts.
