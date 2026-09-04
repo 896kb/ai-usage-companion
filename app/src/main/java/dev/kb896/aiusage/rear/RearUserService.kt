@@ -166,10 +166,20 @@ class RearUserService : IRearService.Stub {
     /**
      * Launch the system camera onto the rear display.
      *
-     * The component and flags are MIUI's own, read off a live trace of opening the rear
+     * On MIUI, the component and flags are read off a live trace of opening the rear
      * camera by hand: com.xiaomi.subscreencenter starts com.android.camera/.Camera with
      * these five flags and no extras, and the camera app then brings up its own
      * companion UI on the front by itself. Nothing here has to arrange that half.
+     *
+     * That component is Xiaomi-specific — a name AOSP-style enough to look generic, and
+     * wrong everywhere else. Samsung's stock camera is a different package with a
+     * class name that has moved across One UI versions, so hardcoding another guess
+     * would repeat the mistake the autostart step already made once for MIUI. Off MIUI
+     * this launches the STANDARD still-camera intent action instead — resolved by the
+     * system to whatever the default camera app is, which is exactly what the button
+     * asks for, and stays correct as camera apps update or a user changes their default.
+     * The AIDL's own doc for this method already draws the line at "a camera", not "an
+     * arbitrary component"; a fixed system action is that same bound, portably.
      *
      * Launching straight at the rear display works for the camera where it does not for
      * this app's own panel — which needs the start-then-move dance above — because the
@@ -180,7 +190,9 @@ class RearUserService : IRearService.Stub {
      */
     override fun openCamera(displayId: Int): Boolean {
         if (displayId < 0) return false
-        val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
+        val cmd = if (isMiui()) "am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT"
+        else "am start --display $displayId -a $CAMERA_ACTION"
+        val out = exec(cmd)
         val ok = !out.contains("Error", ignoreCase = true)
         if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
         if (ok) {
@@ -189,6 +201,10 @@ class RearUserService : IRearService.Stub {
         }
         return ok
     }
+
+    /** Whether this is a MIUI/HyperOS device — see [openCamera]'s KDoc for why it matters. */
+    private fun isMiui(): Boolean =
+        android.os.Build.MANUFACTURER.equals("xiaomi", ignoreCase = true)
 
     /**
      * The camera we started, and whether we have yet seen it in front of the panel.
@@ -307,7 +323,15 @@ class RearUserService : IRearService.Stub {
 
     private fun panelWhere(): Where {
         val out = exec("dumpsys SurfaceFlinger")
-        if (!out.contains("HWC layers:")) return Where.NOWHERE
+        // No per-display composition section in this dump at all — a newer SurfaceFlinger
+        // format, confirmed on a Galaxy Z Flip 6 running Android 16, where this text does
+        // not exist anywhere in the output. Composition cannot answer the question here,
+        // so fall back to ActivityTaskManager's own view instead of defaulting to NOWHERE
+        // — which is what silently made every DISPLACED strand permanent on that device:
+        // Samsung's cover-display home task (SubHomeActivity) takes the front on every
+        // lock/unlock, and this fallback is what lets the keep-alive notice and recover.
+        // See ActivityDump's KDoc for the failure this closes.
+        if (!out.contains("HWC layers:")) return taskDisplayWhere()
 
         val header = Regex("""Display (\d+) \((active|inactive)\) HWC layers:""")
         val matches = header.findAll(out).toList()
@@ -368,6 +392,29 @@ class RearUserService : IRearService.Stub {
             else -> Where.NOWHERE
         }
     }
+
+    /**
+     * [panelWhere]'s fallback for a device whose SurfaceFlinger dump has no HWC layers
+     * section — see [ActivityDump]'s KDoc for why this exists and what it closes.
+     *
+     * `dumpsys activity activities` names the same MIUI-style device-neutral marker
+     * `panelWhere()` already matches ("RearActivity"), so the two stay consistent
+     * without a second constant to keep in sync.
+     */
+    private fun taskDisplayWhere(): Where =
+        when (
+            ActivityDump.taskDisplay(
+                exec("dumpsys activity activities"),
+                activityMarker = "RearActivity",
+                mainDisplayId = android.view.Display.DEFAULT_DISPLAY,
+                rearDisplayId = Panel.DISPLAY_ID,
+            )
+        ) {
+            TaskDisplay.REAR -> Where.REAR
+            TaskDisplay.MAIN -> Where.MAIN
+            TaskDisplay.DISPLACED -> Where.DISPLACED
+            TaskDisplay.NOWHERE -> Where.NOWHERE
+        }
 
     /**
      * Asks the window manager which display actually owns the activity.
@@ -602,6 +649,12 @@ class RearUserService : IRearService.Stub {
 
         /** MIUI's camera, and the exact flags its own sub-screen launcher uses. */
         private const val CAMERA_COMPONENT = "com.android.camera/.Camera"
+
+        /**
+         * Standard still-camera action, resolved by the system to the default camera app.
+         * Used off MIUI — see [openCamera]'s KDoc.
+         */
+        private const val CAMERA_ACTION = "android.media.action.STILL_IMAGE_CAMERA"
 
         /** The same app, without the component, for releasing it again. */
         private const val CAMERA_PACKAGE = "com.android.camera"
