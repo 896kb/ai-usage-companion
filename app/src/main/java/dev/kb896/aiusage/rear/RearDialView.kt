@@ -7158,8 +7158,25 @@ class RearDialView(context: Context) : View(context) {
         // the record is part of the readout. Sunk until only a slice of its top edge shows
         // along the bottom of the panel — enough to say what is still down there, not
         // enough to read anything through.
-        val sunk = noticing *
-            (Panel.HEIGHT * (1f - VINYL_PEEK) - (base.cy - base.radius))
+        val sunk =
+            if (config.mediaArt == MediaArt.VINYL) {
+                noticing * (Panel.HEIGHT * (1f - VINYL_PEEK) - (base.cy - base.radius))
+            } else {
+                // THE SQUARE IS NOT SCENERY. Everything above about the lock and the peek
+                // is true of the record and false of the row's thumbnail, which is a
+                // control-sized picture sitting in the very band the slider covers and in
+                // the corner the page above the readout is supposed to clear.
+                //
+                // So it leaves through the bottom on the lock's own drum, the way the
+                // rest of the row does — on the readout page only, weighted by how far it
+                // has travelled toward the media page, where it is the picture in the
+                // middle and the slider covers its band by itself. And on the page above
+                // it goes ALL the way down rather than to a peek: a peek is a slice of a
+                // record's top edge saying what is down there, and a slice of a thumbnail
+                // is a stripe of nothing in particular.
+                val exit = Panel.HEIGHT - (base.cy - base.radius)
+                maxOf(noticing, lockSwap(frameNowMs) * (1f - paging)) * exit
+            }
         val resting = MediaLayout.Disc(
             base.cx,
             base.cy + (1f - swap) * (Panel.HEIGHT + base.radius) + maxOf(0f, sunk),
