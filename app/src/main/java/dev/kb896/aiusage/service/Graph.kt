@@ -8,6 +8,7 @@ import dev.kb896.aiusage.data.ProfileStore
 import dev.kb896.aiusage.data.UsageApi
 import dev.kb896.aiusage.data.UsageHistory
 import dev.kb896.aiusage.data.UsageRepository
+import dev.kb896.aiusage.data.WeatherApi
 import dev.kb896.aiusage.rear.ShizukuBridge
 import okhttp3.OkHttpClient
 
@@ -20,6 +21,7 @@ import okhttp3.OkHttpClient
  */
 class Graph private constructor(context: Context) {
     private val http = OkHttpClient()
+    val weatherApi = WeatherApi(http)
     val store = TokenStore(context.applicationContext)
     val repository = UsageRepository(
         UsageApi(http), OAuthClient(http), store,

@@ -47,7 +47,8 @@ class ShizukuBridge(private val context: Context) {
      * Best-effort "is the panel currently meant to be in calibrate mode" flag — see
      * isCalibrating() below for what it can and cannot see.
      */
-    @Volatile private var calibrating = false
+    @Volatile var calibrating = false
+        private set
 
     private val args by lazy {
         Shizuku.UserServiceArgs(ComponentName(context.packageName, RearUserService::class.java.name))

@@ -41,6 +41,7 @@ import dev.kb896.aiusage.rear.ShizukuBridge
 import dev.kb896.aiusage.service.Graph
 import androidx.core.app.NotificationManagerCompat
 import dev.kb896.aiusage.service.UsagePollService
+import dev.kb896.aiusage.service.WeatherPoll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -265,7 +266,7 @@ class MainActivity : ComponentActivity() {
         // blank on placement and stayed blank until the next poll, now up to five
         // minutes away.
         showButton.setOnClickListener {
-            graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load()))
+            graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load(), WeatherPoll.latest))
         }
         hideButton.setOnClickListener { graph.bridge.hide() }
     }
@@ -343,7 +344,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshNow() = lifecycleScope.launch {
         graph.repository.refresh(force = true)
         graph.bridge.update(
-            StatePayload.encode(graph.repository.state.value, ConfigStore(this@MainActivity).load()))
+            StatePayload.encode(graph.repository.state.value, ConfigStore(this@MainActivity).load(), WeatherPoll.latest))
     }
 
     /**
@@ -491,7 +492,7 @@ class MainActivity : ComponentActivity() {
             ColorPickerDialog.show(this, store.load().titleColor) { picked ->
                 val config = store.load().copy(titleColor = picked)
                 store.save(config)
-                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
                 paintSwatch()
                 refreshPreview()
             }
@@ -502,7 +503,7 @@ class MainActivity : ComponentActivity() {
             val config = store.load()
                 .copy(title = if (typed.isEmpty()) PanelConfig.DEFAULT.title else typed)
             store.save(config)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
             refreshPreview()
         }
     }
@@ -568,7 +569,7 @@ class MainActivity : ComponentActivity() {
         fun write(edit: (PanelConfig) -> PanelConfig) {
             val config = edit(store.load())
             store.save(config)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
             refreshPreview()
             // Ask the watcher to say again what is playing.
             //
@@ -633,7 +634,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 AccountSettingsSheet.show(this, findViewById(R.id.root_host), index,
                     graph.repository.state.value) { edited ->
-                    graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited))
+                    graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited, WeatherPoll.latest))
                     refreshPreview()
                     buildSettingsRows()
                 }
@@ -882,7 +883,7 @@ class MainActivity : ComponentActivity() {
         // the user chose sits in app storage forever.
         ArtImport.clear(this)
         store.save(PanelConfig.DEFAULT)
-        graph.bridge.update(StatePayload.encode(graph.repository.state.value, PanelConfig.DEFAULT))
+        graph.bridge.update(StatePayload.encode(graph.repository.state.value, PanelConfig.DEFAULT, WeatherPoll.latest))
         buildSettingsRows()
         refreshPreview()
         toast("Every setting reset")
@@ -920,7 +921,7 @@ class MainActivity : ComponentActivity() {
                 val config = store.load().copy(art = ArtConfig(
                     imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom))
                 store.save(config)
-                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
                 refreshPreview()
                 toast("Artwork set")
             })
@@ -959,7 +960,7 @@ class MainActivity : ComponentActivity() {
                     imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom))
                 store.save(config)
                 dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
-                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
                 refreshPreview()
                 refreshBackdropClear()
                 toast("Background set")
@@ -992,7 +993,7 @@ class MainActivity : ComponentActivity() {
                 store.save(config)
                 if (had) ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
                 graph.bridge.update(
-                    StatePayload.encode(graph.repository.state.value, config),
+                    StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest),
                 )
                 refreshPreview()
                 dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
@@ -1019,7 +1020,7 @@ class MainActivity : ComponentActivity() {
             // The file goes too. It is a megabyte of somebody's photograph that nothing
             // will ever read again, and leaving it would make "remove" a lie about disk.
             ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
             refreshPreview()
             dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
             refreshBackdropClear()
@@ -1125,7 +1126,7 @@ class MainActivity : ComponentActivity() {
         fun pushLayout(layout: RingLayout) {
             val config = store.load().copy(ringLayout = layout)
             store.save(config)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config))
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
             refreshPreview()
         }
 

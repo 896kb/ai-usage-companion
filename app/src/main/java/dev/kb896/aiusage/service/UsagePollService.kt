@@ -198,6 +198,20 @@ class UsagePollService : Service() {
             }
         }
 
+        val weather = WeatherPoll(
+            fetch = { t -> app.weatherApi.current(t.latitude, t.longitude, t.label, System.currentTimeMillis()) },
+            fix = deviceFix(this),
+            configNow = ::config,
+            onReading = {
+                // Push at once so the line lands within a second of the fetch rather than
+                // at the next usage tick. Calibrate mode is never touched from here.
+                if (!app.bridge.calibrating) {
+                    app.bridge.update(StatePayload.encode(app.repository.state.value, config(), WeatherPoll.latest))
+                }
+            },
+        )
+        scope.launch { weather.run() }
+
         // Supervising the display is a separate job from fetching data, on its own
         // clock. Coupling them meant a panel dismissed by MIUI's double-tap gesture
         // stayed gone until the next poll — up to five minutes of blank back screen
@@ -333,7 +347,7 @@ class UsagePollService : Service() {
         try {
             val app = Graph.of(this)
             if (app.bridge.ensureOnRear()) Log.w(TAG, "panel was on the main display — moved back")
-            ensurePlaced(app, StatePayload.encode(app.repository.state.value, config()))
+            ensurePlaced(app, StatePayload.encode(app.repository.state.value, config(), WeatherPoll.latest))
         } catch (e: Exception) {
             Log.e(TAG, "supervise failed", e)
         }
@@ -423,7 +437,7 @@ class UsagePollService : Service() {
         getSystemService(NotificationManager::class.java)
             ?.notify(NOTIFICATION_ID, notification())
 
-        val payload = StatePayload.encode(app.repository.state.value, config())
+        val payload = StatePayload.encode(app.repository.state.value, config(), WeatherPoll.latest)
         val decision = ensurePlaced(app, payload)
         // A fresh respawn already delivered `payload` via the launch intent extra
         // (RearUserService.show()'s `am start --es state ...`), and calibrate mode
@@ -596,7 +610,7 @@ class UsagePollService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SHOW_PANEL) {
             val app = Graph.of(this)
-            app.bridge.show(StatePayload.encode(app.repository.state.value, config()))
+            app.bridge.show(StatePayload.encode(app.repository.state.value, config(), WeatherPoll.latest))
         }
         return START_STICKY
     }
