@@ -5,8 +5,10 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.CancellationSignal
+import android.util.Log
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.WeatherReading
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -21,7 +23,12 @@ import kotlin.coroutines.resume
  * tick, wait — so a dark panel costs nothing and a waking one asks at once. The wait
  * can be cut short by [nudge], which the settings screen sends after a place or the
  * location switch changes; the gate still runs first, so a nudge from a dark panel
- * waits with everything else.
+ * waits with everything else, and is then spent by the wake-up tick rather than also
+ * winning the wait behind it — see the comment in [run] for why that second win would
+ * be one settings change buying two readings.
+ *
+ * [tick] is guarded the same way UsagePollService.safeTick guards the usage loop: one
+ * bad fetch is logged and skipped, not left free to take the whole loop down with it.
  *
  * The fetch and the location read are handed in as functions so the loop can be run on
  * the JVM with neither a network nor a LocationManager.
@@ -36,8 +43,27 @@ class WeatherPoll(
 
     suspend fun run() {
         while (currentCoroutineContext().isActive) {
+            // Checked BEFORE the gate, not after: a nudge that piled up while the panel
+            // was dark is already answered by the tick this wake is about to run — that
+            // tick reads fresh config regardless of why it fired — so the token must not
+            // ALSO win the wait below and buy a second reading for the same settings
+            // change. A nudge sent while the panel was already awake is aimed at THIS
+            // iteration's wait instead, and is left alone.
+            val wasDark = !PanelAwake.isAwake()
             PanelAwake.awaitAwake()
-            tick()
+            if (wasDark) nudges.tryReceive()
+            try {
+                tick()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Same hazard UsagePollService.safeTick guards against (see its KDoc):
+                // left bare, one bad tick either escapes this while loop — ending the
+                // weather line for the rest of the process's life — or reaches
+                // Dispatchers.Default's uninstalled handler. One bad fetch must cost one
+                // reading, not the loop.
+                Log.e(TAG, "weather tick failed", e)
+            }
             withTimeoutOrNull(Cadence.WEATHER_MS) { nudges.receive() }
         }
     }
@@ -53,6 +79,8 @@ class WeatherPoll(
     }
 
     companion object {
+        private const val TAG = "AiUsageWeather"
+
         /** The last reading, for every payload the process encodes. Null until the first lands. */
         @Volatile var latest: WeatherReading? = null
 

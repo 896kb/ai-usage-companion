@@ -2,6 +2,8 @@ package dev.kb896.aiusage.service
 
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.WeatherReading
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
@@ -9,7 +11,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+// Robolectric only for run()'s exception guard below: it calls android.util.Log, which
+// the plain JVM's android.jar stub throws on ("not mocked") — Robolectric's shadow is
+// what lets a bad tick actually get logged instead of the test itself blowing up.
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class WeatherPollTest {
     private val typed = PanelConfig.DEFAULT.copy(
         weatherPlace = "bucharest", weatherPlaceLabel = "Bucharest, Romania",
@@ -65,5 +75,28 @@ class WeatherPollTest {
         val poll = WeatherPoll(fetch = { fetched++; reading }, fix = { null }, configNow = { typed }, onReading = {})
         assertNull(withTimeoutOrNull(300) { poll.run() })
         assertEquals(0, fetched)
+    }
+
+    @Test fun `a tick that throws is logged and skipped, not fatal to the loop`() = runBlocking {
+        var calls = 0
+        val poll = WeatherPoll(
+            fetch = { calls++; if (calls == 1) throw RuntimeException("boom") else reading },
+            fix = { null }, configNow = { typed }, onReading = {},
+        )
+        // Bypasses the five-minute wait so the second (surviving) tick runs inside the
+        // test's own timeout rather than the real Cadence.WEATHER_MS.
+        WeatherPoll.nudge()
+        withTimeoutOrNull(300) { poll.run() }
+        assertEquals(reading, WeatherPoll.latest)
+    }
+
+    @Test fun `a nudge buffered while dark does not also fire the moment the panel wakes`() = runBlocking {
+        PanelAwake.setDozing(true)
+        WeatherPoll.nudge()
+        var fetched = 0
+        val poll = WeatherPoll(fetch = { fetched++; reading }, fix = { null }, configNow = { typed }, onReading = {})
+        launch { delay(100); PanelAwake.setDozing(false) }
+        withTimeoutOrNull(400) { poll.run() }
+        assertEquals(1, fetched)
     }
 }
