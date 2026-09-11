@@ -231,6 +231,14 @@ data class PanelConfig(
      * shader's own names so the setting reads the same in the file as it does in the code.
      */
     val weather: String = "off",
+    /** What was typed in the Place row. Kept verbatim so the field shows it back. */
+    val weatherPlace: String = "",
+    /** The geocoder's answer for [weatherPlace] as "name, country"; empty when unresolved. */
+    val weatherPlaceLabel: String = "",
+    val weatherLat: Double? = null,
+    val weatherLon: Double? = null,
+    /** Ask the phone where it is before each fetch. Needs the coarse permission. */
+    val weatherUseDevice: Boolean = false,
 
     /**
      * Walk the panel through itself, on a loop, with nobody touching it.

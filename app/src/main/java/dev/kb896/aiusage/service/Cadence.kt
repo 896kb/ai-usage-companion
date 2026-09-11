@@ -27,6 +27,8 @@ object Cadence {
     // re-making: two accounts polled every 60s is ~2,880 requests a day against the
     // endpoint that reports rate limits, and that is enough on its own.
     const val FAST_MS = 120_000L     // every account, every two minutes
+    /** Five minutes between weather readings while the panel is awake. */
+    const val WEATHER_MS = 300_000L
     // No slow cadence any more. There used to be a 15-minute interval for "panel off",
     // on the theory that nobody is looking. Two problems with that in practice:
     //

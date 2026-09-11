@@ -26,6 +26,21 @@ object Weather {
     const val RAIN = "rain"
     const val SNOW = "snow"
 
+    /** Not a mode the shader knows: the setting that means "whatever it is doing outside". */
+    const val AUTO = "auto"
+
+    /**
+     * The mode the shader draws for a setting. A fixed setting is itself. AUTO reads the
+     * last reading — rain codes rain, snow codes snow, anything else off — and a missing
+     * or stale reading is off: a guess about the sky is worse than a dry pane.
+     */
+    fun effective(setting: String, reading: dev.kb896.aiusage.data.WeatherReading?, nowMs: Long): String =
+        when (setting) {
+            RAIN, SNOW -> setting
+            AUTO -> reading?.takeIf { it.isFresh(nowMs) }?.condition?.glass ?: OFF
+            else -> OFF
+        }
+
     /**
      * DROPS ARE DRAWN AS DISPLACEMENT, not as shapes.
      *
