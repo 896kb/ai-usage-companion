@@ -10,9 +10,11 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Broadcast wire format. Carries utilisations and timestamps ONLY — never a token.
@@ -30,6 +32,8 @@ import kotlinx.serialization.json.putJsonArray
 data class PanelPayload(
     val state: DashboardState,
     val config: PanelConfig = PanelConfig.DEFAULT,
+    /** The last weather reading, or null when there has been none. Crosses as a fact. */
+    val weather: WeatherReading? = null,
 )
 
 object StatePayload {
@@ -37,6 +41,7 @@ object StatePayload {
     fun encode(
         state: DashboardState,
         config: PanelConfig = PanelConfig.DEFAULT,
+        weather: WeatherReading? = null,
     ): String = buildJsonObject {
         put("fetchedAt", state.fetchedAt)
         put("config", Json.parseToJsonElement(PanelConfig.encode(config)))
@@ -65,6 +70,15 @@ object StatePayload {
                         }
                     }
                 }
+            }
+        }
+        if (weather != null) {
+            putJsonObject("weather") {
+                put("temperatureC", weather.temperatureC)
+                put("code", weather.code)
+                put("isDay", weather.isDay)
+                put("place", weather.place)
+                put("fetchedAt", weather.fetchedAt)
             }
         }
     }.toString()
@@ -98,9 +112,21 @@ object StatePayload {
                 mascot = o.str("mascot") ?: MascotMood.WALK,
             )
         }
+        val weather = (root["weather"] as? JsonObject)?.let { w ->
+            val t = (w["temperatureC"] as? JsonPrimitive)?.floatOrNull
+            val code = (w["code"] as? JsonPrimitive)?.intOrNull
+            if (t == null || code == null) null
+            else WeatherReading(
+                t, code,
+                (w["isDay"] as? JsonPrimitive)?.booleanOrNull ?: true,
+                w.str("place").orEmpty(),
+                (w["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L,
+            )
+        }
         PanelPayload(
             DashboardState((root["fetchedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, statuses),
             PanelConfig.decode(root["config"]?.toString()),
+            weather,
         )
     } catch (_: Exception) {
         PanelPayload(DashboardState.EMPTY)
