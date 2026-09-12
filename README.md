@@ -973,6 +973,8 @@ ticking is one numeral rolling and not a whole clock redrawing. Under GLASS the 
 are made of glass, the way the charging percentage is; the date is spelled out in full —
 `Thursday, September 3rd, 2026` — in a shell of glass, and both take the colours the
 readout's own clock and date use. Under ORIGINAL they are the original traced glyphs.
+Under the date, whenever there is a reading to show, is the weather — see [what it is
+actually doing outside](#what-it-is-actually-doing-outside).
 
 Under the clock are the **last ten notifications**, on a wheel. The current one is whole
 and in front; its neighbours sit half a card behind it, smaller and faded, and the wheel
@@ -1026,9 +1028,9 @@ averaged into a flat colour, which is coloured type rather than tinted glass.
 
 ## Weather on the glass
 
-A setting, **None, Rain or Snow**, draws weather on the ground behind everything — on the
-colour or the picture, and in front of nothing, so the readout stays readable and the
-cards bend the weather along with whatever else is behind them.
+A setting, **None, Auto, Rain or Snow**, draws weather on the ground behind everything —
+on the colour or the picture, and in front of nothing, so the readout stays readable and
+the cards bend the weather along with whatever else is behind them.
 
 **Rain is water, not sprites.** A drop is drawn as displacement: it bends what is under it
 and only then gets a lit edge, because a lens is what the eye recognises long before it
@@ -1059,6 +1061,76 @@ appeared on the condensation for a while were chased through six explanations �
 the effect, the noise, the compositing — and were a missing term in the water field: the
 clearing knew how far *above* the drop a pixel was and nothing about how far to the side.
 
+### What it is actually doing outside
+
+The page above the readout carries a second reading, under the date: the condition's icon,
+and then `20° · Overcast` — the temperature in whole degrees, a middle dot, and the word for
+the sky. Whole degrees, because a tenth of a degree is a digit with nothing to say on a
+panel read from across a room.
+
+The place it is for goes **underneath**, on its own line, centred, smaller and dimmer. It
+was a suffix on the end of the reading first, at eleven units, which is legible on a laptop
+and unreadable on the panel it is actually printed on; sixteen is the size a caption on this
+page already is — a notification's body — and a second line has the room for it. Under
+GLASS the two lines share **one** card of glass, cut to whichever of them is wider, because
+they are one reading with its source named under it rather than two things sitting near
+each other; the temperature's digits are glass numerals like the clock's, and the words
+beside them are plain type in both themes. Under ORIGINAL the whole line is flat type with a
+glyph traced out of the same terminal font as every other icon here.
+
+That card reaches down into the unlock slider's band, so **the whole block leaves when the
+panel locks** and comes back when it unlocks — the same bargain the artwork makes with the
+lock, and [When the panel lights itself](#when-the-panel-lights-itself) is why the slider is
+there at all. The clock and the date do not move up to make room: nothing on this page
+moves, so it is a fade rather than a shuffle. The one thing that changes on the way out is
+the temperature, which drops back to ordinary type for the trip — a glass numeral is a
+refraction rather than an ink, and asked to fade it simply would not, leaving the figure
+standing at full strength over an empty card.
+
+The conditions are Open-Meteo's WMO codes, collapsed to ten readings and eight icons: clear
+— a sun by day and a moon by night — partly cloudy, overcast, fog, drizzle, rain, showers,
+snow and thunderstorm, with the three kinds of wet sharing a glyph because they are one
+picture. A code outside the documented ranges reads as overcast, which is the least wrong
+thing to say about a sky that cannot be read. The icons came out of the same two generators
+as every other glyph on the panel: Material Symbols Rounded under GLASS, traced rectangles
+under ORIGINAL.
+
+Where the reading is *for* is two settings and a rule. **Place** is typed once and resolved
+once — the geocoder is asked 800ms after the last keystroke, and the coordinates it answers
+with are what every poll after that uses, so nothing is looked up on a schedule. The note
+under the field says what it made of what you typed, `Weather for Bucharest, Romania` or
+`Not found`, and carries Open-Meteo's attribution beside it; a typo is then visible where it
+was made rather than as an absence on the back of the phone. **Use the phone's location** is
+the other, and it asks for coarse location only when you turn it on, and turns itself back
+off if you refuse — a switch that stayed on without the permission would be describing a
+fetch that had quietly fallen back to the typed place.
+
+With that switch on, the reading is for wherever the phone is, and the rule is what the line
+says underneath it: `Here` when nothing is typed, and nothing at all when something is. The
+service will give a reading for a coordinate and will not name it, and printing the typed
+place under a reading taken two countries away would be a lie in small type. A fix that
+never arrives falls back to the typed place, which the line can go back to naming.
+
+A reading every five minutes, and only while the panel is awake. The loop parks on the same
+signal the usage poll parks on — see [And when nobody is
+looking](#and-when-nobody-is-looking) — so a phone in a pocket asks for nothing at all, and
+a panel that lights up asks at once. Setting a place, or turning the location switch on,
+cuts the wait short rather than leaving the line wrong for five minutes; a change made while
+the panel was dark is answered by the reading the wake-up already takes, rather than by that
+one and a second behind it. A fetch that fails keeps the last reading, because a stale fact
+beats a blank line — but only so far: anything older than **two hours** is dropped rather
+than shown, by the line and by Auto both. A two-hour-old sky is a guess dressed as a fact.
+
+**Auto**, the fourth answer on the Weather row, hands the choice to the real weather: rain,
+drizzle, showers and thunderstorms bring the rain, snow brings the snow, and everything else
+leaves the pane dry. With no reading, or one that has aged out, it draws nothing — a guess
+about the sky is worse than a dry pane. It is the only one of the four that can turn itself
+off, which is the whole of the difference: None, Rain and Snow are decisions about the
+panel, and Auto is a decision about the weather.
+
+In a debug build the demo carries a reading of its own — a fixed 12° of rain for `Somewhere`
+— so the line and the rain are both in the filmed loop with no network behind them.
+
 ## Customisation
 
 Almost everything on the panel is editable, and the settings screen shows a **live
@@ -1069,7 +1141,7 @@ drift from what the back of the phone is doing.
 | | |
 |---|---|
 | **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. Each is capped at what it can actually draw, measured off the real font rather than guessed, and each field says its own limit. |
-| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the battery, the camera and game buttons, the notification strip and its ground. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
+| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the weather line, the battery, the camera and game buttons, the notification strip and its ground. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
 | **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. |
 | **Account order** | Reorder the accounts and the rings follow them: ring one belongs to whichever account is first, so there is nothing to keep in step by hand. |
 | **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
@@ -1077,7 +1149,10 @@ drift from what the back of the phone is doing.
 | **Extras** | A clock, a date and a battery readout, stacked in the corner with pixel-traced glyphs, each its own toggle and its own colour. |
 | **Background** | One section, three columns: a colour, a picture, and a bin that is live only when there is a picture to empty. They are exclusive — choosing a colour clears the image, because the picture is drawn *over* the ground and would otherwise go on covering whatever you picked. There is no switch for the ground itself: a panel with no ground is the one state that hands the display back to the system's own launcher. |
 | **Theme** | ORIGINAL or GLASS — the face, the glyphs, the material, and the settings screen with it. First in the list, because it is the one setting that changes what every other setting looks like. |
-| **Weather** | None, rain or snow, on the ground behind everything. |
+| **Weather** | None, Auto, rain or snow, on the ground behind everything. Auto draws whatever is actually falling where the reading is for, and nothing at all when the sky is dry or there is no reading. |
+| **Weather line** | The reading itself, under the date on the page above the readout. A swatch and no switch: the line is there whenever there is a reading, and the two rows below decide whether there is one. It takes the date's colour until it is given one of its own. |
+| **Place** | Where the weather is for. Typed once and resolved once, and the note under the field shows what the geocoder made of it — or `Not found`. |
+| **Use the phone's location** | The reading follows the phone instead, on coarse location that is asked for only when you turn this on. Refuse the prompt and the switch goes back off. |
 | **Keep panel awake** | Off by default: the panel goes dark thirty seconds after you stop touching it and does no work while it is dark. On, it stays lit. |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
@@ -1405,6 +1480,8 @@ The snow is adapted from **Lumine's multilayer snowfall** on
 [Godot Shaders](https://godotshaders.com/shader/multilayer-snowfall-shader/), CC0 — public
 domain, so nothing is owed, but it is worth saying where it came from. The rain is this
 repository's own.
+
+Weather data by [Open-Meteo](https://open-meteo.com/) (CC BY 4.0).
 
 The record is a stock photograph, cropped to the disc and with its label flattened out —
 the album art always covers that part, and an orange label underneath would have tinted
