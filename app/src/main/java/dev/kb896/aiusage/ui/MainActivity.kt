@@ -43,7 +43,9 @@ import androidx.core.app.NotificationManagerCompat
 import dev.kb896.aiusage.service.UsagePollService
 import dev.kb896.aiusage.service.WeatherPoll
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -552,6 +554,25 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Asked when the location switch is turned on. A refusal turns the switch back off —
+     * the setting cannot be on without the permission, and a switch that says otherwise
+     * would be lying about a fetch that silently falls back to the typed place.
+     */
+    private val askLocation = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val store = ConfigStore(this)
+        store.save(store.load().copy(weatherUseDevice = granted))
+        buildSettingsRows()
+        if (granted) WeatherPoll.nudge()
+    }
+
+    /** The place field's geocode, debounced — see the "Place" row in [buildSettingsRows].
+     *  Cancelled on every keystroke so only the typed value that survives 800ms idle
+     *  ever reaches the network. */
+    private var geocodeJob: Job? = null
+
+    /**
      * Everything else the panel exposes, built as rows rather than markup.
      *
      * Rebuilt wholesale when a structural choice changes — a ring pointing at a
@@ -691,24 +712,66 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             container, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
-        // One choice with three answers rather than two switches, which would let
+        // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
         SettingsRows.choice(
-            container, "Weather", listOf("None", "Rain", "Snow"),
+            container, "Weather", listOf("None", "Auto", "Rain", "Snow"),
             when (config.weather) {
-                Weather.RAIN -> 1
-                Weather.SNOW -> 2
+                Weather.AUTO -> 1
+                Weather.RAIN -> 2
+                Weather.SNOW -> 3
                 else -> 0
             },
         ) { i ->
             write {
                 it.copy(
                     weather = when (i) {
-                        1 -> Weather.RAIN
-                        2 -> Weather.SNOW
+                        1 -> Weather.AUTO
+                        2 -> Weather.RAIN
+                        3 -> Weather.SNOW
                         else -> Weather.OFF
                     },
                 )
+            }
+        }
+
+        // The place is typed, then resolved once — the poll never geocodes. The note under
+        // the field shows what the geocoder made of it, so a typo is visible where it was
+        // typed, and carries the attribution Open-Meteo's terms ask for.
+        lateinit var placeNote: TextView
+        fun placeNoteText(c: PanelConfig): String {
+            val what = when {
+                c.weatherPlaceLabel.isNotEmpty() -> "Weather for ${c.weatherPlaceLabel} · "
+                c.weatherPlace.isNotBlank() -> "Not found · "
+                else -> ""
+            }
+            return what + "Weather by Open-Meteo"
+        }
+        SettingsRows.textField(container, "Place", config.weatherPlace, 40) { typed ->
+            write { it.copy(weatherPlace = typed) }
+            geocodeJob?.cancel()
+            geocodeJob = lifecycleScope.launch {
+                delay(800)   // after the last keystroke, not on every one
+                val place = withContext(Dispatchers.IO) { graph.weatherApi.geocode(typed) }
+                write {
+                    it.copy(
+                        weatherPlaceLabel = place?.label.orEmpty(),
+                        weatherLat = place?.latitude, weatherLon = place?.longitude,
+                    )
+                }
+                placeNote.text = placeNoteText(store.load())
+                if (place != null) WeatherPoll.nudge()
+            }
+        }
+        placeNote = SettingsRows.note(container, placeNoteText(config))
+
+        SettingsRows.toggle(container, "Use the phone's location", config.weatherUseDevice) { on ->
+            val allowed = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            when {
+                !on -> write { it.copy(weatherUseDevice = false) }
+                allowed -> { write { it.copy(weatherUseDevice = true) }; WeatherPoll.nudge() }
+                else -> askLocation.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
             }
         }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real

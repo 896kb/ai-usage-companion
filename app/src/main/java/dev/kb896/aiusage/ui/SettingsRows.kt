@@ -46,8 +46,10 @@ object SettingsRows {
      * it is not an error, and disabling the row would hide the feature from the person
      * who most needs to find it. Saying why is the whole content.
      */
-    fun note(parent: LinearLayout, text: String) {
-        parent.addView(label(parent.context, text), rowParams(dp(parent.context, 6)))
+    fun note(parent: LinearLayout, text: String): TextView {
+        val view = label(parent.context, text)
+        parent.addView(view, rowParams(dp(parent.context, 6)))
+        return view
     }
 
     private fun rowParams(topDp: Int) = LinearLayout.LayoutParams(
