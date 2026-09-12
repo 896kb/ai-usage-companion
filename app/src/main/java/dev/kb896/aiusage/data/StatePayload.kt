@@ -17,7 +17,8 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * Broadcast wire format. Carries utilisations and timestamps ONLY — never a token.
+ * Broadcast wire format. Carries utilisations, timestamps, the weather reading, and —
+ * inside config — the coordinates and place the user typed. Never a token.
  *
  * kotlinx.serialization, not org.json: org.json is a stub in local JVM unit tests
  * and throws "not mocked". See Global Constraints.
