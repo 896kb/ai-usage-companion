@@ -580,6 +580,13 @@ class MainActivity : ComponentActivity() {
      * is more code than throwing them away, and this list is short.
      */
     private fun buildSettingsRows() {
+        // Cancelled here, before the rows it would report into are thrown away: a
+        // pending geocode landing on a detached TextView is silently lost, and worse,
+        // Reset Everything writing a fresh config must not be undone by a lookup that
+        // started before the reset and resolves after it.
+        geocodeJob?.cancel()
+        geocodeJob = null
+
         val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
         val container = findViewById<LinearLayout>(R.id.settings_rows)
         val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
