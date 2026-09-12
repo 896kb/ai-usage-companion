@@ -64,6 +64,18 @@ class RearDialView(context: Context) : View(context) {
             invalidate()
         }
 
+    /** The last weather reading, or null. Set with the payload; the line draws it if fresh. */
+    var weather: dev.kb896.aiusage.data.WeatherReading? = null
+        set(value) { if (field != value) { field = value; invalidate() } }
+
+    /** What the glass draws now: the setting, or for Auto, the sky outside. */
+    private fun weatherMode(): String =
+        Weather.effective(config.weather, shownWeather(), System.currentTimeMillis())
+
+    /** The reading the page shows: the demo's in demo mode, else the real one if fresh. */
+    private fun shownWeather(): dev.kb896.aiusage.data.WeatherReading? =
+        demoWeather() ?: weather?.takeIf { it.isFresh(System.currentTimeMillis()) }
+
     /**
      * Draw only this account, filling the panel with it. Null draws all of them.
      *
@@ -1092,7 +1104,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun drawMist(canvas: Canvas) {
-        if (config.weather != Weather.RAIN || width <= 0 || height <= 0) return
+        if (weatherMode() != Weather.RAIN || width <= 0 || height <= 0) return
         val shader = Weather.mist
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
         shader.setFloatUniform("mode", 0f)
@@ -7621,8 +7633,71 @@ class RearDialView(context: Context) : View(context) {
         }
         extras.color = (dateInk and 0x00FFFFFF) or (0xFF shl 24)
         canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
+        shownWeather()?.let { drawWeatherLine(canvas, cx, it, dateInk) }
         extras = extrasBody
         extras.textSize = typed(18f)
+    }
+
+    /**
+     * `[icon] 14° · Rain    Bucharest`, centred under the date in the date's ink.
+     *
+     * Same paint, same size, same glass shell as the date, so the two read as one block.
+     * The temperature is glass numerals under GLASS, drawn the way the clock's figures
+     * are; the words are plain text in both themes. The place is the label size at 60%
+     * so the line says whose weather it is without competing with the reading.
+     */
+    private fun drawWeatherLine(
+        canvas: Canvas,
+        cx: Float,
+        reading: dev.kb896.aiusage.data.WeatherReading,
+        ink: Int,
+    ) {
+        extras = extrasDate
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = typed(DATE_SIZE)
+        val temp = WeatherLine.temperature(reading)
+        val words = " · " + reading.condition.word
+        val tempW = extras.measureText(temp)
+        val wordsW = extras.measureText(words)
+        extras.textSize = typed(WeatherLine.PLACE_SIZE)
+        val placeW = if (reading.place.isEmpty()) 0f else extras.measureText(reading.place)
+        val placeGap = if (reading.place.isEmpty()) 0f else WeatherLine.PLACE_GAP
+        val total = DATE_SIZE + WeatherLine.ICON_GAP + tempW + wordsW + placeGap + placeW
+        val left = cx - total / 2f
+        val base = WeatherLine.BASELINE
+
+        if (config.theme.isGlass) {
+            clockRect.set(
+                left - CARD_PAD_X, base - DATE_SIZE - ROW_CARD_PAD_Y,
+                left + total + CARD_PAD_X, base + ROW_CARD_PAD_Y,
+            )
+            glassCard(canvas, clockRect, ROW_CARD_RADIUS)
+        }
+
+        extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
+        extras.textSize = typed(DATE_SIZE)
+        drawIcon(
+            canvas, WeatherLine.icon(reading.condition.iconName),
+            left, base - DATE_SIZE, DATE_SIZE,
+        )
+
+        // FIXED BEFORE IT IS DEFERRED. A Kotlin lambda closes over a var by reference, so
+        // a running x handed to the overlay pass is read AFTER the words have advanced it
+        // and the figure lands where the place name is. The glass run gets its own value.
+        val tempX = left + DATE_SIZE + WeatherLine.ICON_GAP
+        val glassTemp = config.theme.isGlass &&
+            deferOver(canvas) { c -> drawGlassRun(c, temp, tempX, base, ink) }
+        if (!glassTemp) canvas.drawText(temp, tempX, base, extras)
+        var x = tempX + tempW
+        canvas.drawText(words, x, base, extras)
+        x += wordsW + placeGap
+
+        if (reading.place.isNotEmpty()) {
+            extras.textSize = typed(WeatherLine.PLACE_SIZE)
+            extras.color = (ink and 0x00FFFFFF) or (0x99 shl 24)
+            canvas.drawText(reading.place, x, base, extras)
+        }
+        extras.textSize = typed(DATE_SIZE)
     }
 
     /**
@@ -7832,6 +7907,34 @@ class RearDialView(context: Context) : View(context) {
 
     private val noticeWheelRect = android.graphics.RectF()
     private val noticeWheelShape = android.graphics.Path()
+
+    /**
+     * A run of glass glyphs, left to right: the clock's numerals with nothing rolling.
+     *
+     * IT SETS ITS OWN PAINT, exactly as drawGlassClock does, and for the same reason:
+     * this only ever runs deferred, and by the time the overlay pass replays it the
+     * view's extras has been pointed at the body paint and resized. A run measured with
+     * that paint comes out the wrong width, in the wrong ink, under the wrong baseline.
+     *
+     * Each glyph advances by its own measure rather than a slot. A clock is a column of
+     * digits that must not shuffle when a 1 follows a 0; this is a temperature read as a
+     * word, and letter-spacing it to the widest figure would look like a ransom note.
+     */
+    private fun drawGlassRun(c: Canvas, text: String, x: Float, baseline: Float, ink: Int) {
+        extras = extrasDate
+        extras.textAlign = Paint.Align.LEFT
+        extras.textSize = typed(DATE_SIZE)
+        extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
+        var cx = x
+        for (glyph in text) {
+            val s = glyph.toString()
+            val w = extras.measureText(s)
+            if (!drawSdfText(c, s, extras, cx + w, baseline - DATE_SIZE / 2f)) {
+                c.drawText(s, cx, baseline, extras)
+            }
+            cx += w
+        }
+    }
 
     /**
      * The clock, one glass numeral at a time.
@@ -9756,7 +9859,7 @@ class RearDialView(context: Context) : View(context) {
      * Returns false when there is no weather, or nowhere to put it.
      */
     private fun prepareWeather(): Boolean {
-        if (config.weather == Weather.OFF || width <= 0 || height <= 0) return false
+        if (weatherMode() == Weather.OFF || width <= 0 || height <= 0) return false
         // THE GROUND, AS A TEXTURE. Rebuilt only when the background changes — it is a
         // colour and a photograph, and neither moves between frames.
         val key = (config.backdrop.imagePath ?: "-") + "|" + groundColor + "|" +
@@ -9793,7 +9896,7 @@ class RearDialView(context: Context) : View(context) {
         val shader = Weather.shader
         shader.setInputShader("ground", groundShader!!)
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
-        shader.setFloatUniform("mode", if (config.weather == Weather.SNOW) 1f else 0f)
+        shader.setFloatUniform("mode", if (weatherMode() == Weather.SNOW) 1f else 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
         setLenses(shader)
         shader.setFloatUniform(
@@ -10063,6 +10166,32 @@ class RearDialView(context: Context) : View(context) {
         val health =
             if (status.account == Account.WORK) step.workHealth else step.personalHealth
         return if (health == status.health) status else status.copy(health = health)
+    }
+
+    /** Held, not rebuilt: see demoWeather. */
+    private var demoWeatherReading: dev.kb896.aiusage.data.WeatherReading? = null
+    private val demoWeatherClock = java.util.Calendar.getInstance()
+
+    /**
+     * Demo mode's weather: a fixed light rain for "Somewhere", day or night by the clock,
+     * so the line and the rain appear in the filmed loop without a network.
+     *
+     * HELD RATHER THAN MADE. Every frame asks for this — the line on one page, and the
+     * glass on all of them — so a reading built each time is garbage at the display's
+     * full rate for a fact that changes twice a day. Rebuilt when the sky flips between
+     * day and night, and when the one being held has aged out, because Auto refuses a
+     * reading older than two hours and a filmed loop can run longer than that.
+     */
+    private fun demoWeather(): dev.kb896.aiusage.data.WeatherReading? {
+        demoNow() ?: return null
+        val now = System.currentTimeMillis()
+        demoWeatherClock.timeInMillis = now
+        val day = demoWeatherClock.get(java.util.Calendar.HOUR_OF_DAY) in 7..19
+        val held = demoWeatherReading
+        if (held != null && held.isDay == day && held.isFresh(now)) return held
+        return dev.kb896.aiusage.data.WeatherReading(
+            12f, 61, isDay = day, place = "Somewhere", fetchedAt = now,
+        ).also { demoWeatherReading = it }
     }
 
     /** The reset column's text for this row, or null when the demo is off. */

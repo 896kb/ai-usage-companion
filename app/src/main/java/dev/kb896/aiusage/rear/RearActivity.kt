@@ -369,6 +369,7 @@ class RearActivity : Activity() {
             val decoded = StatePayload.decode(payload)
             dial.config = decoded.config
             dial.state = decoded.state
+            dial.weather = decoded.weather
             // The switch may have just been thrown either way: on has to take the hold
             // back immediately, off has to start a countdown that was never running.
             if (keepAwake != decoded.config.keepPanelAwake) {
