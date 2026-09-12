@@ -1268,10 +1268,22 @@ reporting, and no server belonging to this project. You can check that claim rat
 trust it — the only network destinations in the entire source are:
 
 ```
-https://claude.ai/oauth/authorize     sign-in
-https://api.anthropic.com/            your usage figures
-https://platform.claude.com/          your plan tier
+https://claude.ai/oauth/authorize       sign-in
+https://api.anthropic.com/              your usage figures
+https://platform.claude.com/            your plan tier
+https://lrclib.net/                     lyrics, if you switch them on
+https://api.open-meteo.com/             the weather, if you ask for it
+https://geocoding-api.open-meteo.com/   the place you typed, turned into coordinates
 ```
+
+The bottom three are the optional ones, and what they are told is the whole of what they
+are told. LRCLIB is sent a track's title, artist, album and length, and only with lyrics
+switched on — see [Lyrics](#lyrics) for what that costs and what is done to keep it to
+that. Open-Meteo is sent a latitude and a longitude for a reading, or the place name you
+typed when that is what is being resolved, and it is sent nothing at all until you set a
+place or turn the location switch on. Neither wants an account and neither issues a key,
+so neither is sent one; the only thing either is told about the app is its name, its
+version and which part of it is asking.
 
 Your usage figures never leave your phone, and the panel's broadcast payload carries
 readings and timestamps only — never a credential.
