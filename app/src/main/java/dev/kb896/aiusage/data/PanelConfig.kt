@@ -219,6 +219,8 @@ data class PanelConfig(
     val batteryColor: Int? = null,
     val dateColor: Int? = null,
     val cameraColor: Int? = null,
+    /** The weather line's colour; null means "whatever the date is", which it was born with. */
+    val weatherColor: Int? = null,
 
     /** The date, under the clock. Off by default, like the other two. */
     val showDate: Boolean = false,
@@ -350,6 +352,7 @@ data class PanelConfig(
     val clockTint: Int get() = clockColor ?: extrasColor
     val batteryTint: Int get() = batteryColor ?: extrasColor
     val dateTint: Int get() = dateColor ?: extrasColor
+    val weatherTint: Int get() = weatherColor ?: dateTint
     val cameraTint: Int get() = cameraColor ?: extrasColor
     val notificationTint: Int get() = notificationColor ?: extrasColor
     val mediaTint: Int get() = mediaColor ?: extrasColor

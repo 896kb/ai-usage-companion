@@ -681,6 +681,11 @@ class MainActivity : ComponentActivity() {
             onChange = { on -> write { it.copy(showDate = on) } },
             onPick = { c -> write { it.copy(dateColor = c) } },
         )
+        // No switch: the line shows whenever there is a reading, and the Weather rows
+        // below decide that. Only the colour is a choice, so only a swatch is offered.
+        SettingsRows.colorRow(container, "Weather line", config.weatherTint) { c ->
+            write { it.copy(weatherColor = c) }
+        }
         SettingsRows.toggleWithColor(
             container, "Battery", config.showBattery, config.batteryTint,
             onChange = { on -> write { it.copy(showBattery = on) } },

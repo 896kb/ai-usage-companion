@@ -7633,7 +7633,7 @@ class RearDialView(context: Context) : View(context) {
         }
         extras.color = (dateInk and 0x00FFFFFF) or (0xFF shl 24)
         canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
-        shownWeather()?.let { drawWeatherLine(canvas, cx, it, dateInk) }
+        shownWeather()?.let { drawWeatherLine(canvas, cx, it, colorFor("weather", config.weatherTint)) }
         extras = extrasBody
         extras.textSize = typed(18f)
     }

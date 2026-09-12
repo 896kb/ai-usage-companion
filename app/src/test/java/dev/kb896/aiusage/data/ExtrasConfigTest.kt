@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -49,5 +50,14 @@ class ExtrasConfigTest {
         assertEquals(0xFF040506.toInt(), back.clockColor)
         assertEquals(0xFF070809.toInt(), back.dateColor)
         assertEquals(true, back.showDate)
+    }
+
+    @Test fun `the weather line follows the date until given its own colour`() {
+        val base = PanelConfig.DEFAULT.copy(dateColor = 0xFF112233.toInt())
+        assertEquals(0xFF112233.toInt(), base.weatherTint)
+        val own = base.copy(weatherColor = 0xFF445566.toInt())
+        assertEquals(0xFF445566.toInt(), own.weatherTint)
+        assertEquals(0xFF445566.toInt(), PanelConfig.decode(PanelConfig.encode(own)).weatherColor)
+        assertNull(PanelConfig.DEFAULT.weatherColor)
     }
 }
