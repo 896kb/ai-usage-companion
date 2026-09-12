@@ -7639,12 +7639,13 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * `[icon] 14° · Rain    Bucharest`, centred under the date in the date's ink.
+     * `[icon] 14° · Rain` over `Bucharest`, both centred under the date in the date's ink.
      *
      * Same paint, same size, same glass shell as the date, so the two read as one block.
      * The temperature is glass numerals under GLASS, drawn the way the clock's figures
-     * are; the words are plain text in both themes. The place is the label size at 60%
-     * so the line says whose weather it is without competing with the reading.
+     * are; the words are plain text in both themes. The place is a caption on its OWN
+     * line at 60%, not a suffix beside the reading: at 11px on the end of the line it was
+     * legible on a laptop and unreadable on the panel it is actually printed on.
      */
     /** The line's two strings, held against the reading that spelled them. See below. */
     private var lineFor: dev.kb896.aiusage.data.WeatherReading? = null
@@ -7657,6 +7658,11 @@ class RearDialView(context: Context) : View(context) {
         reading: dev.kb896.aiusage.data.WeatherReading,
         ink: Int,
     ) {
+        // The card reaches into the unlock slider's band, so the block goes when the
+        // slider comes and returns when it goes — the same bargain the square artwork
+        // makes with the lock. A fade, not a slide: nothing on this page moves.
+        val keep = 1f - lockSwap(frameNowMs)
+        if (keep <= 0.001f) return
         // HELD, NOT SPELLED AGAIN. Both strings come from a fact that moves every five
         // minutes, on a page redrawn at the display's full rate — built per frame they are
         // garbage by the thousand for two words. Identity is the right key: a reading is
@@ -7673,25 +7679,33 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = typed(DATE_SIZE)
         val tempW = extras.measureText(temp)
         val wordsW = extras.measureText(words)
+        val place = reading.place
         extras.textSize = typed(WeatherLine.PLACE_SIZE)
-        val placeW = if (reading.place.isEmpty()) 0f else extras.measureText(reading.place)
-        val placeGap = if (reading.place.isEmpty()) 0f else WeatherLine.PLACE_GAP
+        val placeW = if (place.isEmpty()) 0f else extras.measureText(place)
         // THE TYPE'S OWN SIZE, not the constant behind it. A theme with a type scale sets
         // the words at typed(DATE_SIZE) and left the glyph beside them a tenth short.
         val iconH = typed(DATE_SIZE)
-        val total = iconH + WeatherLine.ICON_GAP + tempW + wordsW + placeGap + placeW
+        // EACH LINE CENTRED ON ITS OWN, which is the whole point of the second line: a
+        // reading and a caption stacked on one axis, not one run of type that happens to
+        // wrap. So the place's width is no term in the reading's width.
+        val total = iconH + WeatherLine.ICON_GAP + tempW + wordsW
         val left = cx - total / 2f
         val base = WeatherLine.BASELINE
 
         if (config.theme.isGlass) {
+            // ONE CARD ROUND BOTH, cut to whichever line is wider — two cards, or one cut
+            // to the reading with the place hanging out of it, would say these are two
+            // things. They are one reading with its source named underneath.
+            val wide = maxOf(total, placeW)
             clockRect.set(
-                left - CARD_PAD_X, base - DATE_SIZE - ROW_CARD_PAD_Y,
-                left + total + CARD_PAD_X, base + ROW_CARD_PAD_Y,
+                cx - wide / 2f - CARD_PAD_X, base - DATE_SIZE - ROW_CARD_PAD_Y,
+                cx + wide / 2f + CARD_PAD_X,
+                (if (place.isEmpty()) base else WeatherLine.PLACE_BASELINE) + ROW_CARD_PAD_Y,
             )
-            glassCard(canvas, clockRect, ROW_CARD_RADIUS)
+            glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = keep)
         }
 
-        extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
+        extras.color = (ink and 0x00FFFFFF) or ((0xFF * keep).toInt() shl 24)
         extras.textSize = typed(DATE_SIZE)
         drawIcon(
             canvas, WeatherLine.icon(reading.condition.iconName),
@@ -7699,20 +7713,25 @@ class RearDialView(context: Context) : View(context) {
         )
 
         // FIXED BEFORE IT IS DEFERRED. A Kotlin lambda closes over a var by reference, so
-        // a running x handed to the overlay pass is read AFTER the words have advanced it
-        // and the figure lands where the place name is. The glass run gets its own value.
+        // a running x handed to the overlay pass is read AFTER the rest of the line has
+        // advanced it, and the figure lands off the end of it. This is a val for that
+        // reason and not because it reads more neatly.
         val tempX = left + iconH + WeatherLine.ICON_GAP
-        val glassTemp = config.theme.isGlass &&
+        // PLAIN TYPE WHILE IT IS LEAVING. The glass numeral is a refraction, not an ink:
+        // drawSdfText throws the paint's alpha away and tints the field at Glass.SDF_TINT,
+        // so a figure asked to fade simply would not — the temperature would sit there at
+        // full strength over an empty card while everything around it went. Below full
+        // strength the figure is drawn as text instead, which fades with the rest; the
+        // swap happens under the fade's own first frame, where there is nothing to see.
+        val glassTemp = keep > 0.999f && config.theme.isGlass &&
             deferOver(canvas) { c -> drawGlassRun(c, temp, tempX, base, ink) }
         if (!glassTemp) canvas.drawText(temp, tempX, base, extras)
-        var x = tempX + tempW
-        canvas.drawText(words, x, base, extras)
-        x += wordsW + placeGap
+        canvas.drawText(words, tempX + tempW, base, extras)
 
-        if (reading.place.isNotEmpty()) {
+        if (place.isNotEmpty()) {
             extras.textSize = typed(WeatherLine.PLACE_SIZE)
-            extras.color = (ink and 0x00FFFFFF) or (0x99 shl 24)
-            canvas.drawText(reading.place, x, base, extras)
+            extras.color = (ink and 0x00FFFFFF) or ((0x99 * keep).toInt() shl 24)
+            canvas.drawText(place, cx - placeW / 2f, WeatherLine.PLACE_BASELINE, extras)
         }
         extras.textSize = typed(DATE_SIZE)
     }
