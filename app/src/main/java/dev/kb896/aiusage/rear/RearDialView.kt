@@ -7639,7 +7639,8 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * `[icon] 14° · Rain` over `Bucharest`, both centred under the date in the date's ink.
+     * `[icon] 14° · Rain` over `Bucharest`, both centred under the date, in its own ink —
+     * the date's until told otherwise.
      *
      * Same paint, same size, same glass shell as the date, so the two read as one block.
      * The temperature is glass numerals under GLASS, drawn the way the clock's figures
