@@ -7638,6 +7638,11 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = typed(18f)
     }
 
+    /** The line's two strings, held against the reading that spelled them. See below. */
+    private var lineFor: dev.kb896.aiusage.data.WeatherReading? = null
+    private var lineTemp = ""
+    private var lineWords = ""
+
     /**
      * `[icon] 14° · Rain` over `Bucharest`, both centred under the date, in its own ink —
      * the date's until told otherwise.
@@ -7648,11 +7653,6 @@ class RearDialView(context: Context) : View(context) {
      * line at 60%, not a suffix beside the reading: at 11px on the end of the line it was
      * legible on a laptop and unreadable on the panel it is actually printed on.
      */
-    /** The line's two strings, held against the reading that spelled them. See below. */
-    private var lineFor: dev.kb896.aiusage.data.WeatherReading? = null
-    private var lineTemp = ""
-    private var lineWords = ""
-
     private fun drawWeatherLine(
         canvas: Canvas,
         cx: Float,
@@ -7722,8 +7722,12 @@ class RearDialView(context: Context) : View(context) {
         // drawSdfText throws the paint's alpha away and tints the field at Glass.SDF_TINT,
         // so a figure asked to fade simply would not — the temperature would sit there at
         // full strength over an empty card while everything around it went. Below full
-        // strength the figure is drawn as text instead, which fades with the rest; the
-        // swap happens under the fade's own first frame, where there is nothing to see.
+        // strength the figure is drawn as text instead, which fades with the rest. That
+        // makes this a deliberate, instantaneous restyle rather than a fade of its own:
+        // keep crosses 0.999 once per swap, close to full opacity on both ends — moments
+        // after a lock starts pulling it out, moments before an unlock finishes putting it
+        // back — never while the card is actually faint. With the baseline fixed above,
+        // the figure no longer moves when the restyle happens.
         val glassTemp = keep > 0.999f && config.theme.isGlass &&
             deferOver(canvas) { c -> drawGlassRun(c, temp, tempX, base, ink) }
         if (!glassTemp) canvas.drawText(temp, tempX, base, extras)
@@ -7962,14 +7966,18 @@ class RearDialView(context: Context) : View(context) {
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(DATE_SIZE)
         extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
-        var cx = x
+        var pen = x
         for (glyph in text) {
             val s = glyph.toString()
             val w = extras.measureText(s)
-            if (!drawSdfText(c, s, extras, cx + w, baseline - DATE_SIZE / 2f)) {
-                c.drawText(s, cx, baseline, extras)
+            // drawSdfText's centreY is the field's own midpoint, not a baseline — so this
+            // is the centre whose midpoint IS `baseline`, the same conversion the charge
+            // figure's fallback makes near line 3212, and why plain text below still lines
+            // up with it.
+            if (!drawSdfText(c, s, extras, pen + w, baseline + (extras.ascent() + extras.descent()) / 2f)) {
+                c.drawText(s, pen, baseline, extras)
             }
-            cx += w
+            pen += w
         }
         // HANDED BACK, because this is the last thing the overlay pass replays and the
         // unlock label draws through whatever extras points at: left on the date's paint,
