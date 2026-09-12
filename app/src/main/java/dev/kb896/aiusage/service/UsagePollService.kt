@@ -210,7 +210,10 @@ class UsagePollService : Service() {
                 }
             },
         )
-        scope.launch { weather.run() }
+        // Dispatchers.IO, not the scope's own Default: fetch is a blocking OkHttp
+        // execute() that can sit for up to ten seconds, and Default has as many threads
+        // as there are cores — the same reason UsageRepository.refresh runs under IO.
+        scope.launch(Dispatchers.IO) { weather.run() }
 
         // Supervising the display is a separate job from fetching data, on its own
         // clock. Coupling them meant a panel dismissed by MIUI's double-tap gesture

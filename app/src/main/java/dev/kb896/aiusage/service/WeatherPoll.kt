@@ -91,13 +91,16 @@ class WeatherPoll(
         /**
          * Device fix when the switch is on and one arrived; otherwise the typed place if
          * it resolved; otherwise nothing. The label is what the line shows after the
-         * reading: "Here" for a fix with nothing typed, and nothing at all when a place
-         * is typed too — the API cannot say where a fix is, and naming the typed place
-         * for a reading taken somewhere else would be a lie.
+         * reading: "Here" for a fix with no place resolved, and nothing at all once one
+         * has — the API cannot say where a fix is, and naming a resolved place for a
+         * reading taken somewhere else would be a lie. Keyed on weatherLat, not on the
+         * typed text: a place typed but never geocoded (lat still null) has nothing to
+         * name, so the fix is still the only source this reading has — that is "Here",
+         * not silence.
          */
         fun target(config: PanelConfig, fix: Pair<Double, Double>?): Target? {
             if (config.weatherUseDevice && fix != null) {
-                return Target(fix.first, fix.second, if (config.weatherPlace.isBlank()) "Here" else "")
+                return Target(fix.first, fix.second, if (config.weatherLat == null) "Here" else "")
             }
             val lat = config.weatherLat ?: return null
             val lon = config.weatherLon ?: return null
