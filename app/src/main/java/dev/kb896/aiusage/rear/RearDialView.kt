@@ -7646,23 +7646,40 @@ class RearDialView(context: Context) : View(context) {
      * are; the words are plain text in both themes. The place is the label size at 60%
      * so the line says whose weather it is without competing with the reading.
      */
+    /** The line's two strings, held against the reading that spelled them. See below. */
+    private var lineFor: dev.kb896.aiusage.data.WeatherReading? = null
+    private var lineTemp = ""
+    private var lineWords = ""
+
     private fun drawWeatherLine(
         canvas: Canvas,
         cx: Float,
         reading: dev.kb896.aiusage.data.WeatherReading,
         ink: Int,
     ) {
+        // HELD, NOT SPELLED AGAIN. Both strings come from a fact that moves every five
+        // minutes, on a page redrawn at the display's full rate — built per frame they are
+        // garbage by the thousand for two words. Identity is the right key: a reading is
+        // replaced wholesale when it changes, and the same object always reads the same.
+        if (reading !== lineFor) {
+            lineFor = reading
+            lineTemp = WeatherLine.temperature(reading)
+            lineWords = WeatherLine.words(reading)
+        }
+        val temp = lineTemp
+        val words = lineWords
         extras = extrasDate
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(DATE_SIZE)
-        val temp = WeatherLine.temperature(reading)
-        val words = " · " + reading.condition.word
         val tempW = extras.measureText(temp)
         val wordsW = extras.measureText(words)
         extras.textSize = typed(WeatherLine.PLACE_SIZE)
         val placeW = if (reading.place.isEmpty()) 0f else extras.measureText(reading.place)
         val placeGap = if (reading.place.isEmpty()) 0f else WeatherLine.PLACE_GAP
-        val total = DATE_SIZE + WeatherLine.ICON_GAP + tempW + wordsW + placeGap + placeW
+        // THE TYPE'S OWN SIZE, not the constant behind it. A theme with a type scale sets
+        // the words at typed(DATE_SIZE) and left the glyph beside them a tenth short.
+        val iconH = typed(DATE_SIZE)
+        val total = iconH + WeatherLine.ICON_GAP + tempW + wordsW + placeGap + placeW
         val left = cx - total / 2f
         val base = WeatherLine.BASELINE
 
@@ -7678,13 +7695,13 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = typed(DATE_SIZE)
         drawIcon(
             canvas, WeatherLine.icon(reading.condition.iconName),
-            left, base - DATE_SIZE, DATE_SIZE,
+            left, base - iconH, iconH,
         )
 
         // FIXED BEFORE IT IS DEFERRED. A Kotlin lambda closes over a var by reference, so
         // a running x handed to the overlay pass is read AFTER the words have advanced it
         // and the figure lands where the place name is. The glass run gets its own value.
-        val tempX = left + DATE_SIZE + WeatherLine.ICON_GAP
+        val tempX = left + iconH + WeatherLine.ICON_GAP
         val glassTemp = config.theme.isGlass &&
             deferOver(canvas) { c -> drawGlassRun(c, temp, tempX, base, ink) }
         if (!glassTemp) canvas.drawText(temp, tempX, base, extras)
@@ -7934,6 +7951,10 @@ class RearDialView(context: Context) : View(context) {
             }
             cx += w
         }
+        // HANDED BACK, because this is the last thing the overlay pass replays and the
+        // unlock label draws through whatever extras points at: left on the date's paint,
+        // its title axes put LOCK on the panel a weight heavier than every other label.
+        extras = extrasBody
     }
 
     /**
