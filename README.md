@@ -1068,8 +1068,6 @@ and then `20° · Overcast` — the temperature in whole degrees, a middle dot, 
 the sky. Whole degrees, because a tenth of a degree is a digit with nothing to say on a
 panel read from across a room.
 
-![The weather line on the panel, with Auto driving the rain](assets/weather-line.mp4)
-
 The place it is for goes **underneath**, on its own line, centred, smaller and dimmer. It
 was a suffix on the end of the reading first, at eleven units, which is legible on a laptop
 and unreadable on the panel it is actually printed on; sixteen is the size a caption on this
