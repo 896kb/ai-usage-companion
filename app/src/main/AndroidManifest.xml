@@ -12,6 +12,11 @@
          prompt entirely, so this must never gate installation. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- so the app may ask whether HyperOS's rear-screen app is installed (Setup.kt) -->
+    <queries>
+        <package android:name="com.xiaomi.subscreencenter" />
+    </queries>
     <application
         android:label="AI Usage"
         android:icon="@mipmap/ic_launcher"

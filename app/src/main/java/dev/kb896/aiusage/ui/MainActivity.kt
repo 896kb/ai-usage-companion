@@ -1331,8 +1331,9 @@ class MainActivity : ComponentActivity() {
             container.addView(Button(this).apply {
                 text = "$mark${step.title}"
                 textSize = 13f
-                val actionable = step.open != null || step.title == "Shizuku"
-                isEnabled = !done && actionable
+                val actionable = step.open != null || step.kind != Setup.Kind.OPEN
+                // The Xiaomi row stays live in both states: done means "restore", not "nothing".
+                isEnabled = if (step.kind == Setup.Kind.XIAOMI_APP) true else !done && actionable
                 // Coloured by whether it DOES anything, not by whether its state can be
                 // read. Those were the same thing while the only unreadable step was a
                 // line of advice with no button; the autostart step is unreadable AND
@@ -1346,6 +1347,12 @@ class MainActivity : ComponentActivity() {
                 )
                 typeface = resources.getFont(R.font.departure_mono)
                 setOnClickListener {
+                    if (step.kind == Setup.Kind.XIAOMI_APP) {
+                        // satisfied == true means the app is already gone: the tap restores it
+                        if (step.satisfied == true) setXiaomiRearApp(installed = true)
+                        else confirmRemoveXiaomiRearApp()
+                        return@setOnClickListener
+                    }
                     val intent = step.open?.invoke()
                     if (intent == null) {
                         // Shizuku: granted in-app. onResume re-reads the state when the
@@ -1419,6 +1426,36 @@ class MainActivity : ComponentActivity() {
 
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    /**
+     * The one destructive-looking tap in the app asks first, and the asking says what
+     * actually happens: nothing is deleted, and the same row undoes it.
+     */
+    private fun confirmRemoveXiaomiRearApp() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Remove Xiaomi's rear-screen app?")
+            .setMessage(
+                "It is hidden for your user, not deleted — it stays on the system partition, " +
+                    "and this row restores it with one tap. Without it out of the way HyperOS " +
+                    "keeps putting its own screen back over the panel."
+            )
+            .setPositiveButton("Remove") { _, _ -> setXiaomiRearApp(installed = false) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun setXiaomiRearApp(installed: Boolean) {
+        if (!graph.bridge.status().ready) {
+            toast("Shizuku first — this needs its privilege")
+            return
+        }
+        when (graph.bridge.setXiaomiRearApp(installed)) {
+            null -> toast("Connecting to Shizuku — try again in a moment")
+            true -> toast(if (installed) "Xiaomi's rear-screen app restored" else "Xiaomi's rear-screen app removed")
+            false -> toast("That did not work — see the log")
+        }
+        buildSetupRows()
+    }
 
     companion object {
         /** How long the reset dialog holds its confirm button shut. */

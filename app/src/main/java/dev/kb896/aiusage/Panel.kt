@@ -2,6 +2,15 @@ package dev.kb896.aiusage
 
 /** Measured hardware facts and the arch_rice palette. Single source of truth. */
 object Panel {
+    /**
+     * HyperOS's own rear-screen app. It and this panel want the same display, and the
+     * system keeps bringing its own back over ours; the panel only stays put with it
+     * out of the way. The app hides it for the user with `pm uninstall -k --user 0`, which
+     * deletes nothing — it stays on the system partition — and restores it with
+     * `pm install-existing`. Both run through Shizuku, both are one tap in the app.
+     */
+    const val XIAOMI_REAR_APP = "com.xiaomi.subscreencenter"
+
     const val DISPLAY_ID = 1
     const val WIDTH = 904
     const val HEIGHT = 572

@@ -1333,23 +1333,30 @@ phone, understanding all of the above.
    notification that carries the HyperIsland readout — and nothing on screen will tell you
    why.
 
-   Steps 4 to 6 are also listed at the top of the app's own settings, each as a button
+   Steps 4 to 7 are also listed at the top of the app's own settings, each as a button
    that takes you to the right system screen and ticks itself once done. Once all of them
    are satisfied the list collapses into an **ONBOARDING** accordion and gets out of the
    way — it is instructions for getting started, and a wall of ticks should not sit above
    the settings you come back to. It reopens if a permission is later revoked, or if
    Shizuku is not restarted after a reboot.
-5. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
+5. **Get Xiaomi's own rear-screen app out of the way.** HyperOS's `com.xiaomi.subscreencenter`
+   wants the same display, and the system keeps bringing its own screen back over the panel;
+   the panel only stays put with it gone. The onboarding list has a row for it: **Remove
+   Xiaomi's rear-screen app** asks first, then runs `pm uninstall -k --user 0` through
+   Shizuku — which hides the app for your user and deletes nothing, it stays on the system
+   partition. The same row then reads **Restore Xiaomi's rear-screen app** and undoes it with
+   `pm install-existing`, one tap, whenever you want it back.
+6. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
    HyperOS is aggressive here: with restrictions on it stops the poll service, and the
    panel freezes on its last reading — showing stale numbers as though they were current.
-6. **Grant notification access** — only if you want other apps' notifications mirrored
+7. **Grant notification access** — only if you want other apps' notifications mirrored
    onto the panel, or the media controls. Both read from this one grant; there is no
    separate switch for the player, because Android hands out the active media sessions to
    whoever holds notification access. Without it neither feature does anything and
    everything else works. The
    onboarding list has a button, and unlike autostart this step can read its own state,
    so it ticks itself once granted.
-7. **Allow autostart.** HyperOS will not let the app start itself otherwise — not
+8. **Allow autostart.** HyperOS will not let the app start itself otherwise — not
    after a reboot, and not after the system has killed it. This is the single setting
    that decides whether the panel comes back on its own or waits for you to open the
    app, and it is the same one every persistent app on this phone needs. The onboarding
@@ -1358,13 +1365,13 @@ phone, understanding all of the above.
    Its state is not readable by any app — MIUI exposes no permission, setting or dumpsys
    field for it — so this step is shown as advice with a button rather than as something
    that can tick itself.
-8. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
+9. **Lock the app in recents.** Open recents, long-press the app, and lock it. Otherwise
    "close all" clears it, which kills the poll service and takes the panel down with it.
    A suggestion rather than a requirement, but it is the difference between the panel
    surviving your day and dying to a reflex. This is the one step the app cannot check
    for you — HyperOS does not expose whether an app is locked — so it is shown as advice
    rather than as a box that could never tick.
-9. **Background the app.** The panel places itself and stays there — the service puts it
+10. **Background the app.** The panel places itself and stays there — the service puts it
    on the rear display when it starts, and a watchdog puts it back if anything takes it
    away, including while the phone is asleep. Tapping the notification still re-places it
    by hand, which is the one recovery path that does not need the app opened, but it is

@@ -66,4 +66,15 @@ interface IRearService {
      * knows, so the panel says.
      */
     void setDozing(boolean dozing) = 8;
+
+    /**
+     * Hide HyperOS's own rear-screen app from this user — `pm uninstall -k --user 0`, which
+     * removes nothing from the system partition. Two NAMED actions for one fixed package,
+     * for the same reason openCamera is not "run this component": at shell uid a general
+     * uninstall would be a lever, not a feature.
+     */
+    boolean removeXiaomiRearApp() = 9;
+
+    /** Bring it back — `pm install-existing`, the exact undo of the above. */
+    boolean restoreXiaomiRearApp() = 10;
 }

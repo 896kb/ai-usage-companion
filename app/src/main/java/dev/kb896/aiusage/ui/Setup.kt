@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
+import android.content.pm.PackageManager
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -32,12 +33,42 @@ object Setup {
         val why: String,
         val satisfied: Boolean?,
         val open: (() -> Intent)?,
+        /** What a tap does when it is not an intent. */
+        val kind: Kind = Kind.OPEN,
     ) {
         val checkable get() = satisfied != null
     }
 
+    enum class Kind {
+        /** Opens [Step.open], or is plain advice when there is nothing to open. */
+        OPEN,
+        /** Asks Shizuku for permission, in-app. */
+        SHIZUKU,
+        /**
+         * Hides or restores HyperOS's rear-screen app — a row that stays pressable in
+         * both states, because the tap means the opposite thing in each.
+         */
+        XIAOMI_APP,
+    }
+
+    /**
+     * Whether HyperOS's rear-screen app is installed for this user: true if it is, false
+     * if it has been hidden with `pm uninstall --user 0`, null if this phone has no such
+     * app at all — in which case there is nothing to offer.
+     */
+    fun xiaomiRearAppInstalled(context: Context): Boolean? {
+        val pm = context.packageManager
+        @Suppress("DEPRECATION")
+        val onPhone = runCatching {
+            pm.getApplicationInfo(Panel.XIAOMI_REAR_APP, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+        }.isSuccess
+        if (!onPhone) return null
+        @Suppress("DEPRECATION")
+        return runCatching { pm.getApplicationInfo(Panel.XIAOMI_REAR_APP, 0) }.isSuccess
+    }
+
     fun steps(context: Context, shizukuGranted: Boolean, shizukuRunning: Boolean): List<Step> =
-        listOf(
+        listOfNotNull(
             Step(
                 title = "Shizuku",
                 why = "The rear display refuses an ordinary app. Shizuku lends this one " +
@@ -48,7 +79,21 @@ object Setup {
                 // instead. Left null rather than pointed at Shizuku's own app, which may
                 // not be installed and whose page cannot grant anything on our behalf.
                 open = null,
+                kind = Kind.SHIZUKU,
             ),
+            xiaomiRearAppInstalled(context)?.let { installed ->
+                Step(
+                    title = if (installed) "Remove Xiaomi's rear-screen app" else "Restore Xiaomi's rear-screen app",
+                    why = "HyperOS's own rear-screen app and this panel want the same display, " +
+                        "and the system keeps putting its own back on top. The panel only " +
+                        "stays with it out of the way. Removing it hides it for you and " +
+                        "deletes nothing; this same row brings it back.",
+                    // Ticked once it is gone: that is the state the panel needs.
+                    satisfied = !installed,
+                    open = null,
+                    kind = Kind.XIAOMI_APP,
+                )
+            },
             Step(
                 title = "Notifications",
                 why = "The ongoing notification is what puts the readings in the status " +

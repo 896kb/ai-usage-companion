@@ -134,6 +134,20 @@ class ShizukuBridge(private val context: Context) {
      * alive" as "call show()", whose existing `pending` queue-and-bind handles an
      * unbound service correctly.
      */
+    /**
+     * Hide or restore HyperOS's rear-screen app. Null when the user service is not bound
+     * yet — a bind is started, and the caller should say "try again in a moment" rather
+     * than "failed".
+     */
+    fun setXiaomiRearApp(installed: Boolean): Boolean? {
+        val svc = service ?: run { bind(); return null }
+        return try {
+            if (installed) svc.restoreXiaomiRearApp() else svc.removeXiaomiRearApp()
+        } catch (e: Exception) {
+            Log.e(TAG, "xiaomi rear app change failed", e); service = null; false
+        }
+    }
+
     fun isPanelAlive(): Boolean {
         val svc = service ?: return false
         return try { svc.isAlive() } catch (e: Exception) { Log.e(TAG, "isAlive failed", e); service = null; false }

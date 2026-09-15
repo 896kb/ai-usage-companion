@@ -3,6 +3,7 @@ package dev.kb896.aiusage.rear
 import android.content.Context
 import android.util.Log
 import dev.kb896.aiusage.IRearService
+import dev.kb896.aiusage.Panel
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.system.exitProcess
@@ -407,6 +408,18 @@ class RearUserService : IRearService.Stub {
 
     /** Single-quote for `sh -c`, escaping embedded single quotes. */
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
+
+    override fun removeXiaomiRearApp(): Boolean {
+        val out = exec("pm uninstall -k --user 0 ${Panel.XIAOMI_REAR_APP}")
+        Log.i(TAG, "remove ${Panel.XIAOMI_REAR_APP}: $out")
+        return out.contains("Success")
+    }
+
+    override fun restoreXiaomiRearApp(): Boolean {
+        val out = exec("pm install-existing --user 0 ${Panel.XIAOMI_REAR_APP}")
+        Log.i(TAG, "restore ${Panel.XIAOMI_REAR_APP}: $out")
+        return out.contains("installed for user", ignoreCase = true) || out.contains("Success")
+    }
 
     /** Runs via `sh -c` so PATH resolves am/service/input in the forked process. */
     /**
