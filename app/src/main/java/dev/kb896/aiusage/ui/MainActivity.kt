@@ -108,6 +108,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         buildSetupRows()
+        // Have the user service bound before any row needs it. Placement used to bind
+        // it as a side effect; with placement gated on the onboarding, nothing else does.
+        if (graph.bridge.status().granted) graph.bridge.bind()
         // Shizuku's permission grant is asynchronous (a system dialog the user
         // returns from) and requestPermission() below has no result callback wired
         // — see ShizukuBridge's history (Task 3) for why that's deliberate, not an
@@ -1449,17 +1452,25 @@ class MainActivity : ComponentActivity() {
             toast("Shizuku first — this needs its privilege")
             return
         }
-        when (graph.bridge.setXiaomiRearApp(installed)) {
-            null -> toast("Connecting to Shizuku — try again in a moment")
-            true -> {
-                toast(if (installed) "Xiaomi's rear-screen app restored" else "Xiaomi's rear-screen app removed")
-                // the bridge's gate decides: the panel goes up now that the way is clear, or
-                // comes down now that Xiaomi's app is back
-                graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load(), WeatherPoll.latest))
+        toast(if (installed) "Restoring…" else "Removing…")
+        // Off the main thread: the bridge may wait for Shizuku to start the service, and
+        // the pm command itself takes a moment.
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = graph.bridge.setXiaomiRearApp(installed)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    null -> toast("Shizuku's service did not answer — is Shizuku running?")
+                    true -> {
+                        toast(if (installed) "Xiaomi's rear-screen app restored" else "Xiaomi's rear-screen app removed")
+                        // the bridge's gate decides: the panel goes up now that the way is
+                        // clear, or comes down now that Xiaomi's app is back
+                        graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this@MainActivity).load(), WeatherPoll.latest))
+                    }
+                    false -> toast("That did not work — see the log")
+                }
+                buildSetupRows()
             }
-            false -> toast("That did not work — see the log")
         }
-        buildSetupRows()
     }
 
     companion object {

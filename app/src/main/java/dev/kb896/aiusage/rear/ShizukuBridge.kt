@@ -160,8 +160,25 @@ class ShizukuBridge(private val context: Context) {
      * yet — a bind is started, and the caller should say "try again in a moment" rather
      * than "failed".
      */
+    /**
+     * The user service, bound if it was not — waiting up to [timeoutMs] for Shizuku to
+     * start the process and hand over the binder. Blocks: call it off the main thread.
+     * Null when Shizuku never answered, which with the permission granted means it is
+     * not running.
+     */
+    fun awaitService(timeoutMs: Long = 6_000): IRearService? {
+        service?.let { return it }
+        bind()
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (service == null && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        return service
+    }
+
     fun setXiaomiRearApp(installed: Boolean): Boolean? {
-        val svc = service ?: run { bind(); return null }
+        // Nothing else binds the service while the onboarding is incomplete — placement,
+        // which used to do it as a side effect, is gated on that very onboarding — so
+        // the row binds and waits rather than asking the user to tap twice.
+        val svc = awaitService() ?: return null
         return try {
             if (installed) svc.restoreXiaomiRearApp() else svc.removeXiaomiRearApp()
         } catch (e: Exception) {
