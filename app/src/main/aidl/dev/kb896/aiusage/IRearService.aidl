@@ -75,6 +75,9 @@ interface IRearService {
      */
     boolean removeXiaomiRearApp() = 9;
 
-    /** Bring it back — `pm install-existing`, the exact undo of the above. */
+    /**
+     * Bring it back — `pm install-existing`, the exact undo of the above — and lift a
+     * suspension left by an earlier workaround, so restored means running, not present.
+     */
     boolean restoreXiaomiRearApp() = 10;
 }

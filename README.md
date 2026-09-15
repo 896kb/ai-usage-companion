@@ -1345,7 +1345,9 @@ phone, understanding all of the above.
    Xiaomi's rear-screen app** asks first, then runs `pm uninstall -k --user 0` through
    Shizuku — which hides the app for your user and deletes nothing, it stays on the system
    partition. The same row then reads **Restore Xiaomi's rear-screen app** and undoes it with
-   `pm install-existing`, one tap, whenever you want it back.
+   `pm install-existing`, one tap, whenever you want it back — and lifts a suspension left by
+   an earlier workaround (a suspended app comes back present but not allowed to run, which
+   looks exactly like a restore that did nothing).
 6. **Turn off HyperOS battery restrictions** for the app, and allow background activity.
    HyperOS is aggressive here: with restrictions on it stops the poll service, and the
    panel freezes on its last reading — showing stale numbers as though they were current.

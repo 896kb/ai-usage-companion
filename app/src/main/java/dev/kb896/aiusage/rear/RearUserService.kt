@@ -418,6 +418,13 @@ class RearUserService : IRearService.Stub {
     override fun restoreXiaomiRearApp(): Boolean {
         val out = exec("pm install-existing --user 0 ${Panel.XIAOMI_REAR_APP}")
         Log.i(TAG, "restore ${Panel.XIAOMI_REAR_APP}: $out")
+        // Installed is not the same as allowed to run. A phone that kept this app out of
+        // the way by SUSPENDING it (through shell, the other common workaround) gets it
+        // back still suspended — present, dead, and looking exactly like a failed
+        // restore. Seen on the Xiaomi: suspendingPackage=com.android.shell survived the
+        // uninstall, the reinstall and a reboot. Shell suspended it, so shell may lift it.
+        val lifted = exec("pm unsuspend --user 0 ${Panel.XIAOMI_REAR_APP}")
+        Log.i(TAG, "unsuspend ${Panel.XIAOMI_REAR_APP}: $lifted")
         return out.contains("installed for user", ignoreCase = true) || out.contains("Success")
     }
 
