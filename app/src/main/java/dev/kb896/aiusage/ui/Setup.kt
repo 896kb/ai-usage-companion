@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.rear.ShizukuBridge
 
 /**
  * What has to be true before the panel works, and whether it is.
@@ -178,4 +179,17 @@ object Setup {
      */
     fun allDone(steps: List<Step>): Boolean =
         steps.filter { it.satisfied != null }.all { it.satisfied == true }
+
+    /**
+     * Whether the panel may be placed on the rear display at all.
+     *
+     * The same question as [allDone], asked by the bridge before every placement and
+     * every re-placement: until the onboarding is complete — Shizuku granted, Xiaomi's
+     * own rear-screen app out of the way, the permissions given — the panel is left
+     * alone rather than put back every twenty seconds against a system that keeps
+     * taking the display from it. And if a step comes undone later, the next check
+     * takes the panel down instead of fighting for it.
+     */
+    fun panelAllowed(context: Context, status: ShizukuBridge.Status): Boolean =
+        allDone(steps(context, status.granted, status.running))
 }

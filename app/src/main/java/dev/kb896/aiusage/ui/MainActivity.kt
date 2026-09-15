@@ -1451,7 +1451,12 @@ class MainActivity : ComponentActivity() {
         }
         when (graph.bridge.setXiaomiRearApp(installed)) {
             null -> toast("Connecting to Shizuku — try again in a moment")
-            true -> toast(if (installed) "Xiaomi's rear-screen app restored" else "Xiaomi's rear-screen app removed")
+            true -> {
+                toast(if (installed) "Xiaomi's rear-screen app restored" else "Xiaomi's rear-screen app removed")
+                // the bridge's gate decides: the panel goes up now that the way is clear, or
+                // comes down now that Xiaomi's app is back
+                graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load(), WeatherPoll.latest))
+            }
             false -> toast("That did not work — see the log")
         }
         buildSetupRows()

@@ -23,6 +23,14 @@ class ShizukuBridge(private val context: Context) {
     private var binderListenerArmed = false
 
     /**
+     * May the panel go on the rear display right now? Set by Graph to the onboarding's
+     * answer (Setup.panelAllowed); the default says yes so the bridge is usable alone.
+     * Checked on every placement and re-placement, so a step coming undone is honoured
+     * within one watchdog tick — the panel comes down instead of being fought for.
+     */
+    var gate: (Status) -> Boolean = { true }
+
+    /**
      * Flush the queued payload as soon as Shizuku's binder shows up.
      *
      * Sticky, so it fires immediately if the binder is already there rather than
@@ -100,6 +108,19 @@ class ShizukuBridge(private val context: Context) {
     fun show(payload: String) {
         calibrating = CalibrateMode.isCalibrate(payload)
         val s = status()
+        if (!gate(s)) {
+            // Not placed, and not queued either: the onboarding is not done. A panel that
+            // is up from before the step came undone is taken down, so the two rear-screen
+            // apps stop trading the display every tick.
+            pending = null
+            if (isPanelAlive()) {
+                Log.i(TAG, "onboarding incomplete — taking the panel down")
+                hide()
+            } else {
+                Log.i(TAG, "onboarding incomplete — not placing the panel")
+            }
+            return
+        }
         if (!s.ready) {
             // Hold the payload instead of dropping it. This is the normal state for the
             // first seconds after the app is killed and restarted: Shizuku has to
@@ -161,6 +182,7 @@ class ShizukuBridge(private val context: Context) {
         val svc = service ?: return false
         val id = rearDisplayId()
         if (id < 0) return false
+        if (!gate(status())) return false
         return try { svc.ensureOnRear(id) } catch (e: Exception) {
             Log.e(TAG, "ensureOnRear failed", e); service = null; false
         }

@@ -1333,6 +1333,12 @@ phone, understanding all of the above.
    notification that carries the HyperIsland readout — and nothing on screen will tell you
    why.
 
+   The panel is placed only once every step with a readable state is satisfied. Until
+   then it is left alone — not put on the rear display, and not put back every twenty
+   seconds against a system that keeps taking it — and if a step comes undone later
+   (Xiaomi's app restored, Shizuku gone after a reboot) the next check takes the panel
+   down rather than fighting for it.
+
    Steps 4 to 7 are also listed at the top of the app's own settings, each as a button
    that takes you to the right system screen and ticks itself once done. Once all of them
    are satisfied the list collapses into an **ONBOARDING** accordion and gets out of the

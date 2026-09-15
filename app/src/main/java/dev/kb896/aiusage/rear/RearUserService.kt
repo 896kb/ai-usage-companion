@@ -67,6 +67,10 @@ class RearUserService : IRearService.Stub {
         // receive — or spoof — panel state. Do not drop this as "redundant."
         exec("am broadcast -p $PKG -a $ACTION_FINISH")
         placedDisplayId = -1
+        // A hidden panel is a panel nobody wants back: the keep-alive would otherwise read
+        // the empty rear display as "taken" and re-place it within a tick.
+        keepAlive?.interrupt()
+        keepAlive = null
     }
 
     override fun update(payload: String) {

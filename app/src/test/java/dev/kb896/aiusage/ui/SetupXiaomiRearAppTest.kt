@@ -19,6 +19,11 @@ class SetupXiaomiRearAppTest {
     private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @Test
+    fun `the panel is not allowed until the onboarding is done`() {
+        assertEquals(false, Setup.panelAllowed(context, dev.kb896.aiusage.rear.ShizukuBridge.Status(running = false, granted = false, rearDisplayId = 1)))
+    }
+
+    @Test
     fun `a phone without the app offers no row`() {
         assertNull(Setup.xiaomiRearAppInstalled(context))
         assertTrue(Setup.steps(context, shizukuGranted = true, shizukuRunning = true).none { it.kind == Setup.Kind.XIAOMI_APP })

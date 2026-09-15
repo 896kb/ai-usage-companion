@@ -28,7 +28,10 @@ class Graph private constructor(context: Context) {
         ProfileApi(http), ProfileStore(context.applicationContext),
         UsageHistory(context.applicationContext),
     )
-    val bridge = ShizukuBridge(context.applicationContext)
+    val bridge = ShizukuBridge(context.applicationContext).also { b ->
+        // the onboarding decides whether the panel may be placed at all (Setup.panelAllowed)
+        b.gate = { status -> dev.kb896.aiusage.ui.Setup.panelAllowed(context.applicationContext, status) }
+    }
 
     companion object {
         @Volatile private var instance: Graph? = null
