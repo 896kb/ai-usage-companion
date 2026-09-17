@@ -349,6 +349,14 @@ class ShizukuBridge(private val context: Context) {
 
     fun isDozing(): Boolean = dozing
 
+    /** The keeper switch, forwarded to the service; see RearUserService.setKeeper. */
+    fun setKeeper(on: Boolean) {
+        keeper = on
+        runCatching { service?.setKeeper(on) }
+            .onFailure { Log.w(TAG, "setKeeper($on) failed: ${it.message}") }
+    }
+    @Volatile private var keeper = false
+
     @Volatile private var dozing = false
 
     private companion object { const val TAG = "AiUsageBridge" }
