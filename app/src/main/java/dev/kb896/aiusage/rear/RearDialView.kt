@@ -61,30 +61,25 @@ class RearDialView(context: Context) : View(context) {
             if (!value.showMedia && media != null) {
                 showMedia(active = false, title = "", artist = "", playing = false)
             }
-            applyCrt()
             invalidate()
         }
 
     /**
-     * The CRT look is a RenderEffect on this view: the whole frame, overlays and all,
-     * goes through CrtScreen's shader on its way to the display. Set when the config or
-     * the size changes, never per frame; the effect is a function of the picture alone.
+     * The CRT look is a RenderEffect on a node of its own inside this view, not on the
+     * view: the whole picture — scene and overlays — is recorded into [crtNode] and
+     * goes through CrtScreen's shader on its way out, and what must not go through the
+     * tube is drawn over it afterwards. That is the table lights: they are the
+     * display's own margin lit up, and a margin bent by the tube is no longer the
+     * margin. The effect object is one per shape, never one per frame.
      */
+    private val crtNode = android.graphics.RenderNode("crt")
     private var crtApplied = false
-    private var crtW = 0
-    private var crtH = 0
-    private fun applyCrt() {
-        val want = config.crt && width > 0 && height > 0
-        if (want == crtApplied && (!want || (crtW == width && crtH == height))) return
-        if (want) {
-            val effect = CrtScreen.effect(width.toFloat(), height.toFloat())
-            setRenderEffect(effect)
-            crtApplied = effect != null
-            crtW = width; crtH = height
-        } else {
-            setRenderEffect(null)
-            crtApplied = false
-        }
+    private var glowOverTube = false
+
+    /** The rings round the lenses, which the tube must not move: ring radius plus half the stroke. */
+    private fun crtStills(): List<CrtScreen.Still> {
+        val g = PanelGeometry.of(config.ringLayout)
+        return listOf(g.personal, g.work).map { CrtScreen.Still(it.cx, it.cy, it.radius + it.stroke / 2f + 4f) }
     }
 
     /** A touch on the tube, moved to the flat pixel the tube shows there. No-op without the CRT. */
@@ -1084,6 +1079,8 @@ class RearDialView(context: Context) : View(context) {
         val strength = tableGlowFade(frameNowMs)
         if (strength <= 0.001f) return
         if (tableGlowBusy(frameNowMs)) animating = true
+        // with the CRT on, the lights are drawn after the tube, by onDraw, not here
+        if (crtApplied && !glowOverTube) return
         val paint = TableGlow.frame(
             Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tableGlowWalk(frameNowMs),
             colorFor("clock", config.clockTint), strength, cornerRadius(),
@@ -1275,7 +1272,31 @@ class RearDialView(context: Context) : View(context) {
      * front screen, for one.
      */
     override fun onDraw(canvas: Canvas) {
-        applyCrt() // cheap when nothing changed; catches the first size
+        val recorder = canvas as? android.graphics.RecordingCanvas
+        val tube = if (config.crt && recorder != null && width > 0 && height > 0) {
+            CrtScreen.effect(width.toFloat(), height.toFloat(), crtStills())
+        } else null
+        crtApplied = tube != null
+        if (tube == null) {
+            drawPicture(canvas)
+            return
+        }
+        crtNode.setPosition(0, 0, width, height)
+        crtNode.setRenderEffect(tube)
+        val into = crtNode.beginRecording(width, height)
+        try {
+            drawPicture(into)
+        } finally {
+            crtNode.endRecording()
+        }
+        recorder!!.drawRenderNode(crtNode)
+        // over the tube, untouched by it
+        glowOverTube = true
+        try { drawTableGlow(canvas) } finally { glowOverTube = false }
+    }
+
+    /** The picture itself: the scene, refracted or flat, and its overlays. */
+    private fun drawPicture(canvas: Canvas) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         pendingButtons.clear()

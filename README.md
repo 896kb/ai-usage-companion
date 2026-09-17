@@ -237,11 +237,18 @@ than restyling it, because the controls differ in kind.
 
 ## A CRT screen, if you want one
 
-A switch on the settings screen, off by default, draws the whole panel as if on a
-curved tube: the picture bent outwards, scanlines, a shadow mask of red, green and blue
-columns, a vignette and a touch of colour fringing — the terminal's look on 896.ro,
-ported from its shader. It sits over whichever theme is on as a render effect on the
-panel's view, so overlays, the slider and always-on go through it too.
+A switch on the settings screen, off by default, draws the panel as if on a curved
+tube: the picture bent outwards, scanlines every three pixels, a shadow mask of red,
+green and blue columns, a vignette and colour fringing — the terminal's look on 896.ro,
+ported from its shader and turned up for a panel seen from arm's length. It sits over
+whichever theme is on, so overlays, the slider and always-on go through it too.
+
+Three things it leaves alone. The margin: a band along the frame, wide enough to hold
+the display's own rounded corners, where the bend fades to nothing — so the frame stays
+the frame and no corner goes black. The rings: they sit round the camera lenses under
+the glass, and bent they would no longer sit round them, so the bend fades to nothing
+inside them too. And the table lights, which are the margin lit up: they are drawn over
+the tube, not through it.
 
 What was left out: the site's flicker and noise. Those need a new frame every few
 milliseconds, and this panel does not draw a frame it has no reason to (a still page in
@@ -249,8 +256,8 @@ always-on costs nothing). What is here is a function of the picture alone, so it
 once per size, never per frame.
 
 The tube shows, at each spot, the picture from a little further out, so a touch is moved
-the same way before anything reads it: the centre and the middles of the edges do not
-move, the corners move most. A shader that fails to compile is logged and the panel
+the same way before anything reads it, by as much of the bend as applies there: nothing
+in the margin band or the rings, most in the open middle of the picture. A shader that fails to compile is logged and the panel
 stays flat; it never takes the panel down.
 
 ## The preview shows what the panel shows

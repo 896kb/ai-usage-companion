@@ -7,24 +7,33 @@ import org.junit.Test
 class CrtScreenTest {
     private val w = 904f
     private val h = 572f
+    private val rings = listOf(CrtScreen.Still(150f, 144f, 140f), CrtScreen.Still(150f, 420f, 140f))
+
+    private fun at(x: Float, y: Float) = CrtScreen.sourcePoint(x, y, w, h, rings)
 
     @Test
-    fun `the centre and the middles of the edges do not move`() {
-        assertEquals(452f to 286f, CrtScreen.sourcePoint(452f, 286f, w, h))
-        val (lx, ly) = CrtScreen.sourcePoint(0f, 286f, w, h)
-        assertEquals(0f, lx, 0.01f); assertEquals(286f, ly, 0.01f)
-        val (tx, ty) = CrtScreen.sourcePoint(452f, 0f, w, h)
-        assertEquals(452f, tx, 0.01f); assertEquals(0f, ty, 0.01f)
+    fun `the centre, the margin band and the corners do not move`() {
+        assertEquals(452f to 286f, at(452f, 286f))
+        assertEquals(10f to 286f, at(10f, 286f))
+        assertEquals(600f to 12f, at(600f, 12f))
+        assertEquals(0f to 0f, at(0f, 0f))
+        assertEquals(w to h, at(w, h))
     }
 
     @Test
-    fun `a touch near a corner is pushed outwards, and held at the edge`() {
-        val (x, y) = CrtScreen.sourcePoint(100f, 60f, w, h)
-        assertTrue("x pushed left: $x", x < 100f)
-        assertTrue("y pushed up: $y", y < 60f)
-        val (cx, cy) = CrtScreen.sourcePoint(0f, 0f, w, h)
-        assertEquals(0f to 0f, cx to cy)
-        val (fx, fy) = CrtScreen.sourcePoint(w, h, w, h)
-        assertEquals(w to h, fx to fy)
+    fun `inside a lens ring nothing moves`() {
+        assertEquals(150f to 144f, at(150f, 144f))
+        assertEquals(250f to 200f, at(250f, 200f))
+        assertEquals(150f to 300f, at(150f, 300f))
+    }
+
+    @Test
+    fun `further in, a touch is pushed outwards from the centre`() {
+        val (x, y) = at(650f, 180f)
+        assertTrue("x pushed right: $x", x > 650f)
+        assertTrue("y pushed up: $y", y < 180f)
+        val (lx, ly) = at(400f, 420f)
+        assertTrue("x pushed left: $lx", lx < 400f)
+        assertTrue("y pushed down: $ly", ly > 420f)
     }
 }
