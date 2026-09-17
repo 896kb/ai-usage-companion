@@ -652,7 +652,7 @@ dumpsys power 2>/dev/null | sed -n '/Secondary display power state/,/mAlwaysWake
 for i in 1 2 3 4 5 6 7 8; do s=$(dumpsys display 2>/dev/null | grep -E 'mScreenState=' | sed 's/.*=//' | tr '\n' ' '); echo "  t=$((i*2))s screens(front,rear)=[${'$'}s]"; sleep 2; done
 echo
 echo "framework log since the wake (power / cover / rear):"
-logcat -d 2>/dev/null | grep -E 'DualScreenCover|PowerManagerServiceImpl|PowerManagerService: |Rear screen|subscreen|SubScreen' | grep -viE 'BrightnessEvent|MiuiSubScreenMultiFinger' | tail -30
+logcat -d 2>/dev/null | grep -E 'DualScreenCover|Going to sleep|Waking up|turned OFF|groupId\\[1\\]|Rear screen|SecondaryDisplay|goToSleep|userActivity.*displayId=1|subscreen_display_time' | grep -viE 'BrightnessEvent|MultiFinger|acquireWakeLock|releaseWakeLock|extCmdAndArgs' | tail -30
 echo
 echo "wake locks:"
 dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
