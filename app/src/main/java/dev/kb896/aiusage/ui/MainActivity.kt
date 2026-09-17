@@ -731,7 +731,12 @@ class MainActivity : ComponentActivity() {
         // pocket, the slider one double tap away. See RearActivity.enterAod.
         SettingsRows.toggle(
             container, "Always-on display", config.alwaysOn,
-        ) { on -> write { it.copy(alwaysOn = on) } }
+        ) { on -> write { it.copy(alwaysOn = on) }; buildSettingsRows() }
+        if (config.alwaysOn) {
+            SettingsRows.toggle(
+                container, "  ↳ battery level above the clock", config.aodBattery,
+            ) { on -> write { it.copy(aodBattery = on) } }
+        }
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
         SettingsRows.choice(

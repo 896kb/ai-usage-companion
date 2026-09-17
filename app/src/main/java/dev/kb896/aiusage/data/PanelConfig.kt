@@ -275,6 +275,8 @@ data class PanelConfig(
      * on it raises the unlock slider; the swipe brings the full panel back.
      */
     val alwaysOn: Boolean = false,
+    /** In always-on, the battery level above the clock. */
+    val aodBattery: Boolean = false,
 
     /**
      * Mirror other apps' notifications onto the panel.

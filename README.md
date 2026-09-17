@@ -1179,6 +1179,7 @@ drift from what the back of the phone is doing.
 | **Use the phone's location** | The reading follows the phone instead, on coarse location that is asked for only when you turn this on. Refuse the prompt and the switch goes back off. |
 | **Keep panel awake** | Off by default: the panel goes dark thirty seconds after you stop touching it and does no work while it is dark. On, it stays lit. |
 | **Always-on display** | Off by default. On, the panel rests dim and frozen instead of dark, raises the slider on a double tap, and sleeps only in a pocket — see [And when nobody is looking](#and-when-nobody-is-looking). |
+| **↳ battery level above the clock** | In always-on only: the battery percentage above the clock, in the clock's ink. |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
 Each account gets **its own settings screen**, reached from a row on the main one and

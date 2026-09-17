@@ -7679,6 +7679,20 @@ class RearDialView(context: Context) : View(context) {
         var x = cx - span / 2f
         if (aod) armMinuteTick()
 
+        // always-on, if asked: the battery level above the clock, arriving with the mode
+        val batteryAlpha = aodFade(frameNowMs)
+        if (config.aodBattery && batteryAlpha > 0.001f) {
+            val pct = batteryPercent()
+            if (pct >= 0) {
+                extras.textSize = typed(DATE_SIZE)
+                extras.textAlign = Paint.Align.CENTER
+                extras.color = (ink and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
+                canvas.drawText("$pct%", cx, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP, extras)
+                extras.textAlign = Paint.Align.LEFT
+                extras.textSize = typed(CLOCK_SIZE)
+            }
+        }
+
         // NO CARD BEHIND IT. The numerals are made of glass themselves — see
         // drawGlassClock — and a glass sheet behind glass figures is two panes deep for
         // no reason: the card's own refraction fights the letterforms' and both come out
@@ -10603,6 +10617,8 @@ class RearDialView(context: Context) : View(context) {
 
     companion object {
         const val AOD_FADE_MS = 1_000L
+        /** the battery figure's distance above the clock's cap height, in always-on */
+        const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
         const val AOD_VEIL_ALPHA = 0.6f
         /**
