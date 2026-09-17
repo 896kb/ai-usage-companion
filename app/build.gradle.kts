@@ -79,6 +79,9 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 
 dependencies {
+    // lifts Android's hidden-API filter for this process only, so the MIUI window flag the
+    // rear screen's double tap needs can be read and set (see RearActivity.takeOverDoubleTap)
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     // ComponentActivity + lifecycleScope — MainActivity collects a StateFlow (Task 17).

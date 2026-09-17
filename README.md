@@ -349,6 +349,16 @@ spinning back up.
 
 ### And when nobody is looking
 
+**A double tap puts it to sleep the way Xiaomi's own rear screen does**: the panel dims
+at once and lets go of the display, and HyperOS powers it down on its own rear-screen
+timeout, ten seconds after the tap. A second double tap during the dim calls it off; a
+single touch does not, so a brush of the finger does not bring it back. HyperOS handles the
+rear double tap itself by default and would switch the display off on the spot; the panel
+opts its window out of that gesture with the same hidden MIUI window flag Xiaomi's app
+uses (`MIUI_FLAG_DISABLE_SUBSCREEN_DOUBLE_TAP`, in the window's `miuiFlags`, reached
+through the hidden-API bypass). A hard knock still goes through HyperOS's tap sensor, which
+no flag covers, and turns the display off directly.
+
 Thirty seconds after the last touch the rear display goes dark, unless **Keep panel awake**
 is on. Dark is not dimmed: while it sleeps the panel draws nothing, fetches no reading, and
 asks for no lyric sheet. The poll loop does not check a flag every few seconds and go back

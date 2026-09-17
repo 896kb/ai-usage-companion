@@ -80,4 +80,5 @@ interface IRearService {
      * suspension left by an earlier workaround, so restored means running, not present.
      */
     boolean restoreXiaomiRearApp() = 10;
+
 }

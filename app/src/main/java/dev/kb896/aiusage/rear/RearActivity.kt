@@ -11,6 +11,11 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
+import android.view.ViewGroup
+import android.view.View
+import android.view.MotionEvent
+import android.view.GestureDetector
+import android.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -161,6 +166,7 @@ class RearActivity : Activity() {
         const val ACTION_DOZING = "dev.kb896.aiusage.DOZING"
         const val EXTRA_DOZING = "dozing"
 
+
         const val EXTRA_STATE = "state"
         private const val TAG = "AiUsageRear"
 
@@ -298,6 +304,7 @@ class RearActivity : Activity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        takeOverDoubleTap()
 
         calibrationView = CalibrationView(this)
         dial = RearDialView(this)
@@ -417,7 +424,139 @@ class RearActivity : Activity() {
      * genuinely lit — see the display listener — because re-adding it while the display
      * is dark is a request for it to be on, which is the opposite of what was asked for.
      */
+    /**
+     * THE DOUBLE TAP, done the way Xiaomi's own rear screen does it.
+     *
+     * By default HyperOS itself handles a double tap on the rear display and switches it
+     * off on the spot — before the panel hears anything, which is why it went straight to
+     * black. The official app opts its window out of that gesture with a MIUI window flag
+     * (read by name at runtime, as the official app does — it is not in the public SDK)
+     * and handles the double tap itself: dim first, off after a few seconds, a touch in
+     * between calling it off. So does the panel now.
+     *
+     * If the flag cannot be set — another ROM, a renamed field — the system keeps the
+     * gesture and the dim simply never gets a chance; nothing else changes.
+     */
+    private val sleepStage = DoubleTapSleep()
+    private var veil: View? = null
+    /**
+     * Put to sleep by the double tap, and not yet woken by anything real. While this is
+     * set, requests to hold the screen are refused: the display group is still awake after
+     * our power-off, so a hold alone would light the display straight back up — which a
+     * media update did within 50 ms of the first successful dim. A real wake (the
+     * system's double-tap-to-wake, a notification's wake, the charger) lights the display,
+     * onDisplayState(true) clears this, and holds work again.
+     */
+    private var sleptByDoubleTap = false
+    private var systemDoubleTapTakenOver = false
+
+    private val doubleTaps by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                // a second double tap during the dim calls it off; a single touch does not,
+                // so a dimming panel is not brought back by a brush of the finger
+                if (sleepStage.dimming) endDim(off = false) else beginDim()
+                return false // observed, never consumed: the panel's own controls still get the tap
+            }
+        })
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (systemDoubleTapTakenOver) doubleTaps.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun takeOverDoubleTap() {
+        // The flag and MIUI's extraFlags are hidden members: filtered from ordinary
+        // reflection since Android 9, visible to the official app only because it is a
+        // system app. HiddenApiBypass lifts the filter for this process. (Its 4.3 crashed
+        // natively on this Android release; 6.x is the one built for it.)
+        runCatching { org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions("") }
+            .onFailure { Log.w(TAG, "hidden-api exemption failed: ${it.message}") }
+        val lp = WindowManager.LayoutParams::class.java
+        val statics = runCatching { org.lsposed.hiddenapibypass.HiddenApiBypass.getStaticFields(lp).filterIsInstance<java.lang.reflect.Field>() }.getOrDefault(emptyList())
+        val related = statics.filter { it.name.contains("SUBSCREEN") || it.name.contains("DOUBLE_TAP") }.map { it.name }
+        Log.i(TAG, "double tap: hidden statics on LayoutParams about it: $related")
+        val flag = statics.firstOrNull { it.name == "MIUI_FLAG_DISABLE_SUBSCREEN_DOUBLE_TAP" }
+            ?.let { f -> runCatching { f.isAccessible = true; f.getInt(null) }.getOrNull() }
+        if (flag == null) {
+            Log.i(TAG, "no MIUI_FLAG_DISABLE_SUBSCREEN_DOUBLE_TAP on this ROM — the system keeps the double tap")
+            return
+        }
+        // What the gesture actually consults is the window's MIUI *input* flags
+        // (WindowState.getInputMiuiFlags() & 0x100 in MiuiSubscreenDoubleTapGesture), and
+        // the official app reads and writes those through a hidden `miuiFlags` field on
+        // the layout params. setExtraFlags, the other MIUI channel, did not reach it.
+        val attrs = window.attributes
+        val fields = runCatching { org.lsposed.hiddenapibypass.HiddenApiBypass.getInstanceFields(lp).filterIsInstance<java.lang.reflect.Field>() }.getOrDefault(emptyList())
+        Log.i(TAG, "double tap: hidden flag fields on LayoutParams: ${fields.map { it.name }.filter { it.contains("lag") }}")
+        val viaMiuiFlags = fields.firstOrNull { it.name == "miuiFlags" }?.let { f ->
+            runCatching {
+                f.isAccessible = true
+                f.setInt(attrs, f.getInt(attrs) or flag)
+                window.attributes = attrs
+                true
+            }.onFailure { Log.w(TAG, "miuiFlags failed: ${it.message}") }.getOrDefault(false)
+        } ?: false
+        val viaMethod = runCatching {
+            org.lsposed.hiddenapibypass.HiddenApiBypass.invoke(android.view.Window::class.java, window, "setExtraFlags", flag, flag)
+            true
+        }.getOrDefault(false)
+        systemDoubleTapTakenOver = viaMiuiFlags || viaMethod
+        Log.i(TAG, "double tap: flag=0x${flag.toString(16)} miuiFlags=${viaMiuiFlags} setExtraFlags=${viaMethod}")
+    }
+
+    private fun beginDim() {
+        if (!sleepStage.doubleTap(SystemClock.uptimeMillis())) return
+        window.decorView.removeCallbacks(sleepPanel)
+        // Let go of the display NOW, not when the dim ends. Releasing the hold makes the
+        // window manager drop a wakelock flagged ON_AFTER_RELEASE, which the power manager
+        // counts as fresh user activity; released 40 ms before the power-off, that poke
+        // landed after it and lit the display straight back up (seen 2026-09-17). Released
+        // here, it is spent during the dim, and the off 7.5 s later has nothing to fight.
+        // The dim itself is a window attribute and needs no hold to keep applying.
+        if (holding) holdScreen(false)
+        window.attributes = window.attributes.apply { screenBrightness = DoubleTapSleep.DIM_BRIGHTNESS }
+        val v = veil ?: View(this).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = DoubleTapSleep.VEIL_ALPHA
+            isClickable = false
+        }.also { veil = it }
+        if (v.parent == null) addContentView(v, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        Log.i(TAG, "double tap: dimmed and let go — HyperOS powers the display down on its rear timeout")
+    }
+
+    /**
+     * End the dim: either the display has gone off under it ([off]), and the panel tidies
+     * up behind a dark screen, or a second double tap called it off and the panel is back
+     * at full brightness with its ordinary sleep timer running.
+     */
+    private fun endDim(off: Boolean) {
+        sleepStage.reset()
+        veil?.let { v -> (v.parent as? ViewGroup)?.removeView(v) }
+        if (off) {
+            Log.i(TAG, "double tap: the display went off — dim over")
+            sleptByDoubleTap = true
+            // Full brightness again only once the display is dark, so the next wake is
+            // not a frame of the dim.
+            window.decorView.postDelayed(restoreBrightness, 1_500)
+        } else {
+            restoreBrightness.run()
+            holdScreen(true)
+            armSleep()
+        }
+    }
+
+    private val restoreBrightness = Runnable {
+        window.attributes = window.attributes.apply { screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
+    }
+
     private fun holdScreen(on: Boolean) {
+        // No holds while the double tap's dim runs either: the double tap's own second
+        // touch reaches the view after the dim begins, and the view's touch handling
+        // re-took the hold a millisecond after it was released — so the flag never
+        // stayed cleared and the display never let go (seen in the wakelock history).
+        if (on && (sleptByDoubleTap || sleepStage.dimming)) return
         if (on) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
@@ -538,12 +677,15 @@ class RearActivity : Activity() {
 
     private fun onDisplayState(on: Boolean) {
         if (!on) {
+            if (sleepStage.dimming) endDim(off = true)
             if (!awaitingDoze) return
             awaitingDoze = false
             window.decorView.removeCallbacks(restorePanel)
             window.decorView.post(restorePanel)
             return
         }
+        if (sleepStage.dimming) endDim(off = false)
+        sleptByDoubleTap = false // lit by something real: holds mean something again
         if (!holding && !awaitingDoze) holdScreen(true)
         // Lit again, for whatever reason. Start the clock over rather than letting a
         // stale countdown put it straight back to sleep.
@@ -759,6 +901,7 @@ class RearActivity : Activity() {
     override fun onDestroy() {
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
         window.decorView.removeCallbacks(restorePanel)
+        window.decorView.removeCallbacks(restoreBrightness)
         window.decorView.removeCallbacks(sleepPanel)
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE)
