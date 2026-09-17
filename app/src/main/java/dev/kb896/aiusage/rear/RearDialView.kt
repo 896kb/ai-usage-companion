@@ -887,12 +887,12 @@ class RearDialView(context: Context) : View(context) {
             if (value) {
                 aodSince = now; aodWallAt = System.currentTimeMillis(); aodRealAt = SystemClock.elapsedRealtime()
                 aodReturnPage = pager.page
-                pager.goTo(PAGE_NOTICES, now) // the clock page is the always-on page
+                pager.goTo(PAGE_NOTICES, now, AOD_FADE_MS.toFloat()) // the clock page is the always-on page, reached with the fade
             } else {
                 aodUntil = now
                 aodPeek = false
                 removeCallbacks(minuteTick)
-                pager.goTo(aodReturnPage, now) // and the swipe returns where you were
+                pager.goTo(aodReturnPage, now, AOD_FADE_MS.toFloat()) // and the swipe returns where you were, with the fade
             }
             invalidate()
         }
@@ -937,7 +937,7 @@ class RearDialView(context: Context) : View(context) {
      * along on the minute tick before this.
      */
     private fun frozen(now: Long): Boolean =
-        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && tableGlowFade(now) <= 0.001f
+        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && tableGlowFade(now) <= 0.001f && !pager.animating()
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -959,14 +959,32 @@ class RearDialView(context: Context) : View(context) {
         val a = (255 * AOD_VEIL_ALPHA * aodFade(frameNowMs)).toInt()
         if (a <= 0) return
         canvas.save()
-        if (pager.restingAt(PAGE_NOTICES)) {
-            canvas.clipOutRect(
-                0f, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
-                Panel.WIDTH.toFloat(), CLOCK_BASELINE + CLOCK_SIZE * 0.2f,
-            )
-        }
+        if (aodBandOut()) canvas.clipOutRect(aodClockBand())
         canvas.drawColor(a shl 24)
         canvas.restore()
+    }
+
+    /** The clock and battery line's band, left out of the veil so the figures stay bright. */
+    private fun aodClockBand() = RectF(
+        0f, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
+        Panel.WIDTH.toFloat(), CLOCK_BASELINE + CLOCK_SIZE * 0.2f,
+    )
+
+    /** Whether the band is left out: always on the way into always-on, at rest on the clock page otherwise. */
+    private fun aodBandOut(): Boolean = aod || pager.restingAt(PAGE_NOTICES)
+
+    /**
+     * The band's share of the veil, laid on the backdrop itself, under the clock. The veil
+     * above clips the band out so the figures stay bright, and without this the backdrop
+     * behind them stayed brighter than above and below for as long as the fade ran.
+     */
+    private fun drawAodBandVeil(canvas: Canvas) {
+        if (!aod && aodUntil == 0L) return
+        if (!aodBandOut()) return
+        val a = (255 * AOD_VEIL_ALPHA * aodFade(frameNowMs)).toInt()
+        if (a <= 0) return
+        veilPaint.color = a shl 24
+        canvas.drawRect(aodClockBand(), veilPaint)
     }
 
     /** The slider's own, lighter veil in always-on: dimmed a little, never as much as the page. */
@@ -10236,10 +10254,12 @@ class RearDialView(context: Context) : View(context) {
             // with that fixed there is no reason for the fog to be anywhere but on the
             // same pane of glass as the drops running down it.
             drawMist(canvas)
+            drawAodBandVeil(canvas)
             return
         }
         canvas.drawColor(groundColor)
         drawBackdropImage(canvas)
+        drawAodBandVeil(canvas)
     }
 
     private val weatherPaint = Paint(Paint.ANTI_ALIAS_FLAG)

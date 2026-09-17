@@ -131,8 +131,8 @@ internal class PanelPager(
     }
 
     /** Go to a page directly, with the same easing a release uses. */
-    fun goTo(page: Int, nowMs: Long) {
-        moveTo(page.coerceIn(0, pages - 1).toFloat() * span, nowMs)
+    fun goTo(page: Int, nowMs: Long, overMs: Float = 0f) {
+        moveTo(page.coerceIn(0, pages - 1).toFloat() * span, nowMs, overMs)
     }
 
     /**
@@ -154,10 +154,14 @@ internal class PanelPager(
     fun restingAt(page: Int): Boolean =
         !settling && !dragging && offset == page.coerceIn(0, pages - 1).toFloat() * span
 
-    private fun moveTo(target: Float, nowMs: Long) {
+    /** A fixed length for the move under way, 0 for the usual per-page pace. */
+    private var overMs = 0f
+
+    private fun moveTo(target: Float, nowMs: Long, fixedMs: Float = 0f) {
         from = offset
         to = target
         startMs = nowMs
+        overMs = fixedMs
         settling = target != offset
     }
 
@@ -171,7 +175,7 @@ internal class PanelPager(
     fun advance(nowMs: Long): Float {
         if (dragging || !settling) return offset
         val distance = Math.abs(to - from) / span
-        val duration = (settleMs * distance).coerceAtLeast(MIN_SETTLE_MS)
+        val duration = if (overMs > 0f) overMs else (settleMs * distance).coerceAtLeast(MIN_SETTLE_MS)
         val t = (nowMs - startMs) / duration
         if (t >= 1f) {
             offset = to
