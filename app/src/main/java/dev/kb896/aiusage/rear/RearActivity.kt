@@ -191,6 +191,10 @@ class RearActivity : Activity() {
         const val AWAKE_MS = 30_000L
         /** how long the rear proximity sensor has to stay covered before always-on lets the display go */
         const val POCKET_MS = 1_500L
+        /** table mode: gravity along -z beyond this, x and y within this, for this long */
+        const val TABLE_Z = 8.6f
+        const val TABLE_XY = 2.2f
+        const val TABLE_SETTLE_MS = 1_000L
         /** how long a notification keeps an always-on panel out of its dim, from the last card */
         const val NOTICE_GRACE_MS = 6_000L
 
@@ -648,6 +652,37 @@ class RearActivity : Activity() {
         Log.i(TAG, "always-on: unlocked — the full panel is back")
     }
 
+    // ---- the table: gravity says the phone lies flat on its face, rear display up ----
+    private val gravitySensor: android.hardware.Sensor? by lazy {
+        sensors.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
+            ?: sensors.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+    }
+    private var tableWatching = false
+    private var flatSince = -1L
+    private val tableListener = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val x = e.values[0]; val y = e.values[1]; val z = e.values[2]
+            // face down and level: gravity along -z, nothing much along x or y
+            val flat = z < -TABLE_Z && kotlin.math.abs(x) < TABLE_XY && kotlin.math.abs(y) < TABLE_XY
+            val now = SystemClock.uptimeMillis()
+            if (flat) {
+                if (flatSince < 0) flatSince = now
+                if (!dial.tableGlow && now - flatSince >= TABLE_SETTLE_MS) { dial.tableGlow = true; Log.i(TAG, "table mode: flat on its face — the margins glow") }
+            } else {
+                flatSince = -1L
+                if (dial.tableGlow) dial.tableGlow = false
+            }
+        }
+        override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+    }
+    private fun tableWatch(on: Boolean) {
+        if (on == tableWatching) return
+        val sensor = gravitySensor ?: return
+        tableWatching = on
+        if (on) sensors.registerListener(tableListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        else { sensors.unregisterListener(tableListener); flatSince = -1L; dial.tableGlow = false }
+    }
+
     // ---- the pocket: the rear proximity sensor, or the best sensor the phone has ----
     private val sensors by lazy { getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager }
     private val pocketSensor: android.hardware.Sensor? by lazy {
@@ -810,6 +845,7 @@ class RearActivity : Activity() {
     private fun onDisplayState(on: Boolean) {
         if (!on) {
             pocketWatch(false)
+            tableWatch(false)
             if (sleepStage.dimming) endDim(off = true)
             if (!awaitingDoze) return
             awaitingDoze = false
@@ -818,6 +854,7 @@ class RearActivity : Activity() {
             return
         }
         if (sleepStage.dimming) endDim(off = false)
+        tableWatch(true)
         val wokeFromSleep = sleptByDoubleTap
         sleptByDoubleTap = false // lit by something real: holds mean something again
         if (!aodOn) dial.ringsClosed = false // awake after the double tap's sleep: the rings open
@@ -1017,6 +1054,7 @@ class RearActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        tableWatch(true)
         armEvictionTimer()
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
         // resumed into an already-suspended display would never be told.
@@ -1045,6 +1083,7 @@ class RearActivity : Activity() {
         window.decorView.removeCallbacks(restoreBrightness)
         window.decorView.removeCallbacks(sleepPanel)
         pocketWatch(false)
+        tableWatch(false)
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE)
                 as android.hardware.display.DisplayManager)

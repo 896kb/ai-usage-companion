@@ -364,6 +364,12 @@ release, and if it is newer than the build you run, one notification carries the
 notes and a **Download APK** button that opens the APK's permanent address in the browser.
 Nothing is downloaded or installed by the app itself.
 
+**Table mode**: set the phone flat on its face, rear display up, and after a second the
+panel's margins glow — a soft light in the clock's ink that breathes and travels once round
+the edge every few seconds, an AGSL shader like the glass. It fades when the phone is
+picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
+that is a table or a pocket.
+
 **Always-on display** is the third way to rest. Instead of going dark, the panel settles
 into a dim, frozen page: nothing animates, the backdrop fades to black over a second, and
 the display stays held. A double tap on it raises the unlock slider at once; the swipe

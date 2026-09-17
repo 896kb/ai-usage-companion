@@ -936,7 +936,8 @@ class RearDialView(context: Context) : View(context) {
      * or the charge cell, which plays through when the charger lands and was crawling
      * along on the minute tick before this.
      */
-    private fun frozen(now: Long): Boolean = aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L
+    private fun frozen(now: Long): Boolean =
+        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && tableGlowFade(now) <= 0.001f
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -998,6 +999,35 @@ class RearDialView(context: Context) : View(context) {
         val t = ((now - ringsAt) / AOD_FADE_MS.toFloat()).coerceIn(0f, 1f)
         if (t < 1f) animating = true
         return if (ringsClosed) t else 1f - t
+    }
+
+    /**
+     * Table mode: the phone lying flat on its face. The margins glow (TableGlow), in over
+     * half a second and out the same way, and the glow breathes, so it keeps frames going
+     * — a page frozen in always-on still lets this through.
+     */
+    var tableGlow: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            tableGlowAt = SystemClock.uptimeMillis()
+            invalidate()
+        }
+    private var tableGlowAt = 0L
+    private fun tableGlowFade(now: Long): Float {
+        if (tableGlowAt == 0L) return if (tableGlow) 1f else 0f
+        val t = ((now - tableGlowAt) / AOD_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        return if (tableGlow) t else 1f - t
+    }
+    private fun drawTableGlow(canvas: Canvas) {
+        val strength = tableGlowFade(frameNowMs)
+        if (strength <= 0.001f) return
+        animating = true
+        val paint = TableGlow.frame(
+            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (frameNowMs % 600_000L) / 1000f,
+            colorFor("clock", config.clockTint), strength,
+        )
+        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), paint)
     }
 
     /** Told when the slider is swiped through; not when the lock merely runs out. */
@@ -1307,6 +1337,7 @@ class RearDialView(context: Context) : View(context) {
             swept(canvas) { drawPendingOver(it) }
             swept(canvas) { drawPendingButtons(it) }
             drawAodVeil(canvas)
+            drawTableGlow(canvas)
             drawLockOverlay(canvas)
             drawAodSliderVeil(canvas)
             // Same rule as the glass path's: the page below already has it. See the
@@ -1391,7 +1422,7 @@ class RearDialView(context: Context) : View(context) {
             GROUP_RINGS -> swept(canvas) { drawPendingRings(it) }
             GROUP_OVER -> swept(canvas) { drawPendingOver(it) }
             GROUP_BUTTONS -> swept(canvas) { drawPendingButtons(it) }
-            GROUP_LOCK -> { drawAodVeil(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
+            GROUP_LOCK -> { drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             else -> drawCharge(canvas)
         }
@@ -2918,7 +2949,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // Drawn before the notice and the charging cell, which are allowed over it: they
         // are why the panel is awake, and the knob is at the left where neither reaches.
-        if (overlays) { drawAodVeil(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
+        if (overlays) { drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
@@ -5401,7 +5432,8 @@ class RearDialView(context: Context) : View(context) {
         locked = false
         onUnlocked?.invoke()
         lockAt = SystemClock.uptimeMillis()
-        lockProgress = 0f
+        // the thumb stays where the swipe left it while the band slides out; lockSwap
+        // resets it once the band has gone, so the next lock starts clean
         lockSpringAt = 0L
         lockGrabbed = false
         lockExpiredSent = false
@@ -5423,7 +5455,10 @@ class RearDialView(context: Context) : View(context) {
         if (lockAt == 0L) return if (locked) 1f else 0f
         val t = (nowMs - lockAt).toFloat() / MEDIA_MS
         val to = if (locked) 1f else 0f
-        if (t >= 1f) return to
+        if (t >= 1f) {
+            if (!locked && lockProgress != 0f) { lockProgress = 0f; lockSpringAt = 0L } // gone: the thumb rests
+            return to
+        }
         animating = true
         val from = 1f - to
         return from + (to - from) * Tween.easeInOut(t.coerceIn(0f, 1f))
