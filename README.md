@@ -380,7 +380,9 @@ no flag covers, and turns the display off directly.
 **When a new release is out, the app says so** — once a day it asks GitLab for the newest
 release, and if it is newer than the build you run, one notification carries the release
 notes and a **Download APK** button that opens the APK's permanent address in the browser.
-Nothing is downloaded or installed by the app itself.
+Nothing is downloaded or installed by the app itself. The settings screen says it too:
+while a newer release is known, a row at its top carries the tag and the first lines of
+the notes, and tapping it opens the APK.
 
 **Table mode**: set the phone flat on its face, rear display up, and after a second the
 panel's margins light up — four lights in the clock's ink, a quarter of the frame apart,
