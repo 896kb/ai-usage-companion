@@ -366,7 +366,8 @@ Nothing is downloaded or installed by the app itself.
 
 **Table mode**: set the phone flat on its face, rear display up, and after a second the
 panel's margins light up — a light in the clock's ink walks once round the frame every
-four seconds, trailing a tail over a faint rim, an AGSL shader like the glass. It fades
+four seconds, trailing a tail over a faint rim and following the display's own rounded
+corners, an AGSL shader like the glass. It fades
 when the phone is picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
 that is a table or a pocket.
 
