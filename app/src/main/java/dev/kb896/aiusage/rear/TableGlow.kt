@@ -54,26 +54,31 @@ object TableGlow {
             // the rim: full at the edge, gone `edge` pixels in
             float rim = 1.0 - clamp(d / edge, 0.0, 1.0);
             rim *= rim;
-            // four lights a quarter of the frame apart, each trailing a tail; `walk` is
-            // how far round the frame they have come, one lap from where they rest
+            // four lights a quarter of the frame apart, each walking its own quarter and
+            // leaving the rim lit behind it; `walk` is how far along that quarter they
+            // are. Where they meet, the frame is one even glow, and the bright heads
+            // melt into it over the last stretch.
             float L = 2.0 * top + 2.0 * side + 4.0 * arc;
-            float head = walk * L;
-            float tail = 0.0;
+            float quarter = 0.25 * L;
+            float walked = walk * quarter;
+            float settle = smoothstep(0.7, 1.0, walk);
+            float lit = 0.0;
             for (int k = 0; k < 4; k++) {
-                float behind = mod(head + float(k) * L * 0.25 - s + 2.0 * L, L);
-                tail += exp(-behind / (TAIL * L));
+                float behind = mod(float(k) * quarter + walked - s + 2.0 * L, L);
+                float painted = behind <= walked ? 1.0 : 0.0;
+                float glow = exp(-behind / (TAIL * L)) * (1.0 - settle);
+                lit = max(lit, painted * (REST + (1.0 - REST) * glow));
             }
-            tail = min(tail, 1.0);
-            float a1 = rim * (BASE + (1.0 - BASE) * tail) * strength;
+            float a1 = rim * lit * strength;
             return half4(tint.rgb * a1, a1);
         }
     """
 
     /** the glow's reach inward from each edge, in panel pixels */
     const val EDGE = 30f
-    /** each tail as a share of the frame, and the rim's resting share */
+    /** each head's tail as a share of the frame, and the lit rim's share of full brightness */
     private const val TAIL = 0.06f
-    private const val BASE = 0.10f
+    private const val REST = 0.7f
 
     /**
      * Null when the program does not compile. That is found out on the first frame that
@@ -83,7 +88,7 @@ object TableGlow {
      */
     val shader: RuntimeShader? by lazy {
         try {
-            RuntimeShader(SOURCE.replace("TAIL", TAIL.toString()).replace("BASE", BASE.toString()))
+            RuntimeShader(SOURCE.replace("TAIL", TAIL.toString()).replace("REST", REST.toString()))
         } catch (e: IllegalArgumentException) {
             android.util.Log.e("AiUsageRear", "table glow: the shader does not compile — no glow: ${e.message}")
             null
@@ -92,7 +97,7 @@ object TableGlow {
     private val paint: Paint by lazy { Paint().apply { shader = TableGlow.shader } }
 
     /** The paint set for one frame: [strength] 0..1, [seconds] the breathing clock. */
-    /** [walk] is the lights' way round the frame, 0..1 for a lap; they rest at both ends. */
+    /** [walk] is how far along its quarter each light has come, 0..1; at 1 the frame is evenly lit. */
     fun frame(width: Float, height: Float, walk: Float, color: Int, strength: Float, radius: Float): Paint? {
         val shader = shader ?: return null
         shader.setFloatUniform("res", width, height)

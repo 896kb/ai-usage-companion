@@ -1037,7 +1037,7 @@ class RearDialView(context: Context) : View(context) {
         val t = ((now - tableGlowAt) / AOD_FADE_MS.toFloat()).coerceIn(0f, 1f)
         return if (tableGlow) t else 1f - t
     }
-    /** How far round the frame the lights have walked: one eased lap as the glow comes on, then still. */
+    /** How far along their quarters the lights have walked as the glow comes on: eased, then still and even. */
     private fun tableGlowWalk(now: Long): Float {
         if (!tableGlow || tableGlowAt == 0L) return 1f
         val t = ((now - tableGlowAt) / TABLE_INTRO_MS.toFloat()).coerceIn(0f, 1f)
@@ -10751,8 +10751,8 @@ class RearDialView(context: Context) : View(context) {
 
     companion object {
         const val AOD_FADE_MS = 500L
-        /** the table lights' lap round the frame as the glow comes on */
-        const val TABLE_INTRO_MS = 2_400L
+        /** the table lights' walk along their quarters as the glow comes on */
+        const val TABLE_INTRO_MS = 2_000L
         /** the battery figure's distance above the clock's cap height, in always-on */
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
