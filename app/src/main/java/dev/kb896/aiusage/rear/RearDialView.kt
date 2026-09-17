@@ -7698,8 +7698,10 @@ class RearDialView(context: Context) : View(context) {
         // always-on: the seconds fade out over the mode's first second and the rest of
         // the time slides to the centre; on the way back out they return the same way
         val secondsAlpha = 1f - aodFade(frameNowMs)
-        // the seconds shrink to nothing about their own centre, and grow back the same way
-        val secondsScale = 1f - Tween.easeInOut(1f - secondsAlpha)
+        // The seconds leave the way the charge cell does: a small grow first, then the
+        // shrink to nothing about their own centre — easeOutBack read backwards — and they
+        // come back with the same overshoot, the same curve read forwards.
+        val secondsScale = Tween.easeOutBack(secondsAlpha)
         var span = 0f
         for (c in figures) span += if (c == ':') colon else slot
         span -= (colon + 2f * slot) * (1f - secondsScale)
