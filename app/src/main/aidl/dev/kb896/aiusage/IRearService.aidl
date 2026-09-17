@@ -80,5 +80,7 @@ interface IRearService {
      * suspension left by an earlier workaround, so restored means running, not present.
      */
     boolean restoreXiaomiRearApp() = 10;
+    /** What the system says about the rear display, for a bug report. See RearUserService. */
+    String rearReport() = 11;
 
 }

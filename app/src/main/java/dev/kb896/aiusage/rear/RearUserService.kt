@@ -413,6 +413,15 @@ class RearUserService : IRearService.Stub {
     /** Single-quote for `sh -c`, escaping embedded single quotes. */
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
+    /**
+     * The facts a bug report about the rear display needs, from the shell: the firmware,
+     * every package that could own the rear screen and its state, the launcher
+     * components registered for it, the rear-display settings, and what the window and
+     * power managers say about display 1. Bounded by `head` everywhere; it is pasted
+     * into a chat, not a file.
+     */
+    override fun rearReport(): String = exec(REPORT)
+
     override fun removeXiaomiRearApp(): Boolean {
         val out = exec("pm uninstall -k --user 0 ${Panel.XIAOMI_REAR_APP}")
         Log.i(TAG, "remove ${Panel.XIAOMI_REAR_APP}: $out")
@@ -586,6 +595,32 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        private val REPORT = """
+echo "device: $(getprop ro.product.marketname) / $(getprop ro.product.model) / $(getprop ro.product.device)"
+echo "os: HyperOS $(getprop ro.mi.os.version.name) $(getprop ro.mi.os.version.incremental) | android $(getprop ro.build.version.release) | region $(getprop ro.miui.region) | build $(getprop ro.build.version.incremental)"
+echo
+echo "packages that could own the rear screen:"
+for p in $(pm list packages -u 2>/dev/null | sed 's/package://' | grep -iE 'subscreen|mirror|rearscreen|backscreen' | sort -u); do
+  st=$(dumpsys package ${'$'}p 2>/dev/null | grep -E 'User 0:|installed=|suspended=' | head -1 | tr -s ' ')
+  echo "  ${'$'}p:${'$'}st"
+done
+echo
+echo "rear launcher components registered:"
+dumpsys package 2>/dev/null | grep -oiE '[a-z0-9_.]+/[a-z0-9_.]*Sub[sS]creen[a-zA-Z]*Launcher[a-zA-Z]*' | sort -u | head -8
+echo
+echo "rear-display settings:"
+for ns in system global secure; do settings list ${'$'}ns 2>/dev/null | grep -iE 'subscreen|sub_screen|rear_display|back_screen|rearscreen' | sed "s/^/  ${'$'}ns: /"; done
+echo
+echo "display 1 windows:"
+dumpsys window windows 2>/dev/null | grep -E '^  Window #|mDisplayId=1|isVisible=|mHoldScreen' | grep -B1 -A1 'mDisplayId=1' | grep -E 'Window #|isVisible' | head -12
+echo
+echo "power, display 1:"
+dumpsys power 2>/dev/null | grep -iE 'group 1|display 1|mHoldingDisplay|mWakeLockSummary|mUserActivitySummary|mHoldingWakeLock' | head -12
+echo
+echo "wake locks:"
+dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^$/p' | head -10
+"""
+
         /**
          * Tail of the rear panel's physical display id (local:4630946949513469332).
          * Matched as a suffix so the constant does not have to track the full 19-digit

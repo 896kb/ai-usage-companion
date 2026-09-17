@@ -1252,6 +1252,15 @@ actually installed — written rather than borrowed, and dull on purpose, becaus
 point of filming a notification page is not publishing a stranger's messages. The wheel
 turns itself. None of it is in a release build.
 
+## When the panel dies on a phone that is not mine
+
+Advanced → **Copy rear-display report** gathers, through Shizuku, what the system says
+about the rear display — firmware and region, every package that could own the rear
+screen and whether it is installed or suspended, the rear launcher components registered,
+the rear-display settings, the windows on display 1 and what the power manager holds for
+it — and puts the text on the clipboard, with a copy on screen. It is what to ask for
+when someone's panel goes black after ten seconds and yours does not.
+
 ## Future plans
 
 - **ChatGPT Codex** — a second provider beside Claude, so one panel covers both.

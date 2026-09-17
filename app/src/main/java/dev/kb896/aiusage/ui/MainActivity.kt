@@ -902,6 +902,10 @@ class MainActivity : ComponentActivity() {
         // and the common case for touching them is not "I want a different green" but
         // "I am adapting this to a different display" — the same reason the ring geometry
         // lives there.
+        // For a bug report: what the system says about the rear display, gathered through
+        // Shizuku and copied to the clipboard. The panel dying on someone else's phone is
+        // a question about their firmware, and this is the shortest way to ask it.
+        SettingsRows.navigation(advanced, "Copy rear-display report") { copyRearReport() }
         SettingsRows.colorGrid(advanced, config.rampColors.mapIndexed { i, colour ->
             SettingsRows.Swatch("RAMP ${i + 1}", colour) { c ->
                 write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
@@ -1483,6 +1487,31 @@ class MainActivity : ComponentActivity() {
             .setPositiveButton("Remove") { _, _ -> setXiaomiRearApp(installed = false) }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun copyRearReport() {
+        if (!graph.bridge.status().ready) {
+            toast("Shizuku first — this needs its privilege")
+            return
+        }
+        toast("Gathering…")
+        lifecycleScope.launch(Dispatchers.IO) {
+            val report = graph.bridge.rearReport()
+            withContext(Dispatchers.Main) {
+                if (report.isNullOrBlank()) {
+                    toast("Shizuku's service did not answer — is Shizuku running?")
+                    return@withContext
+                }
+                val text = "AI Usage ${dev.kb896.aiusage.BuildConfig.VERSION_NAME}\n$report"
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("rear-display report", text))
+                android.app.AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Rear-display report — copied")
+                    .setMessage(text)
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
     }
 
     private fun setXiaomiRearApp(installed: Boolean) {

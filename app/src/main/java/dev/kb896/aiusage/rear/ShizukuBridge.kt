@@ -186,6 +186,16 @@ class ShizukuBridge(private val context: Context) {
         }
     }
 
+    /** The rear-display report for a bug report; null when the service does not answer. */
+    fun rearReport(): String? {
+        val svc = awaitService() ?: return null
+        return try {
+            svc.rearReport()
+        } catch (e: Exception) {
+            Log.e(TAG, "rear report failed", e); service = null; null
+        }
+    }
+
     fun isPanelAlive(): Boolean {
         val svc = service ?: return false
         return try { svc.isAlive() } catch (e: Exception) { Log.e(TAG, "isAlive failed", e); service = null; false }
