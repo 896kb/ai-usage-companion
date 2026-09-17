@@ -915,8 +915,12 @@ class RearDialView(context: Context) : View(context) {
         postDelayed(minuteTick, 60_000L - wall % 60_000L + 30L)
     }
 
-    /** A page that has settled into always-on wants no more frames than the slider needs. */
-    private fun frozen(now: Long): Boolean = aod && aodFade(now) >= 1f && !lockBusy(now)
+    /**
+     * A page that has settled into always-on wants no more frames than the slider needs —
+     * or the charge cell, which plays through when the charger lands and was crawling
+     * along on the minute tick before this.
+     */
+    private fun frozen(now: Long): Boolean = aod && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
