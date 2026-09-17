@@ -191,6 +191,8 @@ class RearActivity : Activity() {
         const val AWAKE_MS = 30_000L
         /** how long the rear proximity sensor has to stay covered before always-on lets the display go */
         const val POCKET_MS = 1_500L
+        /** how long a notification keeps an always-on panel out of its dim, from the last card */
+        const val NOTICE_GRACE_MS = 6_000L
 
         /**
          * The shortest gap between two requests to be moved back to the panel.
@@ -236,14 +238,14 @@ class RearActivity : Activity() {
                         .let { if (it in 0..100) it else -1 },
                 )
                 ACTION_LOCK -> lockPanel()
-                ACTION_NOTIFICATION -> dial.showNotification(
+                ACTION_NOTIFICATION -> { peekForNotice(); dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_PKG).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_TITLE).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_TEXT).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TITLE).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TEXT).orEmpty(),
-                )
+                ) }
                 ACTION_MEDIA -> dial.showMedia(
                     intent.getBooleanExtra(EXTRA_MEDIA_ACTIVE, false),
                     intent.getStringExtra(EXTRA_MEDIA_TITLE).orEmpty(),
@@ -330,7 +332,10 @@ class RearActivity : Activity() {
             )
         }
         dial.onLockExpired = { onLockSpent() }
-        dial.onUnlocked = { if (inAod && !unlockingBySpent) exitAod() }
+        dial.onUnlocked = {
+            guardedAfterWake = false
+            if (inAod && !unlockingBySpent) exitAod()
+        }
         // Something worth seeing arrived. Take the display back — it may be part-way
         // through being let go after an earlier lock ran out — and call off the hand-back
         // that release queued, because the lock has just been given a fresh reason.
@@ -481,7 +486,7 @@ class RearActivity : Activity() {
         // which has to be swiped: a touch that starts on its band goes through, and so
         // does the rest of that same gesture wherever the finger wanders.
         if (sleepStage.dimming) return true
-        if (inAod) {
+        if (inAod || guardedAfterWake) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> sliderTouch = dial.isLocked && dial.lockBand().contains(ev.x, ev.y)
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val pass = sliderTouch; sliderTouch = false; return if (pass) super.dispatchTouchEvent(ev) else true }
@@ -633,6 +638,8 @@ class RearActivity : Activity() {
         if (!inAod) return
         inAod = false
         pocketWatch(false)
+        window.decorView.removeCallbacks(endPeek)
+        dial.aodPeek = false
         dial.aod = false
         dial.ringsClosed = false
         restoreBrightness.run()
@@ -648,12 +655,32 @@ class RearActivity : Activity() {
             ?: sensors.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY)
     }
     private var pocketWatching = false
-    private val pocketSleep = Runnable {
+    private val pocketSleep: Runnable = Runnable {
         if (!inAod) return@Runnable
         Log.i(TAG, "always-on: in a pocket — letting the display go")
         pocketWatch(false)
         holdScreen(false)
     }
+
+    /**
+     * A notification in always-on lifts the dim: the panel lights up fully with the card,
+     * the slider still up and the page still guarded, and dims again once the last card
+     * has had its time — each new card starts that clock over, the lock's own renewal.
+     */
+    private val endPeek: Runnable = Runnable { dial.aodPeek = false }
+    private fun peekForNotice() {
+        if (!inAod) return
+        dial.aodPeek = true
+        window.decorView.removeCallbacks(endPeek)
+        window.decorView.postDelayed(endPeek, NOTICE_GRACE_MS)
+    }
+
+    /**
+     * Woken from the double tap's sleep — by the double tap, a notification, the charger.
+     * The slider is up and the page takes no touch but the slider's until it is swiped;
+     * the lock running out puts the panel back to sleep, as it always did.
+     */
+    private var guardedAfterWake = false
     private val pocketListener = object : android.hardware.SensorEventListener {
         override fun onSensorChanged(e: android.hardware.SensorEvent) {
             val covered = e.values[0] < e.sensor.maximumRange.coerceAtLeast(1f) * 0.5f
@@ -720,6 +747,7 @@ class RearActivity : Activity() {
     private val restorePanel = Runnable { dial.unlock() }
 
     private fun onLockSpent() {
+        guardedAfterWake = false
         if (inAod) {
             // nobody swiped: in always-on the slider never leaves — re-arm it
             dial.lock()
@@ -790,8 +818,14 @@ class RearActivity : Activity() {
             return
         }
         if (sleepStage.dimming) endDim(off = false)
+        val wokeFromSleep = sleptByDoubleTap
         sleptByDoubleTap = false // lit by something real: holds mean something again
         if (!aodOn) dial.ringsClosed = false // awake after the double tap's sleep: the rings open
+        if (!aodOn && wokeFromSleep) {
+            // the slider up, the page guarded, until the swipe — see guardedAfterWake
+            guardedAfterWake = true
+            dial.lock()
+        }
         if (!holding && !awaitingDoze) holdScreen(true)
         if (aodOn) { if (inAod) { pocketWatch(true); if (!holding) holdScreen(true) } else enterAod() }
         // Lit again, for whatever reason. Start the clock over rather than letting a

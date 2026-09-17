@@ -890,6 +890,7 @@ class RearDialView(context: Context) : View(context) {
                 pager.goTo(PAGE_NOTICES, now) // the clock page is the always-on page
             } else {
                 aodUntil = now
+                aodPeek = false
                 removeCallbacks(minuteTick)
                 pager.goTo(aodReturnPage, now) // and the swipe returns where you were
             }
@@ -901,9 +902,24 @@ class RearDialView(context: Context) : View(context) {
     private var aodWallAt = 0L
     private var aodRealAt = 0L
 
-    /** 0 = backdrop fully there, 1 = faded to black; a second either way. */
+    /**
+     * A notification lifting the dim while always-on stays on: the veil, the backdrop,
+     * the seconds and the freeze come back for a moment, the slider and the guard do not
+     * move. Set and cleared by the activity around a card's time.
+     */
+    var aodPeek: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            val now = SystemClock.uptimeMillis()
+            if (value) aodUntil = now else aodSince = now
+            invalidate()
+        }
+
+    /** 0 = backdrop fully there, 1 = faded to black; half a second either way. */
     private fun aodFade(now: Long): Float {
-        val f = if (aod) (now - aodSince) / AOD_FADE_MS.toFloat() else 1f - (now - aodUntil) / AOD_FADE_MS.toFloat()
+        val dimmed = aod && !aodPeek
+        val f = if (dimmed) (now - aodSince) / AOD_FADE_MS.toFloat() else 1f - (now - aodUntil) / AOD_FADE_MS.toFloat()
         return f.coerceIn(0f, 1f)
     }
 
@@ -920,7 +936,7 @@ class RearDialView(context: Context) : View(context) {
      * or the charge cell, which plays through when the charger lands and was crawling
      * along on the minute tick before this.
      */
-    private fun frozen(now: Long): Boolean = aod && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L
+    private fun frozen(now: Long): Boolean = aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -7749,9 +7765,8 @@ class RearDialView(context: Context) : View(context) {
         // and incoming numerals are drawn one cell apart, so a figure rolls out of the
         // top as the next rolls in underneath — the same movement as the painted version,
         // made of the same glass as everything else on the panel.
-        val glassFigures = if (secondsAlpha < 0.5f) figures.take(5) else figures
         val glassClock = config.theme.isGlass &&
-            deferOver(canvas) { c -> drawGlassClock(c, glassFigures, cx, span, slot, colon, ink) }
+            deferOver(canvas) { c -> drawGlassClock(c, figures, cx, span, slot, colon, ink, secondsScale) }
         if (!glassClock) {
             for ((i, ch) in figures.withIndex()) {
                 val full = if (ch == ':') colon else slot
@@ -8179,6 +8194,8 @@ class RearDialView(context: Context) : View(context) {
         slot: Float,
         colon: Float,
         ink: Int,
+        /** always-on: the seconds' scale, 1 at rest, 0 gone — see drawNoticePage */
+        secondsScale: Float = 1f,
     ) {
         extras = extrasBody
         extras.textAlign = Paint.Align.LEFT
@@ -8187,12 +8204,22 @@ class RearDialView(context: Context) : View(context) {
         val cell = CLOCK_SIZE * CLOCK_ROLL_CELL
         var x = cx - span / 2f
         for ((i, ch) in figures.withIndex()) {
-            val w = if (ch == ':') colon else slot
+            val full = if (ch == ':') colon else slot
+            val seconds = i >= 5
+            if (seconds && secondsScale <= 0.01f) break
+            val w = if (seconds) full * secondsScale else full
+            if (seconds) {
+                // the glyph at its full size, scaled about the centre of its shrunken slot
+                canvas.save()
+                canvas.scale(secondsScale, secondsScale, x + w / 2f, CLOCK_BASELINE - CLOCK_SIZE * 0.35f)
+                canvas.translate(-(full - w) / 2f, 0f)
+            }
             if (ch == ':') {
                 // The colon never rolls. It is punctuation, not a reading.
-                if (!drawSdfText(canvas, ":", extras, slotRight(x, w, ":"), CLOCK_BASELINE - CLOCK_SIZE / 2f)) {
+                if (!drawSdfText(canvas, ":", extras, slotRight(x, full, ":"), CLOCK_BASELINE - CLOCK_SIZE / 2f)) {
                     canvas.drawText(":", x, CLOCK_BASELINE, extras)
                 }
+                if (seconds) canvas.restore()
                 x += w
                 continue
             }
@@ -8223,20 +8250,21 @@ class RearDialView(context: Context) : View(context) {
             canvas.clipRect(0f, mid - cell / 2f, Panel.WIDTH.toFloat(), mid + cell / 2f)
             // Arriving from below, and whatever it replaced leaving through the top.
             val rise = (1f - eased) * cell
-            if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, w, ch.toString()), mid + rise)) {
+            if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, full, ch.toString()), mid + rise)) {
                 canvas.drawText(ch.toString(), x, CLOCK_BASELINE + rise, extras)
             }
             val leaving = clockLeaving[key]
             if (t < 1f && leaving != null && leaving != ch) {
                 if (!drawSdfText(
                         canvas, leaving.toString(), extras,
-                        slotRight(x, w, leaving.toString()), mid + rise - cell,
+                        slotRight(x, full, leaving.toString()), mid + rise - cell,
                     )
                 ) {
                     canvas.drawText(leaving.toString(), x, CLOCK_BASELINE + rise - cell, extras)
                 }
             }
             canvas.restore()
+            if (seconds) canvas.restore()
             if (t >= 1f) clockLeaving[key] = ch
             x += w
         }
