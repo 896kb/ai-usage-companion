@@ -484,6 +484,7 @@ class RearActivity : Activity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        dial.throughCrt(ev) // first: everything below reads the flat picture's coordinates
         if (systemDoubleTapTakenOver) doubleTaps.onTouchEvent(ev)
         // A dimmed page — the double tap's dim, or always-on — takes no touch but the
         // double tap: no paging, no buttons, no drag. The one exception is the slider,

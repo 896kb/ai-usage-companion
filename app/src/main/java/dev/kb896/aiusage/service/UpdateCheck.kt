@@ -53,8 +53,16 @@ object UpdateCheck {
         } ?: return
         if (!newer(release.tag, BuildConfig.VERSION_NAME)) return
         if (prefs.getString("notified", "") == release.tag) return
-        prefs.edit().putString("notified", release.tag).apply()
+        prefs.edit().putString("notified", release.tag).putString("notes", release.notes).apply()
         notify(context, release)
+    }
+
+    /** The release the check last found, while it is still newer than this build; for the settings screen's row. */
+    fun available(context: Context): Release? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val tag = prefs.getString("notified", "").orEmpty()
+        if (tag.isEmpty() || !newer(tag, BuildConfig.VERSION_NAME)) return null
+        return Release(tag, prefs.getString("notes", "").orEmpty())
     }
 
     fun fetch(): Release? {

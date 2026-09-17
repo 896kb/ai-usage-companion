@@ -54,20 +54,21 @@ object TableGlow {
             // the rim: full at the edge, gone `edge` pixels in
             float rim = 1.0 - clamp(d / edge, 0.0, 1.0);
             rim *= rim;
-            // four lights a quarter of the frame apart, each walking its own quarter and
-            // leaving the rim lit behind it; `walk` is how far along that quarter they
-            // are. Where they meet, the frame is one even glow, and the bright heads
-            // melt into it over the last stretch.
+            // four lights a quarter of the frame apart. `walk` is how far they have
+            // come, in quarters: LAPS fast laps first, tails streaming behind, and then
+            // one more quarter in which each paints the rim it passes over; where they
+            // meet, the frame is one even glow, and the heads melt into it at the end.
             float L = 2.0 * top + 2.0 * side + 4.0 * arc;
             float quarter = 0.25 * L;
-            float walked = walk * quarter;
-            float settle = smoothstep(0.7, 1.0, walk);
+            float paintQ = clamp(walk - LAPS * 4.0, 0.0, 1.0);
+            float settle = smoothstep(0.7, 1.0, paintQ);
             float lit = 0.0;
             for (int k = 0; k < 4; k++) {
-                float behind = mod(float(k) * quarter + walked - s + 2.0 * L, L);
-                float painted = behind <= walked ? 1.0 : 0.0;
+                float headPos = mod(float(k) * quarter + walk * quarter, L);
+                float behind = mod(headPos - s + 2.0 * L, L);
+                float painted = (paintQ > 0.0 && behind <= paintQ * quarter) ? REST : 0.0;
                 float glow = exp(-behind / (TAIL * L)) * (1.0 - settle);
-                lit = max(lit, painted * (REST + (1.0 - REST) * glow));
+                lit = max(lit, painted + (1.0 - painted) * glow);
             }
             float a1 = rim * lit * strength;
             return half4(tint.rgb * a1, a1);
@@ -76,8 +77,9 @@ object TableGlow {
 
     /** the glow's reach inward from each edge, in panel pixels */
     const val EDGE = 30f
-    /** each head's tail as a share of the frame, and the lit rim's share of full brightness */
-    private const val TAIL = 0.06f
+    /** fast laps before the painting quarter; each head's tail as a share of the frame; the lit rim's share of full brightness */
+    const val LAPS = 3
+    private const val TAIL = 0.08f
     private const val REST = 0.7f
 
     /**
@@ -88,7 +90,7 @@ object TableGlow {
      */
     val shader: RuntimeShader? by lazy {
         try {
-            RuntimeShader(SOURCE.replace("TAIL", TAIL.toString()).replace("REST", REST.toString()))
+            RuntimeShader(SOURCE.replace("LAPS", LAPS.toString() + ".0").replace("TAIL", TAIL.toString()).replace("REST", REST.toString()))
         } catch (e: IllegalArgumentException) {
             android.util.Log.e("AiUsageRear", "table glow: the shader does not compile — no glow: ${e.message}")
             null
@@ -97,7 +99,7 @@ object TableGlow {
     private val paint: Paint by lazy { Paint().apply { shader = TableGlow.shader } }
 
     /** The paint set for one frame: [strength] 0..1, [seconds] the breathing clock. */
-    /** [walk] is how far along its quarter each light has come, 0..1; at 1 the frame is evenly lit. */
+    /** [walk] is how far the lights have come, in quarters of the frame: LAPS*4 fast, then one that paints; at LAPS*4+1 the frame is evenly lit. */
     fun frame(width: Float, height: Float, walk: Float, color: Int, strength: Float, radius: Float): Paint? {
         val shader = shader ?: return null
         shader.setFloatUniform("res", width, height)

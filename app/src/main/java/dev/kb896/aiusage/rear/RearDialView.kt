@@ -61,8 +61,38 @@ class RearDialView(context: Context) : View(context) {
             if (!value.showMedia && media != null) {
                 showMedia(active = false, title = "", artist = "", playing = false)
             }
+            applyCrt()
             invalidate()
         }
+
+    /**
+     * The CRT look is a RenderEffect on this view: the whole frame, overlays and all,
+     * goes through CrtScreen's shader on its way to the display. Set when the config or
+     * the size changes, never per frame; the effect is a function of the picture alone.
+     */
+    private var crtApplied = false
+    private var crtW = 0
+    private var crtH = 0
+    private fun applyCrt() {
+        val want = config.crt && width > 0 && height > 0
+        if (want == crtApplied && (!want || (crtW == width && crtH == height))) return
+        if (want) {
+            val effect = CrtScreen.effect(width.toFloat(), height.toFloat())
+            setRenderEffect(effect)
+            crtApplied = effect != null
+            crtW = width; crtH = height
+        } else {
+            setRenderEffect(null)
+            crtApplied = false
+        }
+    }
+
+    /** A touch on the tube, moved to the flat pixel the tube shows there. No-op without the CRT. */
+    fun throughCrt(ev: android.view.MotionEvent) {
+        if (!crtApplied) return
+        val (sx, sy) = CrtScreen.sourcePoint(ev.x, ev.y, width.toFloat(), height.toFloat())
+        ev.offsetLocation(sx - ev.x, sy - ev.y)
+    }
 
     /** The last weather reading, or null. Set with the payload; the line draws it if fresh. */
     var weather: dev.kb896.aiusage.data.WeatherReading? = null
@@ -1037,11 +1067,13 @@ class RearDialView(context: Context) : View(context) {
         val t = ((now - tableGlowAt) / AOD_FADE_MS.toFloat()).coerceIn(0f, 1f)
         return if (tableGlow) t else 1f - t
     }
-    /** How far along their quarters the lights have walked as the glow comes on: eased, then still and even. */
+    /** The lights' walk as the glow comes on, in quarters of the frame: fast laps first, then the painting quarter, then still. */
     private fun tableGlowWalk(now: Long): Float {
-        if (!tableGlow || tableGlowAt == 0L) return 1f
+        val whole = (TableGlow.LAPS * 4 + 1).toFloat()
+        if (!tableGlow || tableGlowAt == 0L) return whole
         val t = ((now - tableGlowAt) / TABLE_INTRO_MS.toFloat()).coerceIn(0f, 1f)
-        return 1f - (1f - t) * (1f - t) * (1f - t)
+        // eased out: the laps go by in a rush and the last quarter is slow
+        return whole * (1f - (1f - t) * (1f - t) * (1f - t))
     }
 
     /** Whether the glow is still fading or its lights still walking; at rest it costs no frames. */
@@ -1243,6 +1275,7 @@ class RearDialView(context: Context) : View(context) {
      * front screen, for one.
      */
     override fun onDraw(canvas: Canvas) {
+        applyCrt() // cheap when nothing changed; catches the first size
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         pendingButtons.clear()
@@ -10751,8 +10784,8 @@ class RearDialView(context: Context) : View(context) {
 
     companion object {
         const val AOD_FADE_MS = 500L
-        /** the table lights' walk along their quarters as the glow comes on */
-        const val TABLE_INTRO_MS = 2_000L
+        /** the table lights' laps and painting quarter as the glow comes on */
+        const val TABLE_INTRO_MS = 3_200L
         /** the battery figure's distance above the clock's cap height, in always-on */
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */

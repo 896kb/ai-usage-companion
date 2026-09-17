@@ -595,6 +595,22 @@ class MainActivity : ComponentActivity() {
         val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
         container.removeAllViews()
         advanced.removeAllViews()
+        // A newer release, found by the daily check: a row at the top with its notes,
+        // there until this build is that version. The notification says it once; this
+        // says it every time the screen is opened. See UpdateCheck.
+        dev.kb896.aiusage.service.UpdateCheck.available(this)?.let { release ->
+            SettingsRows.navigation(container, "Update available: ${release.tag} — download") {
+                startActivity(
+                    android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(dev.kb896.aiusage.service.UpdateCheck.APK),
+                    ),
+                )
+            }
+            val notes = dev.kb896.aiusage.service.UpdateCheck.plain(release.notes)
+                .lineSequence().filter { it.isNotBlank() }.take(4).joinToString("\n")
+            if (notes.isNotEmpty()) SettingsRows.note(container, notes)
+        }
         val store = ConfigStore(this)
 
         fun write(edit: (PanelConfig) -> PanelConfig) {

@@ -235,6 +235,24 @@ right for the panel and an upscale on the front, so the wallpaper there is softe
 panel's — recorded, not fixed. And changing the theme rebuilds the settings screen rather
 than restyling it, because the controls differ in kind.
 
+## A CRT screen, if you want one
+
+A switch on the settings screen, off by default, draws the whole panel as if on a
+curved tube: the picture bent outwards, scanlines, a shadow mask of red, green and blue
+columns, a vignette and a touch of colour fringing — the terminal's look on 896.ro,
+ported from its shader. It sits over whichever theme is on as a render effect on the
+panel's view, so overlays, the slider and always-on go through it too.
+
+What was left out: the site's flicker and noise. Those need a new frame every few
+milliseconds, and this panel does not draw a frame it has no reason to (a still page in
+always-on costs nothing). What is here is a function of the picture alone, so it is set
+once per size, never per frame.
+
+The tube shows, at each spot, the picture from a little further out, so a touch is moved
+the same way before anything reads it: the centre and the middles of the edges do not
+move, the corners move most. A shader that fails to compile is logged and the panel
+stays flat; it never takes the panel down.
+
 ## The preview shows what the panel shows
 
 The preview on the front screen is the same view class as the panel, drawing the same
@@ -366,9 +384,10 @@ Nothing is downloaded or installed by the app itself.
 
 **Table mode**: set the phone flat on its face, rear display up, and after a second the
 panel's margins light up — four lights in the clock's ink, a quarter of the frame apart,
-each walk their quarter of the display's own rounded frame and leave the rim lit behind
-them; where they meet, the frame is one even glow, an AGSL shader like the glass. It
-stays, still, for as long as the phone lies there, and fades when it is picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
+race three laps round the display's own rounded frame with tails streaming behind, then
+slow into one last quarter in which each leaves the rim lit behind it; where they meet,
+the frame is one even glow, an AGSL shader like the glass. It stays, still, for as long
+as the phone lies there, and fades when it is picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
 that is a table or a pocket.
 
 **Always-on display** is the third way to rest. Instead of going dark, the panel settles
