@@ -365,10 +365,10 @@ notes and a **Download APK** button that opens the APK's permanent address in th
 Nothing is downloaded or installed by the app itself.
 
 **Table mode**: set the phone flat on its face, rear display up, and after a second the
-panel's margins light up — a light in the clock's ink walks once round the frame every
-four seconds, trailing a tail over a faint rim and following the display's own rounded
-corners, an AGSL shader like the glass. It fades
-when the phone is picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
+panel's margins light up — four lights in the clock's ink, a quarter of the frame apart,
+each trailing a tail over a faint rim, walk once round the display's own rounded frame
+and come to rest, an AGSL shader like the glass. They stay, still, for as long as the
+phone lies there, and fade when it is picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
 that is a table or a pocket.
 
 **Always-on display** is the third way to rest. Instead of going dark, the panel settles

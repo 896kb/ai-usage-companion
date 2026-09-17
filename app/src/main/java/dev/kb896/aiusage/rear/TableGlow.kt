@@ -13,7 +13,7 @@ import android.graphics.RuntimeShader
 object TableGlow {
     private const val SOURCE = """
         uniform float2 res;
-        uniform float t;
+        uniform float walk;
         uniform float edge;
         uniform float radius;
         uniform float strength;
@@ -54,11 +54,16 @@ object TableGlow {
             // the rim: full at the edge, gone `edge` pixels in
             float rim = 1.0 - clamp(d / edge, 0.0, 1.0);
             rim *= rim;
-            // the light: a head once round the frame every LAP seconds, trailing a tail
+            // four lights a quarter of the frame apart, each trailing a tail; `walk` is
+            // how far round the frame they have come, one lap from where they rest
             float L = 2.0 * top + 2.0 * side + 4.0 * arc;
-            float head = fract(t / LAP) * L;
-            float behind = mod(head - s + L, L);
-            float tail = exp(-behind / (TAIL * L));
+            float head = walk * L;
+            float tail = 0.0;
+            for (int k = 0; k < 4; k++) {
+                float behind = mod(head + float(k) * L * 0.25 - s + 2.0 * L, L);
+                tail += exp(-behind / (TAIL * L));
+            }
+            tail = min(tail, 1.0);
             float a1 = rim * (BASE + (1.0 - BASE) * tail) * strength;
             return half4(tint.rgb * a1, a1);
         }
@@ -66,23 +71,23 @@ object TableGlow {
 
     /** the glow's reach inward from each edge, in panel pixels */
     const val EDGE = 30f
-    /** seconds per lap, the tail as a share of the frame, the rim's resting share */
-    private const val LAP = 4.0f
-    private const val TAIL = 0.12f
+    /** each tail as a share of the frame, and the rim's resting share */
+    private const val TAIL = 0.06f
     private const val BASE = 0.10f
 
     val shader: RuntimeShader by lazy {
         RuntimeShader(
-            SOURCE.replace("LAP", LAP.toString()).replace("TAIL", TAIL.toString()).replace("BASE", BASE.toString()),
+            SOURCE.replace("TAIL", TAIL.toString()).replace("BASE", BASE.toString()),
         )
     }
     val paint: Paint by lazy { Paint().apply { shader = TableGlow.shader } }
 
     /** The paint set for one frame: [strength] 0..1, [seconds] the breathing clock. */
-    fun frame(width: Float, height: Float, seconds: Float, color: Int, strength: Float, radius: Float): Paint {
+    /** [walk] is the lights' way round the frame, 0..1 for a lap; they rest at both ends. */
+    fun frame(width: Float, height: Float, walk: Float, color: Int, strength: Float, radius: Float): Paint {
         shader.setFloatUniform("res", width, height)
         shader.setFloatUniform("radius", radius.coerceIn(1f, minOf(width, height) / 2f))
-        shader.setFloatUniform("t", seconds)
+        shader.setFloatUniform("walk", walk)
         shader.setFloatUniform("edge", EDGE)
         shader.setFloatUniform("strength", strength)
         shader.setColorUniform("tint", color)

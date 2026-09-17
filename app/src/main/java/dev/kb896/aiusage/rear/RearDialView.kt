@@ -937,7 +937,7 @@ class RearDialView(context: Context) : View(context) {
      * along on the minute tick before this.
      */
     private fun frozen(now: Long): Boolean =
-        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && tableGlowFade(now) <= 0.001f && !pager.animating()
+        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating()
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -1037,12 +1037,23 @@ class RearDialView(context: Context) : View(context) {
         val t = ((now - tableGlowAt) / AOD_FADE_MS.toFloat()).coerceIn(0f, 1f)
         return if (tableGlow) t else 1f - t
     }
+    /** How far round the frame the lights have walked: one eased lap as the glow comes on, then still. */
+    private fun tableGlowWalk(now: Long): Float {
+        if (!tableGlow || tableGlowAt == 0L) return 1f
+        val t = ((now - tableGlowAt) / TABLE_INTRO_MS.toFloat()).coerceIn(0f, 1f)
+        return 1f - (1f - t) * (1f - t) * (1f - t)
+    }
+
+    /** Whether the glow is still fading or its lights still walking; at rest it costs no frames. */
+    private fun tableGlowBusy(now: Long): Boolean =
+        tableGlowAt != 0L && now - tableGlowAt < (if (tableGlow) TABLE_INTRO_MS else AOD_FADE_MS)
+
     private fun drawTableGlow(canvas: Canvas) {
         val strength = tableGlowFade(frameNowMs)
         if (strength <= 0.001f) return
-        animating = true
+        if (tableGlowBusy(frameNowMs)) animating = true
         val paint = TableGlow.frame(
-            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (frameNowMs % 600_000L) / 1000f,
+            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tableGlowWalk(frameNowMs),
             colorFor("clock", config.clockTint), strength, cornerRadius(),
         )
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), paint)
@@ -10740,6 +10751,8 @@ class RearDialView(context: Context) : View(context) {
 
     companion object {
         const val AOD_FADE_MS = 500L
+        /** the table lights' lap round the frame as the glow comes on */
+        const val TABLE_INTRO_MS = 2_400L
         /** the battery figure's distance above the clock's cap height, in always-on */
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
