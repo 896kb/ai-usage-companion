@@ -194,6 +194,8 @@ class UsagePollService : Service() {
                 // delay is long finished and this is where the loop has been waiting.
                 PanelAwake.awaitAwake()
                 safeTick()
+                // once a day, whether a newer release exists — the poll is already on the network
+                runCatching { UpdateCheck.maybe(this@UsagePollService) }
                 delay(Cadence.FAST_MS)
             }
         }

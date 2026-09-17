@@ -269,6 +269,12 @@ data class PanelConfig(
      * which was the original behaviour and is a perfectly reasonable thing to want.
      */
     val keepPanelAwake: Boolean = false,
+    /**
+     * Always-on: instead of going dark, the panel settles into a dim, frozen page — no
+     * animation, the backdrop faded to black — and sleeps only in a pocket. A double tap
+     * on it raises the unlock slider; the swipe brings the full panel back.
+     */
+    val alwaysOn: Boolean = false,
 
     /**
      * Mirror other apps' notifications onto the panel.

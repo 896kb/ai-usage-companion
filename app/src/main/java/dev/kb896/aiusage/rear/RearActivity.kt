@@ -189,6 +189,8 @@ class RearActivity : Activity() {
          * on a desk is not costing a core.
          */
         const val AWAKE_MS = 30_000L
+        /** how long the rear proximity sensor has to stay covered before always-on lets the display go */
+        const val POCKET_MS = 1_500L
 
         /**
          * The shortest gap between two requests to be moved back to the panel.
@@ -328,6 +330,7 @@ class RearActivity : Activity() {
             )
         }
         dial.onLockExpired = { onLockSpent() }
+        dial.onUnlocked = { if (inAod && !unlockingBySpent) exitAod() }
         // Something worth seeing arrived. Take the display back — it may be part-way
         // through being let go after an earlier lock ran out — and call off the hand-back
         // that release queued, because the lock has just been given a fresh reason.
@@ -381,6 +384,11 @@ class RearActivity : Activity() {
             // back immediately, off has to start a countdown that was never running.
             if (keepAwake != decoded.config.keepPanelAwake) {
                 keepAwake = decoded.config.keepPanelAwake
+                armSleep()
+            }
+            if (aodOn != decoded.config.alwaysOn) {
+                aodOn = decoded.config.alwaysOn
+                if (!aodOn) exitAod()
                 armSleep()
             }
             calibrationView.geometry = PanelGeometry.of(decoded.config.ringLayout)
@@ -453,6 +461,11 @@ class RearActivity : Activity() {
     private val doubleTaps by lazy {
         GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (aodOn) {
+                    // always-on: the full panel drops into it; a dimmed page raises the slider
+                    if (!inAod) enterAod() else if (!dial.isLocked) dial.lock()
+                    return false
+                }
                 // a second double tap during the dim calls it off; a single touch does not,
                 // so a dimming panel is not brought back by a brush of the finger
                 if (sleepStage.dimming) endDim(off = false) else beginDim()
@@ -463,6 +476,18 @@ class RearActivity : Activity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (systemDoubleTapTakenOver) doubleTaps.onTouchEvent(ev)
+        // A dimmed page — the double tap's dim, or always-on — takes no touch but the
+        // double tap: no paging, no buttons, no drag. The one exception is the slider,
+        // which has to be swiped: a touch that starts on its band goes through, and so
+        // does the rest of that same gesture wherever the finger wanders.
+        if (sleepStage.dimming) return true
+        if (inAod) {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> sliderTouch = dial.isLocked && dial.lockBand().contains(ev.x, ev.y)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val pass = sliderTouch; sliderTouch = false; return if (pass) super.dispatchTouchEvent(ev) else true }
+            }
+            if (!sliderTouch) return true
+        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -516,6 +541,7 @@ class RearActivity : Activity() {
         // here, it is spent during the dim, and the off 7.5 s later has nothing to fight.
         // The dim itself is a window attribute and needs no hold to keep applying.
         if (holding) holdScreen(false)
+        dial.ringsClosed = true
         window.attributes = window.attributes.apply { screenBrightness = DoubleTapSleep.DIM_BRIGHTNESS }
         val v = veil ?: View(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -542,6 +568,7 @@ class RearActivity : Activity() {
             window.decorView.postDelayed(restoreBrightness, 1_500)
         } else {
             restoreBrightness.run()
+            dial.ringsClosed = false
             holdScreen(true)
             armSleep()
         }
@@ -576,6 +603,75 @@ class RearActivity : Activity() {
     private var keepAwake = false
 
     /**
+     * ALWAYS-ON (config.alwaysOn). The resting state is not dark but a dim, frozen page:
+     * the display stays held, the window dims to the double tap's level, the view stops
+     * animating and fades its backdrop away. A double tap on it raises the unlock slider
+     * at once; the swipe brings the full panel back and the idle timer starts again. It
+     * sleeps only in a pocket: the rear proximity sensor covered for a moment lets the
+     * display go, and HyperOS powers it down on its own timeout. Any wake lands back in
+     * always-on, with a notification's card and slider on top of it as usual.
+     */
+    private var aodOn = false
+    private var inAod = false
+    private var unlockingBySpent = false
+    private var sliderTouch = false
+
+    private fun enterAod() {
+        if (inAod) return
+        inAod = true
+        window.decorView.removeCallbacks(sleepPanel)
+        if (!holding) holdScreen(true)
+        dial.aod = true
+        dial.ringsClosed = true
+        // the slider is up from the first moment, and stays: the page dims around it
+        dial.lock()
+        pocketWatch(true)
+        Log.i(TAG, "always-on: dimmed and frozen, the slider up")
+    }
+
+    private fun exitAod() {
+        if (!inAod) return
+        inAod = false
+        pocketWatch(false)
+        dial.aod = false
+        dial.ringsClosed = false
+        restoreBrightness.run()
+        if (!holding) holdScreen(true)
+        armSleep()
+        Log.i(TAG, "always-on: unlocked — the full panel is back")
+    }
+
+    // ---- the pocket: the rear proximity sensor, or the best sensor the phone has ----
+    private val sensors by lazy { getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager }
+    private val pocketSensor: android.hardware.Sensor? by lazy {
+        sensors.getSensorList(android.hardware.Sensor.TYPE_ALL).firstOrNull { it.stringType == "xiaomi.sensor.proxmity_back" }
+            ?: sensors.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY)
+    }
+    private var pocketWatching = false
+    private val pocketSleep = Runnable {
+        if (!inAod) return@Runnable
+        Log.i(TAG, "always-on: in a pocket — letting the display go")
+        pocketWatch(false)
+        holdScreen(false)
+    }
+    private val pocketListener = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val covered = e.values[0] < e.sensor.maximumRange.coerceAtLeast(1f) * 0.5f
+            window.decorView.removeCallbacks(pocketSleep)
+            if (covered) window.decorView.postDelayed(pocketSleep, POCKET_MS)
+        }
+        override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+    }
+    private fun pocketWatch(on: Boolean) {
+        if (on == pocketWatching) return
+        val sensor = pocketSensor
+        if (sensor == null) { Log.w(TAG, "always-on: no proximity sensor — no pocket mode"); return }
+        pocketWatching = on
+        if (on) sensors.registerListener(pocketListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
+        else { sensors.unregisterListener(pocketListener); window.decorView.removeCallbacks(pocketSleep) }
+    }
+
+    /**
      * Let the display go, thirty seconds after the last reason to hold it.
      *
      * THE HOLD IS THE EXPENSIVE THING, not the drawing — or rather, the hold is what
@@ -589,7 +685,10 @@ class RearActivity : Activity() {
      * so the panel sleeps thirty seconds after you stop caring about it rather than
      * thirty seconds after it started.
      */
-    private val sleepPanel = Runnable { if (!keepAwake) holdScreen(false) }
+    private val sleepPanel = Runnable {
+        if (keepAwake) return@Runnable
+        if (aodOn) enterAod() else holdScreen(false)
+    }
 
     /**
      * Start the countdown again, or cancel it outright if the panel is meant to stay up.
@@ -621,6 +720,11 @@ class RearActivity : Activity() {
     private val restorePanel = Runnable { dial.unlock() }
 
     private fun onLockSpent() {
+        if (inAod) {
+            // nobody swiped: in always-on the slider never leaves — re-arm it
+            dial.lock()
+            return
+        }
         holdScreen(false)
         awaitingDoze = true
         window.decorView.removeCallbacks(restorePanel)
@@ -677,6 +781,7 @@ class RearActivity : Activity() {
 
     private fun onDisplayState(on: Boolean) {
         if (!on) {
+            pocketWatch(false)
             if (sleepStage.dimming) endDim(off = true)
             if (!awaitingDoze) return
             awaitingDoze = false
@@ -686,7 +791,9 @@ class RearActivity : Activity() {
         }
         if (sleepStage.dimming) endDim(off = false)
         sleptByDoubleTap = false // lit by something real: holds mean something again
+        if (!aodOn) dial.ringsClosed = false // awake after the double tap's sleep: the rings open
         if (!holding && !awaitingDoze) holdScreen(true)
+        if (aodOn) { if (inAod) { pocketWatch(true); if (!holding) holdScreen(true) } else enterAod() }
         // Lit again, for whatever reason. Start the clock over rather than letting a
         // stale countdown put it straight back to sleep.
         armSleep()
@@ -903,6 +1010,7 @@ class RearActivity : Activity() {
         window.decorView.removeCallbacks(restorePanel)
         window.decorView.removeCallbacks(restoreBrightness)
         window.decorView.removeCallbacks(sleepPanel)
+        pocketWatch(false)
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE)
                 as android.hardware.display.DisplayManager)

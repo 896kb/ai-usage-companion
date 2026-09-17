@@ -873,6 +873,92 @@ class RearDialView(context: Context) : View(context) {
     private var animating = false
 
     /**
+     * ALWAYS-ON. The page freezes: after a one-second fade of the backdrop to black no
+     * frame is scheduled unless the lock is up (the slider has to slide and be dragged),
+     * and the animators that run on a clock — the walk, the ambient walk — read a clock
+     * that stopped when the mode began, so they hold their pose even while the slider
+     * moves in front of them. Everything else is a tween that has already settled.
+     */
+    var aod: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            val now = SystemClock.uptimeMillis()
+            if (value) {
+                aodSince = now; aodWallAt = System.currentTimeMillis(); aodRealAt = SystemClock.elapsedRealtime()
+                aodReturnPage = pager.page
+                pager.goTo(PAGE_NOTICES, now) // the clock page is the always-on page
+            } else {
+                aodUntil = now
+                removeCallbacks(minuteTick)
+                pager.goTo(aodReturnPage, now) // and the swipe returns where you were
+            }
+            invalidate()
+        }
+    private var aodReturnPage = PAGE_READOUT
+    private var aodSince = 0L
+    private var aodUntil = 0L
+    private var aodWallAt = 0L
+    private var aodRealAt = 0L
+
+    /** 0 = backdrop fully there, 1 = faded to black; a second either way. */
+    private fun aodFade(now: Long): Float {
+        val f = if (aod) (now - aodSince) / AOD_FADE_MS.toFloat() else 1f - (now - aodUntil) / AOD_FADE_MS.toFloat()
+        return f.coerceIn(0f, 1f)
+    }
+
+    /** Always-on draws the clock once a minute, on the minute, and otherwise not at all. */
+    private val minuteTick = Runnable { if (aod && displayAwake) invalidate() }
+    private fun armMinuteTick() {
+        removeCallbacks(minuteTick)
+        val wall = System.currentTimeMillis()
+        postDelayed(minuteTick, 60_000L - wall % 60_000L + 30L)
+    }
+
+    /** A page that has settled into always-on wants no more frames than the slider needs. */
+    private fun frozen(now: Long): Boolean = aod && aodFade(now) >= 1f && !lockBusy(now)
+
+    /** The slider is sliding in or out, held by a finger, or springing back. */
+    private fun lockBusy(now: Long): Boolean =
+        (lockAt != 0L && now - lockAt < MEDIA_MS) || lockGrabbed || lockSpringAt != 0L
+
+    /** Where the slider takes touches, in panel pixels: the band, with its slop. */
+    fun lockBand(): android.graphics.RectF {
+        val r = markRegion()
+        return android.graphics.RectF(0f, r.top - LOCK_BAND_SLOP, Panel.WIDTH.toFloat(), r.bottom + LOCK_BAND_SLOP)
+    }
+
+    /** Always-on dims everything under the slider: a veil the view draws, so the slider itself stays bright. */
+    private fun drawAodVeil(canvas: Canvas) {
+        if (!aod && aodUntil == 0L) return
+        val a = (255 * AOD_VEIL_ALPHA * aodFade(frameNowMs)).toInt()
+        if (a > 0) canvas.drawColor(a shl 24)
+    }
+
+    /**
+     * Going to sleep — the double tap's dim, or always-on — the rings close to zero over a
+     * second, and open again the same way when the panel is back. Its own clock, so it
+     * works for the dim too, which the view otherwise knows nothing about.
+     */
+    var ringsClosed: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            ringsAt = SystemClock.uptimeMillis()
+            invalidate()
+        }
+    private var ringsAt = 0L
+    private fun ringsFade(now: Long): Float {
+        if (ringsAt == 0L) return if (ringsClosed) 1f else 0f
+        val t = ((now - ringsAt) / AOD_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        if (t < 1f) animating = true
+        return if (ringsClosed) t else 1f - t
+    }
+
+    /** Told when the slider is swiped through; not when the lock merely runs out. */
+    var onUnlocked: (() -> Unit)? = null
+
+    /**
      * Whether the panel's display is in a state that takes updates at all.
      *
      * MEASURED, and it is the single largest thing this panel spends: with the rear
@@ -1175,6 +1261,7 @@ class RearDialView(context: Context) : View(context) {
             swept(canvas) { drawPendingRings(it) }
             swept(canvas) { drawPendingOver(it) }
             swept(canvas) { drawPendingButtons(it) }
+            drawAodVeil(canvas)
             drawLockOverlay(canvas)
             // Same rule as the glass path's: the page below already has it. See the
             // GROUP_NOTICE guard.
@@ -1258,7 +1345,7 @@ class RearDialView(context: Context) : View(context) {
             GROUP_RINGS -> swept(canvas) { drawPendingRings(it) }
             GROUP_OVER -> swept(canvas) { drawPendingOver(it) }
             GROUP_BUTTONS -> swept(canvas) { drawPendingButtons(it) }
-            GROUP_LOCK -> drawLockOverlay(canvas)
+            GROUP_LOCK -> { drawAodVeil(canvas); drawLockOverlay(canvas) }
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             else -> drawCharge(canvas)
         }
@@ -2021,7 +2108,11 @@ class RearDialView(context: Context) : View(context) {
     private fun drawPendingOver(canvas: Canvas) {
         for (o in pendingOver) {
             canvas.save()
-            canvas.concat(o.matrix)
+            // SET, not concat: the matrix was recorded in full at deferral time, page
+            // offset included. Concatenating it onto a canvas that already carries the
+            // page offset applied that offset twice, and the glass clock and weather line
+            // scrolled faster than everything around them.
+            canvas.setMatrix(o.matrix)
             o.draw(canvas)
             canvas.restore()
         }
@@ -2190,7 +2281,10 @@ class RearDialView(context: Context) : View(context) {
             // lose the display to MIUI's SubScreenLauncher. A setting whose only
             // reachable states are "no change" and "break the panel" is not a setting.
             val alpha = animateTo("bg:alpha", 255f)
-            val hue = colorFor("bg", config.background or (0xFF shl 24))
+            // always-on rests on true black: an OLED spends nothing on it
+            val hue = androidx.core.graphics.ColorUtils.blendARGB(
+                colorFor("bg", config.background or (0xFF shl 24)), 0xFF000000.toInt(), aodFade(frameNowMs),
+            )
             val ground = (hue and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24)
 
             // THE GROUND, PUBLISHED AS WELL AS PAINTED.
@@ -2778,7 +2872,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // Drawn before the notice and the charging cell, which are allowed over it: they
         // are why the panel is awake, and the knob is at the left where neither reaches.
-        if (overlays) drawLockOverlay(canvas)
+        if (overlays) { drawAodVeil(canvas); drawLockOverlay(canvas) }
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
@@ -2808,7 +2902,7 @@ class RearDialView(context: Context) : View(context) {
                 //
                 // Which is exactly what "the gamepad trashes the panel but keeps the
                 // background" rules out. The readout goes; what it was standing on stays.
-                drawAmbientWalk(canvas, nowReal)
+                drawAmbientWalk(canvas, if (aod) aodRealAt else nowReal) // frozen in always-on
                 canvas.restore()
             }
         } else {
@@ -2839,7 +2933,10 @@ class RearDialView(context: Context) : View(context) {
         // AND ONLY WHILE THE DISPLAY CAN SHOW IT. See displayAwake — a suspended panel
         // drops every frame we hand it, so asking for the next vsync is asking to be
         // woken up to do nothing.
-        if (animating && displayAwake) postInvalidateOnAnimation()
+        // fading in or out of always-on is itself a second of frames
+        if (aod || aodUntil > 0) { if (aodFade(frameNowMs) in 0.001f..0.999f) animating = true }
+        if (ringsAt != 0L && frameNowMs - ringsAt < AOD_FADE_MS) animating = true
+        if (animating && displayAwake && !frozen(frameNowMs)) postInvalidateOnAnimation()
     }
 
     /** When the cell arrived, and what it is filling to. */
@@ -3374,7 +3471,8 @@ class RearDialView(context: Context) : View(context) {
         // window and the metric into the key meant every change to what a ring reports
         // built a fresh tween and snapped — including the change to NONE, where the
         // unwind is the whole point.
-        val shown = animateTo("ring:" + account.name, target).coerceIn(0f, 1f)
+        val shown = animateTo("ring:" + account.name, target).coerceIn(0f, 1f) *
+            (1f - Tween.easeInOut(ringsFade(frameNowMs)))
         val usageColor = when {
             status != null && status.health != Health.OK -> Panel.Palette.DIM
             spec.metric == RingMetric.UTILIZATION -> RampColor.at(shown, config.rampColors)
@@ -5255,6 +5353,7 @@ class RearDialView(context: Context) : View(context) {
     fun unlock() {
         if (!locked) return
         locked = false
+        onUnlocked?.invoke()
         lockAt = SystemClock.uptimeMillis()
         lockProgress = 0f
         lockSpringAt = 0L
@@ -6739,7 +6838,7 @@ class RearDialView(context: Context) : View(context) {
         }
 
     private fun drawMascots(canvas: Canvas) {
-        val now = System.currentTimeMillis()
+        val now = if (aod) aodWallAt else System.currentTimeMillis()
         for ((index, entry) in sessionBars.entries.withIndex()) {
             val account = entry.key
             if (!config.styleFor(account.ordinal).showMascot) continue
@@ -7531,7 +7630,18 @@ class RearDialView(context: Context) : View(context) {
         // recorded — so a card built here got a pane with nothing behind it and came out
         // looking nothing like the notification strip, which is drawn in the overlay pass
         // and gets the real thing. Same pass now, same glass.
-        if (!deferOver(canvas) { c -> drawNoticeWheel(c) }) drawNoticeWheel(canvas)
+        // always-on: the notifications fade away with the backdrop; the clock stays
+        val wheelAlpha = 1f - aodFade(frameNowMs)
+        if (wheelAlpha > 0.001f) {
+            val wheel: (Canvas) -> Unit = { c ->
+                if (wheelAlpha < 0.999f) {
+                    c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * wheelAlpha).toInt())
+                    drawNoticeWheel(c)
+                    c.restore()
+                } else drawNoticeWheel(c)
+            }
+            if (!deferOver(canvas, wheel)) wheel(canvas)
+        }
 
         // ---- the clock, one wheel per digit -----------------------------------------
         //
@@ -7555,10 +7665,15 @@ class RearDialView(context: Context) : View(context) {
         extras.textSize = typed(CLOCK_SIZE)
         val slot = extras.measureText("0")
         val colon = extras.measureText(":")
+        // always-on: the seconds fade out over the mode's first second and the rest of
+        // the time slides to the centre; on the way back out they return the same way
+        val secondsAlpha = 1f - aodFade(frameNowMs)
         var span = 0f
         for (c in figures) span += if (c == ':') colon else slot
+        span -= (colon + 2f * slot) * (1f - secondsAlpha)
         val clockBase = CLOCK_BASELINE
         var x = cx - span / 2f
+        if (aod) armMinuteTick()
 
         // NO CARD BEHIND IT. The numerals are made of glass themselves — see
         // drawGlassClock — and a glass sheet behind glass figures is two panes deep for
@@ -7581,11 +7696,16 @@ class RearDialView(context: Context) : View(context) {
         // and incoming numerals are drawn one cell apart, so a figure rolls out of the
         // top as the next rolls in underneath — the same movement as the painted version,
         // made of the same glass as everything else on the panel.
+        val glassFigures = if (secondsAlpha < 0.5f) figures.take(5) else figures
         val glassClock = config.theme.isGlass &&
-            deferOver(canvas) { c -> drawGlassClock(c, figures, cx, span, slot, colon, ink) }
+            deferOver(canvas) { c -> drawGlassClock(c, glassFigures, cx, span, slot, colon, ink) }
         if (!glassClock) {
             for ((i, ch) in figures.withIndex()) {
                 val w = if (ch == ':') colon else slot
+                if (i >= 5) {
+                    if (secondsAlpha <= 0.001f) break
+                    extras.alpha = (255 * secondsAlpha).toInt()
+                }
                 if (ch == ':') {
                     canvas.drawText(":", x, clockBase, extras)
                 } else {
@@ -7602,6 +7722,7 @@ class RearDialView(context: Context) : View(context) {
                 }
                 x += w
             }
+            extras.alpha = 255
         }
 
         // ---- the date, spelled out ---------------------------------------------------
@@ -7728,9 +7849,9 @@ class RearDialView(context: Context) : View(context) {
         // after a lock starts pulling it out, moments before an unlock finishes putting it
         // back — never while the card is actually faint. With the baseline fixed above,
         // the figure no longer moves when the restyle happens.
-        val glassTemp = keep > 0.999f && config.theme.isGlass &&
-            deferOver(canvas) { c -> drawGlassRun(c, temp, tempX, base, ink) }
-        if (!glassTemp) canvas.drawText(temp, tempX, base, extras)
+        // the temperature reads like the rest of the line — plain ink, not a glass run:
+        // a figure made of glass beside words made of ink looked like two different things
+        canvas.drawText(temp, tempX, base, extras)
         canvas.drawText(words, tempX + tempW, base, extras)
 
         if (place.isNotEmpty()) {
@@ -10019,7 +10140,11 @@ class RearDialView(context: Context) : View(context) {
         )
         canvas.save()
         canvas.clipRect(panelRect)
+        // always-on: the backdrop fades to black over a second and stays there
+        val fade = aodFade(frameNowMs)
+        if (fade > 0f) artPaint.alpha = (255 * (1f - fade)).toInt()
         canvas.drawBitmap(bitmap, null, dest, artPaint)
+        artPaint.alpha = 255
         canvas.restore()
     }
 
@@ -10473,6 +10598,9 @@ class RearDialView(context: Context) : View(context) {
     }
 
     companion object {
+        const val AOD_FADE_MS = 1_000L
+        /** how dark always-on makes everything but the slider */
+        const val AOD_VEIL_ALPHA = 0.6f
         /**
          * How often [redrawTick] reschedules itself. Chosen to be frequent enough
          * that the ±4px/10-minute drift reads as a slow wander rather than a single

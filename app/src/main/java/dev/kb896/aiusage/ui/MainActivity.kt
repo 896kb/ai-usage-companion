@@ -727,6 +727,11 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             container, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
+        // The rear screen's always-on: dim and frozen instead of dark, asleep only in a
+        // pocket, the slider one double tap away. See RearActivity.enterAod.
+        SettingsRows.toggle(
+            container, "Always-on display", config.alwaysOn,
+        ) { on -> write { it.copy(alwaysOn = on) } }
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
         SettingsRows.choice(
@@ -806,7 +811,8 @@ class MainActivity : ComponentActivity() {
         // reason one row up rather than in an accordion they have not opened.
         SettingsRows.toggleWithColor(
             container, "Media controls", config.showMedia, config.mediaTint,
-            onChange = { on -> write { it.copy(showMedia = on) } },
+            // the cover and lyrics rows live under this switch: rebuild so they appear now
+            onChange = { on -> write { it.copy(showMedia = on) }; buildSettingsRows() },
             onPick = { c -> write { it.copy(mediaColor = c) } },
         )
         if (config.showMedia) {
@@ -830,6 +836,7 @@ class MainActivity : ComponentActivity() {
                     ).clear()
                 }
                 write { it.copy(showLyrics = on) }
+                buildSettingsRows() // the note under this row says what the switch does
             }
             SettingsRows.note(
                 container,

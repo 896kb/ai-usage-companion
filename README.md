@@ -359,6 +359,20 @@ uses (`MIUI_FLAG_DISABLE_SUBSCREEN_DOUBLE_TAP`, in the window's `miuiFlags`, rea
 through the hidden-API bypass). A hard knock still goes through HyperOS's tap sensor, which
 no flag covers, and turns the display off directly.
 
+**When a new release is out, the app says so** — once a day it asks GitLab for the newest
+release, and if it is newer than the build you run, one notification carries the release
+notes and a **Download APK** button that opens the APK's permanent address in the browser.
+Nothing is downloaded or installed by the app itself.
+
+**Always-on display** is the third way to rest. Instead of going dark, the panel settles
+into a dim, frozen page: nothing animates, the backdrop fades to black over a second, and
+the display stays held. A double tap on it raises the unlock slider at once; the swipe
+brings the full panel back, and thirty seconds after the last touch it settles again. It
+sleeps only in a pocket: the rear proximity sensor covered for a moment lets the display
+go and HyperOS powers it down on its own timeout. Face-down on a table the rear sensor is
+clear, so it stays. Any wake — a notification, the charger, a double tap — lands back in
+always-on, with the notification's card and slider on top as usual.
+
 Thirty seconds after the last touch the rear display goes dark, unless **Keep panel awake**
 is on. Dark is not dimmed: while it sleeps the panel draws nothing, fetches no reading, and
 asks for no lyric sheet. The poll loop does not check a flag every few seconds and go back
@@ -1164,6 +1178,7 @@ drift from what the back of the phone is doing.
 | **Place** | Where the weather is for. Typed once and resolved once, and the note under the field shows what the geocoder made of it — or `Not found`. |
 | **Use the phone's location** | The reading follows the phone instead, on coarse location that is asked for only when you turn this on. Refuse the prompt and the switch goes back off. |
 | **Keep panel awake** | Off by default: the panel goes dark thirty seconds after you stop touching it and does no work while it is dark. On, it stays lit. |
+| **Always-on display** | Off by default. On, the panel rests dim and frozen instead of dark, raises the slider on a double tap, and sleeps only in a pocket — see [And when nobody is looking](#and-when-nobody-is-looking). |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
 Each account gets **its own settings screen**, reached from a row on the main one and
