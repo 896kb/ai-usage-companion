@@ -1083,7 +1083,7 @@ class RearDialView(context: Context) : View(context) {
         if (crtApplied && !glowOverTube) return
         val paint = TableGlow.frame(
             Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tableGlowWalk(frameNowMs),
-            colorFor("clock", config.clockTint), strength, cornerRadius(),
+            colorFor("table", config.tableTint), strength, cornerRadius(),
         ) ?: return
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), paint)
     }
@@ -1458,7 +1458,12 @@ class RearDialView(context: Context) : View(context) {
         // Straight after the bands, so a ring's own label is legible on top of it.
         if (pendingOver.isNotEmpty()) active.add(GROUP_OVER)
         if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
-        if (lockSwap(frameNowMs) > 0.001f) active.add(GROUP_LOCK)
+        // The lock group also carries the always-on veil and the table lights, which
+        // show without any slider: in always-on the slider is always up, which hid
+        // that the group never came on for the lights alone on a plain page.
+        if (lockSwap(frameNowMs) > 0.001f || tableGlowFade(frameNowMs) > 0.001f ||
+            aod || (aodUntil != 0L && frameNowMs - aodUntil < AOD_FADE_MS)
+        ) active.add(GROUP_LOCK)
         // NOT WHILE THE PAGE THAT HOLDS THEM IS UP. The strip and the carousel are the
         // same notification drawn twice — the strip slides one in over the top of a page
         // whose whole job is showing it, and the newest card in the carousel IS that

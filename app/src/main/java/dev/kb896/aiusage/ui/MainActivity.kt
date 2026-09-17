@@ -710,6 +710,11 @@ class MainActivity : ComponentActivity() {
         SettingsRows.colorRow(container, "Weather line", config.weatherTint) { c ->
             write { it.copy(weatherColor = c) }
         }
+        // The lights round the margin when the phone lies on its face — see table
+        // mode in the README. They follow the clock's colour unless told otherwise.
+        SettingsRows.colorRow(container, "Table lights", config.tableTint) { c ->
+            write { it.copy(tableColor = c) }
+        }
         SettingsRows.toggleWithColor(
             container, "Battery", config.showBattery, config.batteryTint,
             onChange = { on -> write { it.copy(showBattery = on) } },

@@ -392,7 +392,8 @@ while a newer release is known, a row at its top carries the tag and the first l
 the notes, and tapping it opens the APK.
 
 **Table mode**: set the phone flat on its face, rear display up, and after a second the
-panel's margins light up — four lights in the clock's ink, a quarter of the frame apart,
+panel's margins light up — four lights in the clock's colour (or one of their own: Settings →
+Table lights), a quarter of the frame apart,
 race three laps round the display's own rounded frame with tails streaming behind, then
 slow into one last quarter in which each leaves the rim lit behind it; where they meet,
 the frame is one even glow, an AGSL shader like the glass. It stays, still, for as long
