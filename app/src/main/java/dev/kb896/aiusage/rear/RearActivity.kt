@@ -165,6 +165,7 @@ class RearActivity : Activity() {
          */
         const val ACTION_DOZING = "dev.kb896.aiusage.DOZING"
         const val EXTRA_DOZING = "dozing"
+        const val EXTRA_KEEPER = "keeper"
 
 
         const val EXTRA_STATE = "state"
@@ -386,7 +387,9 @@ class RearActivity : Activity() {
         }
         if (!calibrating) {
             val decoded = StatePayload.decode(payload)
+            val keeperChanged = dial.config.pokeRearDisplay != decoded.config.pokeRearDisplay
             dial.config = decoded.config
+            if (keeperChanged) announceHold()
             dial.state = decoded.state
             dial.weather = decoded.weather
             // The switch may have just been thrown either way: on has to take the hold
@@ -602,8 +605,15 @@ class RearActivity : Activity() {
         holding = on
         // Tell the supervisors. They will otherwise recover a panel that is not lost, and
         // recovery lights the display — see IRearService.setDozing.
+        announceHold()
+    }
+
+    /** Tells the app process whether the panel holds the display, and whether the keeper is wanted. */
+    private fun announceHold() {
         sendBroadcast(
-            Intent(ACTION_DOZING).setPackage(packageName).putExtra(EXTRA_DOZING, !on),
+            Intent(ACTION_DOZING).setPackage(packageName)
+                .putExtra(EXTRA_DOZING, !holding)
+                .putExtra(EXTRA_KEEPER, dial.config.pokeRearDisplay),
         )
     }
 

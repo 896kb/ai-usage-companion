@@ -1254,6 +1254,13 @@ turns itself. None of it is in a release build.
 
 ## When the panel dies on a phone that is not mine
 
+Some phones switch the rear display off ten seconds after the last touch whatever the
+panel's window asks — the keep-screen-on flag that holds it on mine is ignored there.
+**Poke the rear display awake** (Settings, under Keep panel awake) sends a wake key to
+the rear display every four seconds while the panel is up and holding, which counts as a
+touch there; it is the trick MiRearScreenSwitcher relies on, twice a second. Off unless
+you need it.
+
 Advanced → **Copy rear-display report** gathers, through Shizuku, what the system says
 about the rear display — firmware and region, every package that could own the rear
 screen and whether it is installed or suspended, the rear launcher components registered,
