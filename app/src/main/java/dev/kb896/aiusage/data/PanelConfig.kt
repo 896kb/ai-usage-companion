@@ -277,6 +277,12 @@ data class PanelConfig(
     val alwaysOn: Boolean = false,
     /** In always-on, the battery level above the clock. */
     val aodBattery: Boolean = false,
+    /**
+     * The whole panel drawn as if on a curved tube — scanlines, a shadow mask, a
+     * vignette, the picture bent outwards — the terminal's look on 896.ro. Off by
+     * default: it is a look, and it bends the picture. See CrtScreen.
+     */
+    val crt: Boolean = false,
 
     /**
      * Mirror other apps' notifications onto the panel.

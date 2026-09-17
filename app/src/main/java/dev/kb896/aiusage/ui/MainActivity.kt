@@ -637,6 +637,11 @@ class MainActivity : ComponentActivity() {
             // new one is one path instead of two.
             recreate()
         }
+        // A look over whichever theme: the panel on a curved tube. Off by default —
+        // it bends the picture, and touches with it. See CrtScreen.
+        SettingsRows.toggle(
+            container, "CRT screen", config.crt,
+        ) { on -> write { it.copy(crt = on) } }
 
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
         // two accounts, not a taxonomy — someone else has a client and a side project,
