@@ -20,7 +20,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * Once a day, ask GitLab for the newest release. If it is newer than this build, say so
+ * Every two hours, ask GitLab for the newest release. If it is newer than this build, say so
  * once, in a notification that carries the release notes and opens the APK's permanent
  * address — the same one the site's buttons use. Nothing is downloaded by the app itself;
  * the browser does that, and the user installs.
@@ -33,7 +33,7 @@ object UpdateCheck {
     private const val PREFS = "update_check"
     private const val CHANNEL = "updates"
     private const val NOTIFICATION_ID = 4711
-    private const val EVERY_MS = 24L * 60 * 60 * 1000
+    private const val EVERY_MS = 2L * 60 * 60 * 1000
     private const val API = "https://gitlab.com/api/v4/projects/85495687/releases?per_page=1"
     const val APK = "https://gitlab.com/896kb/ai-usage-companion/-/releases/permalink/latest/downloads/ai-usage-companion.apk"
     const val RELEASES = "https://gitlab.com/896kb/ai-usage-companion/-/releases"

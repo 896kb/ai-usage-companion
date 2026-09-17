@@ -384,7 +384,7 @@ uses (`MIUI_FLAG_DISABLE_SUBSCREEN_DOUBLE_TAP`, in the window's `miuiFlags`, rea
 through the hidden-API bypass). A hard knock still goes through HyperOS's tap sensor, which
 no flag covers, and turns the display off directly.
 
-**When a new release is out, the app says so** — once a day it asks GitLab for the newest
+**When a new release is out, the app says so** — every two hours it asks GitLab for the newest
 release, and if it is newer than the build you run, one notification carries the release
 notes and a **Download APK** button that opens the APK's permanent address in the browser.
 Nothing is downloaded or installed by the app itself. The settings screen says it too:
