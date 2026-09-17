@@ -56,8 +56,8 @@ object CrtScreen {
         half3 toSrgb(half3 c) { return pow(max(c, 0.0), half3(1.0 / 2.2)); }
 
         half4 main(float2 coord) {
-            float2 flat = coord / res;
-            float2 uv = mix(flat, bend(flat), give(coord));
+            float2 plain = coord / res;
+            float2 uv = mix(plain, bend(plain), give(coord));
             float2 edge = abs(uv * 2.0 - 1.0);
             if (max(edge.x, edge.y) >= 1.0) return half4(0.0, 0.0, 0.0, 1.0);
             float2 off = (uv - 0.5) * aberration;
@@ -79,7 +79,7 @@ object CrtScreen {
             );
             col *= mix(half3(1.0), shadow, 0.8);
             col *= 1.0 + mask * 0.35;
-            float vig = pow(16.0 * flat.x * flat.y * (1.0 - flat.x) * (1.0 - flat.y), 0.3);
+            float vig = pow(16.0 * plain.x * plain.y * (1.0 - plain.x) * (1.0 - plain.y), 0.3);
             col *= vig;
             col = toSrgb(col);
             return half4(col, 1.0);
