@@ -6121,70 +6121,7 @@ class RearDialView(context: Context) : View(context) {
                 // The charging glyph replaces the outline entirely rather than being
                 // overlaid: it already contains the bolt, and two glyphs stacked would
                 // read as one badly drawn one.
-                if (charging()) {
-                    drawIcon(canvas, PanelIcons.CHARGING, iconX, iconY, EXTRA_ICON_H)
-                } else {
-                    // Outline, then filled from the bottom to the actual charge — a full
-                    // battery drawn at 12% is only ever right once.
-                    val shell =
-                        if (config.theme.isGlass) GlassIcons.of(PanelIcons.BATTERY) else null
-                    if (shell != null) {
-                        // ---- the glass set's battery -------------------------------
-                        //
-                        // TWO THINGS WERE WRONG HERE and they compounded into one fat
-                        // smear. Material's battery_full is a SOLID silhouette, so
-                        // drawing it and then painting the charge over it in the same
-                        // colour said nothing — the glyph was already full. And the
-                        // charge was measured against Glyphs.aspect, which under GLASS is
-                        // the CELL's aspect of 1 rather than the glyph's ink width of
-                        // about 0.42, so the bar came out more than twice the width of
-                        // the battery it was supposed to be inside.
-                        //
-                        // Clipping to the glyph settles both. The charge cannot leave the
-                        // battery whatever the aspect says, and it takes the battery's own
-                        // shape on the way — rounded corners, terminal and all.
-                        val k = EXTRA_ICON_H / GlassIcons.VIEWPORT
-                        batteryMatrix.setTranslate(iconX, iconY)
-                        batteryMatrix.preScale(k, k)
-                        batteryMatrix.preTranslate(0f, -GlassIcons.ORIGIN_Y)
-                        shell.path.transform(batteryMatrix, batteryPath)
-                        // The glyph's OWN extent, so empty is empty and full is full. A
-                        // fixed inset off the cell would leave a lit sliver at nothing and
-                        // stop short at everything.
-                        batteryPath.computeBounds(batteryBounds, true)
-
-                        // The empty shell, held back so the charge reads against it. The
-                        // set is a filled one and a hairline outline among filled glyphs
-                        // looks like a different icon set; a dimmer solid does not.
-                        val was = extras.alpha
-                        extras.alpha = was * BATTERY_SHELL_ALPHA / 255
-                        drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
-                        extras.alpha = was
-
-                        val fillTop = batteryBounds.bottom -
-                            batteryBounds.height() * (level / 100f)
-                        canvas.save()
-                        canvas.clipPath(batteryPath)
-                        canvas.drawRect(
-                            batteryBounds.left, fillTop,
-                            batteryBounds.right, batteryBounds.bottom, extras,
-                        )
-                        canvas.restore()
-                    } else {
-                        drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, EXTRA_ICON_H)
-                        // The fill follows the GLYPH inside the cell, not the cell itself,
-                        // or it would spill into the padding the square adds either side.
-                        val glyphW =
-                            EXTRA_ICON_H * Glyphs.aspect(PanelIcons.BATTERY, config.theme)
-                        val glyphX = iconX + (EXTRA_ICON_H - glyphW) / 2f
-                        val inset = EXTRA_ICON_H * 0.16f
-                        val top = iconY + inset
-                        val bottom = iconY + EXTRA_ICON_H - inset
-                        val fillTop = bottom - (bottom - top) * (level / 100f)
-                        canvas.drawRect(glyphX + inset * 0.6f, fillTop,
-                            glyphX + glyphW - inset * 0.6f, bottom, extras)
-                    }
-                }
+                drawBatteryGlyph(canvas, iconX, iconY, EXTRA_ICON_H, level)
             }
             // DOWN A LINE, like the two below it. The battery had no advance for as long
             // as it was drawn last, where there was nothing after it to push out of the
@@ -6330,6 +6267,78 @@ class RearDialView(context: Context) : View(context) {
                 kotlin.math.round(y + (r.y + r.h) * h),
                 iconPaint,
             )
+        }
+    }
+
+    /**
+     * The battery as the extras row draws it: the charging glyph while a charger is in,
+     * otherwise the shell with its level filled — under GLASS the traced shell, under
+     * ORIGINAL the glyph. Shared with the battery line always-on puts above the clock.
+     */
+    private fun drawBatteryGlyph(canvas: Canvas, iconX: Float, iconY: Float, h: Float, level: Int, charging: Boolean = charging()) {
+        if (charging) {
+            drawIcon(canvas, PanelIcons.CHARGING, iconX, iconY, h)
+        } else {
+            // Outline, then filled from the bottom to the actual charge — a full
+            // battery drawn at 12% is only ever right once.
+            val shell =
+                if (config.theme.isGlass) GlassIcons.of(PanelIcons.BATTERY) else null
+            if (shell != null) {
+                // ---- the glass set's battery -------------------------------
+                //
+                // TWO THINGS WERE WRONG HERE and they compounded into one fat
+                // smear. Material's battery_full is a SOLID silhouette, so
+                // drawing it and then painting the charge over it in the same
+                // colour said nothing — the glyph was already full. And the
+                // charge was measured against Glyphs.aspect, which under GLASS is
+                // the CELL's aspect of 1 rather than the glyph's ink width of
+                // about 0.42, so the bar came out more than twice the width of
+                // the battery it was supposed to be inside.
+                //
+                // Clipping to the glyph settles both. The charge cannot leave the
+                // battery whatever the aspect says, and it takes the battery's own
+                // shape on the way — rounded corners, terminal and all.
+                val k = h / GlassIcons.VIEWPORT
+                batteryMatrix.setTranslate(iconX, iconY)
+                batteryMatrix.preScale(k, k)
+                batteryMatrix.preTranslate(0f, -GlassIcons.ORIGIN_Y)
+                shell.path.transform(batteryMatrix, batteryPath)
+                // The glyph's OWN extent, so empty is empty and full is full. A
+                // fixed inset off the cell would leave a lit sliver at nothing and
+                // stop short at everything.
+                batteryPath.computeBounds(batteryBounds, true)
+
+                // The empty shell, held back so the charge reads against it. The
+                // set is a filled one and a hairline outline among filled glyphs
+                // looks like a different icon set; a dimmer solid does not.
+                val was = extras.alpha
+                extras.alpha = was * BATTERY_SHELL_ALPHA / 255
+                drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, h)
+                extras.alpha = was
+
+                val fillTop = batteryBounds.bottom -
+                    batteryBounds.height() * (level / 100f)
+                canvas.save()
+                canvas.clipPath(batteryPath)
+                canvas.drawRect(
+                    batteryBounds.left, fillTop,
+                    batteryBounds.right, batteryBounds.bottom, extras,
+                )
+                canvas.restore()
+            } else {
+                drawIcon(canvas, PanelIcons.BATTERY, iconX, iconY, h)
+                // The fill follows the GLYPH inside the cell, not the cell itself,
+                // or it would spill into the padding the square adds either side.
+                val glyphW =
+                    h * Glyphs.aspect(PanelIcons.BATTERY, config.theme)
+                val glyphX = iconX + (h - glyphW) / 2f
+                val inset = h * 0.16f
+                val top = iconY + inset
+                val bottom = iconY + h - inset
+                val fillTop = bottom - (bottom - top) * (level / 100f)
+                canvas.drawRect(glyphX + inset * 0.6f, fillTop,
+                    glyphX + glyphW - inset * 0.6f, bottom, extras)
+            }
         }
     }
 
@@ -7721,10 +7730,8 @@ class RearDialView(context: Context) : View(context) {
                 extras.textAlign = Paint.Align.CENTER
                 extras.color = (ink and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
                 canvas.drawText(figure, cx, top, extras)
-                if (charging()) {
-                    val ih = typed(DATE_SIZE)
-                    drawIcon(canvas, PanelIcons.CHARGING, cx + extras.measureText(figure) / 2f + AOD_BATTERY_GAP / 2f, top - ih * 0.85f, ih)
-                }
+                val ih = typed(DATE_SIZE)
+                drawBatteryGlyph(canvas, cx + extras.measureText(figure) / 2f + AOD_BATTERY_GAP / 2f, top - ih * 0.85f, ih, pct)
                 extras.textAlign = Paint.Align.LEFT
                 extras.textSize = typed(CLOCK_SIZE)
             }
@@ -10649,7 +10656,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     companion object {
-        const val AOD_FADE_MS = 1_000L
+        const val AOD_FADE_MS = 500L
         /** the battery figure's distance above the clock's cap height, in always-on */
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
