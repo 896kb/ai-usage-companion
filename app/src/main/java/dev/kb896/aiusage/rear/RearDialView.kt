@@ -1055,7 +1055,7 @@ class RearDialView(context: Context) : View(context) {
         val paint = TableGlow.frame(
             Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tableGlowWalk(frameNowMs),
             colorFor("clock", config.clockTint), strength, cornerRadius(),
-        )
+        ) ?: return
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), paint)
     }
 

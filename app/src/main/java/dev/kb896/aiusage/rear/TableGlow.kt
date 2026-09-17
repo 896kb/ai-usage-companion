@@ -22,9 +22,9 @@ object TableGlow {
             // the frame is the display's own rounded rectangle: straight runs between
             // corner arcs of the display's radius
             float r = radius;
-            float2 half = res * 0.5;
-            float2 a = p - half;
-            float2 h = half - r;
+            float2 hs = res * 0.5;
+            float2 a = p - hs;
+            float2 h = hs - r;
             float2 q = abs(a) - h;
             float top = res.x - 2.0 * r;
             float side = res.y - 2.0 * r;
@@ -75,16 +75,26 @@ object TableGlow {
     private const val TAIL = 0.06f
     private const val BASE = 0.10f
 
-    val shader: RuntimeShader by lazy {
-        RuntimeShader(
-            SOURCE.replace("TAIL", TAIL.toString()).replace("BASE", BASE.toString()),
-        )
+    /**
+     * Null when the program does not compile. That is found out on the first frame that
+     * draws it, on the panel's main thread, and it must not take the panel down: the
+     * rear process dying is re-placed by the keep-alive as a fresh panel, which reads as
+     * the panel forgetting where it was.
+     */
+    val shader: RuntimeShader? by lazy {
+        try {
+            RuntimeShader(SOURCE.replace("TAIL", TAIL.toString()).replace("BASE", BASE.toString()))
+        } catch (e: IllegalArgumentException) {
+            android.util.Log.e("AiUsageRear", "table glow: the shader does not compile — no glow: ${e.message}")
+            null
+        }
     }
-    val paint: Paint by lazy { Paint().apply { shader = TableGlow.shader } }
+    private val paint: Paint by lazy { Paint().apply { shader = TableGlow.shader } }
 
     /** The paint set for one frame: [strength] 0..1, [seconds] the breathing clock. */
     /** [walk] is the lights' way round the frame, 0..1 for a lap; they rest at both ends. */
-    fun frame(width: Float, height: Float, walk: Float, color: Int, strength: Float, radius: Float): Paint {
+    fun frame(width: Float, height: Float, walk: Float, color: Int, strength: Float, radius: Float): Paint? {
+        val shader = shader ?: return null
         shader.setFloatUniform("res", width, height)
         shader.setFloatUniform("radius", radius.coerceIn(1f, minOf(width, height) / 2f))
         shader.setFloatUniform("walk", walk)
