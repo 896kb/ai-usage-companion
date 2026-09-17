@@ -932,12 +932,37 @@ class RearDialView(context: Context) : View(context) {
         return android.graphics.RectF(0f, r.top - LOCK_BAND_SLOP, Panel.WIDTH.toFloat(), r.bottom + LOCK_BAND_SLOP)
     }
 
-    /** Always-on dims everything under the slider: a veil the view draws, so the slider itself stays bright. */
+    /**
+     * Always-on dims everything under the slider: a veil the view draws, so the slider
+     * itself stays bright — and the clock, with the battery line above it, is cut out of
+     * the veil and stays as it is. The slider gets its own lighter veil after it is drawn.
+     */
     private fun drawAodVeil(canvas: Canvas) {
         if (!aod && aodUntil == 0L) return
         val a = (255 * AOD_VEIL_ALPHA * aodFade(frameNowMs)).toInt()
-        if (a > 0) canvas.drawColor(a shl 24)
+        if (a <= 0) return
+        canvas.save()
+        if (pager.restingAt(PAGE_NOTICES)) {
+            canvas.clipOutRect(
+                0f, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
+                Panel.WIDTH.toFloat(), CLOCK_BASELINE + CLOCK_SIZE * 0.2f,
+            )
+        }
+        canvas.drawColor(a shl 24)
+        canvas.restore()
     }
+
+    /** The slider's own, lighter veil in always-on: dimmed a little, never as much as the page. */
+    private fun drawAodSliderVeil(canvas: Canvas) {
+        if (!aod && aodUntil == 0L) return
+        if (!locked) return
+        val a = (255 * AOD_SLIDER_VEIL_ALPHA * aodFade(frameNowMs)).toInt()
+        if (a <= 0) return
+        val b = lockBand()
+        veilPaint.color = a shl 24
+        canvas.drawRect(b.left, b.top, b.right, b.bottom, veilPaint)
+    }
+    private val veilPaint = android.graphics.Paint()
 
     /**
      * Going to sleep — the double tap's dim, or always-on — the rings close to zero over a
@@ -1267,6 +1292,7 @@ class RearDialView(context: Context) : View(context) {
             swept(canvas) { drawPendingButtons(it) }
             drawAodVeil(canvas)
             drawLockOverlay(canvas)
+            drawAodSliderVeil(canvas)
             // Same rule as the glass path's: the page below already has it. See the
             // GROUP_NOTICE guard.
             if (noticing < 0.5f) {
@@ -1349,7 +1375,7 @@ class RearDialView(context: Context) : View(context) {
             GROUP_RINGS -> swept(canvas) { drawPendingRings(it) }
             GROUP_OVER -> swept(canvas) { drawPendingOver(it) }
             GROUP_BUTTONS -> swept(canvas) { drawPendingButtons(it) }
-            GROUP_LOCK -> { drawAodVeil(canvas); drawLockOverlay(canvas) }
+            GROUP_LOCK -> { drawAodVeil(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             else -> drawCharge(canvas)
         }
@@ -2876,7 +2902,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // Drawn before the notice and the charging cell, which are allowed over it: they
         // are why the panel is awake, and the knob is at the left where neither reaches.
-        if (overlays) { drawAodVeil(canvas); drawLockOverlay(canvas) }
+        if (overlays) { drawAodVeil(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
@@ -7672,35 +7698,35 @@ class RearDialView(context: Context) : View(context) {
         // always-on: the seconds fade out over the mode's first second and the rest of
         // the time slides to the centre; on the way back out they return the same way
         val secondsAlpha = 1f - aodFade(frameNowMs)
+        // the seconds shrink to nothing about their own centre, and grow back the same way
+        val secondsScale = 1f - Tween.easeInOut(1f - secondsAlpha)
         var span = 0f
         for (c in figures) span += if (c == ':') colon else slot
-        span -= (colon + 2f * slot) * (1f - secondsAlpha)
+        span -= (colon + 2f * slot) * (1f - secondsScale)
         val clockBase = CLOCK_BASELINE
         var x = cx - span / 2f
         if (aod) armMinuteTick()
 
-        // always-on, if asked: the battery level above the clock, arriving with the mode
+        // always-on, if asked: the battery level above the clock, arriving with the mode,
+        // and the charging glyph beside it while a charger is in
         val batteryAlpha = aodFade(frameNowMs)
         if (config.aodBattery && batteryAlpha > 0.001f) {
             val pct = batteryPercent()
             if (pct >= 0) {
+                val top = CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP
+                val figure = "$pct%"
                 extras.textSize = typed(DATE_SIZE)
                 extras.textAlign = Paint.Align.CENTER
                 extras.color = (ink and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
-                canvas.drawText("$pct%", cx, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP, extras)
+                canvas.drawText(figure, cx, top, extras)
+                if (charging()) {
+                    val ih = typed(DATE_SIZE)
+                    drawIcon(canvas, PanelIcons.CHARGING, cx + extras.measureText(figure) / 2f + AOD_BATTERY_GAP / 2f, top - ih * 0.85f, ih)
+                }
                 extras.textAlign = Paint.Align.LEFT
                 extras.textSize = typed(CLOCK_SIZE)
             }
         }
-
-        // NO CARD BEHIND IT. The numerals are made of glass themselves — see
-        // drawGlassClock — and a glass sheet behind glass figures is two panes deep for
-        // no reason: the card's own refraction fights the letterforms' and both come out
-        // muddier than either alone. The figures are the object here, not something
-        // written on one.
-        //
-        // A painted clock still gets one; that is what the fallback below is for, and it
-        // has the ordinary problem of type needing something to sit on.
 
         extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
         // MADE OF GLASS, the way the charge figure is: the panel is bent through the
@@ -7719,10 +7745,14 @@ class RearDialView(context: Context) : View(context) {
             deferOver(canvas) { c -> drawGlassClock(c, glassFigures, cx, span, slot, colon, ink) }
         if (!glassClock) {
             for ((i, ch) in figures.withIndex()) {
-                val w = if (ch == ':') colon else slot
+                val full = if (ch == ':') colon else slot
+                val w = if (i >= 5) full * secondsScale else full
                 if (i >= 5) {
-                    if (secondsAlpha <= 0.001f) break
-                    extras.alpha = (255 * secondsAlpha).toInt()
+                    if (secondsScale <= 0.01f) break
+                    // the glyph draws at its full size, scaled about the centre of its shrunken slot
+                    canvas.save()
+                    canvas.scale(secondsScale, secondsScale, x + w / 2f, clockBase - CLOCK_SIZE * 0.35f)
+                    canvas.translate(-(full - w) / 2f, 0f)
                 }
                 if (ch == ':') {
                     canvas.drawText(":", x, clockBase, extras)
@@ -7738,9 +7768,9 @@ class RearDialView(context: Context) : View(context) {
                         ),
                     )
                 }
+                if (i >= 5) canvas.restore()
                 x += w
             }
-            extras.alpha = 255
         }
 
         // ---- the date, spelled out ---------------------------------------------------
@@ -7801,8 +7831,9 @@ class RearDialView(context: Context) : View(context) {
         // The card reaches into the unlock slider's band, so the block goes when the
         // slider comes and returns when it goes — the same bargain the square artwork
         // makes with the lock. A fade, not a slide: nothing on this page moves.
-        val keep = 1f - lockSwap(frameNowMs)
-        if (keep <= 0.001f) return
+        // The line sits above the slider's band now, so it no longer has to leave when
+        // the slider comes; keep stays at full and the fade machinery below is idle.
+        val keep = 1f
         // HELD, NOT SPELLED AGAIN. Both strings come from a fact that moves every five
         // minutes, on a page redrawn at the display's full rate — built per frame they are
         // garbage by the thousand for two words. Identity is the right key: a reading is
@@ -10621,6 +10652,8 @@ class RearDialView(context: Context) : View(context) {
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
         const val AOD_VEIL_ALPHA = 0.6f
+        /** and the slider's own, lighter one */
+        const val AOD_SLIDER_VEIL_ALPHA = 0.15f
         /**
          * How often [redrawTick] reschedules itself. Chosen to be frequent enough
          * that the ±4px/10-minute drift reads as a slow wander rather than a single
@@ -11470,7 +11503,7 @@ class RearDialView(context: Context) : View(context) {
         private const val CLOCK_ROLL_CELL = 1.7f
         private const val CLOCK_ROLL_MS = 260f
         private const val DATE_SIZE = 26f
-        private const val DATE_BASELINE = 420f
+        private const val DATE_BASELINE = 372f // above the slider's band, so the weather under it stays
 
         /** How many measured glyphs to keep. Eleven for a clock, a hundred for a charge. */
         private const val SDF_CACHE_MAX = 160
