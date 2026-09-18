@@ -989,11 +989,21 @@ class RearDialView(context: Context) : View(context) {
         canvas.restore()
     }
 
-    /** The clock and battery line's band, left out of the veil so the figures stay bright. */
-    private fun aodClockBand() = RectF(
-        0f, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
-        Panel.WIDTH.toFloat(), CLOCK_BASELINE + CLOCK_SIZE * 0.2f,
-    )
+    /**
+     * The clock and battery line's band, left out of the veil so the figures stay
+     * bright. Only as wide as the clock, with a little air: the rings round the lenses
+     * share these rows, and a band the full width of the panel left their arcs bright.
+     */
+    private fun aodClockBand(): RectF {
+        val half = if (aodClockSpan > 0f) aodClockSpan / 2f + AOD_BAND_AIR else Panel.WIDTH.toFloat()
+        return RectF(
+            aodClockCx - half, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
+            aodClockCx + half, CLOCK_BASELINE + CLOCK_SIZE * 0.2f,
+        )
+    }
+    /** Where the clock page last drew its clock: centre and full width, seconds and all. */
+    private var aodClockCx = Panel.WIDTH / 2f
+    private var aodClockSpan = 0f
 
     /** Whether the band is left out: always on the way into always-on, at rest on the clock page otherwise. */
     private fun aodBandOut(): Boolean = aod || pager.restingAt(PAGE_NOTICES)
@@ -7813,9 +7823,9 @@ class RearDialView(context: Context) : View(context) {
         if (wheelAlpha > 0.001f) {
             val wheel: (Canvas) -> Unit = { c ->
                 if (wheelAlpha < 0.999f) {
-                    c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * wheelAlpha).toInt())
+                    val layer = c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * wheelAlpha).toInt())
                     drawNoticeWheel(c)
-                    c.restore()
+                    c.restoreToCount(layer) // whatever the wheel left open, the fade stays the wheel's
                 } else drawNoticeWheel(c)
             }
             if (!deferOver(canvas, wheel)) wheel(canvas)
@@ -7852,6 +7862,8 @@ class RearDialView(context: Context) : View(context) {
         val secondsScale = Tween.easeOutBack(secondsAlpha)
         var span = 0f
         for (c in figures) span += if (c == ':') colon else slot
+        aodClockCx = cx
+        aodClockSpan = span // the full width, before the seconds shrink — the band must not breathe
         span -= (colon + 2f * slot) * (1f - secondsScale)
         val clockBase = CLOCK_BASELINE
         var x = cx - span / 2f
@@ -8185,7 +8197,11 @@ class RearDialView(context: Context) : View(context) {
             }
             val cr = r * scale
             val layer = fade < 0.999f
-            canvas.save()
+            // Restored to this count below: the alpha layer is a save of its own, and
+            // popping a fixed two left it open for every fading card — on ORIGINAL,
+            // where the wheel is drawn inline, the clock, battery, date and weather
+            // then inherited the wheel's always-on fade and popped back when it ended.
+            val cardSave = canvas.save()
             if (layer) {
                 canvas.saveLayerAlpha(cardRect, (255 * fade).toInt().coerceIn(0, 255))
             }
@@ -8227,7 +8243,7 @@ class RearDialView(context: Context) : View(context) {
             if (scale < 0.999f) canvas.scale(scale, scale, cx, cy)
             drawNoticeRow(canvas, shown[i], noticeWheelRect.top)
             canvas.restore()
-            canvas.restore()
+            canvas.restoreToCount(cardSave)
         }
         canvas.restore()
     }
@@ -10816,6 +10832,8 @@ class RearDialView(context: Context) : View(context) {
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
         const val AOD_VEIL_ALPHA = 0.6f
+        /** air either side of the clock inside its undimmed band */
+        const val AOD_BAND_AIR = 28f
         /** and the slider's own, lighter one */
         const val AOD_SLIDER_VEIL_ALPHA = 0.15f
         /**
