@@ -404,7 +404,7 @@ that is a table or a pocket.
 into a dim, frozen page: nothing animates, the backdrop fades to black over a second, and
 the display stays held. A double tap on it raises the unlock slider at once; the swipe
 brings the full panel back, and thirty seconds after the last touch it settles again. It
-sleeps only in a pocket: the rear proximity sensor covered for a moment lets the display
+sleeps only in a pocket, and only if you ask (Settings → Always-on display → pocket mode, off by default, because a rear proximity sensor that reads covered in the hand makes it the panel going black for no visible reason): the rear proximity sensor covered for a moment lets the display
 go and HyperOS powers it down on its own timeout. Face-down on a table the rear sensor is
 clear, so it stays. Any wake — a notification, the charger, a double tap — lands back in
 always-on, with the notification's card and slider on top as usual.
