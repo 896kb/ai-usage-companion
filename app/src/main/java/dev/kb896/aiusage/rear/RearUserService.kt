@@ -153,6 +153,13 @@ class RearUserService : IRearService.Stub {
         // old way is taken: start on the front screen, move the task across.
         exec("am start --display $displayId -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
         var task = pollTaskId()
+        // A start HyperOS aborts still leaves a task record for a moment, so one look
+        // is not proof; the second, a beat later, is — an aborted start has no task
+        // and nothing composited on the rear by then.
+        if (task > 0 && panelWhere() == Where.REAR) {
+            Thread.sleep(DIRECT_START_SETTLE_MS)
+            task = taskId()
+        }
         if (task > 0 && panelWhere() == Where.REAR) {
             Log.d(TAG, "task=$task started on display $displayId directly")
         } else {
@@ -637,6 +644,8 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        /** after a direct start on the rear display, before believing it took */
+        private const val DIRECT_START_SETTLE_MS = 1_200L
         /** between two pokes of the keeper; the firmware's timer is ten seconds */
         private const val KEEPER_MS = 4_000L
         private val REPORT = """
