@@ -85,6 +85,24 @@ data class RingLayout(
         val CY_SECOND_RANGE = 280..572
         val RADIUS_RANGE = 60..200
         val STROKE_RANGE = 4..60
+
+        /**
+         * The rings for the phone this runs on, in panel units (the 17 Pro's 904x572;
+         * the panel is scaled to the display it is on — see RearDialView.fitX).
+         *
+         * The 17 Pro Max ("popsicle"): Xiaomi's own rear-screen app keeps one geometry
+         * per device, the width of the lens column — 104.5dp on the Pro, 105.2dp on the
+         * Pro Max, both about 296px at the rear displays' 450dpi. So the lenses are the
+         * same pixel size on both, and the Pro Max's display is simply wider and taller
+         * round them; scaling the Pro's rings up would put them 12px too far right and
+         * 8% too big. These are the Pro's pixels divided by the Pro Max's scale, with
+         * the lens column centred on its taller display. A starting point measured from
+         * the app, not from a Pro Max — Settings → Ring layout takes it from there.
+         */
+        fun forDevice(): RingLayout = when (android.os.Build.DEVICE) {
+            "popsicle" -> RingLayout(cx = 139, cyFirst = 154, cySecond = 418, radius = 121, stroke = 24)
+            else -> RingLayout()
+        }
     }
 }
 
@@ -372,6 +390,8 @@ data class PanelConfig(
     /** This account's appearance, or an all-defaults one if it has no entry. */
     /** [clockColor] or the shared extras colour. Same for the two below. */
     val clockTint: Int get() = clockColor ?: extrasColor
+    /** The rings as drawn: what the user set, or the phone's own default while untouched. */
+    val effectiveRingLayout: RingLayout get() = if (ringLayout == RingLayout()) RingLayout.forDevice() else ringLayout
     val batteryTint: Int get() = batteryColor ?: extrasColor
     val dateTint: Int get() = dateColor ?: extrasColor
     val weatherTint: Int get() = weatherColor ?: dateTint

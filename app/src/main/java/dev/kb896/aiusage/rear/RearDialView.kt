@@ -78,7 +78,7 @@ class RearDialView(context: Context) : View(context) {
 
     /** The rings round the lenses, which the tube must not move: ring radius plus half the stroke. */
     private fun crtStills(): List<CrtScreen.Still> {
-        val g = PanelGeometry.of(config.ringLayout)
+        val g = PanelGeometry.of(config.effectiveRingLayout)
         return listOf(g.personal, g.work).map {
             CrtScreen.Still(it.cx * fitX, it.cy * fitY, (it.radius + it.stroke / 2f + 4f) * maxOf(fitX, fitY))
         }
@@ -1381,7 +1381,7 @@ class RearDialView(context: Context) : View(context) {
      * exactly where it is.
      */
     private fun setLenses(shader: android.graphics.RuntimeShader) {
-        val lay = config.ringLayout
+        val lay = config.effectiveRingLayout
         val r = PanelGeometry.LENS_RADIUS
         shader.setFloatUniform("lensA", lay.cx.toFloat(), lay.cyFirst.toFloat(), r)
         shader.setFloatUniform("lensB", lay.cx.toFloat(), lay.cySecond.toFloat(), r)
@@ -2738,7 +2738,7 @@ class RearDialView(context: Context) : View(context) {
         // meet the camera lenses; in a preview there are no lenses, and a ring pinned to
         // where the top lens would be leaves the rows it belongs to floating beside
         // nothing.
-        val geometry = PanelGeometry.of(config.ringLayout).let { g ->
+        val geometry = PanelGeometry.of(config.effectiveRingLayout).let { g ->
             if (onlyAccount == null) g
             else PanelGeometry(
                 personal = g.personal.copy(cy = Panel.HEIGHT / 2f),

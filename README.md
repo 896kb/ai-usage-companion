@@ -1300,9 +1300,16 @@ when someone's panel goes black after ten seconds and yours does not.
 The panel is laid out for the 17 Pro's rear display, 904x572, and scaled to whatever
 rear display it finds itself on: the 17 Pro Max's is 976x596, and there the panel fills
 it. Per axis, so no margin goes unused; the two ratios differ by under four per cent on
-the Pro Max, which no ring shows. Touches are mapped back the same way. The rings round
-the lenses are measured for the Pro; on a Pro Max, whose lenses sit elsewhere, set them
-under Settings → Ring layout.
+the Pro Max, which no ring shows. Touches are mapped back the same way.
+
+The rings are another matter, because the lenses do not scale with the display. Xiaomi's
+own rear-screen app keeps one number per device, the width of the lens column: 104.5dp on
+the Pro and 105.2dp on the Pro Max, both about 296px at the rear displays' 450dpi. So the
+lenses are the same pixel size on both phones and the Pro Max's display is simply wider
+and taller round them. On a Pro Max the panel therefore starts from the Pro's rings at
+their pixel size, with the lens column centred on the taller display — a starting point
+taken from the app's numbers, not measured on a Pro Max. Settings → Ring layout takes it
+from there, and a screenshot from a Pro Max would let the default be set exactly.
 
 ## Requirements
 

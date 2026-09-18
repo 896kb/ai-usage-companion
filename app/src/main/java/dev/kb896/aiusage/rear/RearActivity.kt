@@ -403,7 +403,7 @@ class RearActivity : Activity() {
                 if (!aodOn) exitAod()
                 armSleep()
             }
-            calibrationView.geometry = PanelGeometry.of(decoded.config.ringLayout)
+            calibrationView.geometry = PanelGeometry.of(decoded.config.effectiveRingLayout)
         }
     }
 

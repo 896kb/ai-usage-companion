@@ -1227,7 +1227,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun bindGeometrySliders() {
         val store = ConfigStore(this)
-        var current = store.load().ringLayout
+        var current = store.load().effectiveRingLayout
 
         data class Slider(
             val bar: SeekBar, val label: TextView, val name: String,
@@ -1278,7 +1278,7 @@ class MainActivity : ComponentActivity() {
         }
 
         findViewById<Button>(R.id.geo_reset).setOnClickListener {
-            current = RingLayout()
+            current = RingLayout.forDevice()
             seed()
             pushLayout(current)
             toast("Ring geometry reset")
