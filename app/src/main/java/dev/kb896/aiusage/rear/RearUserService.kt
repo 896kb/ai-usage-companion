@@ -641,7 +641,7 @@ for p in com.xiaomi.subscreencenter com.xiaomi.mirror com.android.systemui miui.
   [ -n "${'$'}cp" ] && echo "  ${'$'}p: ${'$'}vn @ ${'$'}cp"
 done
 echo "system apps running an installed update:"
-pm list packages -s -f 2>/dev/null | grep '/data/app/' | sed 's/.*=//' | sort | tr '\\n' ' ' | fold -s -w 110 | sed 's/^/  /'
+pm list packages -s -f 2>/dev/null | grep '/data/app/' | sed 's/.*=//' | sort | xargs -n 5 | sed 's/^/  /'
 echo
 echo "rear launcher components registered:"
 dumpsys package 2>/dev/null | grep -oiE '[a-z0-9_.]+/[a-z0-9_.]*Sub[sS]creen[a-zA-Z]*Launcher[a-zA-Z]*' | sort -u | head -8
