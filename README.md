@@ -1325,7 +1325,10 @@ operations knock it over, and when it is down this app simply cannot place the p
    phone → tap *OS version* seven times, then Settings → Additional settings → Developer
    options).
 3. Open Shizuku and use **Start via Wireless debugging**. It walks you through pairing.
-4. Open this app and grant Shizuku permission when it asks.
+4. Open this app. The first-run list has two rows for it: **Shizuku running** opens
+   Shizuku's app (or its site, before it is installed), and **Allow this app in Shizuku**
+   asks Shizuku for the permission — allow it in the dialog. A Shizuku that is running but
+   has not allowed this app is the second row unticked, not the first.
 
 **After every reboot, Shizuku must be started again.** Its own notification is the
 quickest route back.

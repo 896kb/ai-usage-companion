@@ -1415,7 +1415,10 @@ class MainActivity : ComponentActivity() {
                     if (intent == null) {
                         // Shizuku: granted in-app. onResume re-reads the state when the
                         // system dialog returns, so the row ticks itself.
-                        graph.bridge.requestPermission(this@MainActivity)
+                        // The request goes nowhere while Shizuku is down; say so rather
+                        // than let the tap fall silent.
+                        if (!graph.bridge.status().running) toast("Start Shizuku first — the row above")
+                        else graph.bridge.requestPermission(this@MainActivity)
                         return@setOnClickListener
                     }
                     try {
