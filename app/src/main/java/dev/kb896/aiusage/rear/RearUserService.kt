@@ -126,8 +126,11 @@ class RearUserService : IRearService.Stub {
         exec("input -d $displayId keyevent KEYCODE_WAKEUP")
     }
 
-    override fun show(payload: String, displayId: Int) {
-        if (displayId < 0) return
+    /** show() and ensureOnRear() both place; two at once moved the same task twice and the second threw. */
+    private val placing = Any()
+
+    override fun show(payload: String, displayId: Int) = synchronized(placing) {
+        if (displayId < 0) return@synchronized
         lastPayload = payload
         startKeepAlive(displayId)
         // The cheap path — already placed, just push new numbers — must ALSO require
@@ -267,8 +270,8 @@ class RearUserService : IRearService.Stub {
         exec("am kill $CAMERA_PACKAGE")
     }
 
-    override fun ensureOnRear(displayId: Int): Boolean {
-        if (displayId < 0) return false
+    override fun ensureOnRear(displayId: Int): Boolean = synchronized(placing) {
+        if (displayId < 0) return@synchronized false
         if (panelWhere() != Where.MAIN) { strandStrikes = 0; return false }
         val task = taskId()
         if (task <= 0) return false
