@@ -634,6 +634,15 @@ for p in $(pm list packages -u 2>/dev/null | sed 's/package://' | grep -iE 'subs
   echo "  ${'$'}p:${'$'}st"
 done
 echo
+echo "system apps around the rear display: factory build or installed update (code path), and version:"
+for p in com.xiaomi.subscreencenter com.xiaomi.mirror com.android.systemui miui.systemui.plugin com.miui.securitycenter com.xiaomi.misubscreenui; do
+  cp=$(dumpsys package ${'$'}p 2>/dev/null | grep -E '^ *codePath=' | head -1 | sed 's/ *codePath=//')
+  vn=$(dumpsys package ${'$'}p 2>/dev/null | grep -E '^ *versionName=' | head -1 | sed 's/ *versionName=//')
+  [ -n "${'$'}cp" ] && echo "  ${'$'}p: ${'$'}vn @ ${'$'}cp"
+done
+echo "system apps running an installed update:"
+pm list packages -s -f 2>/dev/null | grep '/data/app/' | sed 's/package://; s#/data/app/[^/]*/##; s/-[^=]*=/ = /' | sort | head -40 | sed 's/^/  /'
+echo
 echo "rear launcher components registered:"
 dumpsys package 2>/dev/null | grep -oiE '[a-z0-9_.]+/[a-z0-9_.]*Sub[sS]creen[a-zA-Z]*Launcher[a-zA-Z]*' | sort -u | head -8
 echo
