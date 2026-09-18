@@ -52,6 +52,12 @@ object Setup {
         XIAOMI_APP,
     }
 
+    /** Shizuku's own app when it is installed; its site, where it is downloaded from, when not. */
+    private fun shizukuIntent(context: Context): Intent =
+        context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+            ?: Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/"))
+    private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+
     /**
      * Whether HyperOS's rear-screen app is installed for this user: true if it is, false
      * if it has been hidden with `pm uninstall --user 0`, null if this phone has no such
@@ -70,15 +76,27 @@ object Setup {
 
     fun steps(context: Context, shizukuGranted: Boolean, shizukuRunning: Boolean): List<Step> =
         listOfNotNull(
+            // Two rows, because they are two different things to do: starting Shizuku
+            // happens in Shizuku's own app (or, before that, on its site), and allowing
+            // this app happens in a dialog Shizuku shows when this app asks. One row for
+            // both left a running-but-not-allowed Shizuku looking the same as an absent
+            // one, and a tap that could do nothing until Shizuku was up.
             Step(
-                title = "Shizuku",
+                title = "Shizuku running",
                 why = "The rear display refuses an ordinary app. Shizuku lends this one " +
-                    "the privilege to move a window there.",
+                    "the privilege to move a window there. Start it from its own app — " +
+                    "Wireless debugging is the way without a computer.",
+                satisfied = shizukuRunning,
+                open = { shizukuIntent(context) },
+                kind = Kind.OPEN,
+            ),
+            Step(
+                title = "Allow this app in Shizuku",
+                why = "Shizuku asks once whether this app may use it. Until you allow it, " +
+                    "nothing here can reach the rear display. This row asks again.",
+                // Not ticked while Shizuku is down even if it once said yes: the privilege
+                // is only real while Shizuku is there to lend it.
                 satisfied = shizukuRunning && shizukuGranted,
-                // Granting happens in-app through the bridge, not in a settings page, so
-                // this row carries no intent — MainActivity wires the tap to the request
-                // instead. Left null rather than pointed at Shizuku's own app, which may
-                // not be installed and whose page cannot grant anything on our behalf.
                 open = null,
                 kind = Kind.SHIZUKU,
             ),
