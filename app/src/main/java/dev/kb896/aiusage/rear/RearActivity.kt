@@ -403,6 +403,7 @@ class RearActivity : Activity() {
                 if (!aodOn) exitAod()
                 armSleep()
             }
+            if (!decoded.config.aodPocket) pocketWatch(false) else if (inAod) pocketWatch(true)
             calibrationView.geometry = PanelGeometry.of(decoded.config.effectiveRingLayout)
         }
     }
@@ -747,6 +748,9 @@ class RearActivity : Activity() {
         override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
     }
     private fun pocketWatch(on: Boolean) {
+        // A switch, off by default: a sensor that reads covered in the hand makes this
+        // the panel going black for no reason anyone can see.
+        if (on && !dial.config.aodPocket) { pocketWatch(false); return }
         if (on == pocketWatching) return
         val sensor = pocketSensor
         if (sensor == null) { Log.w(TAG, "always-on: no rear proximity sensor — no pocket mode"); return }

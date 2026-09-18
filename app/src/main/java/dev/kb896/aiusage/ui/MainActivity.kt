@@ -775,6 +775,11 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 container, "  ↳ battery level above the clock", config.aodBattery,
             ) { on -> write { it.copy(aodBattery = on) } }
+            // Off by default: on a phone whose rear proximity sensor reads covered in the
+            // hand, pocket mode is the panel going black for no reason anyone can see.
+            SettingsRows.toggle(
+                container, "  ↳ pocket mode: display off when the back is covered", config.aodPocket,
+            ) { on -> write { it.copy(aodPocket = on) } }
         }
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.

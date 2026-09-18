@@ -304,6 +304,12 @@ data class PanelConfig(
     /** In always-on, the battery level above the clock. */
     val aodBattery: Boolean = false,
     /**
+     * In always-on, let the display go when the rear proximity sensor reads covered — a
+     * pocket, a bag. Off by default: on a phone whose sensor reads covered in the hand,
+     * it is the panel going black for no visible reason. See RearActivity.pocketWatch.
+     */
+    val aodPocket: Boolean = false,
+    /**
      * The whole panel drawn as if on a curved tube — scanlines, a shadow mask, a
      * vignette, the picture bent outwards — the terminal's look on 896.ro. Off by
      * default: it is a look, and it bends the picture. See CrtScreen.
