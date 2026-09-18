@@ -143,11 +143,25 @@ class RearUserService : IRearService.Stub {
             if (!dozing) wake(displayId)
             return
         }
-        exec("am start -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
-        val task = pollTaskId()
-        if (task <= 0) { Log.e(TAG, "RearActivity task never appeared"); return }
-        val moved = moveToDisplay(task, displayId)
-        Log.d(TAG, "move task=$task -> display=$displayId : $moved")
+        // Straight onto the rear display first: the manifest's miui.rear.policy makes
+        // HyperOS allow it (ActivityStarterImpl logs "allow app"), so the panel never
+        // touches the front screen. HyperOS still aborts the start while the keyguard
+        // is locked, for every app outside its own list — then no task appears, and the
+        // old way is taken: start on the front screen, move the task across.
+        exec("am start --display $displayId -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
+        var task = pollTaskId()
+        if (task > 0 && panelWhere() == Where.REAR) {
+            Log.d(TAG, "task=$task started on display $displayId directly")
+        } else {
+            if (task <= 0) {
+                Log.i(TAG, "start on display $displayId was refused (keyguard?) — starting on the front and moving")
+                exec("am start -n $PKG/$ACTIVITY --es state ${shellQuote(payload)}")
+                task = pollTaskId()
+                if (task <= 0) { Log.e(TAG, "RearActivity task never appeared"); return }
+            }
+            val moved = moveToDisplay(task, displayId)
+            Log.d(TAG, "move task=$task -> display=$displayId : $moved")
+        }
 
         // A command that did not complain still proves only that it was accepted, not
         // that the panel is on screen. Confirm with the window manager.

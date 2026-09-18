@@ -1306,6 +1306,19 @@ when someone's panel goes black after ten seconds and yours does not.
 - **[Shizuku](https://shizuku.rikka.app/)**, running. Non-negotiable — see below.
 - A Claude account with Claude Code access.
 
+## The rear-display policy HyperOS checks
+
+Before HyperOS lets an activity start on the rear display it asks whether the app has
+declared itself a rear-display app: a manifest meta-data `miui.rear.policy`, 1 for
+allowed, 0 for not (`ActivityStarterImpl.isShouldShowOnRearDisplay` in miui-services,
+which logs "allow app" or "should not allow app"). Without it every start aimed at the
+rear display is aborted, and a panel could only ever be started on the front screen and
+moved across afterwards — which is what a panel "respawning on the front screen" looks
+like when the system relaunches it. This app declares it, for the app and for the
+panel's activity, and starts the panel on the rear display directly. One exception is
+HyperOS's own: while the keyguard is locked only its own list of apps may start there,
+so the panel then starts on the front screen and is moved, as it always was.
+
 ## Shizuku, and why you cannot skip it
 
 The rear display will not host an app you simply launch at it. Getting a window there

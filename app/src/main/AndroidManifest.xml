@@ -23,6 +23,17 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <!--
+          HyperOS asks, before it lets an activity start on the rear display, whether the
+          app declares itself a rear-display app: meta-data miui.rear.policy, 1 for
+          allowed, 0 for not, unset otherwise — ActivityStarterImpl.isShouldShowOnRearDisplay
+          in miui-services, which logs "allow app" / "should not allow app". Without it,
+          every start of the panel aimed at the rear display is aborted, and the panel
+          could only ever be started on the front screen and moved across afterwards —
+          which is what a panel "respawning on the front screen" looks like when the
+          system relaunches it. Declared for the app and again on the panel's activity.
+        -->
+        <meta-data android:name="miui.rear.policy" android:value="1" />
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">
@@ -54,7 +65,9 @@
             android:excludeFromRecents="true"
             android:screenOrientation="nosensor"
             android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
-            android:theme="@style/RearTheme" />
+            android:theme="@style/RearTheme">
+            <meta-data android:name="miui.rear.policy" android:value="1" />
+        </activity>
 
         <!--
           Mirrors other apps' notifications to the rear panel. Binding requires the
