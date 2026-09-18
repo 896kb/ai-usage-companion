@@ -696,9 +696,19 @@ class RearActivity : Activity() {
 
     // ---- the pocket: the rear proximity sensor, or the best sensor the phone has ----
     private val sensors by lazy { getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager }
+    /**
+     * The proximity sensor on the BACK of the phone, and only that one. Xiaomi names it
+     * "xiaomi.sensor.proxmity_back" (sic) on the 17 Pro; matched loosely in case another
+     * model spells it differently. Never the front sensor: falling back to it made the
+     * panel read "in a pocket" whenever the phone was held or lay on its face — and let
+     * the display go, which is what a panel going black ten seconds after a wake looked
+     * like on phones where the name did not match.
+     */
     private val pocketSensor: android.hardware.Sensor? by lazy {
-        sensors.getSensorList(android.hardware.Sensor.TYPE_ALL).firstOrNull { it.stringType == "xiaomi.sensor.proxmity_back" }
-            ?: sensors.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY)
+        val all = sensors.getSensorList(android.hardware.Sensor.TYPE_ALL)
+        val rear = Regex("(?i)prox.*(back|rear|sub)|(back|rear|sub).*prox")
+        all.firstOrNull { it.stringType == "xiaomi.sensor.proxmity_back" }
+            ?: all.firstOrNull { rear.containsMatchIn(it.stringType) || rear.containsMatchIn(it.name) }
     }
     private var pocketWatching = false
     private val pocketSleep: Runnable = Runnable {
@@ -738,7 +748,8 @@ class RearActivity : Activity() {
     private fun pocketWatch(on: Boolean) {
         if (on == pocketWatching) return
         val sensor = pocketSensor
-        if (sensor == null) { Log.w(TAG, "always-on: no proximity sensor — no pocket mode"); return }
+        if (sensor == null) { Log.w(TAG, "always-on: no rear proximity sensor — no pocket mode"); return }
+        if (on) Log.i(TAG, "pocket mode: watching ${sensor.name} (${sensor.stringType}), range ${sensor.maximumRange}")
         pocketWatching = on
         if (on) sensors.registerListener(pocketListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
         else { sensors.unregisterListener(pocketListener); window.decorView.removeCallbacks(pocketSleep) }
