@@ -79,7 +79,9 @@ class RearDialView(context: Context) : View(context) {
     /** The rings round the lenses, which the tube must not move: ring radius plus half the stroke. */
     private fun crtStills(): List<CrtScreen.Still> {
         val g = PanelGeometry.of(config.ringLayout)
-        return listOf(g.personal, g.work).map { CrtScreen.Still(it.cx, it.cy, it.radius + it.stroke / 2f + 4f) }
+        return listOf(g.personal, g.work).map {
+            CrtScreen.Still(it.cx * fitX, it.cy * fitY, (it.radius + it.stroke / 2f + 4f) * maxOf(fitX, fitY))
+        }
     }
 
     /** A touch on the tube, moved to the flat pixel the tube shows there. No-op without the CRT. */
@@ -1300,13 +1302,41 @@ class RearDialView(context: Context) : View(context) {
             crtNode.endRecording()
         }
         recorder!!.drawRenderNode(crtNode)
-        // over the tube, untouched by it
+        // over the tube, untouched by it — in panel units like everything else
         glowOverTube = true
-        try { drawTableGlow(canvas) } finally { glowOverTube = false }
+        canvas.save()
+        canvas.scale(fitX, fitY)
+        try { drawTableGlow(canvas) } finally { glowOverTube = false; canvas.restore() }
     }
 
     /** The picture itself: the scene, refracted or flat, and its overlays. */
+    /**
+     * The panel is laid out in the 17 Pro's 904x572 and scaled to the rear display it is
+     * actually on — the 17 Pro Max's is 976x596 — so nothing below needs to know which
+     * phone this is. Everything inside draws in panel units; only the tube (CrtScreen)
+     * and touches live in real pixels. Per axis, so the whole display is used; the two
+     * ratios differ by under four per cent on the Pro Max, which no ring shows.
+     */
+    val fitX: Float get() = if (width > 0) width / Panel.WIDTH.toFloat() else 1f
+    val fitY: Float get() = if (height > 0) height / Panel.HEIGHT.toFloat() else 1f
+
+    /** A touch in real pixels, moved into panel units for everything that reads it. */
+    fun toPanel(ev: android.view.MotionEvent) {
+        if (fitX == 1f && fitY == 1f) return
+        ev.transform(android.graphics.Matrix().apply { setScale(1f / fitX, 1f / fitY) })
+    }
+
     private fun drawPicture(canvas: Canvas) {
+        canvas.save()
+        canvas.scale(fitX, fitY) // panel units from here on
+        try {
+            drawPictureInPanelUnits(canvas)
+        } finally {
+            canvas.restore()
+        }
+    }
+
+    private fun drawPictureInPanelUnits(canvas: Canvas) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         pendingButtons.clear()
@@ -1318,8 +1348,8 @@ class RearDialView(context: Context) : View(context) {
             // setPosition says where it goes. Without it the node has empty bounds and
             // draws nothing at all — the panel came up as two notification cards floating
             // on black, with the readout recorded perfectly and placed nowhere.
-            sceneNode.setPosition(0, 0, width, height)
-            val scene = sceneNode.beginRecording(width, height)
+            sceneNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
+            val scene = sceneNode.beginRecording(Panel.WIDTH, Panel.HEIGHT)
             recordingScene = true
             try {
                 drawFrame(scene, overlays = false)
@@ -1360,7 +1390,7 @@ class RearDialView(context: Context) : View(context) {
     private fun drawMist(canvas: Canvas) {
         if (weatherMode() != Weather.RAIN || width <= 0 || height <= 0) return
         val shader = Weather.mist
-        shader.setFloatUniform("size", width.toFloat(), height.toFloat())
+        shader.setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         shader.setFloatUniform("mode", 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
         setLenses(shader)
@@ -1555,8 +1585,8 @@ class RearDialView(context: Context) : View(context) {
     ): android.graphics.RenderNode {
         val out = nextNode()
         out.setRenderEffect(null)
-        out.setPosition(0, 0, width, height)
-        val into = out.beginRecording(width, height)
+        out.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
+        val into = out.beginRecording(Panel.WIDTH, Panel.HEIGHT)
         paneBackdrop = backdrop
         try {
             into.drawRenderNode(backdrop)
@@ -2745,8 +2775,8 @@ class RearDialView(context: Context) : View(context) {
             // node and it is drawn once. That node is what the cards refract.
             val behind = canvas as? android.graphics.RecordingCanvas
             if (behind != null && config.theme.isGlass && width > 0 && height > 0) {
-                groundNode.setPosition(0, 0, width, height)
-                val into = groundNode.beginRecording(width, height)
+                groundNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
+                val into = groundNode.beginRecording(Panel.WIDTH, Panel.HEIGHT)
                 try {
                     drawWeatheredGround(into)
                     // The record is contents, so it goes when the panel does. The two
@@ -6035,7 +6065,8 @@ class RearDialView(context: Context) : View(context) {
         val fromWindow = rootWindowInsets
             ?.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT)
             ?.radius
-        return (fromWindow?.toFloat() ?: FALLBACK_CORNER).also { cornerRadius = it }
+        // real pixels from the window, brought into panel units
+        return ((fromWindow?.toFloat() ?: FALLBACK_CORNER) / fitX).also { cornerRadius = it }
     }
 
     private var cornerRadius: Float? = null

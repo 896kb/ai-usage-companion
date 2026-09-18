@@ -642,6 +642,7 @@ class RearUserService : IRearService.Stub {
         private val REPORT = """
 echo "device: $(getprop ro.product.marketname) / $(getprop ro.product.model) / $(getprop ro.product.device)"
 echo "os: HyperOS $(getprop ro.mi.os.version.name) $(getprop ro.mi.os.version.incremental) | android $(getprop ro.build.version.release) | region $(getprop ro.miui.region) | build $(getprop ro.build.version.incremental)"
+echo "rear display: $(wm size -d 1 2>/dev/null | tr -d '\n') $(wm density -d 1 2>/dev/null | tr -d '\n')"
 echo "props: cover_mode=$(getprop persist.sys.dual_screen_cover_mode_enable) multidisplay_type=$(getprop persist.sys.muiltdisplay_type)"
 echo "settings: subscreen_display_time=$(settings get system subscreen_display_time) rear_doze_always_on=$(settings get secure rear_doze_always_on) doze_always_on=$(settings get secure doze_always_on) stay_on_while_plugged_in=$(settings get global stay_on_while_plugged_in)"
 echo
