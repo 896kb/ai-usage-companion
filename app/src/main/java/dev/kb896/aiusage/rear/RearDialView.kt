@@ -1002,7 +1002,10 @@ class RearDialView(context: Context) : View(context) {
         val half = if (aodClockSpan > 0f) aodClockSpan / 2f + AOD_BAND_AIR else Panel.WIDTH.toFloat()
         return RectF(
             aodClockCx - half, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
-            aodClockCx + half, CLOCK_BASELINE + CLOCK_SIZE * 0.2f,
+            // Stops just under the baseline: the figures have no descenders, and the old
+            // fifth of the clock's height below it reached into the top of the date's
+            // glass card, which then sat eight pixels brighter than the rest of it.
+            aodClockCx + half, minOf(CLOCK_BASELINE + AOD_BAND_BELOW, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y - 1f),
         )
     }
     /** Where the clock page last drew its clock: centre and full width, seconds and all. */
@@ -10876,7 +10879,8 @@ class RearDialView(context: Context) : View(context) {
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
         const val AOD_VEIL_ALPHA = 0.6f
-        /** air either side of the clock inside its undimmed band */
+        /** air either side of the clock inside its undimmed band, and how far under its baseline the band goes */
+        const val AOD_BAND_BELOW = 4f
         const val AOD_BAND_AIR = 28f
         /** and the slider's own, lighter one */
         const val AOD_SLIDER_VEIL_ALPHA = 0.15f
