@@ -416,16 +416,18 @@ class MainActivity : ComponentActivity() {
             IntentFilter().apply {
                 addAction(RearActivity.ACTION_NOTIFICATION)
                 addAction(RearActivity.ACTION_MEDIA)
+                addAction(RearActivity.ACTION_MIRROR)
             },
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        // Ask what is playing, the same way the panel does on start — this screen can be
-        // opened long after the last thing the player said.
         sendBroadcast(
             Intent(RearActivity.ACTION_MEDIA_COMMAND)
                 .setPackage(packageName)
                 .putExtra(RearActivity.EXTRA_MEDIA_COMMAND, RearActivity.MEDIA_SYNC),
         )
+        // And the back's own state — page, always-on, slider — so the preview starts
+        // as a mirror rather than on the readout.
+        sendBroadcast(Intent(RearActivity.ACTION_MIRROR_SYNC).setPackage(packageName))
     }
 
     /** Feeds the preview the same broadcasts the panel gets. */
@@ -442,6 +444,17 @@ class MainActivity : ComponentActivity() {
                         .orEmpty(),
                     intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_MORE_TEXT)
                         .orEmpty(),
+                )
+                RearActivity.ACTION_MIRROR -> preview.mirror(
+                    dev.kb896.aiusage.rear.RearDialView.Mirror(
+                        page = intent.getIntExtra(RearActivity.EXTRA_MIRROR_PAGE, 1),
+                        aod = intent.getBooleanExtra(RearActivity.EXTRA_MIRROR_AOD, false),
+                        locked = intent.getBooleanExtra(RearActivity.EXTRA_MIRROR_LOCKED, false),
+                        ringsClosed = intent.getBooleanExtra(RearActivity.EXTRA_MIRROR_RINGS, false),
+                        tableGlow = intent.getBooleanExtra(RearActivity.EXTRA_MIRROR_TABLE, false),
+                        corner = intent.getFloatExtra(RearActivity.EXTRA_MIRROR_CORNER, 97f),
+                    ),
+                    dim = intent.getBooleanExtra(RearActivity.EXTRA_MIRROR_DIM, false),
                 )
                 RearActivity.ACTION_MEDIA -> preview.showMedia(
                     intent.getBooleanExtra(RearActivity.EXTRA_MEDIA_ACTIVE, false),

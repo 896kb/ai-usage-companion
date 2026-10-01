@@ -164,6 +164,17 @@ class RearActivity : Activity() {
          * composite identically. See IRearService.setDozing.
          */
         const val ACTION_DOZING = "dev.kb896.aiusage.DOZING"
+        /** What the front screen's preview mirrors — see RearDialView.Mirror. */
+        const val ACTION_MIRROR = "dev.kb896.aiusage.MIRROR"
+        const val ACTION_MIRROR_SYNC = "dev.kb896.aiusage.MIRROR_SYNC"
+        const val EXTRA_MIRROR_PAGE = "page"
+        const val EXTRA_MIRROR_AOD = "aod"
+        const val EXTRA_MIRROR_LOCKED = "locked"
+        const val EXTRA_MIRROR_RINGS = "rings"
+        const val EXTRA_MIRROR_TABLE = "table"
+        const val EXTRA_MIRROR_CORNER = "corner"
+        const val EXTRA_MIRROR_DIM = "dim"
+
         const val EXTRA_DOZING = "dozing"
         const val EXTRA_KEEPER = "keeper"
 
@@ -242,6 +253,7 @@ class RearActivity : Activity() {
                     intent.getIntExtra(EXTRA_CHARGE_PERCENT, -1)
                         .let { if (it in 0..100) it else -1 },
                 )
+                ACTION_MIRROR_SYNC -> dial.republishMirror()
                 ACTION_LOCK -> lockPanel()
                 ACTION_NOTIFICATION -> { peekForNotice(); dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
@@ -317,6 +329,8 @@ class RearActivity : Activity() {
 
         calibrationView = CalibrationView(this)
         dial = RearDialView(this)
+        dial.onMirror = { m -> lastMirror = m; sendMirror() }
+
         // Fire-and-forget across the process boundary. This process cannot open the
         // camera itself — the Shizuku binding is in the main one — and it deliberately
         // learns nothing about whether the launch worked: there is no screen here to
@@ -373,6 +387,8 @@ class RearActivity : Activity() {
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
+                addAction(ACTION_MIRROR_SYNC)
+
             },
             ContextCompat.RECEIVER_EXPORTED,
         )
@@ -546,7 +562,8 @@ class RearActivity : Activity() {
         Log.i(TAG, "double tap: flag=0x${flag.toString(16)} miuiFlags=${viaMiuiFlags} setExtraFlags=${viaMethod}")
     }
 
-    private fun beginDim() {
+    private fun beginDim() { beginDimInner(); sendMirror() }
+    private fun beginDimInner() {
         if (!sleepStage.doubleTap(SystemClock.uptimeMillis())) return
         window.decorView.removeCallbacks(sleepPanel)
         // Let go of the display NOW, not when the dim ends. Releasing the hold makes the
@@ -572,7 +589,8 @@ class RearActivity : Activity() {
      * up behind a dark screen, or a second double tap called it off and the panel is back
      * at full brightness with its ordinary sleep timer running.
      */
-    private fun endDim(off: Boolean) {
+    private fun endDim(off: Boolean) { endDimInner(off); sendMirror() }
+    private fun endDimInner(off: Boolean) {
         sleepStage.reset()
         veil?.let { v -> (v.parent as? ViewGroup)?.removeView(v) }
         if (off) {
@@ -620,6 +638,19 @@ class RearActivity : Activity() {
     }
 
     private var holding = true
+    private var lastMirror: RearDialView.Mirror? = null
+    /** The back's state for the front screen's preview; the dim rides along, it being the window's, not the view's. */
+    private fun sendMirror() {
+        val m = lastMirror ?: return
+        sendBroadcast(
+            Intent(ACTION_MIRROR).setPackage(packageName)
+                .putExtra(EXTRA_MIRROR_PAGE, m.page).putExtra(EXTRA_MIRROR_AOD, m.aod)
+                .putExtra(EXTRA_MIRROR_LOCKED, m.locked).putExtra(EXTRA_MIRROR_RINGS, m.ringsClosed)
+                .putExtra(EXTRA_MIRROR_TABLE, m.tableGlow).putExtra(EXTRA_MIRROR_CORNER, m.corner)
+                .putExtra(EXTRA_MIRROR_DIM, sleepStage.dimming),
+        )
+    }
+
 
     /** The user's answer to whether the panel should ever sleep. See PanelConfig. */
     private var keepAwake = false

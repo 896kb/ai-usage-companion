@@ -287,6 +287,13 @@ It is also inert: nothing on it can be pressed or dragged. It sits inside a scro
 settings page, so before that every drag past it was handed to the panel's pager, and
 scrolling the app quietly scrolled the preview onto the media page.
 
+It mirrors the back's own state as well, not only its data: the page the back is on,
+always-on, the unlock slider, the rings closed for sleep, the table lights and the double
+tap's dim all show on the preview as they happen, published by the panel whenever one of
+them changes and asked for once when the settings screen opens. And the preview is cut to
+the rear display's own rounded corners, at the radius the panel measured from its window
+— so it is the shape of the back, on whichever phone.
+
 ## On the front screen too
 
 An ongoing notification carries both accounts, and on HyperOS it drives the

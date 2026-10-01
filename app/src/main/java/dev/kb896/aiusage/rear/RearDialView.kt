@@ -3182,7 +3182,9 @@ class RearDialView(context: Context) : View(context) {
         // fading in or out of always-on is itself a second of frames
         if (aod || aodUntil > 0) { if (aodFade(frameNowMs) in 0.001f..0.999f) animating = true }
         if (ringsAt != 0L && frameNowMs - ringsAt < AOD_FADE_MS) animating = true
+        publishMirror()
         if (animating && displayAwake && !frozen(frameNowMs)) postInvalidateOnAnimation()
+
     }
 
     /** When the cell arrived, and what it is filling to. */
@@ -6738,6 +6740,39 @@ class RearDialView(context: Context) : View(context) {
     private val homePage: Int get() = if (readoutGone) PAGE_NOTICES else PAGE_READOUT
     private val mediaPage: Int get() = if (readoutGone) 1 else PAGE_MEDIA
     private var readoutWasGone = false
+
+    /**
+     * What the preview on the front screen mirrors so that it shows what the back
+     * shows: the page, always-on, the slider, the closed rings, the table lights, and
+     * the display's own corner radius. The panel publishes one whenever it changes;
+     * the preview applies it. Everything else the two already share — the state, the
+     * config, the notifications and the media arrive at both by the same broadcasts.
+     */
+    data class Mirror(
+        val page: Int, val aod: Boolean, val locked: Boolean, val ringsClosed: Boolean,
+        val tableGlow: Boolean, val corner: Float,
+    )
+    var onMirror: ((Mirror) -> Unit)? = null
+    private var lastMirror: Mirror? = null
+    private fun publishMirror() {
+        val cb = onMirror ?: return
+        val m = Mirror(pager.page, aod, locked, ringsClosed, tableGlow, cornerRadius())
+        if (m != lastMirror) { lastMirror = m; cb(m) }
+    }
+    /** Have the mirror published again on the next frame, whether or not it changed. */
+    fun republishMirror() { lastMirror = null; invalidate() }
+
+    /** The preview takes the back's state. The corner is the back's measured one, not this window's. */
+    fun mirror(m: Mirror) {
+        cornerRadius = m.corner
+        if (ringsClosed != m.ringsClosed) ringsClosed = m.ringsClosed
+        if (tableGlow != m.tableGlow) tableGlow = m.tableGlow
+        if (aod != m.aod) aod = m.aod
+        if (m.locked && !locked) lock() else if (!m.locked && locked) unlock()
+        if (!aod && pager.page != m.page) pager.goTo(m.page, SystemClock.uptimeMillis())
+        invalidate()
+    }
+
     /** Whether the media page was wanted last frame, and whether that has been seen at all yet. */
     private var mediaPageWasWanted = false
     private var mediaWantKnown = false

@@ -75,15 +75,45 @@ class PanelPreviewView @JvmOverloads constructor(
         durationMs, positionMs, positionAtMs, speed, lyricsLrc, lyricsFor,
     )
 
+    /** The back's corner radius in panel pixels, until the back says otherwise. */
+    private var cornerPx = DEFAULT_CORNER
+    private var dimming = false
+    private val veil = android.graphics.Paint()
+
     init {
-        // Fixed at the panel's own size. The scale below does the fitting, so the child
-        // never has to know it is being previewed and its layout constants stay honest.
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
         clipChildren = true
-        // A picture, not a control. See RearDialView.interactive: this sits inside the
-        // settings page's scroll view, so without it every drag past the preview was
-        // handed to the panel's pager and quietly scrolled the preview to another page.
         dial.interactive = false
+        // The real display's rounded corners, so the preview is the shape of the back.
+        clipToOutline = true
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, cornerPx * view.width / Panel.WIDTH)
+            }
+        }
+    }
+
+    /** The back's state: page, always-on, slider, rings, table lights, corner — and its dim. */
+    fun mirror(m: RearDialView.Mirror, dim: Boolean) {
+        if (cornerPx != m.corner) { cornerPx = m.corner; invalidateOutline() }
+        dial.mirror(m)
+        if (dimming != dim) { dimming = dim; invalidate() }
+    }
+
+    override fun dispatchDraw(canvas: android.graphics.Canvas) {
+        super.dispatchDraw(canvas)
+        // The double tap's dim is the window's brightness and a veil on the back; here
+        // only a veil can stand for both.
+        if (dimming) {
+            veil.color = (255 * DIM_VEIL).toInt() shl 24
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), veil)
+        }
+    }
+
+    private companion object {
+        /** The 17 Pro's rear display corner, in its own pixels, until measured. */
+        const val DEFAULT_CORNER = 97f
+        const val DIM_VEIL = 0.7f
     }
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
