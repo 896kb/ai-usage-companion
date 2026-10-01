@@ -924,6 +924,8 @@ class RearDialView(context: Context) : View(context) {
             invalidate()
         }
     private var aodReturnPage = PAGE_READOUT
+    /** Until when a clock figure is rolling over; the always-on freeze waits for it. */
+    private var clockRollUntil = 0L
     private var aodSince = 0L
     private var aodUntil = 0L
     private var aodWallAt = 0L
@@ -964,7 +966,7 @@ class RearDialView(context: Context) : View(context) {
      * along on the minute tick before this.
      */
     private fun frozen(now: Long): Boolean =
-        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating()
+        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating() && now >= clockRollUntil
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -8413,6 +8415,7 @@ class RearDialView(context: Context) : View(context) {
             val was = clockRolls[key]
             if (was == null || was.first != ch) {
                 clockRolls[key] = ch to (if (was == null) 0L else frameNowMs)
+                if (was != null) clockRollUntil = frameNowMs + CLOCK_ROLL_MS.toLong() // a frozen page thaws for the roll
             }
             val state = clockRolls[key]!!
             val since = frameNowMs - state.second
