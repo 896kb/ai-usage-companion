@@ -1387,8 +1387,8 @@ class RearDialView(context: Context) : View(context) {
         shader.setFloatUniform("lensB", lay.cx.toFloat(), lay.cySecond.toFloat(), r)
     }
 
-    private fun drawMist(canvas: Canvas) {
-        if (weatherMode() != Weather.RAIN || width <= 0 || height <= 0) return
+    private fun drawMist(canvas: Canvas, keep: Float = 1f) {
+        if (weatherMode() != Weather.RAIN || width <= 0 || height <= 0 || keep <= 0.001f) return
         val shader = Weather.mist
         shader.setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         shader.setFloatUniform("mode", 0f)
@@ -1398,8 +1398,10 @@ class RearDialView(context: Context) : View(context) {
             "time", (frameNowMs % (Weather.PERIOD_S * 1000L).toLong()) / 1000f,
         )
         mistPaint.shader = shader
+        mistPaint.alpha = (255 * keep).toInt()
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         canvas.drawRect(panelRect, mistPaint)
+        mistPaint.alpha = 255
     }
 
     private val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -2652,7 +2654,14 @@ class RearDialView(context: Context) : View(context) {
                 // rather than one page up from it.
                 val saved = panelPrefs.getInt(KEY_PAGE, PAGE_READOUT)
                     .coerceIn(0, pager.pages - 1)
-                if (saved != PAGE_READOUT) {
+                if (aod) {
+                    // Always-on owns the page while it is up — a panel re-placed while the
+                    // display was off enters it before its first frame, and this restore
+                    // then put the readout under the veil. The saved page is where the
+                    // swipe returns to; the clock page is what shows.
+                    aodReturnPage = saved
+                    pager.goTo(PAGE_NOTICES, frameNowMs)
+                } else if (saved != PAGE_READOUT) {
                     pager.goTo(saved, frameNowMs)
                 } else {
                     pager.goTo(PAGE_READOUT, frameNowMs)
@@ -2664,8 +2673,15 @@ class RearDialView(context: Context) : View(context) {
             // and the page it was about goes with it. Walk back rather than cutting: the
             // panel drops a page only once it has actually returned to the first one, so
             // what you see is the readout arriving, not the panel blinking.
-            pager.settleTo(PAGE_READOUT, frameNowMs)
-            if (pager.restingAt(PAGE_READOUT)) pager.pages = 2
+            // In always-on the clock page stays where it is; only the page the swipe
+            // returns to moves.
+            if (aod) {
+                if (aodReturnPage == PAGE_MEDIA) aodReturnPage = PAGE_READOUT
+                if (pager.restingAt(PAGE_NOTICES)) pager.pages = 2
+            } else {
+                pager.settleTo(PAGE_READOUT, frameNowMs)
+                if (pager.restingAt(PAGE_READOUT)) pager.pages = 2
+            }
         }
         // Two pages even with nothing playing: the notifications are always there. Only a
         // single-account preview has no paging at all, which is what it has always had.
@@ -10286,6 +10302,9 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun prepareWeather(): Boolean {
         if (weatherMode() == Weather.OFF || width <= 0 || height <= 0) return false
+        // Nothing falls on a frozen page: the weather fades with the backdrop and is not
+        // even prepared once always-on has settled — its shader is the dearest thing here.
+        if (aodFade(frameNowMs) >= 0.999f) return false
         // THE GROUND, AS A TEXTURE. Rebuilt only when the background changes — it is a
         // colour and a photograph, and neither moves between frames.
         val key = (config.backdrop.imagePath ?: "-") + "|" + groundColor + "|" +
@@ -10346,31 +10365,20 @@ class RearDialView(context: Context) : View(context) {
      * draw a node into at all.
      */
     private fun drawWeatheredGround(canvas: Canvas) {
-        if (weatherReady) {
+        val keep = 1f - aodFade(frameNowMs)
+        if (weatherReady && keep > 0.001f) {
+            // On the way into always-on the weather thins out over the plain ground, which
+            // is itself fading to black underneath; the weather's own ground is a cached
+            // bitmap that knows nothing of the fade, so it must not be the only thing drawn.
+            if (keep < 0.999f) {
+                canvas.drawColor(groundColor)
+                drawBackdropImage(canvas)
+            }
             panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
-            // NO LAYER HERE, ANY MORE.
-            //
-            // There was one, on the theory that a glass pane sampling a node that contains
-            // a self-displacing RuntimeShader makes Skia abandon whole tiles — which would
-            // have explained rectangles that appeared only under GLASS and never under
-            // snow, snow being the one mode that does not displace. It explained the
-            // evidence and it was wrong: the rectangles were a missing horizontal term in
-            // the water, and they outlived this layer by several commits.
-            //
-            // It cost a full-panel saveLayer every frame, which is the sort of thing that
-            // gets left behind when a fix is kept "just in case" — so it goes, and the
-            // weather paints straight onto the ground.
+            weatherPaint.alpha = (255 * keep).toInt()
             canvas.drawRect(panelRect, weatherPaint)
-            // WITH THE WATER, NOT IN FRONT OF THE PANEL. The fog was drawn last, over
-            // everything, while the drops are part of the ground and sit behind the vinyl
-            // and the cards — so the weather was on both sides of the panel at once, half
-            // of it behind the record and half of it painted across the label.
-            //
-            // It was put out there while the rectangles were being blamed on the panes
-            // bending it. They were not; they were a missing term in the water itself, and
-            // with that fixed there is no reason for the fog to be anywhere but on the
-            // same pane of glass as the drops running down it.
-            drawMist(canvas)
+            weatherPaint.alpha = 255
+            drawMist(canvas, keep)
             drawAodBandVeil(canvas)
             return
         }
