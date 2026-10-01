@@ -3071,6 +3071,12 @@ class RearDialView(context: Context) : View(context) {
             // screen — which is what happened, and you cannot press what has left. The
             // record gives up the room instead.
             canvas.translate(dx, dy)
+            // With the readout, the media page is a morph: the transport and the title
+            // grow out of the readout's media strip as the swipe goes. Without it there
+            // is no strip to grow out of, and they merely appeared in place — so there
+            // the media page arrives as a page, sliding up from below while the clock
+            // page slides away above it. The rings stay put: they are the lenses'.
+            if (gone) canvas.translate(0f, (1f - paging) * Panel.HEIGHT)
             drawMediaPage(canvas, paging, dx, dy, panelPush, geometry, volumeFraction)
             canvas.restore()
         } else if (paging <= 0.001f) {
