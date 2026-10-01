@@ -55,6 +55,8 @@ object StatePayload {
                     put("hasSnapshot", s.snapshot != null)
                     s.planTier?.let { put("plan", it) }
                     put("mascot", s.mascot)
+                    put("connected", s.connected)
+
                     put("fetchedAt", s.snapshot?.fetchedAt ?: 0L)
                     putJsonArray("windows") {
                         s.snapshot?.windows?.forEach { w ->
@@ -111,6 +113,7 @@ object StatePayload {
                 } else null,
                 planTier = o.str("plan"),
                 mascot = o.str("mascot") ?: MascotMood.WALK,
+                connected = (o["connected"] as? JsonPrimitive)?.booleanOrNull ?: true,
             )
         }
         val weather = (root["weather"] as? JsonObject)?.let { w ->

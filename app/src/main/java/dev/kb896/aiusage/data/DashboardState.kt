@@ -22,6 +22,12 @@ data class AccountStatus(
     val planTier: String? = null,
     /** Which mascot clip this account's 5h window has earned. See MascotMood. */
     val mascot: String = MascotMood.WALK,
+    /**
+     * Whether a credential is stored for the account at all. False means never connected
+     * or signed out — not expired, which keeps its credential and is AUTH with this true.
+     * The panel leaves an account with no credential out of the readout altogether.
+     */
+    val connected: Boolean = true,
 )
 
 data class DashboardState(

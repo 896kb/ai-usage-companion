@@ -109,7 +109,7 @@ class UsageRepository(
         val stored = store.load(account)
             ?: run {
                 Log.i(TAG, "${account.slug}: no stored credential")
-                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), MascotMood.GHOST)
+                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), MascotMood.GHOST, connected = false)
             }
 
         val now = System.currentTimeMillis()

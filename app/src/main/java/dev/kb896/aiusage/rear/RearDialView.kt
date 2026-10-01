@@ -2629,15 +2629,20 @@ class RearDialView(context: Context) : View(context) {
         // be wrong.
         settlePresence(frameNowMs)
         val wantsMediaPage = onlyAccount == null && mediaPageAvailable()
-        // THE READOUT IS NO LONGER THE FIRST PAGE, and almost nothing below had to learn
-        // that. There is a notification page above it now, so the pager's own coordinates
-        // shift by one span — but `paging` is read in seventy-odd places downstream and
-        // every one of them means "how far onto the MEDIA page", so it keeps that meaning
-        // exactly and only its definition moves. What is new is `noticing`, which is the
-        // same question asked upwards.
-        val readoutAt = if (onlyAccount == null) Panel.HEIGHT.toFloat() else 0f
+        val gone = readoutGone
+        val basePages = if (gone) 1 else 2
+        if (gone != readoutWasGone) {
+            // The readout page came or went — an account connected, or the last one signed
+            // out. The pager's pages are renumbered, so it is put on the home page at once.
+            readoutWasGone = gone
+            pager.pages = basePages + (if (wantsMediaPage) 1 else 0)
+            pager.goTo(homePage, frameNowMs)
+            pager.advance(frameNowMs + PAGE_SETTLE_MS.toLong())
+            if (aod) aodReturnPage = homePage
+        }
+        val readoutAt = if (onlyAccount == null && !gone) Panel.HEIGHT.toFloat() else 0f
         if (wantsMediaPage) {
-            pager.pages = 3
+            pager.pages = basePages + 1
             // COME BACK TO THE PAGE YOU WERE ON.
             //
             // The :rear process is destroyed and recreated constantly — every recovery,
@@ -2657,7 +2662,7 @@ class RearDialView(context: Context) : View(context) {
                 // arrived: what used to be 0 and 1 is 1 and 2. Anything from before is
                 // read through PAGE_BASE so an upgrade lands you where you left off
                 // rather than one page up from it.
-                val saved = panelPrefs.getInt(KEY_PAGE, PAGE_READOUT)
+                val saved = if (gone) homePage else panelPrefs.getInt(KEY_PAGE, PAGE_READOUT)
                     .coerceIn(0, pager.pages - 1)
                 if (aod) {
                     // Always-on owns the page while it is up — a panel re-placed while the
@@ -2666,14 +2671,14 @@ class RearDialView(context: Context) : View(context) {
                     // swipe returns to; the clock page is what shows.
                     aodReturnPage = saved
                     pager.goTo(PAGE_NOTICES, frameNowMs)
-                } else if (saved != PAGE_READOUT) {
+                } else if (saved != homePage) {
                     pager.goTo(saved, frameNowMs)
                 } else {
-                    pager.goTo(PAGE_READOUT, frameNowMs)
+                    pager.goTo(homePage, frameNowMs)
                 }
                 pager.advance(frameNowMs + PAGE_SETTLE_MS.toLong())
             }
-        } else if (pager.pages > 2) {
+        } else if (pager.pages > basePages) {
             // The media page can vanish while you are standing on it — the music stops,
             // and the page it was about goes with it. Walk back rather than cutting: the
             // panel drops a page only once it has actually returned to the first one, so
@@ -2681,16 +2686,17 @@ class RearDialView(context: Context) : View(context) {
             // In always-on the clock page stays where it is; only the page the swipe
             // returns to moves.
             if (aod) {
-                if (aodReturnPage == PAGE_MEDIA) aodReturnPage = PAGE_READOUT
-                if (pager.restingAt(PAGE_NOTICES)) pager.pages = 2
+                if (aodReturnPage == mediaPage) aodReturnPage = homePage
+                if (pager.restingAt(PAGE_NOTICES)) pager.pages = basePages
             } else {
-                pager.settleTo(PAGE_READOUT, frameNowMs)
-                if (pager.restingAt(PAGE_READOUT)) pager.pages = 2
+                pager.settleTo(homePage, frameNowMs)
+                if (pager.restingAt(homePage)) pager.pages = basePages
             }
         }
         // Two pages even with nothing playing: the notifications are always there. Only a
         // single-account preview has no paging at all, which is what it has always had.
-        if (onlyAccount == null && pager.pages < 2) pager.pages = 2
+        if (onlyAccount == null && pager.pages < basePages) pager.pages = basePages
+
         // The demo turns the page itself, and has to do it after the page COUNT is
         // settled above — a segment asking for the media page while only two exist would
         // be clamped to the readout and the loop would skip a beat.
@@ -2709,7 +2715,10 @@ class RearDialView(context: Context) : View(context) {
         // readout's new resting offset rather than from zero.
         val paging = ((paged - readoutAt) / Panel.HEIGHT).coerceIn(0f, 1f)
         // And the same question upwards. 1 is standing on the notification page.
-        noticing = ((readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
+        // with no readout page the clock page is page 0 and the media page is next, so
+        // the notices fraction runs the other way from the same offset
+        noticing = (if (gone) 1f - paged / Panel.HEIGHT else (readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
+
         pagingNow = paging
         // The transport records where it rests against this, so it has to be the offset
         // the readout is actually displaced by — not the pager's raw position, which now
@@ -2992,10 +3001,9 @@ class RearDialView(context: Context) : View(context) {
         // seconds it gets it.
         canvas.save()
         canvas.translate(dx, dy + readoutPush - (paged - readoutAt))
-        if (!hidden) drawCanvasSide(canvas, dx, dy + readoutPush - (paged - readoutAt))
-        // The extras belong to the panel as a whole, not to an account, so a
-        // single-account preview leaves them out — see onlyAccount.
-        if (onlyAccount == null && !hidden) drawExtras(canvas)
+        if (!hidden && !gone) drawCanvasSide(canvas, dx, dy + readoutPush - (paged - readoutAt))
+        if (onlyAccount == null && !hidden && !gone) drawExtras(canvas)
+
         // Same rule as the extras: it acts on the panel rather than on an account, so a
         // single-account preview leaves it out — and a preview is scaled, which would
         // put the touch target in the wrong place even if it were wanted there.
@@ -3008,7 +3016,7 @@ class RearDialView(context: Context) : View(context) {
         // Faded on the lock's own drum rather than cut, so they leave as the slider
         // arrives instead of blinking out in front of it.
         val unlocked = 1f - lockSwap(frameNowMs)
-        if (onlyAccount == null && config.showCamera && !hidden && unlocked > 0.004f) {
+        if (onlyAccount == null && config.showCamera && !hidden && !gone && unlocked > 0.004f) {
             fading(canvas, cameraFadeBounds(), unlocked) {
                 drawCamera(canvas, dx, dy + readoutPush - (paged - readoutAt))
             }
@@ -3020,7 +3028,7 @@ class RearDialView(context: Context) : View(context) {
         // permanent control — but it closes the readout, and on a page that is not the
         // readout it is a button for somewhere else. The way back from the media page is
         // the swipe that got you there.
-        if (onlyAccount == null && config.showClose && !hidden && unlocked > 0.004f) {
+        if (onlyAccount == null && config.showClose && !hidden && !gone && unlocked > 0.004f) {
             fading(canvas, closeFadeBounds(), unlocked) {
                 drawClose(canvas, dx, dy + readoutPush - (paged - readoutAt))
             }
@@ -3633,7 +3641,7 @@ class RearDialView(context: Context) : View(context) {
         // same 1800ms, started by the same config change, so the sweep and the fade
         // land together rather than reading as two events.
         val presence = animateTo("ring:" + account.name + ":presence",
-            if (spec.metric == RingMetric.NONE) 0f else 1f)
+            if (spec.metric == RingMetric.NONE || (onlyAccount == null && !connected(account))) 0f else 1f)
         // The media page has its own reason for this ring to exist, so a ring switched
         // off for usage comes back as the page turns.
         val visible = maxOf(presence, blend)
@@ -6698,6 +6706,29 @@ class RearDialView(context: Context) : View(context) {
     private fun orderedAccounts(): List<Int> = config.orderedAccounts(Account.entries.size)
 
     /**
+     * Whether the account has a credential at all. Never connected, or signed out, is
+     * false; expired is true — that account stays, as a ghost with SIGN IN, because it was
+     * yours and wants you back. Unknown, before the first state arrives, counts as yes.
+     */
+    private fun connected(account: Account): Boolean =
+        state.statuses.firstOrNull { it.account == account }?.connected ?: true
+
+    /** The accounts the readout shows, in the user's order: those with a credential. */
+    private fun shownAccounts(): List<Int> =
+        orderedAccounts().filter { i -> Account.entries.getOrNull(i)?.let { connected(it) } ?: false }
+
+    /**
+     * No account has a credential: the readout page is not shown at all. The clock page
+     * is home and the media page, when there is one, sits below it; the rings stay as
+     * the media dials. Never in the single-account preview, which shows what it is told.
+     */
+    private val readoutGone: Boolean get() = onlyAccount == null && shownAccounts().isEmpty()
+    private val homePage: Int get() = if (readoutGone) PAGE_NOTICES else PAGE_READOUT
+    private val mediaPage: Int get() = if (readoutGone) 1 else PAGE_MEDIA
+    private var readoutWasGone = false
+
+
+    /**
      * The account blocks, in two passes over one layout.
      *
      * [cardsOnly] draws the glass and stops. It exists because the cards have to go down
@@ -6724,6 +6755,8 @@ class RearDialView(context: Context) : View(context) {
         val blocks = orderedAccounts()
             .mapNotNull { Account.entries.getOrNull(it) }
             .filter { onlyAccount == null || it == onlyAccount }
+            .filter { onlyAccount != null || connected(it) }
+
             .map { account ->
             val status = state.statuses.firstOrNull { it.account == account }
             ?.let { demoStatus(it) }
@@ -6820,9 +6853,14 @@ class RearDialView(context: Context) : View(context) {
         val gap: Float
         val lead: Float
         if (onlyAccount != null) {
-            // One account centres in the space it has, which is a different question.
             gap = ((regionBottom - regionTop - contentH) / 2f).coerceAtLeast(0f)
             lead = gap
+        } else if (blocks.size == 1) {
+            // One account connected: centred, not left at the bottom of a region laid
+            // out for two with a grey SIGN IN taking the rest.
+            val slack = (regionBottom - regionTop - contentH - cardExtra).coerceAtLeast(0f)
+            gap = slack / 2f
+            lead = cardTopOffset + slack / 2f
         } else if (config.theme.isGlass) {
             // n cards need n gaps: one above the first, one between each pair after it.
             // Nothing is reserved below the last, because the region's own bottom is
