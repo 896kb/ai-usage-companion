@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The mascot, as the launcher icon: the same nine-rect rig the panel draws, in the same
-  body colour, so the icon is the artwork rather than a picture of it.
+  The mascot as a silhouette, for THEMED icons only (the adaptive icon's monochrome
+  layer): the same nine-rect rig the panel draws. The icon itself is a rendered image,
+  mipmap/ic_launcher_fg, with the face colour in values/ic_launcher_background.
 
   Sized to 32 of the 108dp canvas, at the user's direction — a small mark on a large
   field of colour. Sizing here is purely a look; the ceilings below are the ones that

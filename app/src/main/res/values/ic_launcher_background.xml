@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Palette.PERSONAL. The mascot is drawn in Palette.WORK (#B5BD68), so the icon is the
-      panel's two greens against each other and nothing else.
-
-      They are close in luminance — about 1.9:1 — so this is deliberately a low-contrast,
-      tonal mark rather than a legible-at-any-size logo. The dark eyes are what stop it
-      reading as a flat blob.
+      The face colour of the icon's squircle, sampled from the artwork: whatever a launcher's
+      mask shows beyond the squircle's own rounded corners is this, so the shape reads as
+      one piece. The mascot and the squircle are a rendered image, mipmap/ic_launcher_fg.
     -->
-    <color name="ic_launcher_background">#FFFF78</color>
+    <color name="ic_launcher_background">#FDFB76</color>
 </resources>
