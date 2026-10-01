@@ -3661,7 +3661,7 @@ class RearDialView(context: Context) : View(context) {
         // same 1800ms, started by the same config change, so the sweep and the fade
         // land together rather than reading as two events.
         val presence = animateTo("ring:" + account.name + ":presence",
-            if (spec.metric == RingMetric.NONE || (onlyAccount == null && !connected(account))) 0f else 1f)
+            if (spec.metric == RingMetric.NONE) 0f else 1f)
         // The media page has its own reason for this ring to exist, so a ring switched
         // off for usage comes back as the page turns.
         val visible = maxOf(presence, blend)
@@ -3681,7 +3681,10 @@ class RearDialView(context: Context) : View(context) {
         // Unless the media page is asking for it, which is a different reading entirely —
         // an account that failed to fetch says nothing about the volume.
         val usable = status != null && window != null && status.health != Health.AUTH
-        if (!usable && blend <= 0f) return
+        // Not usable — no account, a ghost, nothing to read — is an empty ring, not no
+        // ring: the band of glass round the lens stays, with no reading in it. It is the
+        // lens's frame, there on every page, whatever the account is doing.
+
 
         // A dial being DRIVEN must not look like a dial being read. The finger doing the
         // driving is on the far side of the phone and cannot be seen, so the ring itself

@@ -129,7 +129,8 @@ An account whose session merely expired stays, as the ghost with SIGN IN, becaus
 yours and wants you back. With no account connected at all the readout page is not shown:
 the clock page is home, the media page sits below it when something is playing — and
 slides up into view by itself when music starts, since there is no strip on the clock page
-to carry the news — and the rings round the lenses stay as its dials.
+to carry the news. The rings round the lenses keep their bands of glass on every page,
+empty, and become the media dials below.
 
 ## The rings and the bars
 
