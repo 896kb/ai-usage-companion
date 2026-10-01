@@ -125,8 +125,9 @@ or that you signed out of, is left out altogether: with one account connected th
 shows that one, centred, rather than a grey SIGN IN and a ghost taking the other half.
 An account whose session merely expired stays, as the ghost with SIGN IN, because it was
 yours and wants you back. With no account connected at all the readout page is not shown:
-the clock page is home, the media page sits below it when something is playing, and the
-rings round the lenses stay as its dials.
+the clock page is home, the media page sits below it when something is playing — and
+slides up into view by itself when music starts, since there is no strip on the clock page
+to carry the news — and the rings round the lenses stay as its dials.
 
 ## The rings and the bars
 

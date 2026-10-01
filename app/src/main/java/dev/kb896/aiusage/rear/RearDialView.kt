@@ -2643,6 +2643,15 @@ class RearDialView(context: Context) : View(context) {
         val readoutAt = if (onlyAccount == null && !gone) Panel.HEIGHT.toFloat() else 0f
         if (wantsMediaPage) {
             pager.pages = basePages + 1
+            // With the readout, music arriving announces itself: the strip slides into the
+            // readout and the page below is there to swipe to. Without it there is nothing
+            // on the clock page to carry the news, so the media page itself slides up into
+            // view when music starts — and walks back home when it stops, as it already
+            // did. Not under always-on, which has its own idea of the page, not over a
+            // finger, and not on a panel that comes up with music already playing.
+            if (gone && mediaWantKnown && !mediaPageWasWanted && !aod && !pager.animating() &&
+                pager.restingAt(homePage)
+            ) pager.settleTo(mediaPage, frameNowMs)
             // COME BACK TO THE PAGE YOU WERE ON.
             //
             // The :rear process is destroyed and recreated constantly — every recovery,
@@ -2696,6 +2705,9 @@ class RearDialView(context: Context) : View(context) {
         // Two pages even with nothing playing: the notifications are always there. Only a
         // single-account preview has no paging at all, which is what it has always had.
         if (onlyAccount == null && pager.pages < basePages) pager.pages = basePages
+        mediaPageWasWanted = wantsMediaPage
+        mediaWantKnown = true
+
 
         // The demo turns the page itself, and has to do it after the page COUNT is
         // settled above — a segment asking for the media page while only two exist would
@@ -6726,6 +6738,10 @@ class RearDialView(context: Context) : View(context) {
     private val homePage: Int get() = if (readoutGone) PAGE_NOTICES else PAGE_READOUT
     private val mediaPage: Int get() = if (readoutGone) 1 else PAGE_MEDIA
     private var readoutWasGone = false
+    /** Whether the media page was wanted last frame, and whether that has been seen at all yet. */
+    private var mediaPageWasWanted = false
+    private var mediaWantKnown = false
+
 
 
     /**
