@@ -78,12 +78,17 @@ class PanelPreviewView @JvmOverloads constructor(
     /** The back's corner radius in panel pixels, until the back says otherwise. */
     private var cornerPx = DEFAULT_CORNER
     private var dimming = false
+    private var last: RearDialView.Mirror? = null
+
     private val veil = android.graphics.Paint()
 
     init {
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
         clipChildren = true
         dial.interactive = false
+        // The slider has its own timeout; the back re-locks it under always-on, so the
+        // preview does the same from the last mirror rather than letting it leave alone.
+        dial.onLockExpired = { last?.let { if (it.locked) dial.lock() } }
         // The real display's rounded corners, so the preview is the shape of the back.
         clipToOutline = true
         outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -95,6 +100,7 @@ class PanelPreviewView @JvmOverloads constructor(
 
     /** The back's state: page, always-on, slider, rings, table lights, corner — and its dim. */
     fun mirror(m: RearDialView.Mirror, dim: Boolean) {
+        last = m
         if (cornerPx != m.corner) { cornerPx = m.corner; invalidateOutline() }
         dial.mirror(m)
         if (dimming != dim) { dimming = dim; invalidate() }
