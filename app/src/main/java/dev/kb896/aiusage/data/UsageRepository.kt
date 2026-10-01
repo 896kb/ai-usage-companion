@@ -99,6 +99,14 @@ class UsageRepository(
         // throttled indefinitely rather than letting it recover — exactly what
         // happened to the work account.
         val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        // Before the backoff: no credential is a definitive answer, and nothing to back
+        // off from — a signed-out account must not come back STALE with its old numbers
+        // for as long as a backoff set while it was signed in has left to run.
+        val stored = store.load(account)
+            ?: run {
+                Log.i(TAG, "${account.slug}: no stored credential")
+                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), MascotMood.GHOST, connected = false)
+            }
         backoffUntil[account]?.let { until ->
             if (nowElapsed < until) {
                 Log.i(TAG, "${account.slug}: backing off ${(until - nowElapsed) / 1000}s more")
@@ -106,11 +114,6 @@ class UsageRepository(
                 return AccountStatus(account, Health.STALE, last, profiles?.tier(account), moodStale(last))
             }
         }
-        val stored = store.load(account)
-            ?: run {
-                Log.i(TAG, "${account.slug}: no stored credential")
-                return AccountStatus(account, Health.AUTH, null, profiles?.tier(account), MascotMood.GHOST, connected = false)
-            }
 
         val now = System.currentTimeMillis()
         if (stored.refreshExpired(now)) {

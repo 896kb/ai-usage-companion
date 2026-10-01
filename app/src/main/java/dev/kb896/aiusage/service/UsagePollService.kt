@@ -19,6 +19,7 @@ import android.view.Display
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.ConfigStore
+import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.RearActivity
 import kotlinx.coroutines.CancellationException
@@ -114,8 +115,19 @@ class UsagePollService : Service() {
             //
             // The timestamp is still recorded either way: a failed attempt is still an
             // attempt, and must not license an immediate retry on the next restart.
-            if (current.statuses.any { it.snapshot != null }) {
-                recordFetch(StatePayload.encode(current))
+            //
+            // An account with no credential is a definitive answer, not a throttled miss:
+            // a sign-out must reach the cache, or a restart restores the old numbers and
+            // the readout comes back for an account that is gone. So the cache is merged
+            // per account — fresh where the refresh said something (numbers, or no
+            // credential), the cached status where it was only throttled.
+            val cached = cachedState()?.let { runCatching { StatePayload.decode(it).state }.getOrNull() }
+            val merged = current.statuses.map { s ->
+                if (s.snapshot != null || !s.connected) s
+                else cached?.statuses?.firstOrNull { it.account == s.account && it.snapshot != null } ?: s
+            }
+            if (merged.any { it.snapshot != null || !it.connected }) {
+                recordFetch(StatePayload.encode(DashboardState(current.fetchedAt, merged)))
             } else {
                 recordFetchTimeOnly()
             }
