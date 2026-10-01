@@ -67,7 +67,11 @@ class UsageHistory(private val context: Context) {
     fun saveHoldUntil(account: Account, at: Long) =
         prefs.edit().putLong(holdKey(account), at).apply()
 
+    /** The account's usage history and its mascot hold, gone. */
+    fun clear(account: Account) = prefs.edit().remove(key(account)).remove(holdKey(account)).apply()
+
     private fun key(a: Account) = "u_${a.slug}"
+
     private fun holdKey(a: Account) = "hold_${a.slug}"
 
     private companion object {

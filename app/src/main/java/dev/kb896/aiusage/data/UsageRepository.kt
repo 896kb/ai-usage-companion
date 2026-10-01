@@ -93,6 +93,26 @@ class UsageRepository(
     private val backoffUntil = mutableMapOf<Account, Long>()
     private val backoffStep = mutableMapOf<Account, Long>()
 
+    /**
+     * The account was signed out by hand: its status becomes "no credential" at once,
+     * with nothing carried over — not the last snapshot, not a backoff — and the state
+     * goes out as a completed fetch so the panel and the restart cache both learn it now
+     * rather than at the next poll. An expiry never comes through here; it keeps its
+     * numbers and shows the ghost.
+     */
+    fun signedOut(account: Account) {
+        backoffUntil.remove(account)
+        backoffStep.remove(account)
+        val gone = AccountStatus(account, Health.AUTH, null, null, MascotMood.GHOST, connected = false)
+        val current = _state.value
+        val statuses = if (current.statuses.any { it.account == account })
+            current.statuses.map { if (it.account == account) gone else it }
+        else current.statuses + gone
+        _state.value = DashboardState(System.currentTimeMillis(), statuses)
+        onFetchCompleted?.invoke()
+    }
+
+
     private fun fetchOne(account: Account, last: UsageSnapshot?): AccountStatus {
         // Respect an active backoff before spending a request. Without this a 429 is
         // answered by polling again at the same cadence, which keeps the account

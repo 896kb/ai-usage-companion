@@ -158,13 +158,21 @@ object AccountSettingsSheet {
                     // Confirmed, because it is not undoable by tapping again: signing back
                     // in means a browser round trip, or finding the credential JSON a
                     // second time.
+                    // Signing out by hand forgets EVERYTHING the phone holds about the
+                    // account — credential, plan, name, email, organisation, usage history,
+                    // the last numbers — so nothing stale can come back. An expiry is not a
+                    // sign-out: it keeps its numbers and shows the ghost.
                     Modal.show(
                         Modal.builder(context)
                             .setTitle("Sign out")
-                            .setMessage("Forget this account's credential?")
+                            .setMessage("Forget everything about this account on this phone — credential, plan, name, usage history?")
                             .setNegativeButton("Cancel", null)
                             .setPositiveButton("Sign out") { _, _ ->
-                                dev.kb896.aiusage.service.Graph.of(context).store.clear(account)
+                                val graph = dev.kb896.aiusage.service.Graph.of(context)
+                                graph.store.clear(account)
+                                dev.kb896.aiusage.data.ProfileStore(context).clear(account)
+                                dev.kb896.aiusage.data.UsageHistory(context).clear(account)
+                                graph.repository.signedOut(account)
                                 build()
                             },
                         danger = true,

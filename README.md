@@ -121,7 +121,9 @@ more than an activity you can already feel.
 ## An account that was never connected is not there
 
 The readout shows the accounts that have a credential. One that was never signed in,
-or that you signed out of, is left out altogether: with one account connected the panel
+or that you signed out of, is left out altogether — signing out by hand forgets everything
+the phone holds about the account, credential, plan, name, usage history and the last
+numbers, so nothing stale can come back: with one account connected the panel
 shows that one, centred, rather than a grey SIGN IN and a ghost taking the other half.
 An account whose session merely expired stays, as the ghost with SIGN IN, because it was
 yours and wants you back. With no account connected at all the readout page is not shown:

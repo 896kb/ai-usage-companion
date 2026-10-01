@@ -83,7 +83,14 @@ class ProfileStore(private val context: Context) {
         .putLong(stampKey(account), now)
         .apply()
 
+    /** Everything held about the account: plan, when it was fetched, name, email, organisation. */
+    fun clear(account: Account) = prefs.edit()
+        .remove(key(account)).remove(stampKey(account))
+        .remove("name_${account.slug}").remove("email_${account.slug}").remove("org_${account.slug}")
+        .apply()
+
     private fun key(a: Account) = "tier_${a.slug}"
+
     private fun stampKey(a: Account) = "tier_at_${a.slug}"
 
     companion object {
