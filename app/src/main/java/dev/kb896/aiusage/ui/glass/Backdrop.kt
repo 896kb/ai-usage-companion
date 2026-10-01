@@ -73,9 +73,8 @@ object Backdrop {
         val w = root.width; val h = root.height
         if (w <= 0 || h <= 0) return
         root.getLocationOnScreen(origin)
-        val config = ConfigStore(root.context).load()
-        val image = config.backdrop.imagePath?.let { decodeNear(it, w, h) }
-        val built = paint(w, h, config, image)
+        // The panel's photograph is not decoded here any more — see paint().
+        val built = paint(w, h, ConfigStore(root.context).load(), null)
         // The outgoing bitmap is dropped, never recycled: a draw already queued may still
         // hold it, and drawing a recycled bitmap throws where letting go of one costs a GC.
         bitmap = built
@@ -117,21 +116,27 @@ object Backdrop {
     }
 
     /** Draw the window's wallpaper: the picture centre-cropped, or the colour as a gradient. */
+    /**
+     * The wallpaper is one baked-in colour, a slate blue-grey, as a soft top-to-bottom
+     * gradient. It used to be the panel's own backdrop — the photograph you chose for
+     * the back of the phone, centre-cropped onto the front — and that read as a cheap
+     * clone of the panel rather than a surface of its own. A flat colour gives a lens
+     * nothing to bend, so the gradient; dark enough that every pane's ink comes out
+     * white. [config] and [image] are kept for the callers and the tests and ignored.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun paint(w: Int, h: Int, config: PanelConfig, image: Bitmap?): Bitmap {
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
-        val p = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        if (image != null) {
-            val dst = ArtPlacement.destination(RectF(0f, 0f, w.toFloat(), h.toFloat()),
-                image.width, image.height, 0f, 0f, 1f)
-            canvas.drawBitmap(image, null, dst, p)
-        } else {
-            val stops = gradientStops(config.background)
-            p.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), stops[0], stops[1], Shader.TileMode.CLAMP)
-            canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
-        }
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val stops = gradientStops(SLATE)
+        p.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), stops[0], stops[1], Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
         return out
     }
+
+    /** The front screen's wallpaper colour: slate, blue-grey. */
+    const val SLATE = 0xFF475569.toInt()
 
     /** Top and bottom of the flat-colour gradient. A flat colour gives a lens nothing to bend. */
     fun gradientStops(colour: Int): IntArray = intArrayOf(

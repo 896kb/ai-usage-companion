@@ -203,11 +203,13 @@ They are given a tint *only* where clear glass stops working, and none in the mi
 
 ### The settings screen is glass too
 
-Under GLASS the app you set the panel from is made of the same thing the panel is. The
-picture you chose for the panel's background becomes the wallpaper behind the settings —
-or, with no picture, a soft gradient of the ground colour, because a flat colour gives a
-lens nothing to bend — and every section sits on it as a card of glass, drawn by the same
-vendored shaders with the same luminance grid deciding whether its text is black or white.
+Under GLASS the app you set the panel from is made of the same thing the panel is. Behind
+the settings is one baked-in colour, a slate blue-grey, as a soft top-to-bottom gradient —
+a flat colour gives a lens nothing to bend. It used to be the picture you chose for the
+panel's background, centre-cropped onto the front, and that read as a cheap clone of the
+panel rather than a surface of its own. Every section sits on it as a card of glass, drawn
+by the same vendored shaders with the same luminance grid deciding whether its text is
+black or white — on the slate, white.
 The toggles, the choices, the buttons, the sliders, the colour chips and the dialogs are
 ports of the components in AndroidLiquidGlass's catalog app, rebuilt as Views because the
 catalog is Compose and this app is not. The dropdowns became segmented controls, which is

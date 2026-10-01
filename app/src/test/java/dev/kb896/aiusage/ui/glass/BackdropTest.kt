@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import dev.kb896.aiusage.data.ArtConfig
 import dev.kb896.aiusage.data.PanelConfig
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,6 +27,16 @@ class BackdropTest {
         val pictured = Backdrop.paint(120, 300,
             PanelConfig(backdrop = ArtConfig(imagePath = "/nowhere.png")), image = photo)
         assertEquals(120, pictured.width); assertEquals(300, pictured.height)
+    }
+
+    @Test fun `the wallpaper is the slate gradient whatever the panel shows`() {
+        val photo = Bitmap.createBitmap(40, 10, Bitmap.Config.ARGB_8888).apply { eraseColor(0xFFFF0000.toInt()) }
+        val flat = Backdrop.paint(120, 300, PanelConfig(background = 0xFF336699.toInt()), image = null)
+        val pictured = Backdrop.paint(120, 300, PanelConfig(), image = photo)
+        // Robolectric's canvas does not shade a gradient exactly, so the pixel is compared
+        // between the two paints, not with the stop: the photograph makes no difference.
+        assertEquals(flat.getPixel(60, 150), pictured.getPixel(60, 150))
+        assertNotEquals(0xFFFF0000.toInt(), pictured.getPixel(60, 150))
     }
 
     @Test fun `a missing image file decodes to nothing rather than throwing`() {
