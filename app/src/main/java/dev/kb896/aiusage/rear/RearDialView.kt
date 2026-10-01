@@ -9149,6 +9149,8 @@ class RearDialView(context: Context) : View(context) {
             state.leaving = if (animate) state.shown else null
             state.at = if (animate) frameNowMs else 0L
             state.shown = text
+            // ORIGINAL's clock rolls through here: a frozen always-on page thaws for it
+            if (animate) clockRollUntil = maxOf(clockRollUntil, frameNowMs + WHEEL_MS.toLong())
         }
         val turn =
             if (state.at == 0L) 1f
