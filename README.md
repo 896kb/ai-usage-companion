@@ -1,7 +1,8 @@
 # Claude usage, on the back of the phone
 
-Your Claude Code rate limits, live on the Xiaomi 17 Pro's rear display — so you can see
-how much of your window is left without unlocking anything, opening anything, or asking.
+Your Claude Code rate limits, live on the rear display of the Xiaomi 17 Pro and Pro Max — so
+you can see how much of your window is left without unlocking anything, opening anything, or
+asking.
 
 ![The panel running on the phone's rear display](assets/rear-panel.mp4)
 
@@ -1295,8 +1296,6 @@ when someone's panel goes black after ten seconds and yours does not.
 
 - **ChatGPT Codex** — a second provider beside Claude, so one panel covers both.
 - **Android widget** — the same readings on the home screen, for phones with no rear display.
-- **iOS widget.**
-- **macOS widget.**
 - **More than two accounts**, scrolled vertically on the panel rather than stacked — which
   is why colours are named per account rather than "primary" and "secondary". The panel
   overflows at four today: 516px of content into 396px of room.
@@ -1345,8 +1344,8 @@ where they disagree shows it.
 
 ## Requirements
 
-- **A Xiaomi 17 Pro.** The rear display's size, position and lens geometry are measured
-  into this app. It will not do anything useful on another phone.
+- **A Xiaomi 17 Pro or Pro Max.** The rear display's size, position and lens geometry are
+  measured into this app. It will not do anything useful on another phone.
 - **HyperOS 3, Android 16.** Developed and verified against **`3.0.318.0`**, the current
   stable. **It has not been tested against the HyperOS 4 beta** — the placement mechanism
   depends on system internals that have already changed once between releases, so assume
@@ -1626,6 +1625,14 @@ could check it.
 It also means a clip can reserve space for whatever it throws outside the character —
 confetti, a flag, the Zs above a sleeping head — without the character shrinking to make
 room.
+
+## Credits
+
+- **[u/Over_Squash3318](https://www.reddit.com/user/Over_Squash3318/)** got the panel
+  working on the Xiaomi 17 Pro Max: the logs from their phone showed why it kept closing
+  there.
+
+The same list is in the app, behind **Credits** at the bottom of the settings screen.
 
 ## Attribution
 

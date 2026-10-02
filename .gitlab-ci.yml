@@ -100,7 +100,7 @@ release:
     tag_name: "$CI_COMMIT_TAG"
     name: "$CI_COMMIT_TAG"
     description: |
-      Install the APK below on a Xiaomi 17 Pro running HyperOS 3.
+      Install the APK below on a Xiaomi 17 Pro or Pro Max running HyperOS 3.
 
       Read the README's **Please read this first** and **Shizuku** sections before
       signing in — this app holds account credentials and cannot place the panel
