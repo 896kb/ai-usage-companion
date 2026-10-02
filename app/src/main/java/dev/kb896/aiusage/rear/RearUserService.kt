@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.rear.SurfaceDump.Where
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.system.exitProcess
@@ -302,124 +303,44 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * Whether SurfaceFlinger is actually COMPOSITING RearActivity on the rear panel.
-     *
-     * This is the only signal on this device that has not lied. Every window-manager
-     * source — Activity.getDisplay(), `dumpsys window displays`, `am stack list` bounds
-     * — reports display 1 while the panel renders visibly on the FRONT screen, and
-     * panel power state cannot distinguish "our activity lit it" from "MIUI lit it".
-     *
-     * SurfaceFlinger is different in kind: `Display <id> (active|inactive) HWC layers:`
-     * sections list what each display is composing. That is where pixels physically go,
-     * not what the window manager believes about task ownership.
-     *
-     * Deliberately asymmetric: false is returned ONLY when the layer is present on the
-     * main display AND absent from the rear one. A capture taken while placement was
-     * correct showed MainActivity's layer listed under BOTH display sections, so a
-     * section listing a layer is not proof that display currently owns it — leftovers
-     * linger. Under a "first section that mentions it wins" rule, one stale main-side
-     * entry would report a strand that isn't happening and trigger a pointless move of
-     * a correctly-placed panel. Requiring absence from the rear section costs nothing
-     * in the real failure case, where the activity genuinely never reached the panel.
-     *
-     * "Nowhere" USED TO BE ONE ANSWER and it was two, which is the blind spot this enum
-     * exists to close. The panel not being composited means either that it is asleep —
-     * ordinary, and nothing to act on — or that something else has taken the rear display
-     * while our task sits behind it, alive and invisible. Both read as null, so the
-     * keep-alive's "composited nowhere AND no task" branch never fired for the second one:
-     * the task is precisely what still exists. Observed on device with the rear display
-     * showing HyperOS's own clock-and-steps widget, RearActivity paused in the background,
-     * the service running, and every health check reporting a healthy panel.
-     *
-     * The two are told apart by what ELSE the rear section lists. A display composing
-     * another app's layers is a display that is on and showing something; a display
-     * composing nothing at all is asleep.
+     * Whether SurfaceFlinger is actually COMPOSITING RearActivity on the rear panel —
+     * see [SurfaceDump] for why composition is the signal, and what each answer means.
      */
-    private enum class Where {
-        /** On the rear display. The only healthy answer. */
-        REAR,
-
-        /** On the main display, over whatever the user is actually doing. */
-        MAIN,
-
-        /** Nowhere, while something else holds the rear display. Alive and invisible. */
-        DISPLACED,
-
-        /** Nowhere, and nothing else is there either: the panel is asleep. */
-        NOWHERE,
+    private fun panelWhere(): Where {
+        val rear = rearPhysicalId()
+        return SurfaceDump.where(exec("dumpsys SurfaceFlinger")) { id ->
+            if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX)
+        }
     }
 
+    /** The rear display's physical id, once read. It belongs to the panel, so it never changes. */
+    @Volatile private var knownRearId: String? = null
+    private var warnedNoRearId = false
+
     /**
-     * A layer name line in a HWC section: a window name ending in `#<id>`.
+     * The physical id SurfaceFlinger knows the rear display by, read from the system.
      *
-     * Matched rather than counting lines, because a section always carries column
-     * headings and rules whether or not it is composing anything. Names are truncated
-     * with `[...]` in the middle when long, so this anchors on the end.
+     * It was a constant — the tail of the 17 Pro's rear panel id — and on a Pro Max,
+     * whose rear display is another panel, nothing matched it: the panel on the back read
+     * as on the MAIN display, every tick tried to move it to the display it was already
+     * on, the system refused, and three refusals finished it as stranded. See [SurfaceDump].
+     *
+     * Null when `dumpsys display` does not say, and then [panelWhere] falls back to the
+     * 17 Pro's suffix, which is what it always did. Asked again next time rather than
+     * remembered as missing: a dump that came back empty once is not a phone without one.
      */
-    private val layerName = Regex("""^\s*\S+#\d+\s*$""", RegexOption.MULTILINE)
-
-    private fun panelWhere(): Where {
-        val out = exec("dumpsys SurfaceFlinger")
-        if (!out.contains("HWC layers:")) return Where.NOWHERE
-
-        val header = Regex("""Display (\d+) \((active|inactive)\) HWC layers:""")
-        val matches = header.findAll(out).toList()
-        if (matches.isEmpty()) return Where.NOWHERE
-
-        var onRear = false
-        var onMain = false
-        // Whether the rear display is composing ANYTHING, ours or not. This is what
-        // separates an asleep panel from a hijacked one.
-        var rearBusy = false
-        // And whether that display is powered at all. SurfaceFlinger says so in the same
-        // header — measured: the front display read "(inactive)" with mScreenState=OFF
-        // while the rear read "(active)" with mScreenState=ON, in one dump.
-        var rearActive = false
-        for ((i, m) in matches.withIndex()) {
-            val start = m.range.last + 1
-            val end = if (i + 1 < matches.size) matches[i + 1].range.first else out.length
-            val section = out.substring(start, end)
-            val isRear = m.groupValues[1].endsWith(REAR_PHYSICAL_ID_SUFFIX)
-            if (isRear) {
-                if (m.groupValues[2] == "active") rearActive = true
-                if (layerName.containsMatchIn(section)) rearBusy = true
-            }
-            if (!section.contains("RearActivity")) continue
-            if (isRear) onRear = true else onMain = true
+    private fun rearPhysicalId(): String? {
+        knownRearId?.let { return it }
+        val dump = exec("dumpsys display | grep -E 'mDisplayId=|mPrimaryDisplayDevice='")
+        val id = DisplayDump.physicalId(dump, Panel.DISPLAY_ID)
+        if (id != null) {
+            Log.i(TAG, "rear display ${Panel.DISPLAY_ID} is physical display $id")
+            knownRearId = id
+        } else if (!warnedNoRearId) {
+            warnedNoRearId = true
+            Log.w(TAG, "no physical id for display ${Panel.DISPLAY_ID} in dumpsys display — matching the 17 Pro's")
         }
-        // ON MAIN WINS, even when it is also on the rear. Observed on device: the panel
-        // drawing as a 904x572 box over the user's foreground app while
-        // Activity.getDisplay() and `dumpsys window` both reported display 1 and the
-        // layer appeared under BOTH display sections. Whatever the bookkeeping says, a
-        // layer on the main display is pixels the user is looking at, and that is the
-        // condition worth acting on.
-        //
-        // This reverses the earlier rule, which preferred "present on rear" to avoid
-        // acting on a stale leftover. That caution was wrong for THIS layer: it made
-        // the one genuinely visible failure undetectable. The cost of being wrong is a
-        // redundant move, which is cheap and invisible; the cost of missing it is the
-        // user staring at the panel on the wrong screen.
-        return when {
-            onMain -> Where.MAIN
-            onRear -> Where.REAR
-            // Our layer is nowhere. If the rear display is composing someone else's, it
-            // is on and showing something that is not us, which is a failure that used to
-            // be invisible. If it is composing nothing, the panel is simply asleep.
-            //
-            // "IS ON" IS NOT AN ASSUMPTION ANY MORE, IT IS CHECKED. A powered-down display
-            // is composing nothing of ours and often something of MIUI's, which read as
-            // "taken" — so the moment the panel deliberately let the display doze, the
-            // watchdog re-placed it, and re-placing calls wake(). The panel woke itself
-            // up about ten seconds after asking to sleep, every time, and the sleep looked
-            // like it simply did not work.
-            //
-            // Nothing is composing on a dark display in any sense worth acting on. Falling
-            // through to NOWHERE is the safe answer: that branch relaunches only when the
-            // task is genuinely gone, so a panel that really did die while the display was
-            // out is still recovered, and one that is merely dark is left alone.
-            rearBusy && rearActive -> Where.DISPLACED
-            else -> Where.NOWHERE
-        }
+        return id
     }
 
     /**
@@ -652,6 +573,8 @@ class RearUserService : IRearService.Stub {
 echo "device: $(getprop ro.product.marketname) / $(getprop ro.product.model) / $(getprop ro.product.device)"
 echo "os: HyperOS $(getprop ro.mi.os.version.name) $(getprop ro.mi.os.version.incremental) | android $(getprop ro.build.version.release) | region $(getprop ro.miui.region) | build $(getprop ro.build.version.incremental)"
 echo "rear display: $(wm size -d 1 2>/dev/null | tr -d '\n') $(wm density -d 1 2>/dev/null | tr -d '\n')"
+echo "physical ids: $(dumpsys display 2>/dev/null | grep -E 'mDisplayId=|mPrimaryDisplayDevice=' | head -8 | tr -s ' ' | tr '\n' ' ')"
+echo "composited: $(dumpsys SurfaceFlinger 2>/dev/null | grep -oE 'Display [0-9]+ \((active|inactive)\) HWC layers' | tr '\n' ' ')"
 echo "props: cover_mode=$(getprop persist.sys.dual_screen_cover_mode_enable) multidisplay_type=$(getprop persist.sys.muiltdisplay_type)"
 echo "settings: subscreen_display_time=$(settings get system subscreen_display_time) rear_doze_always_on=$(settings get secure rear_doze_always_on) doze_always_on=$(settings get secure doze_always_on) stay_on_while_plugged_in=$(settings get global stay_on_while_plugged_in)"
 echo
@@ -701,9 +624,9 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
 """
 
         /**
-         * Tail of the rear panel's physical display id (local:4630946949513469332).
-         * Matched as a suffix so the constant does not have to track the full 19-digit
-         * value appearing in two different formats across dumpsys outputs.
+         * Tail of the 17 Pro's rear panel physical display id (local:4630946949513469332).
+         * Only the fallback now, for when [rearPhysicalId] cannot read the real one: it
+         * is the 17 Pro's panel, and nothing says another phone's rear display ends in it.
          */
         const val REAR_PHYSICAL_ID_SUFFIX = "332"
 

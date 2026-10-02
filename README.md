@@ -1334,6 +1334,15 @@ their pixel size, with the lens column centred on the taller display — a start
 taken from the app's numbers, not measured on a Pro Max. Settings → Ring layout takes it
 from there, and a screenshot from a Pro Max would let the default be set exactly.
 
+Which display is the rear one is read off the phone, not written down. The panel checks
+where it is being drawn by asking SurfaceFlinger, which names displays by their physical
+id, and that id belongs to the panel: it used to be the 17 Pro's, so on a Pro Max a panel
+sitting correctly on the back read as stranded on the front. Every check then moved it to
+the display it was already on, the system refused, and after three refusals the panel was
+finished and relaunched — over and over, on a display that never went off. The id now
+comes from `dumpsys display`, and the rear-display report prints both lists, so a phone
+where they disagree shows it.
+
 ## Requirements
 
 - **A Xiaomi 17 Pro.** The rear display's size, position and lens geometry are measured
