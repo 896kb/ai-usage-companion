@@ -133,6 +133,7 @@ class MainActivity : ComponentActivity() {
         bindDiagnostics()
         bindAdvancedToggle()
         bindGeometrySliders()
+        findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
         // field only ever displays a command MainActivity wrote, never accepts

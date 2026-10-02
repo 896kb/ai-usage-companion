@@ -472,6 +472,24 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
+        <!-- The people who helped. Last on the screen, in every build. See Credits. -->
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_credits"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical">
+
+        <dev.kb896.aiusage.ui.glass.GlassButton
+            android:id="@+id/credits"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Credits"
+            android:textSize="13sp" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         </LinearLayout>
     </ScrollView>
 </LinearLayout>
