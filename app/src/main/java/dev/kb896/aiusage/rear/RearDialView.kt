@@ -2628,6 +2628,11 @@ class RearDialView(context: Context) : View(context) {
         // and a scroll position it cannot be given is a scroll position that would just
         // be wrong.
         settlePresence(frameNowMs)
+        // The glyph's verdict is taken here, every frame, and not in the readout's media
+        // row where it used to be: with no account connected there is no readout, nothing
+        // drew that row, and the media page's button kept whatever it showed when the
+        // track arrived — pause bars over a paused track, for good.
+        if (media != null || departing != null) settlePlaying(frameNowMs)
         val wantsMediaPage = onlyAccount == null && mediaPageAvailable()
         val gone = readoutGone
         val basePages = if (gone) 1 else 2
@@ -10059,7 +10064,6 @@ class RearDialView(context: Context) : View(context) {
         dy: Float,
     ) {
         val m = media ?: departing ?: return
-        settlePlaying(frameNowMs)
         val tint = colorFor("media", config.mediaTint)
         val band = mediaRegion(region)
 
