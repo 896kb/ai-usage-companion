@@ -32,6 +32,7 @@ android {
         versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.7.9-dev"
         ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["appLabel"] = "AI Usage"
     }
 
     compileOptions {
@@ -61,6 +62,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Debug builds are their own app (dev.kb896.<app>.dev, "(dev)", a "dev" tab on the
+            // icon from src/debug/res), so one installs beside the release instead of over it.
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appLabel"] = "AI Usage (dev)"
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

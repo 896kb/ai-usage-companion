@@ -38,7 +38,7 @@ if [ -z "$DEVICE" ]; then
   "$ADB" devices | awk 'NR>1 && NF' >&2
   exit 1
 fi
-PKG=dev.kb896.aiusage
+PKG=dev.kb896.aiusage.dev
 STAGE=/data/local/tmp/claude-status.apk
 
 # This machine has no system Java — `java -version` fails outright. Android
@@ -90,7 +90,7 @@ fi
 # refused ("Requires permission not exported"). Launching the activity is the only
 # route in. So launch it, then immediately go HOME: the service is running and the
 # screen is back where the user left it, about a second later.
-"$ADB" -s "$DEVICE" shell am start -n "$PKG/.ui.MainActivity" >/dev/null
+"$ADB" -s "$DEVICE" shell am start -n "$PKG/dev.kb896.aiusage.ui.MainActivity" >/dev/null
 if [ "${LAUNCH:-0}" = "1" ]; then
   echo "✓ installed and left open on $DEVICE"
 else

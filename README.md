@@ -1456,6 +1456,8 @@ phone, understanding all of the above.
    ```bash
    ./build-install.sh          # debug build, straight to a connected phone
    ```
+   The debug build is its own app, `dev.kb896.aiusage.dev` ("AI Usage (dev)", with a dev
+   tab on its icon), so it installs beside the release rather than over it.
    Note that `build-install.sh` produces a **debuggable** build. That is fine for
    development on your own cable, but it means anything with ADB access can `run-as` the
    app — reading its files *as the app*, which includes decrypting the stored tokens. The
