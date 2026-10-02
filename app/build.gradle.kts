@@ -29,7 +29,7 @@ android {
         // does not give a number to derive one from. CI_PIPELINE_IID is monotonic per
         // project, which is exactly the guarantee needed and nothing more.
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
-        versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.7.9-dev"
+        versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.8.0-dev"
         ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "AI Usage"
