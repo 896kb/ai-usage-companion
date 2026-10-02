@@ -6331,6 +6331,14 @@ class RearDialView(context: Context) : View(context) {
         val iconLeft = if (boxed) cardRect.left + EXTRA_PAD_X else CONTENT_RIGHT - EXTRA_ICON_H
         val textLeft = iconLeft + EXTRA_ICON_H + EXTRA_ICON_GAP
         val align = if (boxed) Paint.Align.LEFT else Paint.Align.RIGHT
+        // Its own paint, size and alignment, every frame. `extras` is shared with the
+        // clock page (92px figures), the media title, the date and the weather, and this
+        // row never set its size — so whatever had drawn last decided how big the date
+        // and the battery came out, and after the right sequence they stayed huge,
+        // restart or not, since the sequence recurred.
+        extras = extrasBody
+        extras.textSize = typed(EXTRA_TEXT_SIZE)
+        extras.textAlign = align
 
         // From the card's own top, so the two cannot drift apart when either changes.
         var baseline =
@@ -11694,6 +11702,8 @@ class RearDialView(context: Context) : View(context) {
         private const val MEDIA_THUMB = 4.5f
 
         private const val EXTRA_ICON_H = 20f
+        /** the row's text: the extras paint's own size, which nothing else may leave behind */
+        private const val EXTRA_TEXT_SIZE = 18f
 
         /** Line pitch when both extras are shown. */
         /** Short weekday names, Sunday first — Calendar.DAY_OF_WEEK is 1-based there. */
