@@ -2,6 +2,7 @@ package dev.kb896.aiusage.rear
 
 import android.content.Context
 import android.util.Log
+import dev.kb896.aiusage.BuildConfig
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.SurfaceDump.Where
@@ -664,8 +665,15 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
 
         /** NEW_TASK | SINGLE_TOP | EXCLUDE_FROM_RECENTS | RESET_TASK_IF_NEEDED | CLEAR_TASK */
         private const val CAMERA_FLAGS = "0x30a08000"
-        const val PKG = "dev.kb896.aiusage"
-        const val ACTIVITY = ".rear.RearActivity"
+        /**
+         * This build's own app id. A debug build is dev.kb896.aiusage.dev, installed
+         * beside the release, and with the release's id written here a debug build
+         * started, fed and finished the RELEASE app's panel instead of its own.
+         */
+        const val PKG = BuildConfig.APPLICATION_ID
+
+        /** In full: `.rear.RearActivity` resolves against PKG, which is not the namespace on a debug build. */
+        const val ACTIVITY = "dev.kb896.aiusage.rear.RearActivity"
         const val ACTION_STATE = "dev.kb896.aiusage.STATE"
         const val ACTION_FINISH = "dev.kb896.aiusage.FINISH"
     }
