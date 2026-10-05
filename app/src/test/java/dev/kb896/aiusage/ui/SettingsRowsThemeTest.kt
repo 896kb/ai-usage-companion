@@ -36,23 +36,6 @@ class SettingsRowsThemeTest {
         return null
     }
 
-    @Test fun `ORIGINAL builds the platform widgets`() {
-        ConfigStore(context).save(PanelConfig())
-        val parent = LinearLayout(context)
-        SettingsRows.toggle(parent, "T", true) {}
-        SettingsRows.choice(parent, "C", listOf("a", "b"), 0) {}
-        val nav = SettingsRows.navigationButton(parent, "N") {}
-        SettingsRows.colorRow(parent, "K", 0xFF112233.toInt()) {}
-        SettingsRows.reorderable(parent, "R", canMoveUp = true, onMoveUp = {}) {}
-        assertNotNull(find(parent, Switch::class.java))
-        assertNotNull(find(parent, Spinner::class.java))
-        assertEquals(Button::class.java, nav.javaClass)
-        assertNull(find(parent, GlassSwitch::class.java))
-        assertNull(find(parent, GlassSegmented::class.java))
-        assertNull(find(parent, GlassChip::class.java))
-        assertNull(find(parent, GlassButton::class.java))
-    }
-
     @Test fun `GLASS builds the glass controls and they report through the same callbacks`() {
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         val parent = LinearLayout(context)

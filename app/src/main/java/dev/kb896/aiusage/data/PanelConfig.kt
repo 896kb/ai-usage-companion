@@ -179,12 +179,12 @@ data class PanelConfig(
      * The whole app's look. See PanelTheme — it decides the face, the glyphs and whether
      * surfaces refract, and those are not separable settings.
      *
-     * FIRST FIELD, and default ORIGINAL. A panel that has never heard of themes decodes
-     * to exactly what it drew before, which is the property that matters: this arrives in
-     * the same payload as everything else, and a stored config written by an older build
-     * must not come back looking like somebody else's phone.
+     * FIRST FIELD, and default GLASS: a new install starts on glass. Existing panels keep
+     * theirs — configs are stored with their defaults written out (encodeDefaults), so a
+     * phone that has saved anything since themes existed has its theme on record. It is
+     * the BACK's theme only: the front screen is always glass (see UiTheme).
      */
-    val theme: PanelTheme = PanelTheme.ORIGINAL,
+    val theme: PanelTheme = PanelTheme.GLASS,
     val title: String = "CLAUDE USAGE",
     val background: Int = Panel.Palette.BG,
     /**

@@ -26,20 +26,6 @@ class GlassButtonTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     @After fun reset() { ConfigStore(context).save(PanelConfig()) }
 
-    @Test fun `under ORIGINAL a glass button is the platform button`() {
-        ConfigStore(context).save(PanelConfig())
-        val plain = Button(context)
-        val ours = GlassButton(context)
-        assertFalse(ours.glass)
-        assertNotNull(ours.background)
-        assertEquals(plain.paddingLeft, ours.paddingLeft)
-        assertEquals(plain.minHeight, ours.minHeight)
-        assertEquals(plain.isAllCaps, ours.isAllCaps)
-        val icon = GlassIconButton(context)
-        assertFalse(icon.glass)
-        assertEquals(ImageButton(context).paddingLeft, icon.paddingLeft)
-    }
-
     @Test fun `under GLASS it sheds the platform chrome and takes the capsule`() {
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         val ours = GlassButton(context)

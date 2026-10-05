@@ -25,14 +25,6 @@ class GlassSliderTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     @After fun reset() { ConfigStore(context).save(PanelConfig()) }
 
-    @Test fun `under ORIGINAL it is the platform seek bar`() {
-        ConfigStore(context).save(PanelConfig())
-        val ours = GlassSlider(context)
-        assertFalse(ours.glass)
-        assertNotNull(ours.thumb)
-        assertEquals(SeekBar(context).paddingLeft, ours.paddingLeft)
-    }
-
     @Test fun `under GLASS it draws its own thumb and track`() {
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         val ours = GlassSlider(context)

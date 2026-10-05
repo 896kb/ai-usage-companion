@@ -32,12 +32,6 @@ class ModalGlassTest {
         return content.getChildAt(0)
     }
 
-    @Test fun `under ORIGINAL the dialog keeps the panel background`() {
-        ConfigStore(activity).save(PanelConfig())
-        val dialog = Modal.show(Modal.builder(activity).setTitle("t").setMessage("m"))
-        assertFalse(panel(dialog).background is GlassSheetDrawable)
-    }
-
     @Test fun `under GLASS the dialog's panel is a glass sheet`() {
         ConfigStore(activity).save(PanelConfig(theme = PanelTheme.GLASS))
         val dialog = Modal.show(Modal.builder(activity).setTitle("t").setMessage("m"))

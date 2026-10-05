@@ -5,6 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.PanelTheme
+import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,29 +18,32 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class UiThemeTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
+    @After fun reset() { ConfigStore(context).save(PanelConfig()) }
 
-    @Test fun `the default theme is not glass`() {
-        ConfigStore(context).save(PanelConfig())
-        assertFalse(UiTheme.isGlass(context))
+    @Test fun `a new install starts on glass`() {
+        assertEquals(PanelTheme.GLASS, PanelConfig().theme)
     }
 
-    @Test fun `glass is read from the stored config`() {
+    @Test fun `the front is glass whatever the back is`() {
+        ConfigStore(context).save(PanelConfig(theme = PanelTheme.ORIGINAL))
+        assertTrue(UiTheme.isGlass(context))
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         assertTrue(UiTheme.isGlass(context))
     }
 
-    /**
-     * The answer is cached on the stored blob, so the cache has to follow the store both
-     * ways: a stale `true` after a switch back to ORIGINAL would leave the whole screen
-     * drawing glass over a background nothing built.
-     */
-    @Test fun `the cached answer follows the store in both directions`() {
+    /** The cache behind the back's answer follows the store both ways. */
+    @Test fun `the back's theme follows the store in both directions`() {
         val store = ConfigStore(context)
-        store.save(PanelConfig())
-        assertFalse(UiTheme.isGlass(context))
+        store.save(PanelConfig(theme = PanelTheme.ORIGINAL))
+        assertFalse(UiTheme.panelIsGlass(context))
         store.save(PanelConfig(theme = PanelTheme.GLASS))
-        assertTrue(UiTheme.isGlass(context))
-        store.save(PanelConfig())
-        assertFalse(UiTheme.isGlass(context))
+        assertTrue(UiTheme.panelIsGlass(context))
+        store.save(PanelConfig(theme = PanelTheme.ORIGINAL))
+        assertFalse(UiTheme.panelIsGlass(context))
+    }
+
+    @Test fun `a config saved with ORIGINAL keeps it`() {
+        val saved = PanelConfig.encode(PanelConfig(theme = PanelTheme.ORIGINAL))
+        assertEquals(PanelTheme.ORIGINAL, PanelConfig.decode(saved).theme)
     }
 }

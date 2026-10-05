@@ -678,14 +678,9 @@ class MainActivity : ComponentActivity() {
             dev.kb896.aiusage.data.PanelTheme.entries.map { it.name },
             config.theme.ordinal,
         ) { i ->
+            // The back's look only: the front is glass whichever it is (UiTheme), so nothing
+            // here needs rebuilding — the preview redraws with the rest.
             write { it.copy(theme = dev.kb896.aiusage.data.PanelTheme.entries[i]) }
-            // The front screen is themed too, and it is already on screen. Everything
-            // else here redraws through the preview; this has to re-run the sweep that
-            // sets the face on views that were built under the previous theme.
-            //
-            // The widgets differ in kind between the two themes; re-inflating under the
-            // new one is one path instead of two.
-            recreate()
         }
         // A look over whichever theme: the panel on a curved tube. Off by default —
         // it bends the picture, and touches with it. See CrtScreen.

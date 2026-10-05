@@ -19,8 +19,9 @@ import dev.kb896.aiusage.rear.PanelType
  */
 object UiType {
 
+    /** The front screen's face: GLASS's, always — the front is glass whatever the back is (UiTheme). */
     fun of(context: Context): Typeface =
-        PanelType.of(context.resources, ConfigStore(context).load().theme)
+        PanelType.of(context.resources, dev.kb896.aiusage.data.PanelTheme.GLASS)
 
     /**
      * The variation axes to set alongside it, or null.
@@ -30,5 +31,5 @@ object UiType {
      * returns its default instance — which for Outfit is Thin.
      */
     fun variation(context: Context): String? =
-        PanelType.variation(ConfigStore(context).load().theme)
+        PanelType.variation(dev.kb896.aiusage.data.PanelTheme.GLASS)
 }

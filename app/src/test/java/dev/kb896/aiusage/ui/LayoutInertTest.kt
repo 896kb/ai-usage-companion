@@ -34,49 +34,6 @@ class LayoutInertTest {
         return out
     }
 
-    @Test fun `under ORIGINAL every twin in the layout is inert`() {
-        ConfigStore(context).save(PanelConfig())
-        context.setTheme(android.R.style.Theme_Material_NoActionBar)
-        val root = LayoutInflater.from(context).inflate(R.layout.activity_main, null)
-        // Laid out before anything is read off it: a card takes its bottom margin in
-        // setLayoutParams and a slider its drawables on the way through measure, so an
-        // unmeasured tree would pass these whether the twins were inert or not.
-        root.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.AT_MOST))
-        root.layout(0, 0, 1080, root.measuredHeight)
-        val views = all(root)
-        val cards = views.filterIsInstance<GlassCard>()
-        assertTrue("sections declared as cards", cards.size >= 5)
-        cards.forEach { assertEquals(0, it.paddingLeft + it.paddingTop + it.paddingRight + it.paddingBottom) }
-        // The 12dp gap between cards is GLASS's; under ORIGINAL the sections sit where
-        // the hairlines put them, so the margin must still be whatever the XML said.
-        cards.forEach {
-            assertEquals("a card takes no glass margin", 0,
-                (it.layoutParams as LinearLayout.LayoutParams).bottomMargin)
-        }
-        assertTrue(views.filterIsInstance<GlassButton>().size >= 6)
-        assertEquals(5, views.filterIsInstance<GlassSlider>().size)
-        views.filterIsInstance<GlassSlider>().forEach { assertTrue(it.thumb != null) }
-        // GLASS clears these so it can draw the track itself; ORIGINAL keeps the
-        // PanelSeekBar style, and a null progressDrawable is a SeekBar drawing nothing.
-        views.filterIsInstance<GlassSlider>().forEach { assertTrue(it.progressDrawable != null) }
-        // The icon button under GLASS gets minimums and no background, both of which move
-        // padding; under ORIGINAL it must sit where a plain ImageButton would.
-        val plain = ImageButton(context)
-        val icons = views.filterIsInstance<GlassIconButton>()
-        assertEquals(1, icons.size)
-        icons.forEach {
-            assertEquals(plain.paddingLeft, it.paddingLeft)
-            assertEquals(plain.paddingTop, it.paddingTop)
-            assertEquals(plain.paddingRight, it.paddingRight)
-            assertEquals(plain.paddingBottom, it.paddingBottom)
-        }
-        // The title swatch is a chip now, and under ORIGINAL a chip is a plain View.
-        val chip = root.findViewById<View>(R.id.settings_title_color)
-        assertTrue("the swatch is declared as a chip", chip is GlassChip)
-        assertFalse((chip as GlassChip).glass)
-    }
-
     // Measuring the orphan card directly (no parent) does NOT reproduce this: View.measure()
     // runs a view's own onMeasure regardless of that view's own visibility — GONE is only
     // honoured by a PARENT deciding whether to measure/lay out a child at all (LinearLayout

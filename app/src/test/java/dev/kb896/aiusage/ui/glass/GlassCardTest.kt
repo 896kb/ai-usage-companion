@@ -23,18 +23,6 @@ class GlassCardTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     @After fun reset() { ConfigStore(context).save(PanelConfig()) }
 
-    @Test fun `under ORIGINAL it is a plain LinearLayout`() {
-        ConfigStore(context).save(PanelConfig())
-        val card = GlassCard(context)
-        assertFalse(card.glass)
-        assertEquals(0, card.paddingLeft + card.paddingTop + card.paddingRight + card.paddingBottom)
-        assertNull(card.background)
-        assertTrue(card.willNotDraw())
-        val host = LinearLayout(context); host.addView(card)
-        host.measure(0, 0); host.layout(0, 0, 100, 100)
-        assertEquals(0, (card.layoutParams as LinearLayout.LayoutParams).bottomMargin)
-    }
-
     @Test fun `under GLASS it pads, separates and draws`() {
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         val card = GlassCard(context)

@@ -39,17 +39,6 @@ class GlassChipTest {
         assertEquals(0xD9123456.toInt(), GlassChip.shown(0xFF123456.toInt()))
     }
 
-    /** Under ORIGINAL the chip is the plain View the title row always had. */
-    @Test fun `under ORIGINAL the colour is the background and nothing draws`() {
-        ConfigStore(context).save(PanelConfig())
-        val chip = GlassChip(context)
-        chip.colour = 0xFF123456.toInt()
-        assertFalse(chip.glass)
-        val background = chip.background
-        assertTrue("the swatch is its background", background is ColorDrawable)
-        assertEquals(0xFF123456.toInt(), (background as ColorDrawable).color)
-    }
-
     /**
      * The rim pass must not re-run the lens.
      *

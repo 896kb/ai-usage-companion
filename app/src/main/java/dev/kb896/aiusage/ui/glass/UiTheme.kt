@@ -17,7 +17,17 @@ object UiTheme {
     @Volatile private var raw: String? = null
     @Volatile private var cached: Boolean? = null
 
-    fun isGlass(context: Context): Boolean {
+    /**
+     * ALWAYS GLASS. The theme setting chooses the BACK's look; the front screen is glass
+     * whichever it is — the settings, their dialogs and their controls are one design, and
+     * the ORIGINAL front was a second one to keep up. The rest of this object and the
+     * ORIGINAL branches behind it stay only until they are taken out.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun isGlass(context: Context): Boolean = true
+
+    /** What the stored theme says — the back's. Not the front's: see [isGlass]. */
+    fun panelIsGlass(context: Context): Boolean {
         val now = ConfigStore(context).raw()
         val hit = cached
         if (hit != null && (now === raw || now == raw)) return hit
