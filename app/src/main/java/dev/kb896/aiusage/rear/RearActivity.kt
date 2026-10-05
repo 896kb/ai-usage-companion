@@ -367,7 +367,6 @@ class RearActivity : Activity() {
         // Somebody is looking at it. Same effect, different reason — see onInteraction.
         dial.onInteraction = { armSleep() }
         setContentView(dial)
-        coverDebugWatch(true)
         // See MEDIA_SYNC: this process may have been created long after the media
         // session was, and there is no other way for it to find out.
         sendBroadcast(
@@ -779,37 +778,6 @@ class RearActivity : Activity() {
         }
         override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
     }
-    /**
-     * Debug builds only: both proximity sensors watched for as long as the panel lives, and
-     * the panel painted by which reads covered (see [RearDialView.showCover]) — to tell
-     * which one Xiaomi's "back" sensor really is.
-     */
-    private var frontNear = false
-    private var backNear = false
-    private var frontReading = Float.NaN
-    private var backReading = Float.NaN
-    private val frontProx: android.hardware.Sensor? by lazy {
-        sensors.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY, false)
-            ?: sensors.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY)
-    }
-    private val coverDebugListener = object : android.hardware.SensorEventListener {
-        override fun onSensorChanged(e: android.hardware.SensorEvent) {
-            val near = e.values[0] < e.sensor.maximumRange.coerceAtLeast(1f) * 0.5f
-            if (e.sensor == pocketSensor) { backNear = near; backReading = e.values[0] }
-            else { frontNear = near; frontReading = e.values[0] }
-            Log.i(TAG, "cover debug: ${e.sensor.name} = ${e.values[0]} (range ${e.sensor.maximumRange}) → front $frontNear, back $backNear")
-            dial.showCover(frontNear, backNear, "front ${frontReading}  ·  back ${backReading}")
-        }
-        override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
-    }
-    private fun coverDebugWatch(on: Boolean) {
-        if (!dev.kb896.aiusage.BuildConfig.DEBUG) return
-        if (!on) { sensors.unregisterListener(coverDebugListener); return }
-        frontProx?.let { sensors.registerListener(coverDebugListener, it, android.hardware.SensorManager.SENSOR_DELAY_NORMAL) }
-        pocketSensor?.let { sensors.registerListener(coverDebugListener, it, android.hardware.SensorManager.SENSOR_DELAY_NORMAL) }
-        Log.i(TAG, "cover debug: front = ${frontProx?.name}, back = ${pocketSensor?.name}")
-    }
-
     private fun pocketWatch(on: Boolean) {
         // A switch, off by default: a sensor that reads covered in the hand makes this
         // the panel going black for no reason anyone can see.
@@ -1169,7 +1137,6 @@ class RearActivity : Activity() {
     }
 
     override fun onDestroy() {
-        coverDebugWatch(false)
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
         window.decorView.removeCallbacks(restorePanel)
         window.decorView.removeCallbacks(restoreBrightness)

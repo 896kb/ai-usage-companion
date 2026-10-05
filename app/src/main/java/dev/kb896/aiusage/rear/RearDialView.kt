@@ -1297,7 +1297,6 @@ class RearDialView(context: Context) : View(context) {
         crtApplied = tube != null
         if (tube == null) {
             drawPicture(canvas)
-            drawCoverDebug(canvas)
             scheduleNext()
             return
         }
@@ -1315,42 +1314,7 @@ class RearDialView(context: Context) : View(context) {
         canvas.save()
         canvas.scale(fitX, fitY)
         try { drawTableGlow(canvas) } finally { glowOverTube = false; canvas.restore() }
-        drawCoverDebug(canvas)
         scheduleNext()
-    }
-
-    /**
-     * Debug builds only: which proximity sensor reads covered, as the whole screen's colour
-     * over everything — green the front, magenta the back, neon blue both. Set by the rear
-     * activity, which watches both sensors in a debug build; null draws nothing.
-     */
-    private var coverDebug: Pair<Int, String>? = null
-    private val coverDebugPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.BLACK; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD
-    }
-    fun showCover(front: Boolean, back: Boolean, detail: String) {
-        val next = when {
-            front && back -> 0xFF1F51FF.toInt() to "BOTH COVERED"
-            front -> 0xFF00FF00.toInt() to "FRONT COVERED"
-            back -> 0xFFFF00FF.toInt() to "BACK COVERED"
-            else -> null
-        }?.let { (c, what) -> c to "$what\n$detail" }
-        if (next == coverDebug) return
-        coverDebug = next
-        invalidate()
-    }
-    private fun drawCoverDebug(canvas: Canvas) {
-        val (colour, text) = coverDebug ?: return
-        canvas.drawColor(colour)
-        val lines = text.split('\n')
-        coverDebugPaint.textSize = height * 0.09f
-        val step = coverDebugPaint.textSize * 1.3f
-        var y = height / 2f - step * (lines.size - 1) / 2f + coverDebugPaint.textSize * 0.35f
-        for (line in lines) {
-            canvas.drawText(line, width / 2f, y, coverDebugPaint)
-            y += step
-            coverDebugPaint.textSize = height * 0.05f
-        }
     }
 
     /**
