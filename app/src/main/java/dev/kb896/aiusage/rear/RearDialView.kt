@@ -3084,25 +3084,6 @@ class RearDialView(context: Context) : View(context) {
             // page slides away above it. The rings stay put: they are the lenses'.
             if (gone) canvas.translate(0f, (1f - paging) * Panel.HEIGHT)
             drawMediaPage(canvas, paging, dx, dy, panelPush, geometry, volumeFraction)
-            if (gone) {
-                // With no readout, what lived in its corners lives here: the clock, date
-                // and battery row at the top right, where it was, and the camera and the
-                // controller under it along the right edge — the media page's own corners
-                // are the transport's and the lens's. They ride the page as it slides, and
-                // their touch targets follow (the page's offset is the readout's here).
-                val pageDy = dy + (1f - paging) * Panel.HEIGHT
-                drawExtras(canvas)
-                if (config.showCamera && unlocked > 0.004f) {
-                    fading(canvas, mediaCameraBounds(), unlocked) {
-                        drawCamera(canvas, dx, pageDy, PointF(CONTENT_RIGHT, MEDIA_CAMERA_BOTTOM))
-                    }
-                } else cameraButton = null
-                if (config.showClose && unlocked > 0.004f) {
-                    fading(canvas, mediaCloseBounds(), unlocked) {
-                        drawClose(canvas, dx, pageDy, PointF(CONTENT_RIGHT - CLOSE_R, MEDIA_CLOSE_CY))
-                    }
-                } else closeButton = null
-            }
 
             canvas.restore()
         } else if (paging <= 0.001f) {
@@ -3129,6 +3110,28 @@ class RearDialView(context: Context) : View(context) {
             // dragging should.
             canvas.translate(dx, dy - (1f - noticing) * Panel.HEIGHT)
             drawNoticePage(canvas)
+            if (gone) {
+                // With no readout, what lived in its corners lives on the clock page, the
+                // one page that is always there: the clock, date and battery row at the top
+                // right, dropped under the notification card's band, and the camera and the
+                // controller under it along the right edge, clear of the clock's figures.
+                // They ride the page as it slides, and their touch targets follow.
+                val pageDy = dy - (1f - noticing) * Panel.HEIGHT
+                canvas.save()
+                canvas.translate(0f, noticeExtrasDrop)
+                drawExtras(canvas)
+                canvas.restore()
+                if (config.showCamera && unlocked > 0.004f) {
+                    fading(canvas, cornerCameraBounds(), unlocked) {
+                        drawCamera(canvas, dx, pageDy, PointF(CONTENT_RIGHT, noticeCameraBottom))
+                    }
+                } else cameraButton = null
+                if (config.showClose && unlocked > 0.004f) {
+                    fading(canvas, cornerCloseBounds(), unlocked) {
+                        drawClose(canvas, dx, pageDy, PointF(CONTENT_RIGHT - CLOSE_R, noticeCloseCy))
+                    }
+                } else closeButton = null
+            }
             canvas.restore()
         }
         canvas.restore()   // the readout clip
@@ -4477,14 +4480,23 @@ class RearDialView(context: Context) : View(context) {
     )
 
     /** The same for the close button, in the opposite corner. */
-    /** The two buttons' places on the media page with no readout: under the extras row, at the right edge. */
-    private fun mediaCameraBounds() = android.graphics.RectF(
-        CONTENT_RIGHT - CAMERA_H * 2f - FADE_PAD, MEDIA_CAMERA_BOTTOM - CAMERA_H - FADE_PAD,
-        CONTENT_RIGHT + FADE_PAD, MEDIA_CAMERA_BOTTOM + FADE_PAD,
+    /**
+     * On the clock page with no readout: the extras row dropped under the notification
+     * card's band, and the two buttons under it along the right edge.
+     */
+    private val noticeExtrasDrop: Float
+        get() = NOTICE_H + NOTICE_EXTRAS_GAP - (TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H)
+    private val noticeCameraBottom: Float
+        get() = TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + noticeExtrasDrop + CORNER_BUTTON_GAP + CAMERA_H
+    private val noticeCloseCy: Float
+        get() = noticeCameraBottom + CORNER_BUTTON_GAP + CLOSE_R
+    private fun cornerCameraBounds() = android.graphics.RectF(
+        CONTENT_RIGHT - CAMERA_H * 2f - FADE_PAD, noticeCameraBottom - CAMERA_H - FADE_PAD,
+        CONTENT_RIGHT + FADE_PAD, noticeCameraBottom + FADE_PAD,
     )
-    private fun mediaCloseBounds() = android.graphics.RectF(
-        CONTENT_RIGHT - CLOSE_R * 2f - FADE_PAD, MEDIA_CLOSE_CY - CLOSE_R - FADE_PAD,
-        CONTENT_RIGHT + FADE_PAD, MEDIA_CLOSE_CY + CLOSE_R + FADE_PAD,
+    private fun cornerCloseBounds() = android.graphics.RectF(
+        CONTENT_RIGHT - CLOSE_R * 2f - FADE_PAD, noticeCloseCy - CLOSE_R - FADE_PAD,
+        CONTENT_RIGHT + FADE_PAD, noticeCloseCy + CLOSE_R + FADE_PAD,
     )
     private fun closeFadeBounds() = android.graphics.RectF(
         CLOSE_CX - CLOSE_R - FADE_PAD, CLOSE_CY - CLOSE_R - FADE_PAD,
@@ -11264,9 +11276,10 @@ class RearDialView(context: Context) : View(context) {
 
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
-        /** on the media page with no readout: the camera's bottom and the controller's centre, under the extras row */
-        private const val MEDIA_CAMERA_BOTTOM = 158f
-        private const val MEDIA_CLOSE_CY = 206f
+        /** on the clock page with no readout: air under the notification band, and between the row and each button */
+        private const val NOTICE_EXTRAS_GAP = 14f
+        private const val CORNER_BUTTON_GAP = 16f
+
 
 
         /**
