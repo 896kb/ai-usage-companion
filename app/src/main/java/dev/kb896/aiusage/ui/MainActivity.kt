@@ -930,6 +930,12 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             generalRows, "CRT screen", config.crt,
         ) { on -> write { it.copy(crt = on) } }
+        // The table lights glow on every page of the panel, not the clock's alone: General's.
+        SettingsRows.toggleWithColor(
+            generalRows, "Table lights", config.showTableLights, config.tableTint,
+            onChange = { on -> write { it.copy(showTableLights = on) } },
+            onPick = { c -> write { it.copy(tableColor = c) } },
+        )
 
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
         // two accounts, not a taxonomy — someone else has a client and a side project,
@@ -988,11 +994,6 @@ class MainActivity : ComponentActivity() {
         )
         // The lights round the margin when the phone lies on its face — see table
         // mode in the README. They follow the clock's colour unless told otherwise.
-        SettingsRows.toggleWithColor(
-            clockRows, "Table lights", config.showTableLights, config.tableTint,
-            onChange = { on -> write { it.copy(showTableLights = on) } },
-            onPick = { c -> write { it.copy(tableColor = c) } },
-        )
         SettingsRows.toggleWithColor(
             clockRows, "Battery", config.showBattery, config.batteryTint,
             onChange = { on -> write { it.copy(showBattery = on) } },
