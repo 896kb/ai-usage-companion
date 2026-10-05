@@ -35,7 +35,9 @@ class ModalGlassTest {
     @Test fun `under GLASS the dialog's panel is a glass sheet`() {
         ConfigStore(activity).save(PanelConfig(theme = PanelTheme.GLASS))
         val dialog = Modal.show(Modal.builder(activity).setTitle("t").setMessage("m"))
-        assertTrue(panel(dialog).background is GlassSheetDrawable)
+        val bg = panel(dialog).background
+        // Frosted over the activity behind it, or the wallpaper glass where there is none.
+        assertTrue(bg is dev.kb896.aiusage.ui.glass.FrostDrawable || bg is GlassSheetDrawable)
     }
 
     @Test fun `under GLASS the confirm keeps its colour after the sheet is painted`() {
