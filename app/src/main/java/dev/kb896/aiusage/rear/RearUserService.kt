@@ -235,18 +235,89 @@ class RearUserService : IRearService.Stub {
      */
     override fun openCamera(displayId: Int): Boolean {
         if (displayId < 0) return false
-        // The panel puts a close button over the camera — the camera's rear-screen layout
-        // has no way out of its own — and that button is an overlay window. Shell may
-        // grant the app "display over other apps"; idempotent, so asked every time.
-        exec("appops set $PKG SYSTEM_ALERT_WINDOW allow")
         val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
         val ok = !out.contains("Error", ignoreCase = true)
         if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
         if (ok) {
             cameraLaunched = true
             cameraWasOnTop = false
+            watchBandTaps(displayId)
         }
         return ok
+    }
+
+    /**
+     * Closing the camera from the back: a tap in its empty grey band.
+     *
+     * The camera's rear-screen layout has no way out of its own, and nothing can be drawn
+     * over it — HyperOS refuses windows on the rear display to apps outside a short
+     * whitelist. So the tap is read from the rear touchscreen itself, which shell may read,
+     * for as long as the camera we opened is up (see [BandTap]); the camera ignores taps
+     * there. The answer is Back to the rear display, the camera's own exit, which takes its
+     * front-screen half with it and finishes a recording properly — sent only while the
+     * camera has focus there, so it never reaches anything else.
+     */
+    @Volatile private var bandTaps: Process? = null
+
+    private fun watchBandTaps(displayId: Int) {
+        stopBandTaps()
+        val device = BandTap.rearDevice(exec("getevent -pl"))
+        if (device == null) {
+            Log.w(TAG, "camera close: no rear touchscreen in getevent — the camera closes from the front only")
+            return
+        }
+        val (path, maxX, maxY) = device
+        val proc = try {
+            ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
+        } catch (e: Exception) {
+            Log.w(TAG, "camera close: getevent failed: ${e.message}")
+            return
+        }
+        bandTaps = proc
+        val since = android.os.SystemClock.uptimeMillis()
+        Log.i(TAG, "camera close: watching $path for a tap in the grey band")
+        Thread {
+            val tap = BandTap(maxX, maxY)
+            try {
+                proc.inputStream.bufferedReader().useLines { lines ->
+                    for (line in lines) {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (now - since > BAND_WATCH_MS) break
+                        if (tap.feed(line, now)) {
+                            // The camera gone from focus means it has been closed some other
+                            // way: the watch is over either way.
+                            sendCameraBack(displayId)
+                            break
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                if (bandTaps === proc) stopBandTaps()
+            }
+        }.apply { isDaemon = true; name = "camera-band-taps"; start() }
+        // getevent blocks while nobody touches the screen, so the time limit needs its own clock.
+        Thread {
+            try { Thread.sleep(BAND_WATCH_MS) } catch (_: InterruptedException) { return@Thread }
+            if (bandTaps === proc) stopBandTaps()
+        }.apply { isDaemon = true; name = "camera-band-taps-limit"; start() }
+    }
+
+    private fun stopBandTaps() {
+        bandTaps?.let { runCatching { it.destroy() } }
+        bandTaps = null
+    }
+
+    private fun sendCameraBack(displayId: Int) {
+        val focused = FocusDump.focusedPackage(exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='"), displayId)
+        if (focused != CAMERA_PACKAGE) {
+            Log.i(TAG, "camera close: display $displayId has $focused in focus, not the camera — no Back")
+            return
+        }
+        Log.i(TAG, "camera close: a tap in the grey band — Back to display $displayId")
+        exec("input -d $displayId keyevent KEYCODE_BACK")
+        // Seen in front, so the panel coming back next releases its process — see below.
+        if (cameraLaunched) cameraWasOnTop = true
     }
 
     /**
@@ -276,27 +347,8 @@ class RearUserService : IRearService.Stub {
      * Getting this wrong costs somebody their video; getting it too gently costs one
      * resident process until the next time.
      */
-    /**
-     * The close button on the back: Back, sent to the rear display — the camera's own way
-     * out, which takes its front-screen half with it, finishes a recording properly and
-     * hands the display back to the panel. Only while the camera has focus there, so a
-     * Back meant for it never reaches anything else.
-     */
-    override fun closeCamera(displayId: Int): Boolean {
-        if (displayId < 0) return false
-        val focused = FocusDump.focusedPackage(exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='"), displayId)
-        if (focused != CAMERA_PACKAGE) {
-            Log.w(TAG, "camera close: display $displayId has $focused in focus, not the camera — no Back")
-            return false
-        }
-        Log.i(TAG, "camera close: Back to display $displayId")
-        exec("input -d $displayId keyevent KEYCODE_BACK")
-        // Seen in front, so the panel coming back next releases its process — see below.
-        if (cameraLaunched) cameraWasOnTop = true
-        return true
-    }
-
     private fun closeCamera() {
+        stopBandTaps()
         cameraLaunched = false
         cameraWasOnTop = false
         Log.i(TAG, "camera dismissed and the panel is back — releasing it")
@@ -686,6 +738,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
 
         /** The same app, without the component, for releasing it again. */
         private const val CAMERA_PACKAGE = "com.android.camera"
+        /** The longest a band-tap watch runs, in case the camera's end is never seen. */
+        private const val BAND_WATCH_MS = 30 * 60_000L
 
         /** NEW_TASK | SINGLE_TOP | EXCLUDE_FROM_RECENTS | RESET_TASK_IF_NEEDED | CLEAR_TASK */
         private const val CAMERA_FLAGS = "0x30a08000"
