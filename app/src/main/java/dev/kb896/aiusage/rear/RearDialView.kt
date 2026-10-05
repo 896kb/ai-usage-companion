@@ -8336,7 +8336,10 @@ class RearDialView(context: Context) : View(context) {
                 val figure = "$pct%"
                 extras.textSize = typed(DATE_SIZE)
                 extras.textAlign = Paint.Align.CENTER
-                extras.color = (ink and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
+                // The battery's own colour, not the clock's it sits over — the corner row's
+                // battery has always used it, and the switch for it says "Battery".
+                val battery = colorFor("battery", config.batteryTint)
+                extras.color = (battery and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
                 canvas.drawText(figure, cx, top, extras)
                 val ih = typed(DATE_SIZE)
                 drawBatteryGlyph(canvas, cx + extras.measureText(figure) / 2f + AOD_BATTERY_GAP / 2f, top - ih * 0.85f, ih, pct)
