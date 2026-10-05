@@ -94,4 +94,22 @@ class DisplayDumpTest {
         assertNull(DisplayDump.physicalId("mDisplayId=1\nmPrimaryDisplayDevice=null", 1))
         assertNull(DisplayDump.physicalId("mDisplayId=1\nmPrimaryDisplayDevice=Cast(virtual:x)", 1))
     }
+
+    // The two DisplayDeviceInfo lines of the 17 Pro, cut down to what is read.
+    private val devices = """
+        DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4630946949513469331", 1220 x 2656, modeId 2, density 520, cutout DisplayCutout{insets=Rect(0, 150 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0}}, touch INTERNAL}
+        DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4630946949513469332", 904 x 572, modeId 7, density 450, cutout DisplayCutout{insets=Rect(296, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0}}, touch INTERNAL}
+    """.trimIndent()
+
+    @Test fun `the rear display's left inset, as a fraction of its width`() {
+        assertEquals(296f / 904f, DisplayDump.leftInsetFraction(devices, "4630946949513469332")!!, 1e-6f)
+    }
+
+    @Test fun `no left inset on the front display`() {
+        assertNull(DisplayDump.leftInsetFraction(devices, "4630946949513469331"))
+    }
+
+    @Test fun `no line for the display, no inset`() {
+        assertNull(DisplayDump.leftInsetFraction(devices, "1"))
+    }
 }

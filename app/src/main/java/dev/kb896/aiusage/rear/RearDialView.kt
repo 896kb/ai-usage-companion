@@ -5789,6 +5789,18 @@ class RearDialView(context: Context) : View(context) {
     private val tipRect = android.graphics.RectF()
 
     /**
+     * The left edge of the usable area, in panel units: the left inset of the cutout this
+     * view's display reports (296 of 904 on the 17 Pro's rear display), scaled. The 17
+     * Pro's when the display says nothing — the same fallback the tap watch uses.
+     */
+    private fun cutoutLeft(): Float {
+        val inset = display?.cutout?.safeInsetLeft ?: 0
+        // The view fills the display, so its width is the display's in the cutout's own frame.
+        val w = if (width > 0) width else display?.mode?.physicalWidth ?: 0
+        return if (inset > 0 && w > 0) Panel.WIDTH * inset / w.toFloat() else Panel.WIDTH * BandTap.BAND
+    }
+
+    /**
      * The page: black over everything, and the real place to tap lit up where it is — the
      * strip at the left of this very screen that the camera leaves grey and the tap watch
      * listens to ([BandTap.BAND] of the width), flashing, with a tap pulsing between the
@@ -5807,8 +5819,9 @@ class RearDialView(context: Context) : View(context) {
         tipFill.alpha = alpha(1f)
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
 
-        // The strip, where it really is, flashing.
-        val stripRight = Panel.WIDTH * BandTap.BAND
+        // The strip, where it really is, flashing: left of the usable area's edge as this
+        // display reports it — its cutout's left inset, the lens column — in panel units.
+        val stripRight = cutoutLeft()
         tipRect.set(CAMERA_TIP_INSET, CAMERA_TIP_INSET, stripRight, Panel.HEIGHT - CAMERA_TIP_INSET)
         val wave = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_FLASH_MS) / CAMERA_TIP_FLASH_MS).toFloat()
         tipFill.color = CAMERA_TIP_TAP
@@ -5819,11 +5832,9 @@ class RearDialView(context: Context) : View(context) {
         tipStroke.alpha = alpha(0.55f + 0.45f * wave)
         canvas.drawRoundRect(tipRect, CAMERA_TIP_CORNER, CAMERA_TIP_CORNER, tipStroke)
 
-        // A tap, pulsing, in the gap between the lenses — the part of the strip a finger
-        // can actually land on without covering a camera.
-        val lay = config.effectiveRingLayout
-        val tx = lay.cx.toFloat()
-        val ty = (lay.cyFirst + lay.cySecond) / 2f
+        // A tap, pulsing, in the middle of the strip both ways — between the lenses.
+        val tx = stripRight / 2f
+        val ty = Panel.HEIGHT / 2f
         val pulse = (now % CAMERA_TIP_PULSE_MS).toFloat() / CAMERA_TIP_PULSE_MS
         tipStroke.strokeWidth = 3f
         tipStroke.alpha = alpha(1f - pulse)

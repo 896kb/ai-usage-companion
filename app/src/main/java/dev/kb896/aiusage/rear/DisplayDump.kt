@@ -37,4 +37,25 @@ object DisplayDump {
         }
         return null
     }
+
+    private val deviceSize = Regex("""uniqueId="local:(\d+)", (\d+) x (\d+),""")
+    private val cutoutInsets = Regex("""cutout DisplayCutout\{insets=Rect\((\d+), (\d+) - (\d+), (\d+)\)""")
+
+    /**
+     * The left edge of the usable area on physical display [physicalId], as a fraction of
+     * its width: the left inset of the cutout the display reports — on the rear display,
+     * the lens column (296 of 904 on the 17 Pro). Read from its DisplayDeviceInfo line,
+     * which carries the id, the size and the cutout together. Null when the dump does not
+     * say, or reports no left inset.
+     */
+    fun leftInsetFraction(dump: String, physicalId: String): Float? {
+        for (line in dump.lineSequence()) {
+            val size = deviceSize.find(line) ?: continue
+            if (size.groupValues[1] != physicalId) continue
+            val width = size.groupValues[2].toInt()
+            val left = cutoutInsets.find(line)?.groupValues?.get(1)?.toInt() ?: return null
+            return if (width > 0 && left > 0) left / width.toFloat() else null
+        }
+        return null
+    }
 }

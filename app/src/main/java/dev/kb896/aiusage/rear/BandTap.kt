@@ -79,11 +79,12 @@ class BandTap(
 
     companion object {
         /**
-         * The lens column, the panel's camera cutout: the camera keeps it grey on every
-         * model, since its picture cannot go under the lenses. On the 17 Pro the grey runs a
-         * little further (to 40.6% of the width), but the Pro Max's camera layout has not
-         * been measured, and a tap past the grey lands on the viewfinder — so the zone is
-         * the part that is grey on both. The panel lights up exactly this strip for the tip.
+         * The lens column: left of the usable area's edge, which the rear display reports as
+         * its cutout's left inset — read from the system per model (DisplayDump
+         * .leftInsetFraction), and this, the 17 Pro's 296 of 904, only when it says nothing.
+         * The camera keeps that column grey, since its picture cannot go under the lenses;
+         * on the 17 Pro its grey runs a little further (to 40.6%), but a tap past the grey
+         * would land on the viewfinder. The panel lights up exactly this strip for the tip.
          */
         const val BAND = dev.kb896.aiusage.Panel.CUTOUT_RIGHT / dev.kb896.aiusage.Panel.WIDTH.toFloat()
         const val TAP_MS = 400L

@@ -267,6 +267,11 @@ class RearUserService : IRearService.Stub {
             return
         }
         val (path, maxX, maxY) = device
+        // The zone is the display's own left inset, the lens column, as the system reports
+        // it for this model; the 17 Pro's, as a fraction, when it does not say.
+        val band = rearPhysicalId()
+            ?.let { DisplayDump.leftInsetFraction(exec("dumpsys display | grep 'DisplayDeviceInfo'"), it) }
+            ?: BandTap.BAND
         val proc = try {
             ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
         } catch (e: Exception) {
@@ -275,9 +280,9 @@ class RearUserService : IRearService.Stub {
         }
         bandTaps = proc
         val since = android.os.SystemClock.uptimeMillis()
-        Log.i(TAG, "camera close: watching $path for a tap in the grey band")
+        Log.i(TAG, "camera close: watching $path for a tap in the left ${"%.1f".format(band * 100)}%")
         Thread {
-            val tap = BandTap(maxX, maxY)
+            val tap = BandTap(maxX, maxY, band)
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
