@@ -5834,7 +5834,7 @@ class RearDialView(context: Context) : View(context) {
         // it now and then, rather than blinking.
         val edge = cutoutLeft()
         val stripRight = edge + BandTap.EDGE_ALLOW
-        val tx = edge + BandTap.EDGE_ALLOW / 2f
+        val tx = edge // on the edge itself: the lenses end 38 units short of it on the 17 Pro
         val ty = Panel.HEIGHT / 2f
         val breath = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_BREATH_MS) / CAMERA_TIP_BREATH_MS).toFloat()
         tipGlowMatrix.setScale(CAMERA_TIP_GLOW * (0.8f + 0.25f * breath), CAMERA_TIP_GLOW * (0.8f + 0.25f * breath))
