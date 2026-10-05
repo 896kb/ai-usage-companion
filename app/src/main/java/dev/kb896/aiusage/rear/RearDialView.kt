@@ -3112,23 +3112,35 @@ class RearDialView(context: Context) : View(context) {
             drawNoticePage(canvas)
             if (gone) {
                 // With no readout, what lived in its corners lives on the clock page, the
-                // one page that is always there: the clock, date and battery row at the top
-                // right, dropped under the notification card's band, and the camera and the
-                // controller under it along the right edge, clear of the clock's figures.
+                // one page always there — and out of the notification card's way: the
+                // clock, date and battery row hangs in the bottom-right corner (its glass
+                // rounded to the screen's corner there, as it is at the top on the
+                // readout), and the camera and the controller sit between the two rings,
+                // to their right, where neither a card nor the clock's figures reach.
                 // They ride the page as it slides, and their touch targets follow.
                 val pageDy = dy - (1f - noticing) * Panel.HEIGHT
                 canvas.save()
-                canvas.translate(0f, noticeExtrasDrop)
-                drawExtras(canvas)
+                canvas.translate(0f, extrasBottomShift())
+                drawExtras(canvas, bottomRight = true)
                 canvas.restore()
+                val gapY = (geometry.personal.cy + geometry.work.cy) / 2f
+                val camW = CAMERA_H * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
+                val camRight = CONTENT_EDGE + camW
+                val closeCx = camRight + CORNER_BUTTON_GAP + CLOSE_R
                 if (config.showCamera && unlocked > 0.004f) {
-                    fading(canvas, cornerCameraBounds(), unlocked) {
-                        drawCamera(canvas, dx, pageDy, PointF(CONTENT_RIGHT, noticeCameraBottom))
+                    fading(canvas, android.graphics.RectF(
+                        camRight - camW - FADE_PAD, gapY - CAMERA_H / 2f - FADE_PAD,
+                        camRight + FADE_PAD, gapY + CAMERA_H / 2f + FADE_PAD,
+                    ), unlocked) {
+                        drawCamera(canvas, dx, pageDy, PointF(camRight, gapY + CAMERA_H / 2f))
                     }
                 } else cameraButton = null
                 if (config.showClose && unlocked > 0.004f) {
-                    fading(canvas, cornerCloseBounds(), unlocked) {
-                        drawClose(canvas, dx, pageDy, PointF(CONTENT_RIGHT - CLOSE_R, noticeCloseCy))
+                    fading(canvas, android.graphics.RectF(
+                        closeCx - CLOSE_R - FADE_PAD, gapY - CLOSE_R - FADE_PAD,
+                        closeCx + CLOSE_R + FADE_PAD, gapY + CLOSE_R + FADE_PAD,
+                    ), unlocked) {
+                        drawClose(canvas, dx, pageDy, PointF(closeCx, gapY))
                     }
                 } else closeButton = null
             }
@@ -4481,23 +4493,21 @@ class RearDialView(context: Context) : View(context) {
 
     /** The same for the close button, in the opposite corner. */
     /**
-     * On the clock page with no readout: the extras row dropped under the notification
-     * card's band, and the two buttons under it along the right edge.
+     * How far down the extras row moves to hang in the bottom-right corner with the same
+     * air under it as it has above it at the top right — the glass card's rect on GLASS,
+     * the icons' and baselines' extent on ORIGINAL.
      */
-    private val noticeExtrasDrop: Float
-        get() = NOTICE_H + NOTICE_EXTRAS_GAP - (TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H)
-    private val noticeCameraBottom: Float
-        get() = TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + noticeExtrasDrop + CORNER_BUTTON_GAP + CAMERA_H
-    private val noticeCloseCy: Float
-        get() = noticeCameraBottom + CORNER_BUTTON_GAP + CLOSE_R
-    private fun cornerCameraBounds() = android.graphics.RectF(
-        CONTENT_RIGHT - CAMERA_H * 2f - FADE_PAD, noticeCameraBottom - CAMERA_H - FADE_PAD,
-        CONTENT_RIGHT + FADE_PAD, noticeCameraBottom + FADE_PAD,
-    )
-    private fun cornerCloseBounds() = android.graphics.RectF(
-        CONTENT_RIGHT - CLOSE_R * 2f - FADE_PAD, noticeCloseCy - CLOSE_R - FADE_PAD,
-        CONTENT_RIGHT + FADE_PAD, noticeCloseCy + CLOSE_R + FADE_PAD,
-    )
+    private fun extrasBottomShift(): Float {
+        val top: Float
+        val bottom: Float
+        if (extrasCard(cardRect)) {
+            top = cardRect.top; bottom = cardRect.bottom
+        } else {
+            top = TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H + 2f
+            bottom = TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + 4f
+        }
+        return Panel.HEIGHT - bottom - top
+    }
     private fun closeFadeBounds() = android.graphics.RectF(
         CLOSE_CX - CLOSE_R - FADE_PAD, CLOSE_CY - CLOSE_R - FADE_PAD,
         CLOSE_CX + CLOSE_R + FADE_PAD, CLOSE_CY + CLOSE_R + FADE_PAD,
@@ -6286,10 +6296,12 @@ class RearDialView(context: Context) : View(context) {
         screenCorner: Boolean = false,
         /** How present it is, for a page still arriving. See the transport buttons. */
         alpha: Float = 1f,
+        /** With [screenCorner]: the card sits in the screen's bottom-right corner, not its top-right. */
+        bottom: Boolean = false,
     ) {
         if (!config.theme.isGlass || alpha <= 0.004f) return
         if (alpha < 0.999f) {
-            fading(canvas, rect, alpha) { glassCard(canvas, rect, radius, screenCorner) }
+            fading(canvas, rect, alpha) { glassCard(canvas, rect, radius, screenCorner, bottom = bottom) }
             return
         }
         var shape: android.graphics.Path? = null
@@ -6298,7 +6310,8 @@ class RearDialView(context: Context) : View(context) {
             cardShape.rewind()
             cardShape.addRoundRect(
                 rect,
-                floatArrayOf(radius, radius, tr, tr, radius, radius, radius, radius),
+                if (bottom) floatArrayOf(radius, radius, radius, radius, tr, tr, radius, radius)
+                else floatArrayOf(radius, radius, tr, tr, radius, radius, radius, radius),
                 android.graphics.Path.Direction.CW,
             )
             shape = cardShape
@@ -6353,7 +6366,8 @@ class RearDialView(context: Context) : View(context) {
         return true
     }
 
-    private fun drawExtras(canvas: Canvas) {
+    private fun drawExtras(canvas: Canvas, bottomRight: Boolean = false) {
+
         // ---- the card, sized to whichever of the three are on ------------------------
         //
         // A block of one line and a block of three are different objects, and a card cut
@@ -6367,7 +6381,8 @@ class RearDialView(context: Context) : View(context) {
         // the edge it is supposed to be sitting against. The icons keep their own column
         // on the right, so both edges of the block are straight.
         val boxed = extrasCard(cardRect)
-        if (boxed) glassCard(canvas, cardRect, screenCorner = true)
+        if (boxed) glassCard(canvas, cardRect, screenCorner = true, bottom = bottomRight)
+
         // THE ICON LEADS. Left-aligned rows read left to right, so the mark that says what
         // the number IS should arrive before the number does — trailing it, the eye has to
         // read the value, then check what it was, then go back.
@@ -11276,9 +11291,9 @@ class RearDialView(context: Context) : View(context) {
 
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
-        /** on the clock page with no readout: air under the notification band, and between the row and each button */
-        private const val NOTICE_EXTRAS_GAP = 14f
+        /** on the clock page with no readout: the air between the camera and the controller, between the rings */
         private const val CORNER_BUTTON_GAP = 16f
+
 
 
 
