@@ -74,6 +74,8 @@ object Modal {
             }
         }
         dialog.window?.decorView?.let(::walk)
+        // Glass grows when pressed and rims sit on edges: nothing in a dialog clips it.
+        dialog.window?.decorView?.let { dev.kb896.aiusage.ui.glass.Unclip.tree(it) }
 
         // GLASS owns its own colours, buttons included, after layout — see GlassSheet.
         if (dev.kb896.aiusage.ui.glass.GlassSheet.dress(dialog, danger)) return

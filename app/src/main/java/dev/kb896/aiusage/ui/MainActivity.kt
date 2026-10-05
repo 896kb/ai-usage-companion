@@ -227,6 +227,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         applyFont(findViewById(R.id.root_host))
+        dev.kb896.aiusage.ui.glass.Unclip.tree(findViewById(R.id.settings_layout))
 
         if (glass) {
             // The hairlines are the ORIGINAL screen's structure; cards are this one's.
@@ -1182,6 +1183,8 @@ class MainActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = (16 * resources.displayMetrics.density).toInt() })
         }
+        // Rows rebuilt are rows that clip again: let the glass in them draw past them.
+        dev.kb896.aiusage.ui.glass.Unclip.tree(findViewById(R.id.settings_layout))
     }
 
     /**

@@ -36,7 +36,10 @@ class GlassField @JvmOverloads constructor(
             Pane.draw(
                 canvas, this, scrollX.toFloat(), scrollY.toFloat(),
                 scrollX + width.toFloat(), scrollY + height.toFloat(),
-                minOf(RADIUS_DP * density, height / 2f), Glass.CARD_TINT, interior = false,
+                // The whole lens, middle included. Skipping the middle assumes the root's
+                // background is what shows through there, and a field sits on a card: its
+                // middle showed the card's tint, a pale line across every text input.
+                minOf(RADIUS_DP * density, height / 2f), Glass.CARD_TINT,
             )
         }
         super.onDraw(canvas)

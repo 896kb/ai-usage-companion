@@ -8,8 +8,8 @@ import kotlin.math.sin
 /**
  * The front screen's background: "Silk", from Vue Bits (vue-bits.dev/backgrounds/silk,
  * DavidHDev, after React Bits), its fragment shader translated to AGSL line for line,
- * with the settings it was chosen at: speed 3.3, scale 1.3, noise intensity 3, rotation 0,
- * colour #A1FF00.
+ * with the settings it was chosen at: speed 3.3, scale 1.3, noise intensity 3, rotation 60°,
+ * colour #49701D.
  *
  * One shader for every place the background is seen: the root draws it, and every pane of
  * glass refracts it (Backdrop.shader), so the glass bends the silk as it moves rather than
@@ -24,8 +24,9 @@ object Silk {
     const val SPEED = 3.3f
     const val SCALE = 1.3f
     const val NOISE = 3f
-    const val ROTATION = 0f
-    const val COLOR = 0xFFA1FF00.toInt()
+    /** 60°, in radians — the original's rotation control, which takes radians. */
+    const val ROTATION = 1.0471976f
+    const val COLOR = 0xFF49701D.toInt()
 
     private const val SRC = """
 uniform float2 size;

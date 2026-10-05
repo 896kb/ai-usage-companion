@@ -397,7 +397,8 @@ object AccountSettingsSheet {
                     sheetReceivers += watcher
                 }
             }
-
+            // Glass grows when pressed and rims sit on edges: the rebuilt rows must not clip it.
+            dev.kb896.aiusage.ui.glass.Unclip.tree(rows)
         }
         build()
 
