@@ -3149,19 +3149,19 @@ class RearDialView(context: Context) : View(context) {
                 val closeCy = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
                 if (config.showCamera && awake > 0.004f) {
                     // The camera keeps the readout's own corner, bottom right — the corner the
-                    // unlock slider comes up into. So it gives way the way the slider arrives:
-                    // it slides down and out as the slider rises, and back up as it leaves,
-                    // instead of fading in place under it.
+                    // unlock slider comes up into. It does not cross the slider (drawn over it,
+                    // it looked cut in half): it rises just clear of the slider's band as the
+                    // slider arrives, by the slider's own swap, and settles back as it leaves.
+                    // The touch target follows.
                     val swap = lockSwap(frameNowMs)
-                    val drop = swap * (Panel.HEIGHT - cameraFadeBounds().top)
-                    if (swap < 0.999f) {
-                        canvas.save()
-                        canvas.translate(0f, drop)
-                        fading(canvas, cameraFadeBounds(), awake) {
-                            drawCamera(canvas, dx, pageDy - drop, alpha = awake)
-                        }
-                        canvas.restore()
-                    } else cameraButton = null
+                    val restBottom = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f + CAMERA_H / 2f
+                    val lift = swap * maxOf(0f, restBottom - (markRegion().top - CORNER_BUTTON_GAP))
+                    canvas.save()
+                    canvas.translate(0f, -lift)
+                    fading(canvas, cameraFadeBounds(), awake) {
+                        drawCamera(canvas, dx, pageDy + lift, alpha = awake)
+                    }
+                    canvas.restore()
                 } else cameraButton = null
                 if (config.showClose && present > 0.004f) {
                     fading(canvas, android.graphics.RectF(
