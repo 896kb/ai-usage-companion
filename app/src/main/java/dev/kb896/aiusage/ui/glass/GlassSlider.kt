@@ -40,7 +40,24 @@ class GlassSlider @JvmOverloads constructor(
             val side = (32 * density).toInt(); val vert = (14 * density).toInt()
             setPadding(side, vert, side, vert)
             minimumHeight = (48 * density).toInt()
+            // NO RIPPLE. A SeekBar's default background is a borderless ripple, drawn as a
+            // pale circle round its middle; the layouts' PanelSeekBar style nulls it, and a
+            // slider made in code — the background dialog's — showed it.
+            background = null
         }
+    }
+
+    /**
+     * At least [MIN_HEIGHT_DP] tall under GLASS. ProgressBar measures its own height from
+     * its drawables and padding and ignores the view's minimum height, and this one has
+     * no drawables: made in code it came out 28dp tall, and the held thumb — 36dp — was
+     * cut at top and bottom.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        if (!glass) return
+        val min = (MIN_HEIGHT_DP * density).toInt()
+        if (measuredHeight < min) setMeasuredDimension(measuredWidth, resolveSize(min, heightMeasureSpec))
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -86,5 +103,9 @@ class GlassSlider @JvmOverloads constructor(
         paint.color = 0xFFFFFF or (((1f - press.progress) * 255).toInt() shl 24)
         canvas.drawRoundRect(x - tw / 2f, cy - ht / 2f, x + tw / 2f, cy + ht / 2f, ht / 2f, ht / 2f, paint)
         canvas.restore()
+    }
+
+    private companion object {
+        const val MIN_HEIGHT_DP = 48
     }
 }

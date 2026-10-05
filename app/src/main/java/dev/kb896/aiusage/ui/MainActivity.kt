@@ -1169,8 +1169,8 @@ class MainActivity : ComponentActivity() {
                 thumb = getDrawable(R.drawable.seek_thumb)
                 thumbOffset = 0
                 splitTrack = false
-                background = null
             }
+            background = null
             max = 100
             progress = (opacity * 100).toInt()
         }
