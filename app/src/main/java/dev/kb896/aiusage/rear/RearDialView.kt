@@ -5787,6 +5787,14 @@ class RearDialView(context: Context) : View(context) {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = label.typeface; textAlign = Paint.Align.CENTER }
     }
     private val tipRect = android.graphics.RectF()
+    /** The tap's glow: one unit-radius gradient, placed and sized by its matrix each frame. */
+    private val tipGlow = android.graphics.RadialGradient(
+        0f, 0f, 1f,
+        intArrayOf(0xCC0091FF.toInt(), 0x550091FF, 0x000091FF),
+        floatArrayOf(0f, 0.45f, 1f),
+        android.graphics.Shader.TileMode.CLAMP,
+    )
+    private val tipGlowMatrix = android.graphics.Matrix()
 
     /**
      * The left edge of the usable area, in panel units: the left inset of the cutout this
@@ -5819,32 +5827,34 @@ class RearDialView(context: Context) : View(context) {
         tipFill.alpha = alpha(1f)
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
 
-        // The strip, where it really is, flashing: the lens column, left of the usable
-        // area's edge as this display reports it, and the little past it the tap watch
-        // takes in — the same zone, in panel units.
+        // ONE POINT, NOT THE ZONE. The whole lens column closes the camera, but the lenses
+        // fill most of it, so a finger goes where it is shown: right on the usable area's
+        // left edge as this display reports it, halfway down, clear of the lenses. It
+        // breathes — a soft glow swelling and fading, slowly — with a ring drifting out of
+        // it now and then, rather than blinking.
         val edge = cutoutLeft()
         val stripRight = edge + BandTap.EDGE_ALLOW
-        tipRect.set(CAMERA_TIP_INSET, CAMERA_TIP_INSET, stripRight, Panel.HEIGHT - CAMERA_TIP_INSET)
-        val wave = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_FLASH_MS) / CAMERA_TIP_FLASH_MS).toFloat()
-        tipFill.color = CAMERA_TIP_TAP
-        tipFill.alpha = alpha(0.12f + 0.30f * wave)
-        canvas.drawRoundRect(tipRect, CAMERA_TIP_CORNER, CAMERA_TIP_CORNER, tipFill)
-        tipStroke.color = CAMERA_TIP_TAP
-        tipStroke.strokeWidth = 3f
-        tipStroke.alpha = alpha(0.55f + 0.45f * wave)
-        canvas.drawRoundRect(tipRect, CAMERA_TIP_CORNER, CAMERA_TIP_CORNER, tipStroke)
-
-        // A tap, pulsing, right on the usable area's left edge, halfway down: clear of the
-        // lenses, where a finger can land without covering a camera.
         val tx = edge + BandTap.EDGE_ALLOW / 2f
         val ty = Panel.HEIGHT / 2f
-        val pulse = (now % CAMERA_TIP_PULSE_MS).toFloat() / CAMERA_TIP_PULSE_MS
-        tipStroke.strokeWidth = 3f
-        tipStroke.alpha = alpha(1f - pulse)
-        canvas.drawCircle(tx, ty, 11f + 22f * Tween.easeInOut(pulse), tipStroke)
+        val breath = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_BREATH_MS) / CAMERA_TIP_BREATH_MS).toFloat()
+        tipGlowMatrix.setScale(CAMERA_TIP_GLOW * (0.8f + 0.25f * breath), CAMERA_TIP_GLOW * (0.8f + 0.25f * breath))
+        tipGlowMatrix.postTranslate(tx, ty)
+        tipGlow.setLocalMatrix(tipGlowMatrix)
+        tipFill.shader = tipGlow
         tipFill.color = android.graphics.Color.WHITE
-        tipFill.alpha = alpha(1f)
-        canvas.drawCircle(tx, ty, 10f, tipFill)
+        tipFill.alpha = alpha(0.45f + 0.55f * breath)
+        canvas.drawCircle(tx, ty, CAMERA_TIP_GLOW * 1.05f, tipFill)
+        tipFill.shader = null
+
+        val drift = (now % CAMERA_TIP_BREATH_MS).toFloat() / CAMERA_TIP_BREATH_MS
+        tipStroke.color = CAMERA_TIP_TAP
+        tipStroke.strokeWidth = 2f
+        tipStroke.alpha = alpha(0.6f * (1f - drift))
+        canvas.drawCircle(tx, ty, 12f + 40f * Tween.easeInOut(drift), tipStroke)
+
+        tipFill.color = android.graphics.Color.WHITE
+        tipFill.alpha = alpha(0.85f + 0.15f * breath)
+        canvas.drawCircle(tx, ty, 9f, tipFill)
 
         // What to do, beside it: centred in the column right of the strip and in the room
         // above the slider, and shrunk only if a line would not fit across.
@@ -11475,7 +11485,6 @@ class RearDialView(context: Context) : View(context) {
         private const val CAMERA_TIP_GIVE_UP_MS = 90_000L
         private const val CAMERA_TIP_FADE_MS = 260f
         private const val CAMERA_TIP_LABEL = "I UNDERSTAND"
-        private const val CAMERA_TIP_PULSE_MS = 1_300L
         private const val CAMERA_TIP_TITLE = 32f
         private const val CAMERA_TIP_BODY = 23f
         private const val CAMERA_TIP_TITLE_GAP = 22f
@@ -11488,11 +11497,10 @@ class RearDialView(context: Context) : View(context) {
             "grey in the camera, and",
             "the camera closes.",
         )
-        /** The strip's flash, its inset from the screen's edge and its corners, near the display's own. */
-        private const val CAMERA_TIP_FLASH_MS = 1_100L
-        private const val CAMERA_TIP_INSET = 6f
-        private const val CAMERA_TIP_CORNER = 44f
-        /** The tap and the strip, in the accent the slider reveals. */
+        /** The tap's breath — one slow swell and fade — and how far its glow reaches. */
+        private const val CAMERA_TIP_BREATH_MS = 2_400L
+        private const val CAMERA_TIP_GLOW = 54f
+        /** The tap, in the accent the slider reveals. */
         private const val CAMERA_TIP_TAP = 0xFF0091FF.toInt()
 
         /** The session window's fixed length — see sessionElapsed. */

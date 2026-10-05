@@ -289,12 +289,11 @@ class RearUserService : IRearService.Stub {
                     for (line in lines) {
                         val now = android.os.SystemClock.uptimeMillis()
                         if (now - since > BAND_WATCH_MS) break
-                        if (tap.feed(line, now)) {
-                            // The camera gone from focus means it has been closed some other
-                            // way: the watch is over either way.
-                            sendCameraBack(displayId)
-                            break
-                        }
+                        // NOT OVER AFTER ONE TAP. A Back may only take down something inside
+                        // the camera — its pocket warning, a recording it stops first — and
+                        // the camera stays; the watch used to end there, and every tap after
+                        // it went nowhere. It ends when the panel is back in front.
+                        if (tap.feed(line, now) && !sendCameraBack(displayId)) break
                     }
                 }
             } catch (_: Exception) {
@@ -314,16 +313,24 @@ class RearUserService : IRearService.Stub {
         bandTaps = null
     }
 
-    private fun sendCameraBack(displayId: Int) {
+    /**
+     * A tap in the zone: Back to the camera if it has the rear display's focus. False when
+     * the watch is over — the panel has the focus again, so the camera is gone. Anything
+     * else in focus, a system warning say, gets no Back and the watch goes on.
+     */
+    private fun sendCameraBack(displayId: Int): Boolean {
         val focused = FocusDump.focusedPackage(exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='"), displayId)
         if (focused != CAMERA_PACKAGE) {
-            Log.i(TAG, "camera close: display $displayId has $focused in focus, not the camera — no Back")
-            return
+            val over = focused == PKG
+            Log.i(TAG, "camera close: display $displayId has $focused in focus, not the camera — no Back" +
+                if (over) "; the panel is back, the watch ends" else "; still watching")
+            return !over
         }
-        Log.i(TAG, "camera close: a tap in the grey band — Back to display $displayId")
+        Log.i(TAG, "camera close: a tap in the zone — Back to display $displayId")
         exec("input -d $displayId keyevent KEYCODE_BACK")
         // Seen in front, so the panel coming back next releases its process — see below.
         if (cameraLaunched) cameraWasOnTop = true
+        return true
     }
 
     /**
