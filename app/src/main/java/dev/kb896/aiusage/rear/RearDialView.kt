@@ -3147,11 +3147,21 @@ class RearDialView(context: Context) : View(context) {
                 val camRight = RING_BAY_X + camW / 2f
                 val camBottom = gapY + CAMERA_H / 2f
                 val closeCy = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
-                if (config.showCamera && present > 0.004f) {
-                    // The camera keeps the readout's own corner, bottom right.
-                    fading(canvas, cameraFadeBounds(), present) {
-                        drawCamera(canvas, dx, pageDy, alpha = present)
-                    }
+                if (config.showCamera && awake > 0.004f) {
+                    // The camera keeps the readout's own corner, bottom right — the corner the
+                    // unlock slider comes up into. So it gives way the way the slider arrives:
+                    // it slides down and out as the slider rises, and back up as it leaves,
+                    // instead of fading in place under it.
+                    val swap = lockSwap(frameNowMs)
+                    val drop = swap * (Panel.HEIGHT - cameraFadeBounds().top)
+                    if (swap < 0.999f) {
+                        canvas.save()
+                        canvas.translate(0f, drop)
+                        fading(canvas, cameraFadeBounds(), awake) {
+                            drawCamera(canvas, dx, pageDy - drop, alpha = awake)
+                        }
+                        canvas.restore()
+                    } else cameraButton = null
                 } else cameraButton = null
                 if (config.showClose && present > 0.004f) {
                     fading(canvas, android.graphics.RectF(
