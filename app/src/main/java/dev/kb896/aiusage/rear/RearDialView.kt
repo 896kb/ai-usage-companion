@@ -3149,17 +3149,15 @@ class RearDialView(context: Context) : View(context) {
                 val closeCy = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
                 if (config.showCamera && awake > 0.004f) {
                     // The camera keeps the readout's own corner, bottom right — the corner the
-                    // unlock slider comes up into. It does not cross the slider (drawn over it,
-                    // it looked cut in half): it rises just clear of the slider's band as the
-                    // slider arrives, by the slider's own swap, and settles back as it leaves.
-                    // The touch target follows.
+                    // unlock slider comes into. It gives way the way the slider arrives: down
+                    // and out as the slider comes in, back up as it leaves, by the slider's
+                    // own swap and over the slider's own travel. The touch target follows.
                     val swap = lockSwap(frameNowMs)
-                    val restBottom = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f + CAMERA_H / 2f
-                    val lift = swap * maxOf(0f, restBottom - (markRegion().top - CORNER_BUTTON_GAP))
+                    val drop = swap * (markRegion().height() + LOCK_BAND_SLOP)
                     canvas.save()
-                    canvas.translate(0f, -lift)
+                    canvas.translate(0f, drop)
                     fading(canvas, cameraFadeBounds(), awake) {
-                        drawCamera(canvas, dx, pageDy + lift, alpha = awake)
+                        drawCamera(canvas, dx, pageDy - drop, alpha = awake)
                     }
                     canvas.restore()
                 } else cameraButton = null
@@ -4528,8 +4526,11 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** Room for the camera glyph, its margin and the drift. See [fading]. */
+    // The whole button and its glass disc, with room: it started FADE_PAD from the right
+    // edge, which cut the camera through its middle for as long as a fade ran — the
+    // deferred glass button records the clip it was given, and this layer's bounds were it.
     private fun cameraFadeBounds() = android.graphics.RectF(
-        Panel.WIDTH - FADE_PAD, Panel.HEIGHT - MARK_BOTTOM - MARK_H - FADE_PAD,
+        Panel.WIDTH - CAMERA_H * 3f - FADE_PAD, Panel.HEIGHT - MARK_BOTTOM - MARK_H - FADE_PAD,
         Panel.WIDTH.toFloat() + FADE_PAD, Panel.HEIGHT.toFloat() + FADE_PAD,
     )
 
