@@ -3036,7 +3036,7 @@ class RearDialView(context: Context) : View(context) {
         val unlocked = 1f - lockSwap(frameNowMs)
         if (onlyAccount == null && config.showCamera && !hidden && !gone && unlocked > 0.004f) {
             fading(canvas, cameraFadeBounds(), unlocked) {
-                drawCamera(canvas, dx, dy + readoutPush - (paged - readoutAt))
+                drawCamera(canvas, dx, dy + readoutPush - (paged - readoutAt), alpha = unlocked)
             }
         } else {
             cameraButton = null
@@ -3048,7 +3048,7 @@ class RearDialView(context: Context) : View(context) {
         // the swipe that got you there.
         if (onlyAccount == null && config.showClose && !hidden && !gone && unlocked > 0.004f) {
             fading(canvas, closeFadeBounds(), unlocked) {
-                drawClose(canvas, dx, dy + readoutPush - (paged - readoutAt))
+                drawClose(canvas, dx, dy + readoutPush - (paged - readoutAt), alpha = unlocked)
             }
         } else {
             closeButton = null
@@ -3138,7 +3138,7 @@ class RearDialView(context: Context) : View(context) {
                         camRight - camW - FADE_PAD, camBottom - CAMERA_H - FADE_PAD,
                         camRight + FADE_PAD, camBottom + FADE_PAD,
                     ), present) {
-                        drawCamera(canvas, dx, pageDy, PointF(camRight, camBottom))
+                        drawCamera(canvas, dx, pageDy, PointF(camRight, camBottom), alpha = present)
                     }
                 } else cameraButton = null
                 if (config.showClose && present > 0.004f) {
@@ -3146,7 +3146,7 @@ class RearDialView(context: Context) : View(context) {
                         RING_BAY_X - CLOSE_R - FADE_PAD, closeCy - CLOSE_R - FADE_PAD,
                         RING_BAY_X + CLOSE_R + FADE_PAD, closeCy + CLOSE_R + FADE_PAD,
                     ), present) {
-                        drawClose(canvas, dx, pageDy, PointF(RING_BAY_X, closeCy))
+                        drawClose(canvas, dx, pageDy, PointF(RING_BAY_X, closeCy), alpha = present)
                     }
                 } else closeButton = null
             }
@@ -4528,7 +4528,7 @@ class RearDialView(context: Context) : View(context) {
         CLOSE_CX + CLOSE_R + FADE_PAD, CLOSE_CY + CLOSE_R + FADE_PAD,
     )
 
-    private fun drawCamera(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null) {
+    private fun drawCamera(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null, alpha: Float = 1f) {
         val h = CAMERA_H
         val w = h * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
         val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
@@ -4543,7 +4543,7 @@ class RearDialView(context: Context) : View(context) {
         // centring so the glyph's own right edge lands on CONTENT_RIGHT, where every
         // other right-aligned thing on the panel ends.
         glassButton(
-            canvas, right - w / 2f, bottom - h / 2f, h, discH = MediaLayout.GLYPH_H,
+            canvas, right - w / 2f, bottom - h / 2f, h, discH = MediaLayout.GLYPH_H, alpha = alpha,
         ) { c ->
             extras.color = colorFor("camera", config.cameraTint)
             drawIcon(c, PanelIcons.CAMERA, right - w - (h - w) / 2f, bottom - h, h)
@@ -4595,7 +4595,7 @@ class RearDialView(context: Context) : View(context) {
      * missing material rather than as a second colour laid on top. Under GLASS it gets
      * what every other control on this panel gets — the mark, and glass over it.
      */
-    private fun drawClose(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null) {
+    private fun drawClose(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null, alpha: Float = 1f) {
         // The glass reads as a bigger object than the filled disc did, so it IS one — a
         // pane with a lit rim needs room around the mark, or it looks like a lens clamped
         // onto it rather than a button the mark is sitting on. The target grows with it:
@@ -4627,7 +4627,7 @@ class RearDialView(context: Context) : View(context) {
             // The disc sized so its glass lands exactly where the filled one used to,
             // which is also where the touch target still is.
             extras.color = colorFor("close", config.closeColor)
-            glassButton(canvas, closeCx, closeCy, gh, discH = hit / DISC_RADIUS) { c ->
+            glassButton(canvas, closeCx, closeCy, gh, discH = hit / DISC_RADIUS, alpha = alpha) { c ->
                 extras.color = colorFor("close", config.closeColor)
                 drawIcon(c, PanelIcons.GAMEPAD, gx, gy, gh)
             }
