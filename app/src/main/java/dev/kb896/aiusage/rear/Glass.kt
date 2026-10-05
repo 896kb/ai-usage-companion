@@ -132,7 +132,7 @@ half4 main(float2 coord) {
      * spectrum, which is the whole trick: seven taps, weighted so they sum back to white
      * in the middle and separate only where the displacement is large — at the edges.
      */
-    private const val DISPERSION = """
+    internal const val DISPERSION = """
 uniform shader content;
 
 uniform float2 size;
@@ -212,7 +212,7 @@ half4 main(float2 coord) {
      * on a card. It is the difference between a sheet of glass, which has an edge, and a
      * bevelled object, which has a lit side and a shaded one.
      */
-    private const val AMBIENT = """
+    internal const val AMBIENT = """
 uniform float2 size;
 uniform float4 cornerRadii;
 uniform float angle;
@@ -242,7 +242,7 @@ half4 main(float2 coord) {
      * does not otherwise exist on this panel. Without it a glass element over a dark
      * backdrop has no border at all, and reads as a smudge rather than as an object.
      */
-    private const val HIGHLIGHT = """
+    internal const val HIGHLIGHT = """
 uniform float2 size;
 uniform float4 cornerRadii;
 layout(color) uniform half4 color;

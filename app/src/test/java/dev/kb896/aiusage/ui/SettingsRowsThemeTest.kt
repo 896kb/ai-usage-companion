@@ -13,7 +13,7 @@ import dev.kb896.aiusage.data.PanelTheme
 import dev.kb896.aiusage.ui.glass.GlassButton
 import dev.kb896.aiusage.ui.glass.GlassChip
 import dev.kb896.aiusage.ui.glass.GlassSegmented
-import dev.kb896.aiusage.ui.glass.GlassSwitch
+import dev.kb896.aiusage.ui.liquid.LiquidToggle
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -45,7 +45,7 @@ class SettingsRowsThemeTest {
         SettingsRows.choice(parent, "C", listOf("a", "b", "c"), 1) { chosen = it }
         val nav = SettingsRows.navigationButton(parent, "N") {}
         SettingsRows.colorRow(parent, "K", 0xFF112233.toInt()) {}
-        val switch = find(parent, GlassSwitch::class.java) as GlassSwitch
+        val switch = find(parent, LiquidToggle::class.java) as LiquidToggle
         val seg = find(parent, GlassSegmented::class.java) as GlassSegmented
         assertNull(find(parent, Switch::class.java))
         assertNull(find(parent, Spinner::class.java))

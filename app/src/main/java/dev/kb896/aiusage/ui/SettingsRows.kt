@@ -415,7 +415,9 @@ object SettingsRows {
             textSize = 13f
             typeface = UiType.of(context)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(GlassSwitch(context).apply {
+        // The 896 Store's toggle, copied whole (ui/liquid/LiquidToggle): the app's own
+        // stuttered, the store's runs smoothly. On is the app icon's green.
+        row.addView(dev.kb896.aiusage.ui.liquid.LiquidToggle(context).apply {
             setCheckedSilently(initial)
             onCheckedChange = onChange
         })
