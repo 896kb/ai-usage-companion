@@ -30,7 +30,14 @@ package dev.kb896.aiusage.ui.glass
 object Ink {
     const val LIGHT = 0.5f
 
-    fun isLight(luminance: Float) = luminance >= LIGHT
+    /**
+     * NEVER LIGHT, on the front: nothing here reacts to what is behind it any more — not
+     * the text, not the tracks, the switch's on colour, the accent or the dim behind a
+     * dialog. Every branch below takes its dark-background answer, the one the silk asks
+     * for, wherever the control happens to sit on it.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun isLight(luminance: Float) = false
 
     /**
      * TEXT IS WHITE, whatever is behind it. It used to flip to black over a light part

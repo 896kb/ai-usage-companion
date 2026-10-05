@@ -16,15 +16,14 @@ class InkTest {
         assertEquals(0x99FFFFFF.toInt(), Ink.secondary(0.1f))
     }
 
-    @Test fun `the catalog tokens follow the cell`() {
-        assertEquals(0xFF34C759.toInt(), Ink.on(0.7f))
-        assertEquals(0xFF30D158.toInt(), Ink.on(0.3f))
-        assertEquals(0xFF0088FF.toInt(), Ink.accent(0.7f))
-        assertEquals(0xFF0091FF.toInt(), Ink.accent(0.3f))
-        assertEquals(0x33787878, Ink.track(0.7f))
-        assertEquals(0x5C787880, Ink.track(0.3f))
-        assertEquals(0.23f, Ink.scrimAlpha(0.7f), 0.001f)
-        assertEquals(0.56f, Ink.scrimAlpha(0.3f), 0.001f)
+    /** Nothing on the front reacts to the cell behind it: light or dark, the dark background's tokens. */
+    @Test fun `the catalog tokens are the dark background's, whatever the cell`() {
+        for (cell in floatArrayOf(0.7f, 0.3f)) {
+            assertEquals(0xFF30D158.toInt(), Ink.on(cell))
+            assertEquals(0xFF0091FF.toInt(), Ink.accent(cell))
+            assertEquals(0x5C787880, Ink.track(cell))
+            assertEquals(0.56f, Ink.scrimAlpha(cell), 0.001f)
+        }
     }
 
     @Test fun `mix moves each channel toward the target by t`() {

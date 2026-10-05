@@ -24,6 +24,9 @@ import kotlin.math.min
  * paint at draw time, which the panel's mist already depends on.
  */
 object Pane {
+    /** The brightness every front pane's tint is worked out at — a dark background's. */
+    const val FRONT_LUMINANCE = 0.25f
+
     /** What a pane reads as over no backdrop at all: the panel colour, which is dark. */
     const val FALLBACK_LUMINANCE = 0.12f
 
@@ -105,7 +108,10 @@ object Pane {
             paint.shader = null
         }
 
-        val body = if (clear) GlassLuminance.clearTint(lum) else GlassLuminance.reactive(tint, lum)
+        // NOT REACTIVE: the pane's own tint is worked out at one fixed brightness rather
+        // than the cell behind it, so a pane looks the same wherever it is on the silk and
+        // does not shift as the silk moves under it.
+        val body = if (clear) GlassLuminance.clearTint(FRONT_LUMINANCE) else GlassLuminance.reactive(tint, FRONT_LUMINANCE)
         if (body ushr 24 != 0) {
             paint.style = Paint.Style.FILL; paint.color = body
             canvas.drawRoundRect(rect, radius, radius, paint)
