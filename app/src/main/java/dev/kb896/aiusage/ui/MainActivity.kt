@@ -187,6 +187,12 @@ class MainActivity : ComponentActivity() {
         val host = findViewById<View>(R.id.root_host)
         if (glass) {
             dev.kb896.aiusage.ui.glass.Backdrop.install(host)
+            // The status bar's icons dark over a light background, light over a dark one —
+            // the silk is lime, and white icons on it were all but gone.
+            host.post {
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                    .isAppearanceLightStatusBars = dev.kb896.aiusage.ui.glass.Backdrop.meanLuminance() > 0.5f
+            }
             // The headings are not Glassy, so invalidating the glass does not reach them;
             // they are plain text over the wallpaper and have to re-ink as it moves past.
             dev.kb896.aiusage.ui.glass.Backdrop.track(findViewById(R.id.root_scroll)) { inkHeadings() }
@@ -279,6 +285,8 @@ class MainActivity : ComponentActivity() {
         scroll.setPadding(scroll.paddingLeft, scroll.paddingTop, scroll.paddingRight, reach)
         scroll.setOnScrollChangeListener { _, _, _, _, _ -> backdrop.changed() }
         tabBackdrop = backdrop
+        // The silk moves under it: the bar's glass is drawn again with each of its frames.
+        dev.kb896.aiusage.ui.glass.Backdrop.onFrame += { backdrop.changed() }
         val selected = androidx.compose.runtime.mutableIntStateOf(tab)
         val lum = dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(host)
         val tabs = listOf(

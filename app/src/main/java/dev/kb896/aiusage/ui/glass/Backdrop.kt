@@ -39,7 +39,7 @@ object Backdrop {
      * matrix, and the matrix is the only part that changes between panes, so one shader
      * with the matrix set per draw is the same picture for no allocation.
      */
-    var shader: BitmapShader? = null; private set
+    var shader: Shader? = null; private set
     var cells: FloatArray = FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE); private set
     var width = 0; private set
     var height = 0; private set
@@ -51,6 +51,7 @@ object Backdrop {
     fun install(root: View) {
         this.root = root
         root.background = BackdropDrawable()
+        animate(root)
         root.doOnLayout { build(it) }
         root.addOnLayoutChangeListener { v, l, t, r, b, ol, ot, or, ob ->
             if (r - l != or - ol || b - t != ob - ot) build(v)
@@ -73,14 +74,52 @@ object Backdrop {
         val w = root.width; val h = root.height
         if (w <= 0 || h <= 0) return
         root.getLocationOnScreen(origin)
-        // The panel's photograph is not decoded here any more — see paint().
-        val built = paint(w, h, ConfigStore(root.context).load(), null)
-        // The outgoing bitmap is dropped, never recycled: a draw already queued may still
-        // hold it, and drawing a recycled bitmap throws where letting go of one costs a GC.
+        // THE SILK (see Silk): the live shader is what the root draws and what every pane
+        // bends; the bitmap is a still of it, for what cannot run a shader — the
+        // brightness map the ink reads, and the switch tracks. The outgoing bitmap is
+        // dropped, never recycled: a draw already queued may still hold it.
+        Silk.size(w, h)
+        val built = Silk.still(w, h)
         bitmap = built
-        shader = BitmapShader(built, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        shader = Silk.shader
         width = w; height = h
         cells = cellsOf(built)
+    }
+
+    /** Told every frame the silk moves — the bottom bar's glass, which is not a View. */
+    val onFrame = mutableListOf<() -> Unit>()
+
+    private var lastFrameNs = 0L
+    private val frame = object : android.view.Choreographer.FrameCallback {
+        override fun doFrame(nowNs: Long) {
+            val r = root ?: return
+            if (!r.isAttachedToWindow) { lastFrameNs = 0L; return }
+            if (lastFrameNs != 0L) Silk.advance((nowNs - lastFrameNs) / 1e9f)
+            lastFrameNs = nowNs
+            r.invalidate()
+            invalidateGlass(r)
+            onFrame.forEach { it() }
+            android.view.Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    /**
+     * The silk moves while the screen is up: one frame callback, stopped when the root
+     * leaves the window and started again when it comes back.
+     */
+    private fun animate(root: View) {
+        val choreographer = android.view.Choreographer.getInstance()
+        choreographer.removeFrameCallback(frame)
+        lastFrameNs = 0L
+        if (root.isAttachedToWindow) choreographer.postFrameCallback(frame)
+        root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                lastFrameNs = 0L
+                choreographer.removeFrameCallback(frame)
+                choreographer.postFrameCallback(frame)
+            }
+            override fun onViewDetachedFromWindow(v: View) { choreographer.removeFrameCallback(frame) }
+        })
     }
 
     /**
@@ -91,6 +130,8 @@ object Backdrop {
      * a stale [root] keeps the whole dead view tree — and its 13 MB of wallpaper — alive.
      */
     fun release() {
+        android.view.Choreographer.getInstance().removeFrameCallback(frame)
+        onFrame.clear()
         root = null
         bitmap = null
         shader = null
@@ -204,8 +245,19 @@ class BackdropDrawable : Drawable() {
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     override fun draw(canvas: Canvas) {
         val b = Backdrop.bitmap
-        if (b == null) { paint.color = Panel.Palette.BG; canvas.drawRect(bounds, paint) }
-        else canvas.drawBitmap(b, bounds.left.toFloat(), bounds.top.toFloat(), paint)
+        val live = Backdrop.shader
+        when {
+            b == null -> { paint.color = Panel.Palette.BG; canvas.drawRect(bounds, paint) }
+            // The silk, live, in the root's own coordinates: panes move the shared shader
+            // to their place as they draw, so it is put back here first.
+            live != null && canvas.isHardwareAccelerated -> {
+                live.setLocalMatrix(null)
+                paint.shader = live
+                canvas.drawRect(bounds, paint)
+                paint.shader = null
+            }
+            else -> canvas.drawBitmap(b, bounds.left.toFloat(), bounds.top.toFloat(), paint)
+        }
     }
     override fun setAlpha(alpha: Int) { paint.alpha = alpha }
     override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter }
