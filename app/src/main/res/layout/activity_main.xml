@@ -185,31 +185,14 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-        <LinearLayout
+        <!-- One toggle: Xiaomi's rear-screen app out of the way and the panel up, or back
+             and the panel down. Set by MainActivity.refreshControl. -->
+        <dev.kb896.aiusage.ui.glass.GlassButton
+            android:id="@+id/show_button"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:baselineAligned="false"
-            android:orientation="horizontal">
-
-            <dev.kb896.aiusage.ui.glass.GlassButton
-                android:id="@+id/show_button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="4dp"
-                android:layout_weight="1"
-                android:text="Show on back"
-                android:textSize="13sp" />
-
-            <dev.kb896.aiusage.ui.glass.GlassButton
-                android:id="@+id/hide_button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_weight="1"
-                android:text="Hide"
-                android:textSize="13sp" />
-        </LinearLayout>
+            android:text="Show on the back"
+            android:textSize="13sp" />
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 

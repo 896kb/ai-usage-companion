@@ -29,15 +29,16 @@ class SetupXiaomiRearAppTest {
         assertTrue(Setup.steps(context, shizukuGranted = true, shizukuRunning = true).none { it.kind == Setup.Kind.XIAOMI_APP })
     }
 
+    /** Not an onboarding step any more: it is the show/hide toggle, and it keeps the panel off the back. */
     @Test
-    fun `with the app installed the row offers to remove it, unticked`() {
+    fun `with the app installed it is no step, and it keeps the panel off the back`() {
         shadowOf(context.packageManager).installPackage(PackageInfo().apply {
             packageName = Panel.XIAOMI_REAR_APP
             applicationInfo = ApplicationInfo().apply { packageName = Panel.XIAOMI_REAR_APP; flags = ApplicationInfo.FLAG_SYSTEM }
         })
         assertEquals(true, Setup.xiaomiRearAppInstalled(context))
-        val row = Setup.steps(context, shizukuGranted = true, shizukuRunning = true).single { it.kind == Setup.Kind.XIAOMI_APP }
-        assertEquals("Remove Xiaomi's rear-screen app", row.title)
-        assertEquals(false, row.satisfied)
+        assertTrue(Setup.steps(context, shizukuGranted = true, shizukuRunning = true).none { it.kind == Setup.Kind.XIAOMI_APP })
+        assertTrue(Setup.shownByXiaomi(context))
+        assertEquals(false, Setup.panelAllowed(context, dev.kb896.aiusage.rear.ShizukuBridge.Status(running = true, granted = true, rearDisplayId = 1)))
     }
 }

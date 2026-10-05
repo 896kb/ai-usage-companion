@@ -100,19 +100,9 @@ object Setup {
                 open = null,
                 kind = Kind.SHIZUKU,
             ),
-            xiaomiRearAppInstalled(context)?.let { installed ->
-                Step(
-                    title = if (installed) "Remove Xiaomi's rear-screen app" else "Restore Xiaomi's rear-screen app",
-                    why = "HyperOS's own rear-screen app and this panel want the same display, " +
-                        "and the system keeps putting its own back on top. The panel only " +
-                        "stays with it out of the way. Removing it hides it for you and " +
-                        "deletes nothing; this same row brings it back.",
-                    // Ticked once it is gone: that is the state the panel needs.
-                    satisfied = !installed,
-                    open = null,
-                    kind = Kind.XIAOMI_APP,
-                )
-            },
+            // Xiaomi's rear-screen app is not a step any more: removing or restoring it is
+            // the settings' show/hide toggle, offered once the steps here are done — see
+            // panelAllowed, and MainActivity.refreshControl.
             Step(
                 title = "Notifications",
                 why = "The ongoing notification is what puts the readings in the status " +
@@ -209,5 +199,12 @@ object Setup {
      * takes the panel down instead of fighting for it.
      */
     fun panelAllowed(context: Context, status: ShizukuBridge.Status): Boolean =
-        allDone(steps(context, status.granted, status.running))
+        allDone(steps(context, status.granted, status.running)) && !shownByXiaomi(context)
+
+    /**
+     * Whether Xiaomi's rear-screen app is in the way: installed, on a phone that has it.
+     * The panel cannot stay on the back against it, so this is the show/hide switch —
+     * "Show on the back" removes it, "Hide" brings it back and the panel goes.
+     */
+    fun shownByXiaomi(context: Context): Boolean = xiaomiRearAppInstalled(context) == true
 }

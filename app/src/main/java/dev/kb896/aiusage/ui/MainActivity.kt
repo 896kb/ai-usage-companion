@@ -73,7 +73,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var recoveryCommand: EditText
     private lateinit var recoveryDisplayAbsent: TextView
     private lateinit var showButton: Button
-    private lateinit var hideButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,7 +141,6 @@ class MainActivity : ComponentActivity() {
         recoveryCommand = findViewById(R.id.recovery_command)
         recoveryDisplayAbsent = findViewById(R.id.recovery_display_absent)
         showButton = findViewById(R.id.show_button)
-        hideButton = findViewById(R.id.hide_button)
         bindPreview()
         bindSettings()
         buildSettingsRows()
@@ -361,9 +359,44 @@ class MainActivity : ComponentActivity() {
         // blank on placement and stayed blank until the next poll, now up to five
         // minutes away.
         showButton.setOnClickListener {
-            graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load(), WeatherPoll.latest))
+            when (Setup.xiaomiRearAppInstalled(this)) {
+                // Xiaomi's app has the back: take it out of the way, and the panel goes up.
+                true -> confirmRemoveXiaomiRearApp()
+                // Ours has it: bring Xiaomi's back, and the panel comes down.
+                false -> setXiaomiRearApp(installed = true)
+                // A phone without Xiaomi's app: just the panel, up or down.
+                null -> if (panelHidden) {
+                    panelHidden = false
+                    graph.bridge.show(StatePayload.encode(graph.repository.state.value, ConfigStore(this).load(), WeatherPoll.latest))
+                    refreshControl()
+                } else {
+                    panelHidden = true
+                    graph.bridge.hide()
+                    refreshControl()
+                }
+            }
         }
-        hideButton.setOnClickListener { graph.bridge.hide() }
+    }
+
+    /** On a phone without Xiaomi's rear app, whether the toggle last took the panel down. */
+    private var panelHidden = false
+
+    /**
+     * The show/hide card: there once onboarding is done, and one toggle that says what
+     * pressing it does — "Show on the back" while Xiaomi's rear-screen app has the back,
+     * "Hide" while the panel does. See Setup.shownByXiaomi.
+     */
+    private fun refreshControl() {
+        val status = graph.bridge.status()
+        val done = Setup.allDone(Setup.steps(this, status.granted, status.running))
+        findViewById<View>(R.id.card_control)?.visibility = if (done) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.rule_2)?.visibility = if (done) View.VISIBLE else View.GONE
+        val hidden = when (Setup.xiaomiRearAppInstalled(this)) {
+            true -> true
+            false -> false
+            null -> panelHidden
+        }
+        showButton.text = if (hidden) "Show on the back" else "Hide"
     }
 
     /**
@@ -1540,6 +1573,7 @@ class MainActivity : ComponentActivity() {
         val done = Setup.allDone(steps)
         if (!done && onboarding?.isShowing != true) showOnboarding()
         onboardingRows?.let { fillSetupRows(it, steps) }
+        refreshControl()
         onboarding?.let { dialog ->
             dialog.setCancelable(done)
             dialog.setCanceledOnTouchOutside(done)
