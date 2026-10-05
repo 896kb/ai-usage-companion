@@ -274,7 +274,7 @@ class MainActivity : ComponentActivity() {
      * of settings (the usage tab also holds everything general) and has the preview show
      * that screen. Onboarding and recovery stay above every tab.
      */
-    private var tab = TAB_USAGE
+    private var tab = TAB_GENERAL
 
     private fun bindTabs() {
         val bar = findViewById<androidx.compose.ui.platform.ComposeView>(R.id.tab_bar)
@@ -292,6 +292,7 @@ class MainActivity : ComponentActivity() {
         val selected = androidx.compose.runtime.mutableIntStateOf(tab)
         val lum = dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(host)
         val tabs = listOf(
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_general, "General"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_clock, "Clock"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_usage, "Usage"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_media, "Media"),
@@ -334,7 +335,7 @@ class MainActivity : ComponentActivity() {
     private var tabBackdrop: dev.kb896.aiusage.ui.liquid.ViewBackdrop? = null
 
     private fun showTab(i: Int) {
-        val sections = intArrayOf(R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)
+        val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)
         for ((k, id) in sections.withIndex()) {
             findViewById<View>(id).visibility = if (k == i) View.VISIBLE else View.GONE
         }
@@ -343,7 +344,9 @@ class MainActivity : ComponentActivity() {
             TAB_CLOCK -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
             TAB_MEDIA -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_MEDIA, aod = false)
             TAB_AOD -> preview.show(null, aod = true)
-            else -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_READOUT, aod = false)
+            TAB_USAGE -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_READOUT, aod = false)
+            // General is about the whole panel: the back as it is.
+            else -> preview.show(null, aod = false)
         }
         inkHeadings()
     }
@@ -793,11 +796,13 @@ class MainActivity : ComponentActivity() {
         // One container per tab of the bottom bar — see bindTabs. The panel card holds the
         // usage page's rows and everything general; the clock page, the media page and
         // always-on each have their own.
+        val generalRows = findViewById<LinearLayout>(R.id.general_rows)
         val clockRows = findViewById<LinearLayout>(R.id.clock_rows)
         val mediaRows = findViewById<LinearLayout>(R.id.media_rows)
         val aodRows = findViewById<LinearLayout>(R.id.aod_rows)
         container.removeAllViews()
         advanced.removeAllViews()
+        generalRows.removeAllViews()
         clockRows.removeAllViews()
         mediaRows.removeAllViews()
         aodRows.removeAllViews()
@@ -805,7 +810,7 @@ class MainActivity : ComponentActivity() {
         // there until this build is that version. The notification says it once; this
         // says it every time the screen is opened. See UpdateCheck.
         dev.kb896.aiusage.service.UpdateCheck.available(this)?.let { release ->
-            SettingsRows.navigation(container, "Update available: ${release.tag} — download") {
+            SettingsRows.navigation(generalRows, "Update available: ${release.tag} — download") {
                 startActivity(
                     android.content.Intent(
                         android.content.Intent.ACTION_VIEW,
@@ -815,7 +820,7 @@ class MainActivity : ComponentActivity() {
             }
             val notes = dev.kb896.aiusage.service.UpdateCheck.plain(release.notes)
                 .lineSequence().filter { it.isNotBlank() }.take(4).joinToString("\n")
-            if (notes.isNotEmpty()) SettingsRows.note(container, notes)
+            if (notes.isNotEmpty()) SettingsRows.note(generalRows, notes)
         }
         val store = ConfigStore(this)
 
@@ -845,7 +850,7 @@ class MainActivity : ComponentActivity() {
         // see PanelTheme — so finding it at the bottom of a list of colours would be
         // finding out afterwards that half of them meant something else.
         SettingsRows.choice(
-            container,
+            generalRows,
             "Theme",
             dev.kb896.aiusage.data.PanelTheme.entries.map { it.name },
             config.theme.ordinal,
@@ -857,7 +862,7 @@ class MainActivity : ComponentActivity() {
         // A look over whichever theme: the panel on a curved tube. Off by default —
         // it bends the picture, and touches with it. See CrtScreen.
         SettingsRows.toggle(
-            container, "CRT screen", config.crt,
+            generalRows, "CRT screen", config.crt,
         ) { on -> write { it.copy(crt = on) } }
 
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
@@ -1057,7 +1062,7 @@ class MainActivity : ComponentActivity() {
         // that says, and putting the two together is what makes that obvious.
         if (BuildConfig.DEBUG) {
             SettingsRows.toggle(
-                container, "Demo mode (debug)", config.demoMode,
+                generalRows, "Demo mode (debug)", config.demoMode,
             ) { on -> write { it.copy(demoMode = on) } }
         }
         // Directly under Notifications, because it runs on the same grant — see Setup's
@@ -1868,10 +1873,11 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         /** The bottom bar's tabs, in its order. See bindTabs. */
-        private const val TAB_CLOCK = 0
-        private const val TAB_USAGE = 1
-        private const val TAB_MEDIA = 2
-        private const val TAB_AOD = 3
+        private const val TAB_GENERAL = 0
+        private const val TAB_CLOCK = 1
+        private const val TAB_USAGE = 2
+        private const val TAB_MEDIA = 3
+        private const val TAB_AOD = 4
 
         /** How long the reset dialog holds its confirm button shut. */
         private const val RESET_HOLD_MS = 5_000L

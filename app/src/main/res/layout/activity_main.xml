@@ -172,11 +172,11 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
-        <!-- The bottom bar's tabs: the panel's three pages and always-on. The usage tab
-             holds that page's rows and everything general; the other three are below.
-             Onboarding and recovery stay above them all. See MainActivity.bindTabs. -->
+        <!-- The bottom bar's tabs: General first — what belongs to the whole panel rather
+             than one screen of it — then the panel's three pages and always-on. Onboarding
+             and recovery stay above them all. See MainActivity.bindTabs. -->
         <LinearLayout
-            android:id="@+id/tab_usage"
+            android:id="@+id/tab_general"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
@@ -204,95 +204,18 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
-
-        <View
-            android:id="@+id/rule_settings"
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="16dp" />
-
-        <TextView
-            android:id="@+id/settings_heading"
-            android:visibility="gone"
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_general"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="PANEL"
-            android:textSize="12sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassCard
-            android:id="@+id/card_panel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
             android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/settings_title_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="TITLE"
-            android:textSize="11sp" />
-
-        <!--
-          The field and its colour on one line. A swatch for the title sitting down in
-          the colour grid with the ramp and the accents would be a control separated from
-          the thing it controls, and this row has width to spare.
-        -->
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:baselineAligned="false"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <dev.kb896.aiusage.ui.glass.GlassField
-                android:id="@+id/settings_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="CLAUDE USAGE"
-                android:inputType="textCapCharacters"
-                android:maxLines="1"
-                android:textSize="14sp" />
-
-            <dev.kb896.aiusage.ui.glass.GlassChip
-                android:id="@+id/settings_title_color"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:layout_marginStart="12dp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/settings_rows"
+            android:id="@+id/general_rows"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
-
-        </dev.kb896.aiusage.ui.glass.GlassCard>
-
-        <TextView
-            android:id="@+id/settings_art_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="BOTTOM ARTWORK"
-            android:textSize="11sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassCard
-            android:id="@+id/card_art"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-        <dev.kb896.aiusage.ui.glass.GlassButton
-            android:id="@+id/art_pick"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Choose an image"
-            android:textSize="13sp" />
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
@@ -504,6 +427,106 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="Credits"
+            android:textSize="13sp" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_usage"
+            android:visibility="gone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <View
+            android:id="@+id/rule_settings"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp" />
+
+        <TextView
+            android:id="@+id/settings_heading"
+            android:visibility="gone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="PANEL"
+            android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/settings_title_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="TITLE"
+            android:textSize="11sp" />
+
+        <!--
+          The field and its colour on one line. A swatch for the title sitting down in
+          the colour grid with the ramp and the accents would be a control separated from
+          the thing it controls, and this row has width to spare.
+        -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <dev.kb896.aiusage.ui.glass.GlassField
+                android:id="@+id/settings_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="CLAUDE USAGE"
+                android:inputType="textCapCharacters"
+                android:maxLines="1"
+                android:textSize="14sp" />
+
+            <dev.kb896.aiusage.ui.glass.GlassChip
+                android:id="@+id/settings_title_color"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="12dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/settings_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        <TextView
+            android:id="@+id/settings_art_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="BOTTOM ARTWORK"
+            android:textSize="11sp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_art"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <dev.kb896.aiusage.ui.glass.GlassButton
+            android:id="@+id/art_pick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Choose an image"
             android:textSize="13sp" />
 
         </dev.kb896.aiusage.ui.glass.GlassCard>

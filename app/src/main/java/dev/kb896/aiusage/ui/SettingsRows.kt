@@ -365,6 +365,10 @@ object SettingsRows {
             setTextColor(if (canMoveUp) Panel.Palette.WORK else Panel.Palette.DIM)
             typeface = UiType.of(context)
             setOnClickListener { onMoveUp() }
+            // A gap from the account's own button: two glass capsules touching read as one.
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = dp(context, 10) }
         })
         parent.addView(row, rowParams(dp(context, 8)))
     }
