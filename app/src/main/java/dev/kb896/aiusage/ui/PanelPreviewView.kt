@@ -39,6 +39,10 @@ class PanelPreviewView @JvmOverloads constructor(
     var config: PanelConfig
         get() = dial.config
         set(value) { dial.config = value }
+    /** The weather reading the back has; without it the preview had no weather line at all. */
+    var weather: dev.kb896.aiusage.data.WeatherReading?
+        get() = dial.weather
+        set(value) { dial.weather = value; dial.invalidate() }
 
     /**
      * Mirror a notification onto the preview, exactly as the panel receives it.

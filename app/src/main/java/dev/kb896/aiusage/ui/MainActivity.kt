@@ -487,6 +487,7 @@ class MainActivity : ComponentActivity() {
         val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
         preview.config = ConfigStore(this).load()
         preview.state = graph.repository.state.value
+        preview.weather = WeatherPoll.latest
     }
 
     private fun bindSettings() {
