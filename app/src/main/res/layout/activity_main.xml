@@ -34,11 +34,27 @@
         android:id="@+id/preview_heading"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingStart="24dp"
-        android:paddingTop="24dp"
-        android:paddingEnd="24dp"
+        android:visibility="gone"
         android:text="ON THE BACK"
         android:textSize="12sp" />
+
+    <!-- Onboarding, reopened: the checklist is a dialog now (MainActivity.showOnboarding). -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end|center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="24dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="24dp">
+
+        <dev.kb896.aiusage.ui.glass.GlassButton
+            android:id="@+id/onboarding_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Setup"
+            android:textSize="13sp" />
+    </LinearLayout>
 
     <dev.kb896.aiusage.ui.PanelPreviewView
         android:id="@+id/panel_preview"

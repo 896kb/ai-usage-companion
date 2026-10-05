@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
         bindGeometrySliders()
         bindTabs()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
+        findViewById<Button>(R.id.onboarding_button).setOnClickListener { showOnboarding() }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
         // field only ever displays a command MainActivity wrote, never accepts
@@ -1513,53 +1514,72 @@ class MainActivity : ComponentActivity() {
      * comes straight back here afterwards. A checklist needing a restart to notice would
      * be worse than none.
      */
+    /**
+     * Onboarding is a dialog, not a section of the page.
+     *
+     * While anything that can be checked is still undone it comes up by itself and cannot
+     * be closed — no Cancel, no back, no tap outside — because nothing else here works
+     * until it is. "Done" unlocks once every checkable step has ticked: the same rule as
+     * ever (Setup.allDone) — a step whose state cannot be read, autostart or the recents
+     * lock, is advice and never holds it open. Afterwards the button at the top right
+     * opens it again, closable, for the step that came undone.
+     *
+     * Rebuilt on every resume, inside the dialog if it is up, because most of these are
+     * changed in Settings and the user comes straight back here afterwards.
+     */
+    private var onboarding: android.app.AlertDialog? = null
+    private var onboardingRows: LinearLayout? = null
+
     private fun buildSetupRows() {
-        val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
-        val container = findViewById<LinearLayout>(R.id.setup_rows) ?: return
-        val heading = findViewById<TextView>(R.id.setup_heading) ?: return
-        container.removeAllViews()
+        // The page's own section is gone for good; the checklist lives in the dialog.
+        findViewById<View>(R.id.setup_heading)?.visibility = View.GONE
+        findViewById<View>(R.id.setup_rows)?.visibility = View.GONE
+        findViewById<View>(R.id.rule_1)?.visibility = View.GONE
         val status = graph.bridge.status()
         val steps = Setup.steps(this, status.granted, status.running)
-
-        // Once every actionable step is done, this becomes a collapsed accordion. The
-        // list is instructions for getting started; leaving five satisfied rows at the
-        // top of the settings screen forever would push the things a user actually
-        // returns to below a wall of ticks. It stays reachable, because a step can come
-        // undone — a permission revoked, Shizuku not restarted after a reboot.
         val done = Setup.allDone(steps)
-        heading.visibility = if (done) View.VISIBLE else View.GONE
-        // Green, like every other accordion title, and without the rule that used to
-        // sit above it — a heading and a divider one line apart draw the same line
-        // twice, and the heading is already the thing that says a section starts here.
-        //
-        // Under GLASS neither applies and both had to be undone every time: the heading
-        // takes its ink from the cell it is over (inkHeadings), and every hairline is
-        // gone. This runs on every resume, so it was repainting the heading green and
-        // bringing rule_1 back after applyPalette had settled both.
-        if (!glass) {
-            heading.setTextColor(Panel.Palette.WORK)
-            findViewById<View>(R.id.rule_1)?.visibility = if (done) View.GONE else View.VISIBLE
+        if (!done && onboarding?.isShowing != true) showOnboarding()
+        onboardingRows?.let { fillSetupRows(it, steps) }
+        onboarding?.let { dialog ->
+            dialog.setCancelable(done)
+            dialog.setCanceledOnTouchOutside(done)
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.isEnabled = done
         }
-        if (done) {
-            // Expanded state is not remembered across launches: the reason to open this
-            // is to fix something, and that is a fresh decision each time.
-            container.visibility = View.GONE
-            heading.text = "ONBOARDING  ▸"
-            heading.setOnClickListener {
-                val show = container.visibility != View.VISIBLE
-                container.visibility = if (show) View.VISIBLE else View.GONE
-                heading.text = if (show) "ONBOARDING  ▾" else "ONBOARDING  ▸"
-                // The card collapsed when its content hid; it has to come back the
-                // moment that content is shown again, or the arrow flips over nothing.
-                collapseEmptyCards()
-            }
-        } else {
-            // Outstanding: shown expanded with no heading, because a collapsed accordion
-            // is a thing to notice and this is a thing to do.
-            container.visibility = View.VISIBLE
-            heading.setOnClickListener(null)
-        }
+        collapseEmptyCards()
+    }
 
+    /** Opens the checklist; closable only when nothing checkable is left to do. */
+    private fun showOnboarding() {
+        if (onboarding?.isShowing == true) return
+        val status = graph.bridge.status()
+        val steps = Setup.steps(this, status.granted, status.running)
+        val done = Setup.allDone(steps)
+        val rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpPx(20), dpPx(4), dpPx(20), dpPx(8))
+        }
+        fillSetupRows(rows, steps)
+        onboardingRows = rows
+        val dialog = Modal.show(Modal.builder(this)
+            .setTitle("Get set up")
+            .setView(android.widget.ScrollView(this).apply { addView(rows) })
+            .setCancelable(done)
+            // Wired below, so it can start shut and be opened by the rebuild.
+            .setPositiveButton("Done", null))
+        dialog.setCanceledOnTouchOutside(done)
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.apply {
+            isEnabled = done
+            setOnClickListener { dialog.dismiss() }
+        }
+        dialog.setOnDismissListener {
+            if (onboarding === dialog) { onboarding = null; onboardingRows = null }
+        }
+        onboarding = dialog
+    }
+
+    /** The steps as buttons, one each: tap it and you land where it is satisfied. */
+    private fun fillSetupRows(container: LinearLayout, steps: List<Setup.Step>) {
+        container.removeAllViews()
         for (step in steps) {
             // A step nobody can act on for you is TEXT, not a button. Locking the app in
             // recents is a gesture in the launcher; a button that cannot perform it, and
@@ -1583,7 +1603,7 @@ class MainActivity : ComponentActivity() {
                 false -> ""
                 null -> ""
             }
-            container.addView(Button(this).apply {
+            container.addView(dev.kb896.aiusage.ui.glass.GlassButton(this).apply {
                 text = "$mark${step.title}"
                 textSize = 13f
                 val actionable = step.open != null || step.kind != Setup.Kind.OPEN
@@ -1629,7 +1649,6 @@ class MainActivity : ComponentActivity() {
             ).apply { topMargin = dpPx(4) })
         }
 
-        collapseEmptyCards()
     }
 
     private fun dpPx(value: Int) = (value * resources.displayMetrics.density).toInt()
