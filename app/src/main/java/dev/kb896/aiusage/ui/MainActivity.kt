@@ -155,7 +155,6 @@ class MainActivity : ComponentActivity() {
         bindGeometrySliders()
         bindTabs()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
-        findViewById<Button>(R.id.onboarding_button).setOnClickListener { showOnboarding() }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
         // field only ever displays a command MainActivity wrote, never accepts
@@ -363,6 +362,12 @@ class MainActivity : ComponentActivity() {
         // blank on placement and stayed blank until the next poll, now up to five
         // minutes away.
         showButton.setOnClickListener {
+            // Until onboarding is done the toggle is "Setup", and opens it.
+            val status = graph.bridge.status()
+            if (!Setup.allDone(Setup.steps(this, status.granted, status.running))) {
+                showOnboarding()
+                return@setOnClickListener
+            }
             when (Setup.xiaomiRearAppInstalled(this)) {
                 // Xiaomi's app has the back: take it out of the way, and the panel goes up.
                 true -> confirmRemoveXiaomiRearApp()
@@ -416,15 +421,15 @@ class MainActivity : ComponentActivity() {
     private var panelHidden = false
 
     /**
-     * The show/hide card: there once onboarding is done, and one toggle that says what
-     * pressing it does — "Show on the back" while Xiaomi's rear-screen app has the back,
-     * "Hide" while the panel does. See Setup.shownByXiaomi.
+     * The show/hide card's one button. Until onboarding's crucial steps are done it is
+     * "Setup", and opens the checklist; after, it says what pressing it does — "Show on
+     * the back" while Xiaomi's rear-screen app has the back, "Hide" while the panel does
+     * (Setup.shownByXiaomi).
      */
     private fun refreshControl() {
         val status = graph.bridge.status()
         val done = Setup.allDone(Setup.steps(this, status.granted, status.running))
-        findViewById<View>(R.id.card_control)?.visibility = if (done) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.rule_2)?.visibility = if (done) View.VISIBLE else View.GONE
+        if (!done) { showButton.text = "Setup"; return }
         val hidden = when (Setup.xiaomiRearAppInstalled(this)) {
             true -> true
             false -> false
@@ -1602,8 +1607,8 @@ class MainActivity : ComponentActivity() {
      * be closed — no Cancel, no back, no tap outside — because nothing else here works
      * until it is. "Done" unlocks once every checkable step has ticked: the same rule as
      * ever (Setup.allDone) — a step whose state cannot be read, autostart or the recents
-     * lock, is advice and never holds it open. Afterwards the button at the top right
-     * opens it again, closable, for the step that came undone.
+     * lock, is advice and never holds it open. While a step is undone the show/hide
+     * button reads "Setup" and opens it too (refreshControl).
      *
      * Rebuilt on every resume, inside the dialog if it is up, because most of these are
      * changed in Settings and the user comes straight back here afterwards.
