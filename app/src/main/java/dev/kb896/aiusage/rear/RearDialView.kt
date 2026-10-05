@@ -5789,73 +5789,76 @@ class RearDialView(context: Context) : View(context) {
     private val tipRect = android.graphics.RectF()
 
     /**
-     * The page: the panel's own ground over everything, a heading, a picture of the camera
-     * on the back with its grey band and a finger's tap pulsing in it, three lines, and —
-     * until the slider takes the band — the countdown where the slider will be.
+     * The page: black over everything, and the real place to tap lit up where it is — the
+     * strip at the left of this very screen that the camera leaves grey and the tap watch
+     * listens to ([BandTap.BAND] of the width), flashing, with a tap pulsing between the
+     * lenses. Beside it, what to do, centred in the room above the slider; and until the
+     * slider takes its band, the countdown where it will be.
      */
     private fun drawCameraTip(canvas: Canvas) {
         val now = frameNowMs
         val fade = cameraTipFade(now)
         if (fade <= 0.001f) return
-        // The countdown and the tap's pulse move for as long as the tip is up.
+        // The countdown, the flash and the tap's pulse move for as long as the tip is up.
         if (tipAt != 0L) animating = true
         fun alpha(of: Float) = (255 * of * fade).toInt().coerceIn(0, 255)
 
-        tipFill.color = Panel.Palette.BG
+        tipFill.color = android.graphics.Color.BLACK
         tipFill.alpha = alpha(1f)
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
 
-        val cx = (LockSlider.left() + LockSlider.right()) / 2f
+        // The strip, where it really is, flashing.
+        val stripRight = Panel.WIDTH * BandTap.BAND
+        tipRect.set(CAMERA_TIP_INSET, CAMERA_TIP_INSET, stripRight, Panel.HEIGHT - CAMERA_TIP_INSET)
+        val wave = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_FLASH_MS) / CAMERA_TIP_FLASH_MS).toFloat()
+        tipFill.color = CAMERA_TIP_TAP
+        tipFill.alpha = alpha(0.12f + 0.30f * wave)
+        canvas.drawRoundRect(tipRect, CAMERA_TIP_CORNER, CAMERA_TIP_CORNER, tipFill)
+        tipStroke.color = CAMERA_TIP_TAP
+        tipStroke.strokeWidth = 3f
+        tipStroke.alpha = alpha(0.55f + 0.45f * wave)
+        canvas.drawRoundRect(tipRect, CAMERA_TIP_CORNER, CAMERA_TIP_CORNER, tipStroke)
 
-        // The heading.
+        // A tap, pulsing, in the gap between the lenses — the part of the strip a finger
+        // can actually land on without covering a camera.
+        val lay = config.effectiveRingLayout
+        val tx = lay.cx.toFloat()
+        val ty = (lay.cyFirst + lay.cySecond) / 2f
+        val pulse = (now % CAMERA_TIP_PULSE_MS).toFloat() / CAMERA_TIP_PULSE_MS
+        tipStroke.strokeWidth = 3f
+        tipStroke.alpha = alpha(1f - pulse)
+        canvas.drawCircle(tx, ty, 11f + 22f * Tween.easeInOut(pulse), tipStroke)
+        tipFill.color = android.graphics.Color.WHITE
+        tipFill.alpha = alpha(1f)
+        canvas.drawCircle(tx, ty, 10f, tipFill)
+
+        // What to do, beside it: centred in the column right of the strip and in the room
+        // above the slider, and shrunk only if a line would not fit across.
+        val band = markRegion()
+        val colLeft = stripRight + CAMERA_TIP_GAP
+        val colRight = Panel.WIDTH - CAMERA_TIP_GAP
+        val cx = (colLeft + colRight) / 2f
+        tipText.textSize = typed(CAMERA_TIP_BODY)
+        val widest = CAMERA_TIP_LINES.maxOf { tipText.measureText(it) }
+        tipText.textSize = typed(CAMERA_TIP_TITLE)
+        val title = tipText.measureText(CAMERA_TIP_HEADING)
+        val fit = minOf(1f, (colRight - colLeft) / maxOf(title, widest))
+        val titleSize = typed(CAMERA_TIP_TITLE) * fit
+        val bodySize = typed(CAMERA_TIP_BODY) * fit
+        val step = bodySize * 1.6f
+        val block = titleSize + CAMERA_TIP_TITLE_GAP + step * (CAMERA_TIP_LINES.size - 1) + bodySize
+        var y = (band.top - CAMERA_TIP_GAP - block) / 2f + titleSize
+        tipText.color = android.graphics.Color.WHITE
+        tipText.alpha = alpha(1f)
+        tipText.textSize = titleSize
+        canvas.drawText(CAMERA_TIP_HEADING, cx, y, tipText)
+        y += CAMERA_TIP_TITLE_GAP + bodySize
+        tipText.textSize = bodySize
         tipText.color = Panel.Palette.FG
         tipText.alpha = alpha(1f)
-        tipText.textSize = typed(CAMERA_TIP_TITLE)
-        canvas.drawText("CLOSING THE CAMERA", cx, 62f, tipText)
-
-        // The camera on the back, as it looks: grey band, viewfinder, shutter.
-        val pw = 240f
-        val ph = pw * Panel.HEIGHT / Panel.WIDTH
-        tipRect.set(cx - pw / 2f, 88f, cx + pw / 2f, 88f + ph)
-        val r = 16f
-        canvas.save()
-        tipFill.color = CAMERA_TIP_GREY
-        tipFill.alpha = alpha(1f)
-        canvas.clipRect(tipRect.left, tipRect.top, tipRect.left + pw * 0.41f, tipRect.bottom)
-        canvas.drawRoundRect(tipRect, r, r, tipFill)
-        canvas.restore()
-        tipFill.color = CAMERA_TIP_FINDER
-        tipFill.alpha = alpha(1f)
-        canvas.drawRoundRect(
-            tipRect.left + pw * 0.41f, tipRect.top, tipRect.left + pw * 0.87f, tipRect.bottom, 10f, 10f, tipFill,
-        )
-        tipStroke.color = Panel.Palette.FG
-        tipStroke.strokeWidth = 2f
-        tipStroke.alpha = alpha(0.85f)
-        canvas.drawCircle(tipRect.left + pw * 0.935f, tipRect.bottom - ph * 0.17f, pw * 0.04f, tipStroke)
-        tipStroke.alpha = alpha(0.45f)
-        canvas.drawRoundRect(tipRect, r, r, tipStroke)
-
-        // The tap, in the middle of the grey band, pulsing outwards.
-        val tx = tipRect.left + pw * 0.205f
-        val ty = tipRect.centerY()
-        val pulse = ((now % CAMERA_TIP_PULSE_MS).toFloat() / CAMERA_TIP_PULSE_MS)
-        tipStroke.strokeWidth = 2.5f
-        tipStroke.color = CAMERA_TIP_TAP
-        tipStroke.alpha = alpha(1f - pulse)
-        canvas.drawCircle(tx, ty, 9f + 20f * Tween.easeInOut(pulse), tipStroke)
-        tipFill.color = CAMERA_TIP_TAP
-        tipFill.alpha = alpha(1f)
-        canvas.drawCircle(tx, ty, 8f, tipFill)
-
-        // What to do.
-        tipText.color = Panel.Palette.FG
-        tipText.textSize = typed(CAMERA_TIP_BODY)
-        tipText.alpha = alpha(0.85f)
-        var y = tipRect.bottom + 46f
         for (line in CAMERA_TIP_LINES) {
             canvas.drawText(line, cx, y, tipText)
-            y += CAMERA_TIP_BODY * 1.7f
+            y += step
         }
 
         // The countdown, in the band the slider is about to take.
@@ -5864,10 +5867,13 @@ class RearDialView(context: Context) : View(context) {
             val secs = ((left + 999L) / 1000L).coerceAtLeast(0L)
             val keep = 1f - lockSwap(now)
             if (secs > 0 && keep > 0.001f) {
-                val band = markRegion()
                 tipText.textSize = typed(LOCK_TEXT)
+                tipText.color = Panel.Palette.FG
                 tipText.alpha = alpha(keep * LOCK_TEXT_ALPHA / 255f)
-                canvas.drawText("PLEASE READ  ·  $secs", cx, band.centerY() + LOCK_TEXT * 0.36f, tipText)
+                canvas.drawText(
+                    "PLEASE READ  ·  $secs", (LockSlider.left() + LockSlider.right()) / 2f,
+                    band.centerY() + LOCK_TEXT * 0.36f, tipText,
+                )
             }
         }
     }
@@ -11456,16 +11462,23 @@ class RearDialView(context: Context) : View(context) {
         private const val CAMERA_TIP_FADE_MS = 260f
         private const val CAMERA_TIP_LABEL = "I UNDERSTAND"
         private const val CAMERA_TIP_PULSE_MS = 1_300L
-        private const val CAMERA_TIP_TITLE = 26f
-        private const val CAMERA_TIP_BODY = 17f
+        private const val CAMERA_TIP_TITLE = 32f
+        private const val CAMERA_TIP_BODY = 23f
+        private const val CAMERA_TIP_TITLE_GAP = 22f
+        private const val CAMERA_TIP_GAP = 28f
+        private const val CAMERA_TIP_HEADING = "CLOSING THE CAMERA"
         private val CAMERA_TIP_LINES = listOf(
-            "The camera has no close button on the back.",
-            "Tap the grey area left of the viewfinder",
-            "and it closes.",
+            "No close button on the back.",
+            "Tap the flashing area on",
+            "the left of this screen,",
+            "grey in the camera, and",
+            "the camera closes.",
         )
-        /** The camera's own band grey, its viewfinder, and the tap in the accent the slider reveals. */
-        private const val CAMERA_TIP_GREY = 0xFF9C9C9C.toInt()
-        private const val CAMERA_TIP_FINDER = 0xFF3A4350.toInt()
+        /** The strip's flash, its inset from the screen's edge and its corners, near the display's own. */
+        private const val CAMERA_TIP_FLASH_MS = 1_100L
+        private const val CAMERA_TIP_INSET = 6f
+        private const val CAMERA_TIP_CORNER = 44f
+        /** The tap and the strip, in the accent the slider reveals. */
         private const val CAMERA_TIP_TAP = 0xFF0091FF.toInt()
 
         /** The session window's fixed length — see sessionElapsed. */

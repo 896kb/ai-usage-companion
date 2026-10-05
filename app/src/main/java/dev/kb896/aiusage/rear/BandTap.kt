@@ -78,8 +78,14 @@ class BandTap(
     }
 
     companion object {
-        /** The camera's grey band ends at about 40% of the width; a little inside it. */
-        const val BAND = 0.38f
+        /**
+         * The lens column, the panel's camera cutout: the camera keeps it grey on every
+         * model, since its picture cannot go under the lenses. On the 17 Pro the grey runs a
+         * little further (to 40.6% of the width), but the Pro Max's camera layout has not
+         * been measured, and a tap past the grey lands on the viewfinder — so the zone is
+         * the part that is grey on both. The panel lights up exactly this strip for the tip.
+         */
+        const val BAND = dev.kb896.aiusage.Panel.CUTOUT_RIGHT / dev.kb896.aiusage.Panel.WIDTH.toFloat()
         const val TAP_MS = 400L
         const val SLOP = 0.03f
         private const val EV_ABS = 0x03
