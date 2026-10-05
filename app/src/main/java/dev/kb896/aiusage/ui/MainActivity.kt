@@ -360,7 +360,10 @@ class MainActivity : ComponentActivity() {
                 translationX = 0f
                 visibility = View.GONE
             }
-            val w = findViewById<View>(R.id.tab_pages).width.toFloat()
+            // THE WHOLE SCREEN'S WIDTH, not the column's: the column sits inside the side
+            // margins, and sliding by its width alone stopped each section with a margin's
+            // worth still on screen before it vanished. The scroller is the screen's width.
+            val w = findViewById<View>(R.id.root_scroll).width.toFloat()
                 .takeIf { it > 0f } ?: resources.displayMetrics.widthPixels.toFloat()
             val dir = if (i > prev) 1f else -1f
             val ease = android.view.animation.DecelerateInterpolator(2f)
