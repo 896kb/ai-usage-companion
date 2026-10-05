@@ -292,7 +292,16 @@ class UsagePollService : Service() {
             // running it here would have a camera tap second-guessing the panel's
             // position at the exact moment something else is about to cover it.
             if (intent?.action == RearActivity.ACTION_OPEN_CAMERA) {
-                Graph.of(this@UsagePollService).bridge.openCamera()
+                val app = Graph.of(this@UsagePollService)
+                app.bridge.openCamera()
+                // The camera tip, swiped through on the back: settled here, where the
+                // settings live, and handed back to the panel with the next state.
+                if (intent.getBooleanExtra(RearActivity.EXTRA_CAMERA_TIP_SEEN, false)) {
+                    val store = ConfigStore(this@UsagePollService)
+                    val config = store.load().copy(cameraTip = false)
+                    store.save(config)
+                    app.bridge.update(StatePayload.encode(app.repository.state.value, config, WeatherPoll.latest))
+                }
                 return
             }
             // THE CHARGER GOING IN LIGHTS THE PANEL.

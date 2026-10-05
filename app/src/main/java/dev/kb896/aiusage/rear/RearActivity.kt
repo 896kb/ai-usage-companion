@@ -44,6 +44,9 @@ class RearActivity : Activity() {
          */
         const val ACTION_OPEN_CAMERA = "dev.kb896.aiusage.OPEN_CAMERA"
 
+        /** On [ACTION_OPEN_CAMERA]: the camera tip was swiped through — don't show it again. */
+        const val EXTRA_CAMERA_TIP_SEEN = "dev.kb896.aiusage.CAMERA_TIP_SEEN"
+
         /** Another app's notification, on its way to the panel. */
         const val ACTION_NOTIFICATION = "dev.kb896.aiusage.NOTIFICATION"
         const val EXTRA_NOTIFICATION_APP = "app"
@@ -336,7 +339,19 @@ class RearActivity : Activity() {
         // learns nothing about whether the launch worked: there is no screen here to
         // report a failure on, and the camera either appears or it does not.
         dial.onCameraTap = {
-            sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
+            if (dial.config.cameraTip) {
+                // The first camera: the tip first, and the camera once it is swiped through.
+                // "Seen" goes with the open, to the main process that keeps the settings,
+                // and into this panel's own copy at once so a second press cannot repeat it.
+                dial.showCameraTip {
+                    dial.config = dial.config.copy(cameraTip = false)
+                    sendBroadcast(
+                        Intent(ACTION_OPEN_CAMERA).setPackage(packageName).putExtra(EXTRA_CAMERA_TIP_SEEN, true),
+                    )
+                }
+            } else {
+                sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
+            }
         }
         // Same shape, same reason: the session lives in the main process, so a press
         // here is a message rather than an action. The panel does NOT optimistically
@@ -506,13 +521,17 @@ class RearActivity : Activity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         dial.throughCrt(ev) // first: everything below reads the flat picture's coordinates
         dial.toPanel(ev) // then real pixels into panel units — the Pro Max's display is larger
-        if (systemDoubleTapTakenOver) doubleTaps.onTouchEvent(ev)
+        // The camera tip takes nothing but its slider — not even the double tap — and
+        // nothing at all before the slider has come.
+        val tip = dial.cameraTipUp
+        if (tip) dial.onInteraction?.invoke()
+        if (systemDoubleTapTakenOver && !tip) doubleTaps.onTouchEvent(ev)
         // A dimmed page — the double tap's dim, or always-on — takes no touch but the
         // double tap: no paging, no buttons, no drag. The one exception is the slider,
         // which has to be swiped: a touch that starts on its band goes through, and so
         // does the rest of that same gesture wherever the finger wanders.
         if (sleepStage.dimming) return true
-        if (inAod || guardedAfterWake) {
+        if (inAod || guardedAfterWake || tip) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> sliderTouch = dial.isLocked && dial.lockBand().contains(ev.x, ev.y)
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val pass = sliderTouch; sliderTouch = false; return if (pass) super.dispatchTouchEvent(ev) else true }

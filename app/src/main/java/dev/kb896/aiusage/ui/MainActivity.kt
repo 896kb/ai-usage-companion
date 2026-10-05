@@ -949,6 +949,11 @@ class MainActivity : ComponentActivity() {
         // Shizuku and copied to the clipboard. The panel dying on someone else's phone is
         // a question about their firmware, and this is the shortest way to ask it.
         SettingsRows.navigation(advanced, "Copy rear-display report") { copyRearReport() }
+        // The camera tip shows once; this brings it back for the next camera, and goes off
+        // by itself once it has been swiped through again.
+        SettingsRows.toggle(
+            advanced, "Show the camera tip next time", config.cameraTip,
+        ) { on -> write { it.copy(cameraTip = on) } }
         SettingsRows.colorGrid(advanced, config.rampColors.mapIndexed { i, colour ->
             SettingsRows.Swatch("RAMP ${i + 1}", colour) { c ->
                 write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }

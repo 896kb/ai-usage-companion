@@ -309,6 +309,12 @@ data class PanelConfig(
      * it is the panel going black for no visible reason. See RearActivity.pocketWatch.
      */
     val aodPocket: Boolean = false,
+    /**
+     * Show the camera tip — how to close the camera from the back — the next time the
+     * panel's camera button is pressed. On until it has been swiped through once; the
+     * Advanced switch turns it back on for the next time.
+     */
+    val cameraTip: Boolean = true,
     /** In always-on, the date line on the clock page (outside it, the Date switch decides). */
     val aodDate: Boolean = true,
     /** The weather line on the clock page — the reading and the place. Off leaves only the weather on the glass. */

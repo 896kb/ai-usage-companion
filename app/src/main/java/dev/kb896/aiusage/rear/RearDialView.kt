@@ -1482,6 +1482,7 @@ class RearDialView(context: Context) : View(context) {
             swept(canvas) { drawPendingRings(it) }
             swept(canvas) { drawPendingOver(it) }
             swept(canvas) { drawPendingButtons(it) }
+            drawCameraTip(canvas)
             drawAodVeil(canvas)
             drawTableGlow(canvas)
             drawLockOverlay(canvas)
@@ -1521,6 +1522,9 @@ class RearDialView(context: Context) : View(context) {
         // Straight after the bands, so a ring's own label is legible on top of it.
         if (pendingOver.isNotEmpty()) active.add(GROUP_OVER)
         if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
+        // The camera tip covers all of the above, and is its own layer so the slider's
+        // glass bends the tip rather than the panel hidden under it.
+        if (tipAt != 0L || tipLeftAt != 0L) active.add(GROUP_TIP)
         // The lock group also carries the always-on veil and the table lights, which
         // show without any slider: in always-on the slider is always up, which hid
         // that the group never came on for the lights alone on a plain page.
@@ -1573,6 +1577,7 @@ class RearDialView(context: Context) : View(context) {
             GROUP_RINGS -> swept(canvas) { drawPendingRings(it) }
             GROUP_OVER -> swept(canvas) { drawPendingOver(it) }
             GROUP_BUTTONS -> swept(canvas) { drawPendingButtons(it) }
+            GROUP_TIP -> drawCameraTip(canvas)
             GROUP_LOCK -> { drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             else -> drawCharge(canvas)
@@ -2636,7 +2641,8 @@ class RearDialView(context: Context) : View(context) {
         //
         // Fired ONCE. This runs every frame, and putting the display out is not something
         // to ask for sixty times a second.
-        if (locked && !lockExpiredSent && frameNowMs - lockArmedAt > LOCK_MIN_MS &&
+        // Never under the camera tip: its slider waits for the swipe, and gives up on its own.
+        if (locked && tipAt == 0L && !lockExpiredSent && frameNowMs - lockArmedAt > LOCK_MIN_MS &&
             lockSpent(nowReal)
         ) {
             lockExpiredSent = true
@@ -3191,7 +3197,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // Drawn before the notice and the charging cell, which are allowed over it: they
         // are why the panel is awake, and the knob is at the left where neither reaches.
-        if (overlays) { drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
+        if (overlays) { drawCameraTip(canvas); drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
@@ -5695,7 +5701,11 @@ class RearDialView(context: Context) : View(context) {
     fun unlock() {
         if (!locked) return
         locked = false
+        // The tip's slider, swiped: "I understand" — the camera opens, after the panel has
+        // had its usual unlock. A tip that gave up has already ended itself, so nothing.
+        val tipConfirmed = endCameraTip()
         onUnlocked?.invoke()
+        tipConfirmed?.invoke()
         lockAt = SystemClock.uptimeMillis()
         // the thumb stays where the swipe left it while the band slides out; lockSwap
         // resets it once the band has gone, so the next lock starts clean
@@ -5706,6 +5716,161 @@ class RearDialView(context: Context) : View(context) {
     }
 
     val isLocked: Boolean get() = locked
+
+    // ---- the camera tip ----
+
+    /**
+     * The first camera of all: before it opens, a page over the whole panel says how to
+     * close it from the back — a tap in its empty grey band, the only way there is (see
+     * RearUserService.watchBandTaps). Unskippable for [CAMERA_TIP_MS]; then the slider
+     * comes, saying "I UNDERSTAND", and its swipe opens the camera.
+     *
+     * The slider is the lock's own, so it moves and answers the way it always does; only
+     * its word is different, and it does not run out while the tip is up. Who decides the
+     * tip is due, and what "seen" means afterwards, is the activity's business.
+     */
+    private var tipAt = 0L
+    private var tipLeftAt = 0L
+    private var tipDone: (() -> Unit)? = null
+    val cameraTipUp: Boolean get() = tipAt != 0L
+
+    /** Puts the tip up; [done] runs once its slider is swiped. */
+    fun showCameraTip(done: () -> Unit) {
+        if (tipAt != 0L) return
+        tipAt = SystemClock.uptimeMillis()
+        tipLeftAt = 0L
+        tipDone = done
+        removeCallbacks(tipArrive)
+        removeCallbacks(tipGiveUp)
+        postDelayed(tipArrive, CAMERA_TIP_MS)
+        postDelayed(tipGiveUp, CAMERA_TIP_GIVE_UP_MS)
+        onInteraction?.invoke()
+        invalidate()
+    }
+
+    private val tipArrive = Runnable { if (tipAt != 0L) lock() }
+
+    /** Walked away from: the tip goes, the panel comes back, the camera stays shut — and it is shown again next time. */
+    private val tipGiveUp = Runnable {
+        if (tipAt == 0L) return@Runnable
+        endCameraTip()
+        unlock()
+    }
+
+    /** Ends the tip, fading it out; what it was going to do, for the caller to run or drop. */
+    private fun endCameraTip(): (() -> Unit)? {
+        if (tipAt == 0L) return null
+        val done = tipDone
+        tipAt = 0L
+        tipDone = null
+        tipLeftAt = SystemClock.uptimeMillis()
+        removeCallbacks(tipArrive)
+        removeCallbacks(tipGiveUp)
+        invalidate()
+        return done
+    }
+
+    private fun cameraTipFade(now: Long): Float {
+        val rising = tipAt != 0L
+        val from = if (rising) tipAt else tipLeftAt
+        if (from == 0L) return 0f
+        val t = ((now - from).toFloat() / CAMERA_TIP_FADE_MS).coerceIn(0f, 1f)
+        if (!rising && t >= 1f) { tipLeftAt = 0L; return 0f }
+        if (t < 1f) animating = true
+        val e = Tween.easeInOut(t)
+        return if (rising) e else 1f - e
+    }
+
+    private val tipFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val tipStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val tipText by lazy {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = label.typeface; textAlign = Paint.Align.CENTER }
+    }
+    private val tipRect = android.graphics.RectF()
+
+    /**
+     * The page: the panel's own ground over everything, a heading, a picture of the camera
+     * on the back with its grey band and a finger's tap pulsing in it, three lines, and —
+     * until the slider takes the band — the countdown where the slider will be.
+     */
+    private fun drawCameraTip(canvas: Canvas) {
+        val now = frameNowMs
+        val fade = cameraTipFade(now)
+        if (fade <= 0.001f) return
+        // The countdown and the tap's pulse move for as long as the tip is up.
+        if (tipAt != 0L) animating = true
+        fun alpha(of: Float) = (255 * of * fade).toInt().coerceIn(0, 255)
+
+        tipFill.color = Panel.Palette.BG
+        tipFill.alpha = alpha(1f)
+        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
+
+        val cx = (LockSlider.left() + LockSlider.right()) / 2f
+
+        // The heading.
+        tipText.color = Panel.Palette.FG
+        tipText.alpha = alpha(1f)
+        tipText.textSize = typed(CAMERA_TIP_TITLE)
+        canvas.drawText("CLOSING THE CAMERA", cx, 62f, tipText)
+
+        // The camera on the back, as it looks: grey band, viewfinder, shutter.
+        val pw = 240f
+        val ph = pw * Panel.HEIGHT / Panel.WIDTH
+        tipRect.set(cx - pw / 2f, 88f, cx + pw / 2f, 88f + ph)
+        val r = 16f
+        canvas.save()
+        tipFill.color = CAMERA_TIP_GREY
+        tipFill.alpha = alpha(1f)
+        canvas.clipRect(tipRect.left, tipRect.top, tipRect.left + pw * 0.41f, tipRect.bottom)
+        canvas.drawRoundRect(tipRect, r, r, tipFill)
+        canvas.restore()
+        tipFill.color = CAMERA_TIP_FINDER
+        tipFill.alpha = alpha(1f)
+        canvas.drawRoundRect(
+            tipRect.left + pw * 0.41f, tipRect.top, tipRect.left + pw * 0.87f, tipRect.bottom, 10f, 10f, tipFill,
+        )
+        tipStroke.color = Panel.Palette.FG
+        tipStroke.strokeWidth = 2f
+        tipStroke.alpha = alpha(0.85f)
+        canvas.drawCircle(tipRect.left + pw * 0.935f, tipRect.bottom - ph * 0.17f, pw * 0.04f, tipStroke)
+        tipStroke.alpha = alpha(0.45f)
+        canvas.drawRoundRect(tipRect, r, r, tipStroke)
+
+        // The tap, in the middle of the grey band, pulsing outwards.
+        val tx = tipRect.left + pw * 0.205f
+        val ty = tipRect.centerY()
+        val pulse = ((now % CAMERA_TIP_PULSE_MS).toFloat() / CAMERA_TIP_PULSE_MS)
+        tipStroke.strokeWidth = 2.5f
+        tipStroke.color = CAMERA_TIP_TAP
+        tipStroke.alpha = alpha(1f - pulse)
+        canvas.drawCircle(tx, ty, 9f + 20f * Tween.easeInOut(pulse), tipStroke)
+        tipFill.color = CAMERA_TIP_TAP
+        tipFill.alpha = alpha(1f)
+        canvas.drawCircle(tx, ty, 8f, tipFill)
+
+        // What to do.
+        tipText.color = Panel.Palette.FG
+        tipText.textSize = typed(CAMERA_TIP_BODY)
+        tipText.alpha = alpha(0.85f)
+        var y = tipRect.bottom + 46f
+        for (line in CAMERA_TIP_LINES) {
+            canvas.drawText(line, cx, y, tipText)
+            y += CAMERA_TIP_BODY * 1.7f
+        }
+
+        // The countdown, in the band the slider is about to take.
+        if (tipAt != 0L) {
+            val left = CAMERA_TIP_MS - (now - tipAt)
+            val secs = ((left + 999L) / 1000L).coerceAtLeast(0L)
+            val keep = 1f - lockSwap(now)
+            if (secs > 0 && keep > 0.001f) {
+                val band = markRegion()
+                tipText.textSize = typed(LOCK_TEXT)
+                tipText.alpha = alpha(keep * LOCK_TEXT_ALPHA / 255f)
+                canvas.drawText("PLEASE READ  ·  $secs", cx, band.centerY() + LOCK_TEXT * 0.36f, tipText)
+            }
+        }
+    }
 
     /**
      * 0 while the slot holds what it normally would, 1 while the slider does.
@@ -7586,7 +7751,7 @@ class RearDialView(context: Context) : View(context) {
         extras.color =
             (colour and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24)
         canvas.drawText(
-            LOCK_LABEL,
+            if (tipAt != 0L) CAMERA_TIP_LABEL else LOCK_LABEL,
             (LockSlider.left() + LockSlider.right()) / 2f,
             region.centerY() + LOCK_TEXT * 0.36f,
             extras,
@@ -11282,6 +11447,26 @@ class RearDialView(context: Context) : View(context) {
         private const val GROUP_LOCK = 1
         private const val GROUP_NOTICE = 2
         private const val GROUP_CHARGE = 3
+        private const val GROUP_TIP = 6
+
+        /** The camera tip: the wait before its slider comes, unskippable. */
+        private const val CAMERA_TIP_MS = 5_000L
+        /** Nobody swiped in this long after it appeared: the tip gives up, the camera stays shut. */
+        private const val CAMERA_TIP_GIVE_UP_MS = 90_000L
+        private const val CAMERA_TIP_FADE_MS = 260f
+        private const val CAMERA_TIP_LABEL = "I UNDERSTAND"
+        private const val CAMERA_TIP_PULSE_MS = 1_300L
+        private const val CAMERA_TIP_TITLE = 26f
+        private const val CAMERA_TIP_BODY = 17f
+        private val CAMERA_TIP_LINES = listOf(
+            "The camera has no close button on the back.",
+            "Tap the grey area left of the viewfinder",
+            "and it closes.",
+        )
+        /** The camera's own band grey, its viewfinder, and the tap in the accent the slider reveals. */
+        private const val CAMERA_TIP_GREY = 0xFF9C9C9C.toInt()
+        private const val CAMERA_TIP_FINDER = 0xFF3A4350.toInt()
+        private const val CAMERA_TIP_TAP = 0xFF0091FF.toInt()
 
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
