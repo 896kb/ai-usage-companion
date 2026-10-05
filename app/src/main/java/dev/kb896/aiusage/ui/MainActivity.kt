@@ -566,12 +566,13 @@ class MainActivity : ComponentActivity() {
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri == null) return@registerForActivityResult
-        val path = ArtImport.store(this, uri, ArtImport.Slot.BACKGROUND)
+        // Into a waiting slot, not the background's own file: see ArtImport.promote.
+        val path = ArtImport.store(this, uri, ArtImport.Slot.BACKGROUND_PENDING)
         if (path == null) {
             toast("Could not read that image")
             return@registerForActivityResult
         }
-        cropBackdrop(path)
+        cropBackdrop(path, pending = true)
     }
 
     private val pickArt = registerForActivityResult(
@@ -1121,7 +1122,7 @@ class MainActivity : ComponentActivity() {
      * and it differs a lot: 4:1 against the panel's 1.58:1. Showing one and landing in
      * the other is exactly what this view exists to prevent.
      */
-    private fun cropBackdrop(path: String, reuseTransform: Boolean = false) {
+    private fun cropBackdrop(path: String, reuseTransform: Boolean = false, pending: Boolean = false) {
         val bitmap = android.graphics.BitmapFactory.decodeFile(path)
         if (bitmap == null) {
             toast("Could not read that image")
@@ -1162,11 +1163,14 @@ class MainActivity : ComponentActivity() {
             android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = (14 * dp).toInt() })
         val slider = dev.kb896.aiusage.ui.glass.GlassSlider(this).apply {
-            progressDrawable = getDrawable(R.drawable.seek_track)
-            thumb = getDrawable(R.drawable.seek_thumb)
-            thumbOffset = 0
-            splitTrack = false
-            background = null
+            // The settings' PanelSeekBar look, for ORIGINAL; GLASS draws its own.
+            if (!glass) {
+                progressDrawable = getDrawable(R.drawable.seek_track)
+                thumb = getDrawable(R.drawable.seek_thumb)
+                thumbOffset = 0
+                splitTrack = false
+                background = null
+            }
             max = 100
             progress = (opacity * 100).toInt()
         }
@@ -1191,13 +1195,23 @@ class MainActivity : ComponentActivity() {
             override fun onStartTrackingTouch(bar: SeekBar) {}
             override fun onStopTrackingTouch(bar: SeekBar) {}
         })
+        var used = false
         Modal.show(Modal.builder(this)
             .setTitle("Drag to move, pinch to zoom")
             .setView(sheet)
             .setNegativeButton("Cancel", null)
+            // Cancelled, or dismissed any other way: a picked picture that was never used
+            // goes, and the background stays exactly as it was.
+            .setOnDismissListener { if (pending && !used) ArtImport.clear(this, ArtImport.Slot.BACKGROUND_PENDING) }
             .setPositiveButton("Use it") { _, _ ->
+                used = true
+                // Only now does the picked picture become the background's file.
+                val finalPath = if (pending) {
+                    ArtImport.promote(this, ArtImport.Slot.BACKGROUND_PENDING, ArtImport.Slot.BACKGROUND)
+                        ?: run { toast("Could not keep that image"); return@setPositiveButton }
+                } else path
                 var config = store.load().copy(backdrop = ArtConfig(
-                    imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom, opacity = opacity))
+                    imagePath = finalPath, panX = view.panX, panY = view.panY, zoom = view.zoom, opacity = opacity))
                 // The colour behind is the panel's ground; it only matters below full.
                 if (opacity < 1f) config = config.copy(background = behind)
                 store.save(config)

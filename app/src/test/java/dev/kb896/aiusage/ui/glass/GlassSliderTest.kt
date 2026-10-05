@@ -40,7 +40,7 @@ class GlassSliderTest {
         assertNull(ours.thumb)
         assertNull(ours.progressDrawable)
         val d = context.resources.displayMetrics.density
-        assertEquals((20 * d).toInt(), ours.paddingLeft)
+        assertEquals((32 * d).toInt(), ours.paddingLeft)
     }
 
     @Test fun `under GLASS a slider with no size draws without throwing`() {

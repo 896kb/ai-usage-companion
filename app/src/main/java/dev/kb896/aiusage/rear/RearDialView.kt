@@ -10828,15 +10828,27 @@ class RearDialView(context: Context) : View(context) {
             panelRect, bitmap.width, bitmap.height,
             config.backdrop.panX, config.backdrop.panY, config.backdrop.zoom,
         )
+        // always-on: the backdrop fades to black over a second and stays there. The picture
+        // shows only as much as its opacity, the ground colour through the rest.
+        //
+        // DARKENED, NOT THINNED. The ground fades to black underneath on its own, so the
+        // picture fading by its alpha let more of the ground through as it went: the panel
+        // passed through the colour behind on its way to black — pink, under a picture with
+        // no pink in it. The picture keeps its opacity and its colours go to black at the
+        // ground's pace, so the two fade as the one picture they are.
+        val fade = aodFade(frameNowMs)
+        if (fade >= 0.999f) return
+        val opacity = config.backdrop.opacity.coerceIn(0f, 1f)
         canvas.save()
         canvas.clipRect(panelRect)
-        // always-on: the backdrop fades to black over a second and stays there; and the
-        // picture shows only as much as its opacity, the ground colour through the rest
-        val fade = aodFade(frameNowMs)
-        val opacity = config.backdrop.opacity.coerceIn(0f, 1f)
-        if (fade > 0f || opacity < 1f) artPaint.alpha = (255 * (1f - fade) * opacity).toInt()
+        if (opacity < 1f) artPaint.alpha = (255 * opacity).toInt()
+        if (fade > 0f) {
+            val keep = (255 * (1f - fade)).toInt().coerceIn(0, 255)
+            artPaint.colorFilter = android.graphics.LightingColorFilter((keep shl 16) or (keep shl 8) or keep, 0)
+        }
         canvas.drawBitmap(bitmap, null, dest, artPaint)
         artPaint.alpha = 255
+        artPaint.colorFilter = null
         canvas.restore()
     }
 

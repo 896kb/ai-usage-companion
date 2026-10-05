@@ -33,7 +33,11 @@ class GlassSlider @JvmOverloads constructor(
             thumb = null
             progressDrawable = null
             splitTrack = false
-            val side = (20 * density).toInt(); val vert = (14 * density).toInt()
+            // ROOM FOR THE THUMB AT ITS BIGGEST. It is 40dp wide and grows to one and a half
+            // times that while held, so at either end of the track half of it — 30dp — hangs
+            // past the track's end; with 20dp of padding the last 10dp were cut off by the
+            // view's own edge whenever it was pressed at 0% or 100%.
+            val side = (32 * density).toInt(); val vert = (14 * density).toInt()
             setPadding(side, vert, side, vert)
             minimumHeight = (48 * density).toInt()
         }

@@ -29,6 +29,8 @@ object ArtImport {
     enum class Slot(val file: String) {
         ART("panel-art.png"),
         BACKGROUND("panel-background.png"),
+        /** A background picked and not yet cropped — see [promote]. */
+        BACKGROUND_PENDING("panel-background-pending.png"),
     }
 
     /**
@@ -60,6 +62,24 @@ object ArtImport {
 
     fun clear(context: Context, slot: Slot = Slot.ART) {
         File(context.filesDir, slot.file).delete()
+    }
+
+    /**
+     * Moves the picture in [from] into [to], replacing what is there; its path, or null.
+     *
+     * A picked background waits in a slot of its own until its crop is accepted. Written
+     * straight into the background's file, it replaced the panel's picture the moment it
+     * was picked — the panel reloads a file whose date changes — so Cancel left it set.
+     */
+    fun promote(context: Context, from: Slot, to: Slot): String? {
+        val source = File(context.filesDir, from.file)
+        val target = File(context.filesDir, to.file)
+        if (!source.exists()) return null
+        if (!source.renameTo(target)) {
+            if (runCatching { source.copyTo(target, overwrite = true) }.isFailure) return null
+            source.delete()
+        }
+        return target.absolutePath
     }
 
     /**
