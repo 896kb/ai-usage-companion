@@ -1001,7 +1001,7 @@ class MainActivity : ComponentActivity() {
             setCompoundDrawablesRelativeWithIntrinsicBounds(
                 R.drawable.ic_reset, 0, 0, 0)
             compoundDrawablePadding = (10 * resources.displayMetrics.density).toInt()
-            typeface = resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(this@MainActivity)
             setOnClickListener { confirmResetEverything() }
             advanced.addView(this, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1151,7 +1151,7 @@ class MainActivity : ComponentActivity() {
         val opacityLabel = TextView(this).apply {
             textSize = 11f
             setTextColor(Panel.Palette.FG)
-            typeface = resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(this@MainActivity)
             text = "OPACITY  ${(opacity * 100).toInt()}%"
         }
         sheet.addView(opacityLabel, android.widget.LinearLayout.LayoutParams(
@@ -1490,7 +1490,7 @@ class MainActivity : ComponentActivity() {
                     text = step.why
                     textSize = 11f
                     setTextColor(Panel.Palette.DIM)
-                    typeface = resources.getFont(R.font.departure_mono)
+                    typeface = UiType.of(this@MainActivity)
                     setPadding(0, dpPx(10), 0, dpPx(2))
                 })
                 continue
@@ -1521,7 +1521,7 @@ class MainActivity : ComponentActivity() {
                         else -> Panel.Palette.DIM
                     }
                 )
-                typeface = resources.getFont(R.font.departure_mono)
+                typeface = UiType.of(this@MainActivity)
                 setOnClickListener {
                     if (step.kind == Setup.Kind.XIAOMI_APP) {
                         // satisfied == true means the app is already gone: the tap restores it
@@ -1611,7 +1611,7 @@ class MainActivity : ComponentActivity() {
      * actually happens: nothing is deleted, and the same row undoes it.
      */
     private fun confirmRemoveXiaomiRearApp() {
-        android.app.AlertDialog.Builder(this)
+        Modal.show(Modal.builder(this)
             .setTitle("Remove Xiaomi's rear-screen app?")
             .setMessage(
                 "It is hidden for your user, not deleted — it stays on the system partition, " +
@@ -1619,8 +1619,7 @@ class MainActivity : ComponentActivity() {
                     "keeps putting its own screen back over the panel."
             )
             .setPositiveButton("Remove") { _, _ -> setXiaomiRearApp(installed = false) }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .setNegativeButton("Cancel", null), danger = true)
     }
 
     private fun copyRearReport() {
@@ -1639,11 +1638,10 @@ class MainActivity : ComponentActivity() {
                 val text = "AI Usage ${dev.kb896.aiusage.BuildConfig.VERSION_NAME}\n$report"
                 getSystemService(android.content.ClipboardManager::class.java)
                     .setPrimaryClip(android.content.ClipData.newPlainText("rear-display report", text))
-                android.app.AlertDialog.Builder(this@MainActivity)
+                Modal.show(Modal.builder(this@MainActivity)
                     .setTitle("Rear-display report — copied")
                     .setMessage(text)
-                    .setPositiveButton("OK", null)
-                    .show()
+                    .setPositiveButton("OK", null))
             }
         }
     }

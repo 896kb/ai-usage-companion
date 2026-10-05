@@ -27,6 +27,8 @@ object SettingsRows {
 
     /** Swatches per row. Three fits the names and keeps related colours on one line. */
     private const val COLUMNS = 3
+    /** A colour dot at the end of a row: a circle, so as tall as it is wide. */
+    const val SWATCH_DP = 36
 
     /** Which set of controls a row builds. Read once per row, not cached, so a theme
      *  change picked up on rebuild needs nothing here to invalidate. */
@@ -36,7 +38,7 @@ object SettingsRows {
         this.text = text
         textSize = 11f
         setTextColor(Panel.Palette.DIM)
-        typeface = context.resources.getFont(R.font.departure_mono)
+        typeface = UiType.of(context)
     }
 
     /**
@@ -97,7 +99,7 @@ object SettingsRows {
             GlassChip(context).apply {
                 colour = swatch.color
                 layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34))
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 40))
             }
         } else {
             View(context).apply {
@@ -122,7 +124,7 @@ object SettingsRows {
         }
         cell.addView(label(context, swatch.name))
         cell.addView(block, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 34)).apply { topMargin = dp(context, 4) })
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 40)).apply { topMargin = dp(context, 4) })
         return cell
     }
 
@@ -141,14 +143,14 @@ object SettingsRows {
     ) {
         val context = parent.context
         parent.addView(label(context, name), rowParams(dp(context, 10)))
-        parent.addView(android.widget.EditText(context).apply {
+        parent.addView(dev.kb896.aiusage.ui.glass.GlassField(context).apply {
             setText(initial)
             textSize = 14f
             maxLines = 1
             if (maxChars > 0) filters = TitleLimits.filter(maxChars)
             setTextColor(Panel.Palette.FG)
             setHintTextColor(Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             doAfterTextChanged { onChange(it?.toString().orEmpty().trim()) }
         }, rowParams(dp(context, 2)))
     }
@@ -165,7 +167,7 @@ object SettingsRows {
         if (glass(context)) {
             val chip = GlassChip(context).apply {
                 this.colour = colour
-                layoutParams = LinearLayout.LayoutParams(dp(context, 44), dp(context, 26))
+                layoutParams = LinearLayout.LayoutParams(dp(context, SWATCH_DP), dp(context, SWATCH_DP))
                     .apply { marginStart = dp(context, 12) }
             }
             var current = colour
@@ -251,14 +253,14 @@ object SettingsRows {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        row.addView(android.widget.EditText(context).apply {
+        row.addView(dev.kb896.aiusage.ui.glass.GlassField(context).apply {
             setText(initial)
             textSize = 14f
             maxLines = 1
             filters = TitleLimits.filter(maxChars)
             setTextColor(Panel.Palette.FG)
             setHintTextColor(Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             doAfterTextChanged { onChange(it?.toString().orEmpty().trim()) }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(swatch(context, colour, onPick))
@@ -283,7 +285,7 @@ object SettingsRows {
                 text = name
                 textSize = 13f
                 setTextColor(Panel.Palette.FG)
-                typeface = context.resources.getFont(R.font.departure_mono)
+                typeface = UiType.of(context)
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
@@ -310,7 +312,7 @@ object SettingsRows {
             text = "$name  ›"
             textSize = 14f
             setTextColor(Panel.Palette.FG)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             setOnClickListener { onClick() }
             parent.addView(this, rowParams(dp(context, 8)))
         }
@@ -351,7 +353,7 @@ object SettingsRows {
             text = "$name  ›"
             textSize = 14f
             setTextColor(Panel.Palette.FG)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             layoutParams = LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { onClick() }
@@ -361,7 +363,7 @@ object SettingsRows {
             textSize = 15f
             isEnabled = canMoveUp
             setTextColor(if (canMoveUp) Panel.Palette.WORK else Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             setOnClickListener { onMoveUp() }
         })
         parent.addView(row, rowParams(dp(context, 8)))
@@ -384,7 +386,7 @@ object SettingsRows {
                 textSize = 13f
                 isChecked = initial
                 setTextColor(Panel.Palette.FG)
-                typeface = context.resources.getFont(R.font.departure_mono)
+                typeface = UiType.of(context)
                 // Boxy and green, matching the sliders and the panel. The platform's pill
                 // and circle are the only rounded things in an app made of rectangles.
                 thumbDrawable = context.getDrawable(R.drawable.switch_thumb)
@@ -407,7 +409,7 @@ object SettingsRows {
         row.addView(TextView(context).apply {
             text = name
             textSize = 13f
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(GlassSwitch(context).apply {
             setCheckedSilently(initial)

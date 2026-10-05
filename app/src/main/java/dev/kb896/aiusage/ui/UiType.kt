@@ -32,4 +32,10 @@ object UiType {
      */
     fun variation(context: Context): String? =
         PanelType.variation(dev.kb896.aiusage.data.PanelTheme.GLASS)
+
+    /** The front's face on [view], with its axes — set, or cleared when the face has none. */
+    fun dress(view: android.widget.TextView) {
+        view.typeface = of(view.context)
+        view.fontVariationSettings = variation(view.context)
+    }
 }

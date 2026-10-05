@@ -149,7 +149,7 @@ object AccountSettingsSheet {
                 textSize = 12f
                 setTextColor(
                     if (TokenStatus.healthy(record)) Panel.Palette.WORK else Panel.Palette.CRIT)
-                typeface = context.resources.getFont(R.font.departure_mono)
+                typeface = UiType.of(context)
                 setPadding(0, dp(context, 4), 0, dp(context, 4))
             })
 
@@ -308,7 +308,7 @@ object AccountSettingsSheet {
                     text = "ACCOUNT"
                     textSize = 11f
                     setTextColor(Panel.Palette.DIM)
-                    typeface = context.resources.getFont(R.font.departure_mono)
+                    typeface = UiType.of(context)
                     setPadding(0, dp(context, 18), 0, dp(context, 2))
                 })
 
@@ -321,7 +321,7 @@ object AccountSettingsSheet {
                         text = label
                         textSize = 12f
                         setTextColor(Panel.Palette.DIM)
-                        typeface = context.resources.getFont(R.font.departure_mono)
+                        typeface = UiType.of(context)
                         layoutParams = LinearLayout.LayoutParams(dp(context, 108),
                             ViewGroup.LayoutParams.WRAP_CONTENT)
                     })
@@ -331,7 +331,7 @@ object AccountSettingsSheet {
                         text = if (label == "PLAN" || Unlock.isUnlocked()) value else MASK
                         textSize = 12f
                         setTextColor(Panel.Palette.FG)
-                        typeface = context.resources.getFont(R.font.departure_mono)
+                        typeface = UiType.of(context)
                         tag = value
                     }
                     if (label != "PLAN") values += shown
@@ -417,7 +417,7 @@ object AccountSettingsSheet {
             text = "‹  BACK"
             textSize = 14f
             setTextColor(Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             setPadding(dp(context, 20), dp(context, 14), dp(context, 20), dp(context, 10))
             isClickable = true
         }
@@ -513,12 +513,12 @@ object AccountSettingsSheet {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(context, 20), dp(context, 12), dp(context, 20), 0)
         }
-        val paste = android.widget.EditText(context).apply {
+        val paste = dev.kb896.aiusage.ui.glass.GlassField(context).apply {
             hint = "Paste the credential JSON"
             textSize = 12f
             setTextColor(Panel.Palette.FG)
             setHintTextColor(Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             minLines = 3
         }
         // A credential already waiting in our own storage, put there by the export
@@ -533,7 +533,7 @@ object AccountSettingsSheet {
                     "leave the field empty."
                 textSize = 11f
                 setTextColor(Panel.Palette.WORK)
-                typeface = context.resources.getFont(R.font.departure_mono)
+                typeface = UiType.of(context)
                 setPadding(0, 0, 0, dp(context, 8))
             })
         }
@@ -542,7 +542,7 @@ object AccountSettingsSheet {
             text = TokenStatus.EXAMPLE
             textSize = 10f
             setTextColor(Panel.Palette.DIM)
-            typeface = context.resources.getFont(R.font.departure_mono)
+            typeface = UiType.of(context)
             setPadding(0, dp(context, 8), 0, 0)
         })
 

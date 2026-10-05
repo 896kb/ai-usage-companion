@@ -425,6 +425,28 @@ data class PanelConfig(
     val mediaTint: Int get() = mediaColor ?: extrasColor
     val notificationGround: Int get() = notificationBg ?: background
 
+    /**
+     * Every colour the panel is drawn in, once each, in a stable order — the picker's
+     * palette: "make this match that" is most of what choosing a colour is, and these are
+     * the things there are to match. Resolved as drawn (an unset colour is the one it falls
+     * back to), opaque, and told apart by their RGB alone.
+     */
+    fun usedColours(): List<Int> {
+        val all = buildList {
+            add(background)
+            add(titleColor); add(closeColor); add(extrasColor)
+            add(clockTint); add(batteryTint); add(dateTint); add(weatherTint); add(tableTint)
+            add(cameraTint); add(notificationTint); add(notificationGround); add(mediaTint)
+            addAll(rampColors)
+            accounts.forEachIndexed { i, a ->
+                add(a.accent ?: if (i == 0) Panel.Palette.PERSONAL else Panel.Palette.WORK)
+                a.mascotBody?.let(::add)
+                a.mascotAccent?.let(::add)
+            }
+        }
+        return all.map { it or (0xFF shl 24) }.distinct()
+    }
+
     fun styleFor(index: Int): AccountStyle = accounts.getOrElse(index) { AccountStyle() }
 
     /**

@@ -10,13 +10,14 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * A colour swatch as a disc of glass with the colour laid over it.
+ * A colour swatch: the colour as a circle, under a bigger circle of glass that sits on top
+ * of it — the same dot everywhere a colour is shown or chosen, in the settings' rows and
+ * grid and in the picker's palette.
  *
- * The colour is the user's and is shown as chosen — at 0.85 so the glass still reads
- * through the edge — never pushed lighter or darker by what is behind it.
- *
- * Under ORIGINAL it is the plain View the title row always had: [colour] is its
- * background and nothing here draws, so declaring it in the XML changes no pixel.
+ * Drawn as the largest circle the view holds, centred, whatever its shape. The glass
+ * refracts the wallpaper behind it; the colour sits inside, opaque and exactly as chosen;
+ * a sheen and the rim go over both, which is what makes the glass read as ON the colour
+ * rather than round it. [ringed] adds a ring, for the palette's current colour.
  */
 class GlassChip @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null,
@@ -25,40 +26,58 @@ class GlassChip @JvmOverloads constructor(
     val glass = UiTheme.isGlass(context)
 
     var colour: Int = 0
-        set(value) {
-            field = value
-            // setBackgroundColor invalidates by itself, so ORIGINAL asks for one repaint
-            // rather than two; under GLASS the colour is painted in onDraw, not held as
-            // a background, so this is the only thing that schedules it.
-            if (glass) invalidate() else setBackgroundColor(value)
-        }
+        set(value) { field = value; invalidate() }
+
+    /** Ringed, as the palette's current colour. */
+    var ringed: Boolean = false
+        set(value) { field = value; invalidate() }
 
     private val press = PressSpring(this)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val rect = RectF()
+    private val sheen = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private var sheenFor = -1f
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!glass) return super.onTouchEvent(event)
         press.onTouch(event)
         return super.onTouchEvent(event)
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (!glass) { super.onDraw(canvas); return }
-        val w = width.toFloat(); val h = height.toFloat(); val r = h / 2f
-        Pane.draw(canvas, this, 0f, 0f, w, h, r, tint = 0, clear = true, rim = false)
-        rect.set(0f, 0f, w, h)
-        paint.color = shown(colour)
-        canvas.drawRoundRect(rect, r, r, paint)
-        // The rim only. Without lens = false this second pass re-ran the refraction over
-        // the colour that had just been drawn, which repainted the backdrop on top of it
-        // — the swatch came out as wallpaper with a rim, whatever colour was picked.
-        Pane.draw(canvas, this, 0f, 0f, w, h, r, tint = 0, clear = false, rim = true, lens = false)
-        Pane.glow(canvas, 0f, 0f, w, h, r, press.progress, press.x, press.y)
+        if (width <= 0 || height <= 0) return
+        val r = minOf(width, height) / 2f
+        val cx = width / 2f; val cy = height / 2f
+        val l = cx - r; val t = cy - r; val rr = cx + r; val b = cy + r
+        // The glass body, refracting what is behind it.
+        Pane.draw(canvas, this, l, t, rr, b, r, tint = 0, clear = true, rim = false)
+        // The colour, inside it.
+        paint.color = colour or (0xFF shl 24)
+        canvas.drawCircle(cx, cy, r * DOT, paint)
+        // The glass over the colour: a sheen falling from the top left, then the rim.
+        if (sheenFor != r) {
+            sheenFor = r
+            sheen.shader = android.graphics.RadialGradient(
+                cx - r * 0.35f, cy - r * 0.45f, r * 1.1f,
+                intArrayOf(0x55FFFFFF, 0x14FFFFFF, 0x00FFFFFF),
+                floatArrayOf(0f, 0.55f, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.drawCircle(cx, cy, r, sheen)
+        Pane.draw(canvas, this, l, t, rr, b, r, tint = 0, clear = false, rim = true, lens = false)
+        if (ringed) {
+            ring.color = 0xF2FFFFFF.toInt()
+            ring.strokeWidth = r * 0.09f
+            canvas.drawCircle(cx, cy, r * DOT + ring.strokeWidth * 1.4f, ring)
+        }
+        Pane.glow(canvas, l, t, rr, b, r, press.progress, press.x, press.y)
     }
 
     companion object {
+        /** The colour's circle, as a share of the glass's radius. */
+        const val DOT = 0.62f
+
         /** The colour at 0.85 alpha, whatever alpha it came with. */
         fun shown(colour: Int): Int = (colour and 0x00FFFFFF) or (0xD9 shl 24)
     }

@@ -62,14 +62,14 @@ object Modal {
      * until the window is created, and getButton returns null before then.
      */
     fun dress(dialog: AlertDialog, danger: Boolean = false) {
-        val mono = dialog.context.resources.getFont(R.font.departure_mono)
+        val mono = UiType.of(dialog.context)
 
         fun walk(view: View) {
             when (view) {
                 // Typeface only. Colours come from the theme, and views we build
                 // ourselves have already chosen theirs — overwriting here would flatten
                 // the token example and the expiry warning back to one tone.
-                is TextView -> view.typeface = mono
+                is TextView -> UiType.dress(view)
                 is ViewGroup -> for (i in 0 until view.childCount) walk(view.getChildAt(i))
             }
         }
