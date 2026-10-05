@@ -2339,6 +2339,9 @@ class RearDialView(context: Context) : View(context) {
         val recorder = canvas as? android.graphics.RecordingCanvas ?: return
         val source = paneBackdrop
         if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return
+        // The bands are glass, and always-on keeps no glass on the rings.
+        val glass = 1f - aodFade(frameNowMs)
+        if (glass <= 0.004f) return
         for (r in pendingRings) {
             val half = r.thickness / 2f
             // Room for the feathered edge on both sides — see the shader.
@@ -2364,6 +2367,7 @@ class RearDialView(context: Context) : View(context) {
             )
             canvas.save()
             canvas.clipRect(r.clip)
+            if (glass < 0.996f) canvas.saveLayerAlpha(ringRect, (255 * glass).toInt())
             recorder.drawRenderNode(node)
             // The two edges, lit. A lens with no edge has nowhere to start and reads as a
             // smear in the panel rather than a thing lying on it.
@@ -2373,6 +2377,7 @@ class RearDialView(context: Context) : View(context) {
             canvas.drawCircle(r.cx, r.cy, r.radius + half, vinylPaint)
             canvas.drawCircle(r.cx, r.cy, r.radius - half, vinylPaint)
             vinylPaint.style = Paint.Style.FILL
+            if (glass < 0.996f) canvas.restore()
             canvas.restore()
         }
     }
@@ -3801,7 +3806,22 @@ class RearDialView(context: Context) : View(context) {
             arc.alpha = (255 * visible).toInt()
         }
         if (config.theme.isGlass) {
-            drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc, thumbHeld)
+            // In always-on the glass goes — band, track, thumb — and the reading stays as
+            // ORIGINAL draws it, a plain arc, cross-fading so nothing pops.
+            val plain = aodFade(frameNowMs)
+            if (plain < 0.996f) {
+                val pad = arc.strokeWidth * 2f
+                fading(canvas, android.graphics.RectF(scratch.left - pad, scratch.top - pad,
+                    scratch.right + pad, scratch.bottom + pad), 1f - plain) {
+                    drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc, thumbHeld)
+                }
+            }
+            if (plain > 0.004f) {
+                val was = arc.alpha
+                arc.alpha = (was * plain).toInt()
+                canvas.drawArc(scratch, startAngle, fullSweep * fraction, false, arc)
+                arc.alpha = was
+            }
         } else {
             canvas.drawArc(scratch, startAngle, fullSweep * fraction, false, arc)
         }
@@ -8182,7 +8202,7 @@ class RearDialView(context: Context) : View(context) {
                     dateLeft - CARD_PAD_X, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y,
                     dateLeft + dateW + CARD_PAD_X, DATE_BASELINE + ROW_CARD_PAD_Y,
                 )
-                glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = dateKeep)
+                glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = dateKeep * (1f - aodNow))
             }
             extras.color = (dateInk and 0x00FFFFFF) or ((0xFF * dateKeep).toInt() shl 24)
             canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
@@ -8260,7 +8280,7 @@ class RearDialView(context: Context) : View(context) {
                 cx + wide / 2f + CARD_PAD_X,
                 (if (place.isEmpty()) base else WeatherLine.PLACE_BASELINE) + ROW_CARD_PAD_Y,
             )
-            glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = keep)
+            glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = keep * (1f - aodFade(frameNowMs)))
         }
 
         extras.color = (ink and 0x00FFFFFF) or ((0xFF * keep).toInt() shl 24)
