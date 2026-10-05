@@ -965,19 +965,6 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(
             aodRows, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
-        // Not the same thing: this is for phones where the panel goes black ten seconds
-        // after the last touch whatever the window asks — a wake key to the rear display
-        // every few seconds, the trick MiRearScreenSwitcher relies on.
-        SettingsRows.toggle(
-            aodRows, "Poke the rear display awake", config.pokeRearDisplay,
-        ) { on -> write { it.copy(pokeRearDisplay = on) }; buildSettingsRows() }
-        if (config.pokeRearDisplay) {
-            SettingsRows.note(
-                aodRows,
-                "For phones where the panel goes black ten seconds after the last touch. " +
-                    "A wake key is sent to the rear display every four seconds while the panel is up.",
-            )
-        }
         // The rear screen's always-on: dim and frozen instead of dark, asleep only in a
         // pocket, the slider one double tap away. See RearActivity.enterAod.
         SettingsRows.toggle(

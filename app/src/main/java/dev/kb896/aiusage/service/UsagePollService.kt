@@ -325,7 +325,6 @@ class UsagePollService : Service() {
             if (intent?.action == RearActivity.ACTION_DOZING) {
                 val dozing = intent.getBooleanExtra(RearActivity.EXTRA_DOZING, false)
                 Graph.of(this@UsagePollService).bridge.setDozing(dozing)
-                Graph.of(this@UsagePollService).bridge.setKeeper(intent.getBooleanExtra(RearActivity.EXTRA_KEEPER, false))
                 // And anything in this process that only matters when somebody can see
                 // the panel. See PanelAwake — it releases whatever was put off.
                 PanelAwake.setDozing(dozing)

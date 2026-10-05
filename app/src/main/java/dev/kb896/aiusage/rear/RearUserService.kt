@@ -92,31 +92,6 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
 
-    /**
-     * The keeper, for phones whose firmware switches the rear display off ten seconds
-     * after the last touch whatever the panel's window asks. A wake key sent to display
-     * 1 counts as a touch there; every few seconds, while the panel is up and holding,
-     * one goes out. MiRearScreenSwitcher does the same twice a second, and it is what
-     * makes that app usable on those phones. Off unless the user turns it on.
-     */
-    @Volatile private var keeper = false
-    private var keeperThread: Thread? = null
-
-    override fun setKeeper(on: Boolean) {
-        if (keeper == on) return
-        keeper = on
-        Log.i(TAG, if (on) "keeper: poking the rear display every ${KEEPER_MS / 1000}s while the panel holds it" else "keeper: off")
-        if (!on) { keeperThread?.interrupt(); keeperThread = null; return }
-        keeperThread = Thread {
-            try {
-                while (keeper && !Thread.currentThread().isInterrupted) {
-                    if (!dozing && keepAlive?.isAlive == true) exec("input -d 1 keyevent KEYCODE_WAKEUP")
-                    Thread.sleep(KEEPER_MS)
-                }
-            } catch (_: InterruptedException) { }
-        }.apply { isDaemon = true; name = "rear-keeper"; start() }
-    }
-
     override fun wake(displayId: Int) {
         // An explicit wake is somebody deciding the panel should be lit, which ends the
         // sleep by definition. Not gated on `dozing` — gating it here would make the
@@ -672,8 +647,6 @@ class RearUserService : IRearService.Stub {
     private companion object {
         /** after a direct start on the rear display, before believing it took */
         private const val DIRECT_START_SETTLE_MS = 1_200L
-        /** between two pokes of the keeper; the firmware's timer is ten seconds */
-        private const val KEEPER_MS = 4_000L
         private val REPORT = """
 echo "device: $(getprop ro.product.marketname) / $(getprop ro.product.model) / $(getprop ro.product.device)"
 echo "os: HyperOS $(getprop ro.mi.os.version.name) $(getprop ro.mi.os.version.incremental) | android $(getprop ro.build.version.release) | region $(getprop ro.miui.region) | build $(getprop ro.build.version.incremental)"

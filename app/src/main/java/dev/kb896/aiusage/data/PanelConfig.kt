@@ -296,12 +296,6 @@ data class PanelConfig(
      */
     val keepPanelAwake: Boolean = false,
     /**
-     * For phones whose firmware switches the rear display off ten seconds after the
-     * last touch whatever the panel asks: a wake key sent to the rear display every
-     * few seconds while the panel is up. Off unless needed. See RearUserService.
-     */
-    val pokeRearDisplay: Boolean = false,
-    /**
      * Always-on: instead of going dark, the panel settles into a dim, frozen page — no
      * animation, the backdrop faded to black — and sleeps only in a pocket. A double tap
      * on it raises the unlock slider; the swipe brings the full panel back.

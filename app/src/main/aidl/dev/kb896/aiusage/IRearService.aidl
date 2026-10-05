@@ -83,6 +83,5 @@ interface IRearService {
     /** What the system says about the rear display, for a bug report. See RearUserService. */
     String rearReport() = 11;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
-    void setKeeper(boolean on) = 12;
 
 }
