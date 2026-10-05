@@ -5797,7 +5797,7 @@ class RearDialView(context: Context) : View(context) {
         val inset = display?.cutout?.safeInsetLeft ?: 0
         // The view fills the display, so its width is the display's in the cutout's own frame.
         val w = if (width > 0) width else display?.mode?.physicalWidth ?: 0
-        return if (inset > 0 && w > 0) Panel.WIDTH * inset / w.toFloat() else Panel.WIDTH * BandTap.BAND
+        return if (inset > 0 && w > 0) Panel.WIDTH * inset / w.toFloat() else Panel.CUTOUT_RIGHT.toFloat()
     }
 
     /**
@@ -5819,9 +5819,11 @@ class RearDialView(context: Context) : View(context) {
         tipFill.alpha = alpha(1f)
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
 
-        // The strip, where it really is, flashing: left of the usable area's edge as this
-        // display reports it — its cutout's left inset, the lens column — in panel units.
-        val stripRight = cutoutLeft()
+        // The strip, where it really is, flashing: the lens column, left of the usable
+        // area's edge as this display reports it, and the little past it the tap watch
+        // takes in — the same zone, in panel units.
+        val edge = cutoutLeft()
+        val stripRight = edge + BandTap.EDGE_ALLOW
         tipRect.set(CAMERA_TIP_INSET, CAMERA_TIP_INSET, stripRight, Panel.HEIGHT - CAMERA_TIP_INSET)
         val wave = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_FLASH_MS) / CAMERA_TIP_FLASH_MS).toFloat()
         tipFill.color = CAMERA_TIP_TAP
@@ -5832,8 +5834,9 @@ class RearDialView(context: Context) : View(context) {
         tipStroke.alpha = alpha(0.55f + 0.45f * wave)
         canvas.drawRoundRect(tipRect, CAMERA_TIP_CORNER, CAMERA_TIP_CORNER, tipStroke)
 
-        // A tap, pulsing, in the middle of the strip both ways — between the lenses.
-        val tx = stripRight / 2f
+        // A tap, pulsing, right on the usable area's left edge, halfway down: clear of the
+        // lenses, where a finger can land without covering a camera.
+        val tx = edge + BandTap.EDGE_ALLOW / 2f
         val ty = Panel.HEIGHT / 2f
         val pulse = (now % CAMERA_TIP_PULSE_MS).toFloat() / CAMERA_TIP_PULSE_MS
         tipStroke.strokeWidth = 3f

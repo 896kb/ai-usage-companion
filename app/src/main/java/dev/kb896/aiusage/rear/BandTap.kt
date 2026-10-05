@@ -79,14 +79,23 @@ class BandTap(
 
     companion object {
         /**
-         * The lens column: left of the usable area's edge, which the rear display reports as
-         * its cutout's left inset — read from the system per model (DisplayDump
-         * .leftInsetFraction), and this, the 17 Pro's 296 of 904, only when it says nothing.
+         * How far past the usable area's left edge the zone reaches, in panel units. The
+         * place to tap is right on that edge, just clear of the lenses, so the zone has to
+         * take it in: 48 more, still well inside the camera's grey (it runs 71 past the
+         * edge on the 17 Pro).
+         */
+        const val EDGE_ALLOW = 48f
+
+        /**
+         * The lens column and a little more: left of the usable area's edge, which the rear
+         * display reports as its cutout's left inset — read from the system per model
+         * (DisplayDump.leftInsetFraction), and this, the 17 Pro's 296 of 904, only when it
+         * says nothing — plus [EDGE_ALLOW].
          * The camera keeps that column grey, since its picture cannot go under the lenses;
          * on the 17 Pro its grey runs a little further (to 40.6%), but a tap past the grey
          * would land on the viewfinder. The panel lights up exactly this strip for the tip.
          */
-        const val BAND = dev.kb896.aiusage.Panel.CUTOUT_RIGHT / dev.kb896.aiusage.Panel.WIDTH.toFloat()
+        const val BAND = (dev.kb896.aiusage.Panel.CUTOUT_RIGHT + EDGE_ALLOW) / dev.kb896.aiusage.Panel.WIDTH.toFloat()
         const val TAP_MS = 400L
         const val SLOP = 0.03f
         private const val EV_ABS = 0x03

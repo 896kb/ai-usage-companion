@@ -271,6 +271,7 @@ class RearUserService : IRearService.Stub {
         // it for this model; the 17 Pro's, as a fraction, when it does not say.
         val band = rearPhysicalId()
             ?.let { DisplayDump.leftInsetFraction(exec("dumpsys display | grep 'DisplayDeviceInfo'"), it) }
+            ?.let { it + BandTap.EDGE_ALLOW / Panel.WIDTH }
             ?: BandTap.BAND
         val proc = try {
             ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
