@@ -21,7 +21,9 @@ object WeatherLine {
      * card grew down into the slider's band anyway — see PLACE_BASELINE, and the fade in
      * drawWeatherLine that settles it.
      */
-    const val BASELINE = 405f
+    // Its glass card's top (baseline - 26 - 6) clears the date card's bottom (372 + 6) by
+    // six pixels; at 405 the two cards overlapped by five.
+    const val BASELINE = 416f
     const val ICON_GAP = 8f
     /**
      * The place is a caption under the reading, not a suffix beside it: at 11 px beside
@@ -34,7 +36,7 @@ object WeatherLine {
      * 496, inside the unlock slider's band (top 476) — which is why the block leaves with
      * the slider instead of the clock and date moving up to make room: see drawWeatherLine.
      */
-    const val PLACE_BASELINE = 428f
+    const val PLACE_BASELINE = 439f
 
     fun temperature(reading: WeatherReading): String = "${Math.round(reading.temperatureC)}°"
 
