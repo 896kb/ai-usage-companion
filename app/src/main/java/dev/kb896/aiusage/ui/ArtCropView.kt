@@ -129,7 +129,12 @@ class ArtCropView @JvmOverloads constructor(
         // part: a crop you cannot see the outside of is a guess. The placement itself is
         // the panel's own, so this preview cannot lie about the result.
         val dest = ArtPlacement.destination(box, bmp.width, bmp.height, panX, panY, zoom)
+        // The colour behind the picture, where the panel has it — inside the region — and
+        // the picture at the opacity it will have there.
+        ground?.let { groundPaint.color = it or (0xFF shl 24); canvas.drawRect(box, groundPaint) }
+        paint.alpha = (255 * imageAlpha.coerceIn(0f, 1f)).toInt()
         canvas.drawBitmap(bmp, null, dest, paint)
+        paint.alpha = 255
         canvas.save()
         canvas.clipOutRect(box)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
@@ -141,6 +146,16 @@ class ArtCropView @JvmOverloads constructor(
      * Not private any more: the region's shape is now the caller's to choose, so the two
      * shapes it may be have to be nameable from outside.
      */
+    /** The colour behind the picture, shown inside the region; null shows none. */
+    var ground: Int? = null
+        set(value) { field = value; invalidate() }
+
+    /** How much of the picture shows over [ground], 0..1. */
+    var imageAlpha: Float = 1f
+        set(value) { field = value; invalidate() }
+
+    private val groundPaint = Paint()
+
     companion object {
         /** The art region's shape: 278 by 70 panel units. */
         const val REGION_ASPECT = 278f / 70f

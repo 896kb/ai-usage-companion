@@ -220,7 +220,8 @@ class RearDialView(context: Context) : View(context) {
     private fun refreshLuminance() {
         val path = config.backdrop.imagePath
         val key = (path ?: "-") + "|" + config.background + "|" +
-            config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom
+            config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom +
+            "|" + config.backdrop.opacity
         if (key == lumKey) return
         lumKey = key
 
@@ -241,6 +242,7 @@ class RearDialView(context: Context) : View(context) {
                 GlassLuminance.SIDE / Panel.HEIGHT.toFloat(),
             )
             panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+            artPaint.alpha = (255 * config.backdrop.opacity.coerceIn(0f, 1f)).toInt()
             into.drawBitmap(
                 bmp, null,
                 ArtPlacement.destination(
@@ -249,6 +251,7 @@ class RearDialView(context: Context) : View(context) {
                 ),
                 artPaint,
             )
+            artPaint.alpha = 255
         }
         for (y in 0 until GlassLuminance.SIDE) {
             for (x in 0 until GlassLuminance.SIDE) {
@@ -10730,7 +10733,7 @@ class RearDialView(context: Context) : View(context) {
         // colour and a photograph, and neither moves between frames.
         val key = (config.backdrop.imagePath ?: "-") + "|" + groundColor + "|" +
             config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom +
-            "|" + width + "x" + height
+            "|" + config.backdrop.opacity + "|" + width + "x" + height
         if (key != groundKey || groundShader == null) {
             groundKey = key
             groundBitmap?.recycle()
@@ -10827,9 +10830,11 @@ class RearDialView(context: Context) : View(context) {
         )
         canvas.save()
         canvas.clipRect(panelRect)
-        // always-on: the backdrop fades to black over a second and stays there
+        // always-on: the backdrop fades to black over a second and stays there; and the
+        // picture shows only as much as its opacity, the ground colour through the rest
         val fade = aodFade(frameNowMs)
-        if (fade > 0f) artPaint.alpha = (255 * (1f - fade)).toInt()
+        val opacity = config.backdrop.opacity.coerceIn(0f, 1f)
+        if (fade > 0f || opacity < 1f) artPaint.alpha = (255 * (1f - fade) * opacity).toInt()
         canvas.drawBitmap(bitmap, null, dest, artPaint)
         artPaint.alpha = 255
         canvas.restore()

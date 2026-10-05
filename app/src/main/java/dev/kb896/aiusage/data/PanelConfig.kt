@@ -149,6 +149,12 @@ data class ArtConfig(
     val panX: Float = 0f,
     val panY: Float = 0f,
     val zoom: Float = 1f,
+    /**
+     * How much of the picture shows, 0..1, over the panel's ground colour — the colour
+     * behind it. 1 is the picture alone, as it always was. Only the background's picture
+     * reads it; the artwork is always whole.
+     */
+    val opacity: Float = 1f,
 )
 
 /**

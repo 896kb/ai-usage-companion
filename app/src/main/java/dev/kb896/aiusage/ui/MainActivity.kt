@@ -1129,6 +1129,12 @@ class MainActivity : ComponentActivity() {
         }
         val store = ConfigStore(this)
         val existing = store.load().backdrop
+        // OPACITY, AND THE COLOUR BEHIND. The picture can be let through: below full, the
+        // panel's ground colour shows under it, and that colour is chosen here, beside the
+        // slider, rather than from the section's own colour button — which replaces the
+        // picture. Both are previewed in the crop, inside the region, as the panel has them.
+        var opacity = if (reuseTransform) existing.opacity else 1f
+        var behind = store.load().background
         val view = ArtCropView(this).apply {
             regionAspect = ArtCropView.PANEL_ASPECT
             setImage(
@@ -1137,14 +1143,63 @@ class MainActivity : ComponentActivity() {
                 if (reuseTransform) existing.panY else 0f,
                 if (reuseTransform) existing.zoom else 1f,
             )
+            ground = behind
+            imageAlpha = opacity
         }
+        val dp = resources.displayMetrics.density
+        val sheet = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((20 * dp).toInt(), (4 * dp).toInt(), (20 * dp).toInt(), 0)
+        }
+        sheet.addView(view)
+        val opacityLabel = TextView(this).apply {
+            textSize = 11f
+            setTextColor(Panel.Palette.FG)
+            typeface = resources.getFont(R.font.departure_mono)
+            text = "OPACITY  ${(opacity * 100).toInt()}%"
+        }
+        sheet.addView(opacityLabel, android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = (14 * dp).toInt() })
+        val slider = dev.kb896.aiusage.ui.glass.GlassSlider(this).apply {
+            progressDrawable = getDrawable(R.drawable.seek_track)
+            thumb = getDrawable(R.drawable.seek_thumb)
+            thumbOffset = 0
+            splitTrack = false
+            background = null
+            max = 100
+            progress = (opacity * 100).toInt()
+        }
+        sheet.addView(slider, android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+        // The colour behind: only while there is something to see through to.
+        val behindRow = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        SettingsRows.colorRow(behindRow, "Colour behind", behind) { picked ->
+            behind = picked
+            view.ground = picked
+        }
+        sheet.addView(behindRow)
+        behindRow.visibility = if (opacity < 1f) View.VISIBLE else View.GONE
+        slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                opacity = progress / 100f
+                view.imageAlpha = opacity
+                opacityLabel.text = "OPACITY  $progress%"
+                behindRow.visibility = if (progress < 100) View.VISIBLE else View.GONE
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) {}
+            override fun onStopTrackingTouch(bar: SeekBar) {}
+        })
         Modal.show(Modal.builder(this)
             .setTitle("Drag to move, pinch to zoom")
-            .setView(view)
+            .setView(sheet)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Use it") { _, _ ->
-                val config = store.load().copy(backdrop = ArtConfig(
-                    imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom))
+                var config = store.load().copy(backdrop = ArtConfig(
+                    imagePath = path, panX = view.panX, panY = view.panY, zoom = view.zoom, opacity = opacity))
+                // The colour behind is the panel's ground; it only matters below full.
+                if (opacity < 1f) config = config.copy(background = behind)
                 store.save(config)
                 dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
                 graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
