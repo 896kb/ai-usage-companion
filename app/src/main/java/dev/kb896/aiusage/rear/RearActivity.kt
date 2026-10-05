@@ -1117,6 +1117,7 @@ class RearActivity : Activity() {
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
         // resumed into an already-suspended display would never be told.
         dial.displayAwake = takesUpdates(display?.state)
+        if (!dial.displayAwake) Log.i(TAG, "resumed onto a display in state ${display?.state} — the panel stops drawing until it changes")
         armSleep()
     }
 

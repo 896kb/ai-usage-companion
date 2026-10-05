@@ -3133,11 +3133,9 @@ class RearDialView(context: Context) : View(context) {
                 val camBottom = gapY + CAMERA_H / 2f
                 val closeCy = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
                 if (config.showCamera && present > 0.004f) {
-                    fading(canvas, android.graphics.RectF(
-                        camRight - camW - FADE_PAD, camBottom - CAMERA_H - FADE_PAD,
-                        camRight + FADE_PAD, camBottom + FADE_PAD,
-                    ), present) {
-                        drawCamera(canvas, dx, pageDy, PointF(camRight, camBottom), alpha = present)
+                    // The camera keeps the readout's own corner, bottom right.
+                    fading(canvas, cameraFadeBounds(), present) {
+                        drawCamera(canvas, dx, pageDy, alpha = present)
                     }
                 } else cameraButton = null
                 if (config.showClose && present > 0.004f) {
@@ -3235,6 +3233,17 @@ class RearDialView(context: Context) : View(context) {
         if (aod || aodUntil > 0) { if (aodFade(frameNowMs) in 0.001f..0.999f) animating = true }
         if (ringsAt != 0L && frameNowMs - ringsAt < AOD_FADE_MS) animating = true
         publishMirror()
+        // SELF-HEALING. displayAwake is told by the activity — on a display change, and
+        // read afresh on every resume — and a resume can read a state that is about to
+        // change without the change ever being reported, which left the flag false on a
+        // lit display: one frame for whatever invalidated, then nothing — the table
+        // lights, the glyph's morph, everything — until a touch put it right. Seen on a
+        // pause, whose broadcast is often what next invalidates. A frame that wants a
+        // successor asks the display itself before believing the flag.
+        if (animating && !displayAwake && display?.state == android.view.Display.STATE_ON) {
+            android.util.Log.w("AiUsageRear", "display is on but the panel was told it was not — drawing again")
+            displayAwake = true
+        }
         if (animating && displayAwake && !frozen(frameNowMs)) postInvalidateOnAnimation()
 
     }
