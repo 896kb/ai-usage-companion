@@ -56,6 +56,9 @@ class UsagePollService : Service() {
     /** Last panel power state this listener acted on — see onDisplayChanged. */
     private var panelWasOn = false
 
+    /** When the rear display last went dark, for telling a lock's sleep from an earlier one. */
+    @Volatile private var rearWentOffAt = 0L
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {}
         override fun onDisplayRemoved(displayId: Int) {}
@@ -79,6 +82,7 @@ class UsagePollService : Service() {
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != Panel.DISPLAY_ID) return
             val on = panelOn()
+            if (panelWasOn && !on) rearWentOffAt = android.os.SystemClock.elapsedRealtime()
             val woke = on && !panelWasOn
             panelWasOn = on
             if (!woke) return
@@ -326,6 +330,25 @@ class UsagePollService : Service() {
                 // the panel. See PanelAwake — it releases whatever was put off.
                 PanelAwake.setDozing(dozing)
                 return
+            }
+            // LOCKING THE FRONT PUTS THE BACK INTO ALWAYS-ON, not out. HyperOS sends the rear
+            // display to sleep with the main one on the power button ("Secondary Display
+            // gotosleep by power button") and, its own rear always-on being off, straight
+            // to dark ("aod is close, and just go to sleep directly"). With the panel's
+            // always-on switched on, the back is lit again a moment later and the panel,
+            // woken with always-on on, goes into it — the slider up, the page dimmed.
+            // Only when the back went dark WITH the front: a panel already asleep on
+            // purpose (the double tap, pocket mode) stays asleep. Not returned from — the
+            // lock's own supervision below still runs.
+            if (intent?.action == Intent.ACTION_SCREEN_OFF && config().alwaysOn) {
+                val lockedAt = android.os.SystemClock.elapsedRealtime()
+                scope.launch {
+                    delay(RELIGHT_AFTER_LOCK_MS)
+                    if (kotlin.math.abs(rearWentOffAt - lockedAt) <= WENT_DARK_TOGETHER_MS) {
+                        Log.i(TAG, "the front locked and took the back with it — always-on instead")
+                        Graph.of(this@UsagePollService).bridge.wake("always-on after the lock")
+                    }
+                }
             }
             if (intent?.action == Intent.ACTION_POWER_CONNECTED) {
                 // Same reasoning as the notification path: only a panel that was dark
@@ -647,6 +670,10 @@ class UsagePollService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        /** How long after the lock the back is lit again: past HyperOS's own sleep of it. */
+        private const val RELIGHT_AFTER_LOCK_MS = 700L
+        /** The back counts as having gone dark with the front within this of the lock. */
+        private const val WENT_DARK_TOGETHER_MS = 1_500L
         /**
          * How long to wait before checking whether a placement lit the rear panel.
          * Must exceed MIUI's own rear-display timeout (observed ~5s) so a genuine
