@@ -58,7 +58,8 @@
         android:id="@+id/root_scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:clipToPadding="false">
 
         <LinearLayout
             android:id="@+id/settings_layout"
@@ -147,6 +148,15 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
+        <!-- The bottom bar's tabs: the panel's three pages and always-on. The usage tab
+             holds that page's rows and everything general; the other three are below.
+             Onboarding and recovery stay above them all. See MainActivity.bindTabs. -->
+        <LinearLayout
+            android:id="@+id/tab_usage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <View
             android:id="@+id/rule_2"
             android:layout_width="match_parent"
@@ -229,7 +239,7 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <EditText
+            <dev.kb896.aiusage.ui.glass.GlassField
                 android:id="@+id/settings_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -491,6 +501,108 @@
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
         </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_clock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <TextView
+            android:id="@+id/clock_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="CLOCK PAGE"
+            android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_clock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/clock_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_media"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <TextView
+            android:id="@+id/media_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="MEDIA PAGE"
+            android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_media"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/media_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_aod"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <TextView
+            android:id="@+id/aod_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="ALWAYS-ON"
+            android:textSize="12sp" />
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_aod"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/aod_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        </LinearLayout>
+
+        </LinearLayout>
     </ScrollView>
 </LinearLayout>
+
+<!-- Floats over the bottom of the scroll, which runs on underneath it. -->
+<dev.kb896.aiusage.ui.glass.GlassTabBar
+    android:id="@+id/tab_bar"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="bottom" />
 </FrameLayout>

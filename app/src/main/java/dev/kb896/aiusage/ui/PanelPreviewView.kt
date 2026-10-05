@@ -106,8 +106,30 @@ class PanelPreviewView @JvmOverloads constructor(
     fun mirror(m: RearDialView.Mirror, dim: Boolean) {
         last = m
         if (cornerPx != m.corner) { cornerPx = m.corner; invalidateOutline() }
-        dial.mirror(m)
+        dial.mirror(shown(m))
         if (dimming != dim) { dimming = dim; invalidate() }
+    }
+
+    /**
+     * What the settings' bottom bar has chosen to look at: a page of the panel, or
+     * always-on — shown here over whatever the back is doing, so each tab previews the
+     * screen its settings are for. The rest of the back's state (rings, table lights,
+     * the corner) is still mirrored. Null and false: the back as it is.
+     */
+    private var pageShown: Int? = null
+    private var aodShown = false
+
+    fun show(page: Int?, aod: Boolean) {
+        pageShown = page
+        aodShown = aod
+        val m = last ?: RearDialView.Mirror(page ?: RearDialView.PAGE_READOUT, false, false, false, false, cornerPx)
+        dial.mirror(shown(m))
+    }
+
+    private fun shown(m: RearDialView.Mirror): RearDialView.Mirror = when {
+        aodShown -> m.copy(aod = true, locked = true)
+        pageShown != null -> m.copy(page = pageShown!!, aod = false, locked = false)
+        else -> m
     }
 
     override fun dispatchDraw(canvas: android.graphics.Canvas) {

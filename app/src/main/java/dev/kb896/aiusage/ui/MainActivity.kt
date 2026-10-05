@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
         bindDiagnostics()
         bindAdvancedToggle()
         bindGeometrySliders()
+        bindTabs()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
@@ -254,7 +255,45 @@ class MainActivity : ComponentActivity() {
      * now runs on every scroll frame, and a list built there is a per-frame allocation.
      */
     private val headingIds = intArrayOf(R.id.preview_heading, R.id.setup_heading,
-        R.id.settings_heading, R.id.settings_art_label, R.id.backdrop_heading)
+        R.id.settings_heading, R.id.settings_art_label, R.id.backdrop_heading,
+        R.id.clock_heading, R.id.media_heading, R.id.aod_heading)
+
+    /**
+     * The bottom bar: the panel's clock page, its usage page, its media page, and
+     * always-on — the order the pages sit in on the back. Each tab shows its own section
+     * of settings (the usage tab also holds everything general) and has the preview show
+     * that screen. Onboarding and recovery stay above every tab.
+     */
+    private var tab = TAB_USAGE
+
+    private fun bindTabs() {
+        val bar = findViewById<dev.kb896.aiusage.ui.glass.GlassTabBar>(R.id.tab_bar)
+        val scroll = findViewById<android.widget.ScrollView>(R.id.root_scroll)
+        // The rows run on under the bar, so the last of them needs room to scroll clear.
+        bar.post { scroll.setPadding(scroll.paddingLeft, scroll.paddingTop, scroll.paddingRight, bar.reach) }
+        bar.select(tab, animate = false)
+        showTab(tab)
+        bar.onSelect = { i ->
+            tab = i
+            showTab(i)
+            scroll.scrollTo(0, 0)
+        }
+    }
+
+    private fun showTab(i: Int) {
+        val sections = intArrayOf(R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)
+        for ((k, id) in sections.withIndex()) {
+            findViewById<View>(id).visibility = if (k == i) View.VISIBLE else View.GONE
+        }
+        val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
+        when (i) {
+            TAB_CLOCK -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
+            TAB_MEDIA -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_MEDIA, aod = false)
+            TAB_AOD -> preview.show(null, aod = true)
+            else -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_READOUT, aod = false)
+        }
+        inkHeadings()
+    }
 
     private fun inkHeadings() {
         for (id in headingIds) {
@@ -627,8 +666,17 @@ class MainActivity : ComponentActivity() {
         val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
         val container = findViewById<LinearLayout>(R.id.settings_rows)
         val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
+        // One container per tab of the bottom bar — see bindTabs. The panel card holds the
+        // usage page's rows and everything general; the clock page, the media page and
+        // always-on each have their own.
+        val clockRows = findViewById<LinearLayout>(R.id.clock_rows)
+        val mediaRows = findViewById<LinearLayout>(R.id.media_rows)
+        val aodRows = findViewById<LinearLayout>(R.id.aod_rows)
         container.removeAllViews()
         advanced.removeAllViews()
+        clockRows.removeAllViews()
+        mediaRows.removeAllViews()
+        aodRows.removeAllViews()
         // A newer release, found by the two-hourly check: a row at the top with its notes,
         // there until this build is that version. The notification says it once; this
         // says it every time the screen is opened. See UpdateCheck.
@@ -725,12 +773,12 @@ class MainActivity : ComponentActivity() {
         // "Time" rather than "Show the clock": the switch already says what it does, and
         // the word "show" in a row that is visibly a show/hide control is filler.
         SettingsRows.toggleWithColor(
-            container, "Time", config.showClock, config.clockTint,
+            clockRows, "Time", config.showClock, config.clockTint,
             onChange = { on -> write { it.copy(showClock = on) } },
             onPick = { c -> write { it.copy(clockColor = c) } },
         )
         SettingsRows.toggleWithColor(
-            container, "Date", config.showDate, config.dateTint,
+            clockRows, "Date", config.showDate, config.dateTint,
             onChange = { on -> write { it.copy(showDate = on) } },
             onPick = { c -> write { it.copy(dateColor = c) } },
         )
@@ -739,17 +787,17 @@ class MainActivity : ComponentActivity() {
         // Off leaves only the weather on the glass — rain when it rains, with no degrees
         // or place spelled out.
         SettingsRows.toggleWithColor(
-            container, "Weather line", config.showWeatherLine, config.weatherTint,
+            clockRows, "Weather line", config.showWeatherLine, config.weatherTint,
             onChange = { on -> write { it.copy(showWeatherLine = on) } },
             onPick = { c -> write { it.copy(weatherColor = c) } },
         )
         // The lights round the margin when the phone lies on its face — see table
         // mode in the README. They follow the clock's colour unless told otherwise.
-        SettingsRows.colorRow(container, "Table lights", config.tableTint) { c ->
+        SettingsRows.colorRow(clockRows, "Table lights", config.tableTint) { c ->
             write { it.copy(tableColor = c) }
         }
         SettingsRows.toggleWithColor(
-            container, "Battery", config.showBattery, config.batteryTint,
+            clockRows, "Battery", config.showBattery, config.batteryTint,
             onChange = { on -> write { it.copy(showBattery = on) } },
             onPick = { c -> write { it.copy(batteryColor = c) } },
         )
@@ -765,7 +813,7 @@ class MainActivity : ComponentActivity() {
             onPick = { c -> write { it.copy(cameraColor = c) } },
         )
         SettingsRows.toggleWithColor(
-            container, "Notifications", config.showNotifications, config.notificationTint,
+            clockRows, "Notifications", config.showNotifications, config.notificationTint,
             onChange = { on -> write { it.copy(showNotifications = on) } },
             onPick = { c -> write { it.copy(notificationColor = c) } },
         )
@@ -774,27 +822,27 @@ class MainActivity : ComponentActivity() {
         // arrived and broadcasting what it said are different decisions.
         if (config.showNotifications) {
             SettingsRows.toggle(
-                container, "  ↳ include the message text", config.showNotificationText,
+                clockRows, "  ↳ include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
             SettingsRows.colorRow(
-                container, "  ↳ background", config.notificationGround,
+                clockRows, "  ↳ background", config.notificationGround,
             ) { c -> write { it.copy(notificationBg = c) } }
         }
         // NOT a "show" row like the ones above it — it changes nothing on the panel, only
         // how long the panel is there. Placed with them anyway because it is the same
         // kind of decision: one switch, one behaviour, no submenu.
         SettingsRows.toggle(
-            container, "Keep panel awake", config.keepPanelAwake,
+            aodRows, "Keep panel awake", config.keepPanelAwake,
         ) { on -> write { it.copy(keepPanelAwake = on) } }
         // Not the same thing: this is for phones where the panel goes black ten seconds
         // after the last touch whatever the window asks — a wake key to the rear display
         // every few seconds, the trick MiRearScreenSwitcher relies on.
         SettingsRows.toggle(
-            container, "Poke the rear display awake", config.pokeRearDisplay,
+            aodRows, "Poke the rear display awake", config.pokeRearDisplay,
         ) { on -> write { it.copy(pokeRearDisplay = on) }; buildSettingsRows() }
         if (config.pokeRearDisplay) {
             SettingsRows.note(
-                container,
+                aodRows,
                 "For phones where the panel goes black ten seconds after the last touch. " +
                     "A wake key is sent to the rear display every four seconds while the panel is up.",
             )
@@ -802,28 +850,28 @@ class MainActivity : ComponentActivity() {
         // The rear screen's always-on: dim and frozen instead of dark, asleep only in a
         // pocket, the slider one double tap away. See RearActivity.enterAod.
         SettingsRows.toggle(
-            container, "Always-on display", config.alwaysOn,
+            aodRows, "Always-on display", config.alwaysOn,
         ) { on -> write { it.copy(alwaysOn = on) }; buildSettingsRows() }
         if (config.alwaysOn) {
             SettingsRows.toggle(
-                container, "  ↳ battery level above the clock", config.aodBattery,
+                aodRows, "  ↳ battery level above the clock", config.aodBattery,
             ) { on -> write { it.copy(aodBattery = on) } }
             SettingsRows.toggle(
-                container, "  ↳ date", config.aodDate,
+                aodRows, "  ↳ date", config.aodDate,
             ) { on -> write { it.copy(aodDate = on) } }
             SettingsRows.toggle(
-                container, "  ↳ weather line", config.aodWeather,
+                aodRows, "  ↳ weather line", config.aodWeather,
             ) { on -> write { it.copy(aodWeather = on) } }
             // Off by default: on a phone whose rear proximity sensor reads covered in the
             // hand, pocket mode is the panel going black for no reason anyone can see.
             SettingsRows.toggle(
-                container, "  ↳ pocket mode: display off when the back is covered", config.aodPocket,
+                aodRows, "  ↳ pocket mode: display off when the back is covered", config.aodPocket,
             ) { on -> write { it.copy(aodPocket = on) } }
         }
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
         SettingsRows.choice(
-            container, "Weather", listOf("None", "Auto", "Rain", "Snow"),
+            clockRows, "Weather", listOf("None", "Auto", "Rain", "Snow"),
             when (config.weather) {
                 Weather.AUTO -> 1
                 Weather.RAIN -> 2
@@ -855,7 +903,7 @@ class MainActivity : ComponentActivity() {
             }
             return what + "Weather by Open-Meteo"
         }
-        SettingsRows.textField(container, "Place", config.weatherPlace, 40) { typed ->
+        SettingsRows.textField(clockRows, "Place", config.weatherPlace, 40) { typed ->
             write { it.copy(weatherPlace = typed) }
             geocodeJob?.cancel()
             geocodeJob = lifecycleScope.launch {
@@ -871,9 +919,9 @@ class MainActivity : ComponentActivity() {
                 if (place != null) WeatherPoll.nudge()
             }
         }
-        placeNote = SettingsRows.note(container, placeNoteText(config))
+        placeNote = SettingsRows.note(clockRows, placeNoteText(config))
 
-        SettingsRows.toggle(container, "Use the phone's location", config.weatherUseDevice) { on ->
+        SettingsRows.toggle(clockRows, "Use the phone's location", config.weatherUseDevice) { on ->
             val allowed = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
             when {
@@ -898,14 +946,14 @@ class MainActivity : ComponentActivity() {
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.
         SettingsRows.toggleWithColor(
-            container, "Media controls", config.showMedia, config.mediaTint,
+            mediaRows, "Media controls", config.showMedia, config.mediaTint,
             // the cover and lyrics rows live under this switch: rebuild so they appear now
             onChange = { on -> write { it.copy(showMedia = on) }; buildSettingsRows() },
             onPick = { c -> write { it.copy(mediaColor = c) } },
         )
         if (config.showMedia) {
             SettingsRows.choice(
-                container, "  ↳ cover", listOf("SQUARE", "VINYL"),
+                mediaRows, "  ↳ cover", listOf("SQUARE", "VINYL"),
                 config.mediaArt.ordinal,
             ) { i ->
                 write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
@@ -914,7 +962,7 @@ class MainActivity : ComponentActivity() {
             // that sends anything anywhere. The note is not a disclaimer — it is the
             // information needed to make the choice, so it sits with the switch rather
             // than in a document nobody opens.
-            SettingsRows.toggle(container, "  ↳ lyrics", config.showLyrics) { on ->
+            SettingsRows.toggle(mediaRows, "  ↳ lyrics", config.showLyrics) { on ->
                 // Turning it OFF wipes what was fetched. A feature that gathered data
                 // should not leave the data behind when it is switched off; anything else
                 // makes "off" mean "stopped collecting" rather than "undone".
@@ -927,7 +975,7 @@ class MainActivity : ComponentActivity() {
                 buildSettingsRows() // the note under this row says what the switch does
             }
             SettingsRows.note(
-                container,
+                mediaRows,
                 if (config.showLyrics) {
                     "     sends each track's name, artist and length to lrclib.net"
                 } else {
@@ -939,7 +987,7 @@ class MainActivity : ComponentActivity() {
                 .contains(packageName)
         ) {
             SettingsRows.note(
-                container,
+                mediaRows,
                 "  ↳ needs notification access — see ONBOARDING",
             )
         }
@@ -1673,6 +1721,12 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /** The bottom bar's tabs, in its order. See bindTabs. */
+        private const val TAB_CLOCK = 0
+        private const val TAB_USAGE = 1
+        private const val TAB_MEDIA = 2
+        private const val TAB_AOD = 3
+
         /** How long the reset dialog holds its confirm button shut. */
         private const val RESET_HOLD_MS = 5_000L
 
