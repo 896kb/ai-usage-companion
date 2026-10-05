@@ -18,8 +18,11 @@
         android:text="Debug"
         android:textSize="13sp" />
 
+    <!-- Tagged so the shared settings code can put debug rows in it (demo mode) without
+         naming an id that exists only in this build. See MainActivity.buildDebugRows. -->
     <LinearLayout
         android:id="@+id/debug_body"
+        android:tag="debug_rows"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">

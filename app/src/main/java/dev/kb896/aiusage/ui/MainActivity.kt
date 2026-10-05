@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
         bindArt()
         bindBackdrop()
         bindDiagnostics()
+        buildDebugRows()
         bindAdvancedToggle()
         bindGeometrySliders()
         bindTabs()
@@ -329,6 +330,30 @@ class MainActivity : ComponentActivity() {
             UiType.dress(this)
             fontVariationSettings = "'wght' 600"
         }
+    }
+
+    /**
+     * The debug build's own rows, in the Debug card (a debug-only layout, found by its tag):
+     * demo mode, at the card's top. Built again with the settings rows, and once more after
+     * the card itself exists, which is after the first build.
+     */
+    private fun buildDebugRows() {
+        if (!BuildConfig.DEBUG) return
+        val body = findViewById<View>(R.id.debug_slot)?.findViewWithTag<LinearLayout>("debug_rows") ?: return
+        val holder = body.findViewWithTag<LinearLayout>("demo_holder") ?: LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = "demo_holder"
+            body.addView(this, 0)
+        }
+        holder.removeAllViews()
+        val store = ConfigStore(this)
+        SettingsRows.toggle(holder, "Demo mode", store.load().demoMode) { on ->
+            val config = store.load().copy(demoMode = on)
+            store.save(config)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
+            refreshPreview()
+        }
+        dev.kb896.aiusage.ui.glass.Unclip.tree(holder)
     }
 
     /** The bar's view of the screen, told when the rows under it change. */
@@ -1097,11 +1122,8 @@ class MainActivity : ComponentActivity() {
         //
         // Under "keep awake" because it implies it: a demo holds the screen up whatever
         // that says, and putting the two together is what makes that obvious.
-        if (BuildConfig.DEBUG) {
-            SettingsRows.toggle(
-                generalRows, "Demo mode (debug)", config.demoMode,
-            ) { on -> write { it.copy(demoMode = on) } }
-        }
+        // Demo mode lives in the Debug card, not here: see buildDebugRows.
+        buildDebugRows()
         // Directly under Notifications, because it runs on the same grant — see Setup's
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.
