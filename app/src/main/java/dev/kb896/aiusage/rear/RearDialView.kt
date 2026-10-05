@@ -1297,6 +1297,7 @@ class RearDialView(context: Context) : View(context) {
         crtApplied = tube != null
         if (tube == null) {
             drawPicture(canvas)
+            scheduleNext()
             return
         }
         crtNode.setPosition(0, 0, width, height)
@@ -1313,6 +1314,20 @@ class RearDialView(context: Context) : View(context) {
         canvas.save()
         canvas.scale(fitX, fitY)
         try { drawTableGlow(canvas) } finally { glowOverTube = false; canvas.restore() }
+        scheduleNext()
+    }
+
+    /**
+     * Whether to ask for the next frame — decided once EVERYTHING has drawn. It used to be
+     * decided at the end of the scene, and on GLASS the overlays come after it: the glass
+     * buttons and their glyphs, the slider, the table lights. Their animations set the flag
+     * too late to count, so they ran only while something in the scene kept frames coming
+     * — the spinning record, say — and a pause froze the play glyph's morph, the table
+     * lights' walk and everything else mid-way until a touch drew again.
+     */
+    private fun scheduleNext() {
+        publishMirror()
+        if (animating && displayAwake && !frozen(frameNowMs)) postInvalidateOnAnimation()
     }
 
     /** The picture itself: the scene, refracted or flat, and its overlays. */
@@ -3232,19 +3247,7 @@ class RearDialView(context: Context) : View(context) {
         // fading in or out of always-on is itself a second of frames
         if (aod || aodUntil > 0) { if (aodFade(frameNowMs) in 0.001f..0.999f) animating = true }
         if (ringsAt != 0L && frameNowMs - ringsAt < AOD_FADE_MS) animating = true
-        publishMirror()
-        // SELF-HEALING. displayAwake is told by the activity — on a display change, and
-        // read afresh on every resume — and a resume can read a state that is about to
-        // change without the change ever being reported, which left the flag false on a
-        // lit display: one frame for whatever invalidated, then nothing — the table
-        // lights, the glyph's morph, everything — until a touch put it right. Seen on a
-        // pause, whose broadcast is often what next invalidates. A frame that wants a
-        // successor asks the display itself before believing the flag.
-        if (animating && !displayAwake && display?.state == android.view.Display.STATE_ON) {
-            android.util.Log.w("AiUsageRear", "display is on but the panel was told it was not — drawing again")
-            displayAwake = true
-        }
-        if (animating && displayAwake && !frozen(frameNowMs)) postInvalidateOnAnimation()
+        // The next frame is asked for at the end of onDraw, not here: see scheduleNext.
 
     }
 
