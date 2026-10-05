@@ -57,8 +57,15 @@ object Ink {
         if (isLight(luminance)) 0xFF34C759.toInt() else 0xFF30D158.toInt()
 
     /** The slider fill and the segmented selection. LiquidSlider.kt:59-60. */
-    fun accent(luminance: Float): Int =
-        if (isLight(luminance)) 0xFF0088FF.toInt() else 0xFF0091FF.toInt()
+    /**
+     * The app's green: the launcher icon's own background (ic_launcher_background,
+     * #FDFB76) — the bottom bar's open tab, the confirm in every dialog, a slider's fill.
+     * It was the catalog's blue.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun accent(luminance: Float): Int = ICON_GREEN
+
+    const val ICON_GREEN = 0xFFFDFB76.toInt()
 
     /** An inactive track. LiquidToggle.kt:59-60: grey at 0.2 light, 0.36 dark. */
     fun track(luminance: Float): Int =

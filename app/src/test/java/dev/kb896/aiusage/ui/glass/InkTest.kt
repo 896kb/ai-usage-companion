@@ -20,7 +20,7 @@ class InkTest {
     @Test fun `the catalog tokens are the dark background's, whatever the cell`() {
         for (cell in floatArrayOf(0.7f, 0.3f)) {
             assertEquals(0xFF30D158.toInt(), Ink.on(cell))
-            assertEquals(0xFF0091FF.toInt(), Ink.accent(cell))
+            assertEquals(0xFFFDFB76.toInt(), Ink.accent(cell))
             assertEquals(0x5C787880, Ink.track(cell))
             assertEquals(0.56f, Ink.scrimAlpha(cell), 0.001f)
         }
