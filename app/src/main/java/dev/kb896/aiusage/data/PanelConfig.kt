@@ -309,6 +309,12 @@ data class PanelConfig(
      * it is the panel going black for no visible reason. See RearActivity.pocketWatch.
      */
     val aodPocket: Boolean = false,
+    /** In always-on, the date line on the clock page (outside it, the Date switch decides). */
+    val aodDate: Boolean = true,
+    /** The weather line on the clock page — the reading and the place. Off leaves only the weather on the glass. */
+    val showWeatherLine: Boolean = true,
+    /** In always-on, the weather line too (when it shows at all). */
+    val aodWeather: Boolean = true,
     /**
      * The whole panel drawn as if on a curved tube — scanlines, a shadow mask, a
      * vignette, the picture bent outwards — the terminal's look on 896.ro. Off by

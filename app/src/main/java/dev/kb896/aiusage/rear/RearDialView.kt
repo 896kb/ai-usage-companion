@@ -8153,31 +8153,43 @@ class RearDialView(context: Context) : View(context) {
         // Longhand, unlike the corner block's WED 00. That one is a glance at a panel
         // already full of readings and has to be small; this page has room and nothing
         // competing, so it can say the whole thing.
-        val date = java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault())
-            .format(now.time) + ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) +
-            ", " + now.get(java.util.Calendar.YEAR)
-        // ITS OWN COLOUR. The date and the clock are two readings, and the settings give
-        // them a colour each — this took the clock's for both, which is the sort of thing
-        // that looks deliberate until somebody changes one of them and only half the page
-        // moves.
-        // Heavier, and at full strength. It was the body weight at 60% opacity over a
-        // record, which is two different ways of being quiet at once.
-        extras = extrasDate
-        extras.textAlign = Paint.Align.LEFT
-        extras.textSize = typed(DATE_SIZE)
-        val dateInk = colorFor("date", config.dateTint)
-        val dateW = extras.measureText(date)
-        val dateLeft = cx - dateW / 2f
-        if (config.theme.isGlass) {
-            clockRect.set(
-                dateLeft - CARD_PAD_X, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y,
-                dateLeft + dateW + CARD_PAD_X, DATE_BASELINE + ROW_CARD_PAD_Y,
-            )
-            glassCard(canvas, clockRect, ROW_CARD_RADIUS)
+        // The date line follows the Date switch, and in always-on its own switch; the
+        // weather line its own switch, and in always-on another — both cross-fading with
+        // always-on, so neither pops. The weather on the glass is not this line's.
+        val aodNow = aodFade(frameNowMs)
+        val dateKeep = (if (config.showDate) 1f else 0f) +
+            ((if (config.aodDate) 1f else 0f) - (if (config.showDate) 1f else 0f)) * aodNow
+        val weatherOn = if (config.showWeatherLine) 1f else 0f
+        val weatherKeep = weatherOn + ((if (config.showWeatherLine && config.aodWeather) 1f else 0f) - weatherOn) * aodNow
+        if (dateKeep > 0.004f) {
+            val date = java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault())
+                .format(now.time) + ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) +
+                ", " + now.get(java.util.Calendar.YEAR)
+            // ITS OWN COLOUR. The date and the clock are two readings, and the settings give
+            // them a colour each — this took the clock's for both, which is the sort of thing
+            // that looks deliberate until somebody changes one of them and only half the page
+            // moves.
+            // Heavier, and at full strength. It was the body weight at 60% opacity over a
+            // record, which is two different ways of being quiet at once.
+            extras = extrasDate
+            extras.textAlign = Paint.Align.LEFT
+            extras.textSize = typed(DATE_SIZE)
+            val dateInk = colorFor("date", config.dateTint)
+            val dateW = extras.measureText(date)
+            val dateLeft = cx - dateW / 2f
+            if (config.theme.isGlass) {
+                clockRect.set(
+                    dateLeft - CARD_PAD_X, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y,
+                    dateLeft + dateW + CARD_PAD_X, DATE_BASELINE + ROW_CARD_PAD_Y,
+                )
+                glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = dateKeep)
+            }
+            extras.color = (dateInk and 0x00FFFFFF) or ((0xFF * dateKeep).toInt() shl 24)
+            canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
         }
-        extras.color = (dateInk and 0x00FFFFFF) or (0xFF shl 24)
-        canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
-        shownWeather()?.let { drawWeatherLine(canvas, cx, it, colorFor("weather", config.weatherTint)) }
+        if (weatherKeep > 0.004f) {
+            shownWeather()?.let { drawWeatherLine(canvas, cx, it, colorFor("weather", config.weatherTint), weatherKeep) }
+        }
         extras = extrasBody
         extras.textSize = typed(18f)
     }
@@ -8202,13 +8214,13 @@ class RearDialView(context: Context) : View(context) {
         cx: Float,
         reading: dev.kb896.aiusage.data.WeatherReading,
         ink: Int,
+        keep: Float = 1f,
     ) {
         // The card reaches into the unlock slider's band, so the block goes when the
         // slider comes and returns when it goes — the same bargain the square artwork
         // makes with the lock. A fade, not a slide: nothing on this page moves.
         // The line sits above the slider's band now, so it no longer has to leave when
         // the slider comes; keep stays at full and the fade machinery below is idle.
-        val keep = 1f
         // HELD, NOT SPELLED AGAIN. Both strings come from a fact that moves every five
         // minutes, on a page redrawn at the display's full rate — built per frame they are
         // garbage by the thousand for two words. Identity is the right key: a reading is

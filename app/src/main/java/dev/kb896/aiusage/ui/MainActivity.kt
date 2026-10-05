@@ -721,9 +721,13 @@ class MainActivity : ComponentActivity() {
         )
         // No switch: the line shows whenever there is a reading, and the Weather rows
         // below decide that. Only the colour is a choice, so only a swatch is offered.
-        SettingsRows.colorRow(container, "Weather line", config.weatherTint) { c ->
-            write { it.copy(weatherColor = c) }
-        }
+        // Off leaves only the weather on the glass — rain when it rains, with no degrees
+        // or place spelled out.
+        SettingsRows.toggleWithColor(
+            container, "Weather line", config.showWeatherLine, config.weatherTint,
+            onChange = { on -> write { it.copy(showWeatherLine = on) } },
+            onPick = { c -> write { it.copy(weatherColor = c) } },
+        )
         // The lights round the margin when the phone lies on its face — see table
         // mode in the README. They follow the clock's colour unless told otherwise.
         SettingsRows.colorRow(container, "Table lights", config.tableTint) { c ->
@@ -789,6 +793,12 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 container, "  ↳ battery level above the clock", config.aodBattery,
             ) { on -> write { it.copy(aodBattery = on) } }
+            SettingsRows.toggle(
+                container, "  ↳ date", config.aodDate,
+            ) { on -> write { it.copy(aodDate = on) } }
+            SettingsRows.toggle(
+                container, "  ↳ weather line", config.aodWeather,
+            ) { on -> write { it.copy(aodWeather = on) } }
             // Off by default: on a phone whose rear proximity sensor reads covered in the
             // hand, pocket mode is the panel going black for no reason anyone can see.
             SettingsRows.toggle(
