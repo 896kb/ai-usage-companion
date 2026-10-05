@@ -49,4 +49,27 @@ class GlassSliderTest {
         s.layout(0, 0, 0, 0)
         s.draw(Canvas(Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)))
     }
+
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    @Test fun `under GLASS a slider made in code is tall enough and draws something`() {
+        ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
+        val d = context.resources.displayMetrics.density
+        val s = GlassSlider(context).apply { max = 100; progress = 100 }
+        val w = (300 * d).toInt()
+        for (spec in listOf(
+            android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED),
+            android.view.View.MeasureSpec.makeMeasureSpec((400 * d).toInt(), android.view.View.MeasureSpec.AT_MOST),
+        )) {
+            s.measure(android.view.View.MeasureSpec.makeMeasureSpec(w, android.view.View.MeasureSpec.EXACTLY), spec)
+            assertTrue("height ${s.measuredHeight} for $spec", s.measuredHeight >= (48 * d).toInt())
+        }
+        s.layout(0, 0, s.measuredWidth, s.measuredHeight)
+        assertFalse("will not draw", s.willNotDraw())
+        val bmp = Bitmap.createBitmap(s.measuredWidth, s.measuredHeight, Bitmap.Config.ARGB_8888)
+        s.draw(Canvas(bmp))
+        var lit = 0
+        for (y in 0 until bmp.height) for (x in 0 until bmp.width) if (bmp.getPixel(x, y) ushr 24 != 0) lit++
+        assertTrue("nothing drawn", lit > 0)
+    }
 }
+
