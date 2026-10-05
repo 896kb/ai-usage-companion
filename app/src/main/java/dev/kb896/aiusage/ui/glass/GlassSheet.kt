@@ -49,8 +49,26 @@ object GlassSheet {
         // per-cell sample doOnLayout below takes for the panel's own text.
         val mean = Backdrop.meanLuminance()
         window.setDimAmount(Ink.scrimAlpha(mean))
-        val sheet = GlassSheetDrawable()
-        panel.background = sheet
+        // FROSTED: what is behind the dialog — the settings, the wallpaper — blurred
+        // through it, the system's own cross-window blur, clipped to the sheet's rounded
+        // background; a translucent tint and a light rim over it. Where the system will
+        // not blur (battery saver, a phone without it) the tint alone still reads as a
+        // sheet; and before blur existed here, the wallpaper glass did the job.
+        val d = dialog.context.resources.displayMetrics.density
+        val wm = dialog.context.getSystemService(android.view.WindowManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 31 && wm?.isCrossWindowBlurEnabled == true) {
+            window.setBackgroundDrawable(android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = SHEET_RADIUS_DP * d
+                setColor(FROST_TINT)
+            })
+            window.setBackgroundBlurRadius((FROST_BLUR_DP * d).toInt())
+            panel.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = SHEET_RADIUS_DP * d
+                setStroke((1 * d).toInt().coerceAtLeast(1), FROST_RIM)
+            }
+        } else {
+            panel.background = GlassSheetDrawable()
+        }
         // After layout, not before: the panel has no size yet when dress() runs, and a
         // pane drawn at zero size returns the fallback luminance forever. The buttons'
         // colours are decided inside paint(), after the sweep, not here — a sweep that
@@ -67,7 +85,9 @@ object GlassSheet {
      */
     fun paint(dialog: AlertDialog, panel: View, lum: Float, danger: Boolean) {
         ink(panel, lum)
-        val confirm = if (danger) Panel.Palette.CRIT else Panel.Palette.WORK
+        // The confirm is the accent the bottom bar shows the open tab in — the app's one
+        // "this is the thing to press" colour; red only when it destroys something.
+        val confirm = if (danger) Panel.Palette.CRIT else Ink.accent(lum)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(stateList(confirm, Ink.secondary(lum)))
         for (which in intArrayOf(AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
             dialog.getButton(which)?.setTextColor(Ink.secondary(lum))
@@ -84,4 +104,10 @@ object GlassSheet {
         if (view is TextView) view.setTextColor(Ink.primary(lum))
         if (view is ViewGroup) for (i in 0 until view.childCount) ink(view.getChildAt(i), lum)
     }
+
+    /** The sheet's corners, its frosted tint over the blur, its rim, and how far the blur reaches. */
+    private const val SHEET_RADIUS_DP = 28f
+    private const val FROST_TINT = 0x8C1E2228.toInt()
+    private const val FROST_RIM = 0x2EFFFFFF
+    private const val FROST_BLUR_DP = 28f
 }
