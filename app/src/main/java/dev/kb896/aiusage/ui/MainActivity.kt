@@ -334,10 +334,44 @@ class MainActivity : ComponentActivity() {
     /** The bar's view of the screen, told when the rows under it change. */
     private var tabBackdrop: dev.kb896.aiusage.ui.liquid.ViewBackdrop? = null
 
+    /** The tab whose section is showing, or -1 before the first. */
+    private var shownTab = -1
+
+    /**
+     * Shows tab [i]'s section — SLID IN, not swapped: the old section leaves towards the side
+     * the bar moved away from and the new one arrives from the side it moved towards, both
+     * on screen together in their shared frame (tab_pages), the way pages turn. The first
+     * showing just appears. A change mid-slide finishes the slide in flight at once.
+     */
     private fun showTab(i: Int) {
         val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)
-        for ((k, id) in sections.withIndex()) {
-            findViewById<View>(id).visibility = if (k == i) View.VISIBLE else View.GONE
+        val prev = shownTab
+        shownTab = i
+        for (id in sections) findViewById<View>(id).animate().cancel()
+        if (prev < 0 || prev == i) {
+            for ((k, id) in sections.withIndex()) findViewById<View>(id).apply {
+                translationX = 0f
+                visibility = if (k == i) View.VISIBLE else View.GONE
+            }
+        } else {
+            val incoming = findViewById<View>(sections[i])
+            val outgoing = findViewById<View>(sections[prev])
+            for ((k, id) in sections.withIndex()) if (k != i && k != prev) findViewById<View>(id).apply {
+                translationX = 0f
+                visibility = View.GONE
+            }
+            val w = findViewById<View>(R.id.tab_pages).width.toFloat()
+                .takeIf { it > 0f } ?: resources.displayMetrics.widthPixels.toFloat()
+            val dir = if (i > prev) 1f else -1f
+            val ease = android.view.animation.DecelerateInterpolator(2f)
+            incoming.translationX = dir * w
+            incoming.visibility = View.VISIBLE
+            incoming.animate().translationX(0f).setDuration(TAB_SLIDE_MS).setInterpolator(ease).start()
+            outgoing.translationX = 0f
+            outgoing.visibility = View.VISIBLE
+            outgoing.animate().translationX(-dir * w).setDuration(TAB_SLIDE_MS).setInterpolator(ease)
+                .withEndAction { outgoing.visibility = View.GONE; outgoing.translationX = 0f }
+                .start()
         }
         val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
         when (i) {
@@ -1871,6 +1905,8 @@ class MainActivity : ComponentActivity() {
         private const val TAB_USAGE = 2
         private const val TAB_MEDIA = 3
         private const val TAB_AOD = 4
+        /** How long a change of tab slides its sections. */
+        private const val TAB_SLIDE_MS = 320L
 
         /** How long the reset dialog holds its confirm button shut. */
         private const val RESET_HOLD_MS = 5_000L

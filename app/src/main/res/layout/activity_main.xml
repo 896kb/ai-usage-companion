@@ -172,6 +172,13 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
+        <!-- The tabs' sections share one frame, so a change of tab can slide the old one
+             out and the new one in side by side (MainActivity.showTab). -->
+        <FrameLayout
+            android:id="@+id/tab_pages"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
         <!-- The bottom bar's tabs: General first — what belongs to the whole panel rather
              than one screen of it — then the panel's three pages and always-on. Onboarding
              and recovery stay above them all. See MainActivity.bindTabs. -->
@@ -627,6 +634,8 @@
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
         </LinearLayout>
+
+        </FrameLayout>
 
         </LinearLayout>
     </ScrollView>
