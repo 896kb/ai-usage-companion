@@ -3,6 +3,7 @@ package dev.kb896.aiusage.rear
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
@@ -3083,6 +3084,26 @@ class RearDialView(context: Context) : View(context) {
             // page slides away above it. The rings stay put: they are the lenses'.
             if (gone) canvas.translate(0f, (1f - paging) * Panel.HEIGHT)
             drawMediaPage(canvas, paging, dx, dy, panelPush, geometry, volumeFraction)
+            if (gone) {
+                // With no readout, what lived in its corners lives here: the clock, date
+                // and battery row at the top right, where it was, and the camera and the
+                // controller under it along the right edge — the media page's own corners
+                // are the transport's and the lens's. They ride the page as it slides, and
+                // their touch targets follow (the page's offset is the readout's here).
+                val pageDy = dy + (1f - paging) * Panel.HEIGHT
+                drawExtras(canvas)
+                if (config.showCamera && unlocked > 0.004f) {
+                    fading(canvas, mediaCameraBounds(), unlocked) {
+                        drawCamera(canvas, dx, pageDy, PointF(CONTENT_RIGHT, MEDIA_CAMERA_BOTTOM))
+                    }
+                } else cameraButton = null
+                if (config.showClose && unlocked > 0.004f) {
+                    fading(canvas, mediaCloseBounds(), unlocked) {
+                        drawClose(canvas, dx, pageDy, PointF(CONTENT_RIGHT - CLOSE_R, MEDIA_CLOSE_CY))
+                    }
+                } else closeButton = null
+            }
+
             canvas.restore()
         } else if (paging <= 0.001f) {
             volumeBar = null
@@ -4456,26 +4477,29 @@ class RearDialView(context: Context) : View(context) {
     )
 
     /** The same for the close button, in the opposite corner. */
+    /** The two buttons' places on the media page with no readout: under the extras row, at the right edge. */
+    private fun mediaCameraBounds() = android.graphics.RectF(
+        CONTENT_RIGHT - CAMERA_H * 2f - FADE_PAD, MEDIA_CAMERA_BOTTOM - CAMERA_H - FADE_PAD,
+        CONTENT_RIGHT + FADE_PAD, MEDIA_CAMERA_BOTTOM + FADE_PAD,
+    )
+    private fun mediaCloseBounds() = android.graphics.RectF(
+        CONTENT_RIGHT - CLOSE_R * 2f - FADE_PAD, MEDIA_CLOSE_CY - CLOSE_R - FADE_PAD,
+        CONTENT_RIGHT + FADE_PAD, MEDIA_CLOSE_CY + CLOSE_R + FADE_PAD,
+    )
     private fun closeFadeBounds() = android.graphics.RectF(
         CLOSE_CX - CLOSE_R - FADE_PAD, CLOSE_CY - CLOSE_R - FADE_PAD,
         CLOSE_CX + CLOSE_R + FADE_PAD, CLOSE_CY + CLOSE_R + FADE_PAD,
     )
 
-    private fun drawCamera(canvas: Canvas, dx: Float, dy: Float) {
+    private fun drawCamera(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null) {
         val h = CAMERA_H
         val w = h * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
-        // Vertically centred on the bottom artwork, and then inset from the right edge
-        // by exactly the gap that centring leaves BELOW it.
-        //
-        // Not the artwork's own bottom margin, which is what this used first: the
-        // artwork is 70 units tall and the camera 30, so centring the smaller one on the
-        // larger leaves 46 units under it while the artwork keeps 26. Matching the
-        // artwork's number therefore looked cramped — 26 beside it, 46 below it, on a
-        // glyph small enough for the difference to read as a mistake.
         val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
-        val bottom = centreY + h / 2f
-        val margin = Panel.HEIGHT - bottom
-        val right = Panel.WIDTH - margin
+        // Its corner of the readout, or wherever it is asked to be (the media page, when
+        // there is no readout): `at` is the glyph's right edge and bottom.
+        val margin = Panel.HEIGHT - (centreY + h / 2f)
+        val bottom = at?.y ?: (centreY + h / 2f)
+        val right = at?.x ?: (Panel.WIDTH - margin)
         // Positioned by its own left edge rather than by a square cell: drawIcon centres
         // within a cell of side h, which is right for the clock and battery sitting in a
         // column and wrong for something pinned to the panel's right margin. Undo the
@@ -4534,7 +4558,7 @@ class RearDialView(context: Context) : View(context) {
      * missing material rather than as a second colour laid on top. Under GLASS it gets
      * what every other control on this panel gets — the mark, and glass over it.
      */
-    private fun drawClose(canvas: Canvas, dx: Float, dy: Float) {
+    private fun drawClose(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null) {
         // The glass reads as a bigger object than the filled disc did, so it IS one — a
         // pane with a lit rim needs room around the mark, or it looks like a lens clamped
         // onto it rather than a button the mark is sitting on. The target grows with it:
@@ -4544,12 +4568,14 @@ class RearDialView(context: Context) : View(context) {
         // Down the middle of the same band the masthead is centred in, so the two read as
         // one row of furniture above the accounts rather than two things at two heights.
         // Its own radius keeps it clear of the top edge when there is no card to measure.
-        val closeCy = if (firstCardTop > 0f) firstCardTop / 2f else CLOSE_CY
+        // Its corner of the readout, or wherever it is asked to be: `at` is the centre.
+        val closeCx = at?.x ?: CLOSE_CX
+        val closeCy = at?.y ?: (if (firstCardTop > 0f) firstCardTop / 2f else CLOSE_CY)
         // Drift subtracted, for the same reason the camera's is: touches arrive in the
         // view's coordinates, which the burn-in translate never moves.
         closeButton = android.graphics.RectF(
-            CLOSE_CX - hit - dx, closeCy - hit - dy,
-            CLOSE_CX + hit - dx, closeCy + hit - dy,
+            closeCx - hit - dx, closeCy - hit - dy,
+            closeCx + hit - dx, closeCy + hit - dy,
         )
 
         // SIZED BY ITS WIDTH, not its height. The controller is a wide glyph in one theme
@@ -4557,14 +4583,14 @@ class RearDialView(context: Context) : View(context) {
         // asking for a height would give two very different marks on the same disc.
         val aspect = Glyphs.aspect(PanelIcons.GAMEPAD, config.theme)
         val gh = CLOSE_R * GAMEPAD_SPAN / aspect
-        val gx = CLOSE_CX - gh / 2f
+        val gx = closeCx - gh / 2f
         val gy = closeCy - gh / 2f
 
         if (config.theme.isGlass) {
             // The disc sized so its glass lands exactly where the filled one used to,
             // which is also where the touch target still is.
             extras.color = colorFor("close", config.closeColor)
-            glassButton(canvas, CLOSE_CX, closeCy, gh, discH = hit / DISC_RADIUS) { c ->
+            glassButton(canvas, closeCx, closeCy, gh, discH = hit / DISC_RADIUS) { c ->
                 extras.color = colorFor("close", config.closeColor)
                 drawIcon(c, PanelIcons.GAMEPAD, gx, gy, gh)
             }
@@ -4573,7 +4599,7 @@ class RearDialView(context: Context) : View(context) {
 
         closePaint.style = Paint.Style.FILL
         closePaint.color = colorFor("close", config.closeColor)
-        canvas.drawCircle(CLOSE_CX, closeCy, CLOSE_R, closePaint)
+        canvas.drawCircle(closeCx, closeCy, CLOSE_R, closePaint)
 
         // The controller in the panel's own background, so the disc reads as missing
         // material rather than as a second colour laid on top.
@@ -11238,6 +11264,10 @@ class RearDialView(context: Context) : View(context) {
 
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
+        /** on the media page with no readout: the camera's bottom and the controller's centre, under the extras row */
+        private const val MEDIA_CAMERA_BOTTOM = 158f
+        private const val MEDIA_CLOSE_CY = 206f
+
 
         /**
          * The media row's right edge: where the camera button starts, less a gap.
