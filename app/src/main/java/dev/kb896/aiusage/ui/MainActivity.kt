@@ -230,6 +230,11 @@ class MainActivity : ComponentActivity() {
         }
         applyFont(findViewById(R.id.root_host))
         dev.kb896.aiusage.ui.glass.Unclip.tree(findViewById(R.id.settings_layout))
+        // The cards' titles, one look (CardTitle) — after the font sweep, which would put the
+        // weight back, and before the theme's early return, which skipped it under GLASS.
+        for (id in intArrayOf(R.id.geo_heading, R.id.backdrop_heading, R.id.settings_title_label, R.id.settings_art_label)) {
+            dev.kb896.aiusage.ui.glass.CardTitle.style(findViewById(id))
+        }
 
         if (glass) {
             // The hairlines are the ORIGINAL screen's structure; cards are this one's.
@@ -257,7 +262,6 @@ class MainActivity : ComponentActivity() {
             setTextColor(Panel.Palette.FG)
             setHintTextColor(Panel.Palette.DIM)
         }
-        findViewById<TextView>(R.id.geo_heading).setTextColor(Panel.Palette.WORK)
         findViewById<TextView>(R.id.geo_hint).setTextColor(Panel.Palette.DIM)
     }
 
@@ -747,7 +751,7 @@ class MainActivity : ComponentActivity() {
         // accepting characters without saying why reads as broken.
         val max = TitleLimits.masthead(this)
         field.filters = TitleLimits.filter(max)
-        findViewById<TextView>(R.id.settings_title_label).text = "TITLE  (max $max)"
+        findViewById<TextView>(R.id.settings_title_label).text = "Title (max $max)"
 
         val swatch = findViewById<dev.kb896.aiusage.ui.glass.GlassChip>(R.id.settings_title_color)
         // Under ORIGINAL the chip's setter IS setBackgroundColor, so this is the same

@@ -471,9 +471,8 @@
             android:id="@+id/settings_title_label"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="TITLE"
-            android:textSize="11sp" />
+            android:text="Title"
+            android:textSize="13sp" />
 
         <!--
           The field and its colour on one line. A swatch for the title sitting down in
@@ -513,19 +512,21 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
-        <TextView
-            android:id="@+id/settings_art_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="BOTTOM ARTWORK"
-            android:textSize="11sp" />
-
         <dev.kb896.aiusage.ui.glass.GlassCard
             android:id="@+id/card_art"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:orientation="vertical">
+
+        <!-- Inside its card, at the top, like every other card's title. -->
+        <TextView
+            android:id="@+id/settings_art_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="Bottom artwork"
+            android:textSize="13sp" />
 
         <dev.kb896.aiusage.ui.glass.GlassButton
             android:id="@+id/art_pick"

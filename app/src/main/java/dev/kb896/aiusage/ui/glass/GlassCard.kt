@@ -70,7 +70,9 @@ class GlassCard @JvmOverloads constructor(
         inkedLight = Ink.isLight(luminance)
         fun walk(v: View) {
             if (v is Glassy && v !== this) return
-            if (v is TextView) v.setTextColor(if (v.textSize <= 11.5f * density) Ink.secondary(luminance) else Ink.primary(luminance))
+            if (v is TextView) v.setTextColor(
+                if (v.tag == CardTitle.TAG || v.textSize <= 11.5f * density) Ink.secondary(luminance) else Ink.primary(luminance),
+            )
             if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
         }
         walk(this)

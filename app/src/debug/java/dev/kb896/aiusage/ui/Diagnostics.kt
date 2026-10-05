@@ -65,6 +65,8 @@ object Diagnostics {
                 R.id.mascot_heading, R.id.calls_heading, R.id.calls_text)) {
             UiType.dress(slot.findViewById<TextView>(id))
         }
+        // The card's title, as every other card's: see CardTitle.
+        dev.kb896.aiusage.ui.glass.CardTitle.style(slot.findViewById(R.id.debug_heading))
     }
 
     /** Renders the payload exactly as the panel receives it, config included. */

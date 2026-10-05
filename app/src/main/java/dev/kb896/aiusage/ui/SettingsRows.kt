@@ -34,11 +34,10 @@ object SettingsRows {
      *  change picked up on rebuild needs nothing here to invalidate. */
     private fun glass(context: Context) = UiTheme.isGlass(context)
 
+    /** A label over a control: the card title's look (CardTitle), the same everywhere. */
     private fun label(context: Context, text: String) = TextView(context).apply {
         this.text = text
-        textSize = 11f
-        setTextColor(Panel.Palette.DIM)
-        typeface = UiType.of(context)
+        dev.kb896.aiusage.ui.glass.CardTitle.style(this)
     }
 
     /**
@@ -142,7 +141,7 @@ object SettingsRows {
         onChange: (String) -> Unit,
     ) {
         val context = parent.context
-        parent.addView(label(context, name), rowParams(dp(context, 10)))
+        parent.addView(label(context, name), rowParams(dp(context, if (parent.childCount == 0) 0 else 10)))
         parent.addView(dev.kb896.aiusage.ui.glass.GlassField(context).apply {
             setText(initial)
             textSize = 14f
@@ -443,7 +442,7 @@ object SettingsRows {
         // an opaque platform overlay that the theme has no way to make of glass, and with
         // three or four options a segmented control reads faster than a menu anyway.
         if (glass(context)) {
-            parent.addView(label(context, name), rowParams(dp(context, 10)))
+            parent.addView(label(context, name), rowParams(dp(context, if (parent.childCount == 0) 0 else 10)))
             parent.addView(GlassSegmented(context, options, selected).apply { this.onChange = onChange },
                 rowParams(dp(context, 4)))
             return
@@ -490,7 +489,7 @@ object SettingsRows {
                 override fun onNothingSelected(p: AdapterView<*>?) = Unit
             }
         }
-        parent.addView(label(context, name), rowParams(dp(context, 10)))
+        parent.addView(label(context, name), rowParams(dp(context, if (parent.childCount == 0) 0 else 10)))
         parent.addView(spinner, rowParams(dp(context, 2)))
     }
 
