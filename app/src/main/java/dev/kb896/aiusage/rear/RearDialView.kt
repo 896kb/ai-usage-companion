@@ -3121,12 +3121,6 @@ class RearDialView(context: Context) : View(context) {
                 // fade with always-on — not only the buttons with the slider's swap.
                 val pageDy = dy - (1f - noticing) * Panel.HEIGHT
                 val awake = 1f - aodFade(frameNowMs)
-                if (awake > 0.004f) {
-                    canvas.save()
-                    canvas.translate(0f, extrasBottomShift())
-                    fading(canvas, extrasBounds(), awake) { drawExtras(canvas, bottomRight = true) }
-                    canvas.restore()
-                }
                 val present = unlocked * awake
                 val gapY = (geometry.personal.cy + geometry.work.cy) / 2f
                 val camW = CAMERA_H * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
@@ -4503,26 +4497,6 @@ class RearDialView(context: Context) : View(context) {
      * air under it as it has above it at the top right — the glass card's rect on GLASS,
      * the icons' and baselines' extent on ORIGINAL.
      */
-    /** The extras row's extent at its top-right place, for a fade layer round it. */
-    private fun extrasBounds(): android.graphics.RectF =
-        if (extrasCard(cardRect)) android.graphics.RectF(cardRect).apply { inset(-FADE_PAD, -FADE_PAD) }
-        else android.graphics.RectF(
-            CONTENT_RIGHT - 200f, TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H - FADE_PAD,
-            Panel.WIDTH.toFloat(), TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + FADE_PAD,
-        )
-
-    private fun extrasBottomShift(): Float {
-        val bottom =
-            if (extrasCard(cardRect)) cardRect.bottom
-            else TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + 6f
-        // The corner, with the same air under the row as at its right; and while the
-        // unlock slider is up — always-on, or a wake — the row rises above its band, by
-        // the slider's own swap so the two move as one.
-        val corner = Panel.HEIGHT - CORNER_MARGIN
-        val aboveSlider = markRegion().top - CORNER_BUTTON_GAP
-        val target = corner + (aboveSlider - corner) * Tween.easeInOut(lockSwap(frameNowMs))
-        return target - bottom
-    }
     private fun closeFadeBounds() = android.graphics.RectF(
         CLOSE_CX - CLOSE_R - FADE_PAD, CLOSE_CY - CLOSE_R - FADE_PAD,
         CLOSE_CX + CLOSE_R + FADE_PAD, CLOSE_CY + CLOSE_R + FADE_PAD,
@@ -8107,8 +8081,14 @@ class RearDialView(context: Context) : View(context) {
 
         // always-on, if asked: the battery level above the clock, arriving with the mode,
         // and the charging glyph beside it while a charger is in
-        val batteryAlpha = aodFade(frameNowMs)
-        if (config.aodBattery && batteryAlpha > 0.001f) {
+        // In always-on on request; and always when there is no readout, whose corner row
+        // carried the battery — the clock page already says the date and the time.
+        val noReadout = onlyAccount == null && readoutGone
+        val batteryAlpha = maxOf(
+            if (config.aodBattery) aodFade(frameNowMs) else 0f,
+            if (noReadout && config.showBattery) 1f else 0f,
+        )
+        if (batteryAlpha > 0.001f) {
             val pct = batteryPercent()
             if (pct >= 0) {
                 val top = CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP
