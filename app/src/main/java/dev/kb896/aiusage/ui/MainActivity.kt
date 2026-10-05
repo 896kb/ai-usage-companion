@@ -267,18 +267,49 @@ class MainActivity : ComponentActivity() {
     private var tab = TAB_USAGE
 
     private fun bindTabs() {
-        val bar = findViewById<dev.kb896.aiusage.ui.glass.GlassTabBar>(R.id.tab_bar)
+        val bar = findViewById<androidx.compose.ui.platform.ComposeView>(R.id.tab_bar)
         val scroll = findViewById<android.widget.ScrollView>(R.id.root_scroll)
-        // The rows run on under the bar, so the last of them needs room to scroll clear.
-        bar.post { scroll.setPadding(scroll.paddingLeft, scroll.paddingTop, scroll.paddingRight, bar.reach) }
-        bar.select(tab, animate = false)
-        showTab(tab)
-        bar.onSelect = { i ->
-            tab = i
-            showTab(i)
-            scroll.scrollTo(0, 0)
+        val host = findViewById<View>(R.id.root_host)
+        val backdrop = dev.kb896.aiusage.ui.liquid.ViewBackdrop(host, findViewById(R.id.root_layout))
+        // The rows run on under the bar, so the last of them needs room to scroll clear —
+        // and the bar's glass is drawn from them, so it is told whenever they move.
+        val reach = ((64f * dev.kb896.aiusage.ui.liquid.SCALE + 10f + 12f) * resources.displayMetrics.density).toInt()
+        scroll.setPadding(scroll.paddingLeft, scroll.paddingTop, scroll.paddingRight, reach)
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> backdrop.changed() }
+        tabBackdrop = backdrop
+        val selected = androidx.compose.runtime.mutableIntStateOf(tab)
+        val lum = dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(host)
+        val tabs = listOf(
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_clock, "Clock"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_usage, "Usage"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_media, "Media"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_aod, "Always-on"),
+        )
+        bar.setContent {
+            dev.kb896.aiusage.ui.liquid.SettingsTabBar(
+                tabs = tabs,
+                selected = { selected.intValue },
+                onSelect = { i ->
+                    selected.intValue = i
+                    if (i != tab) {
+                        tab = i
+                        showTab(i)
+                        scroll.scrollTo(0, 0)
+                        backdrop.changed()
+                    }
+                },
+                backdrop = backdrop,
+                text = androidx.compose.ui.graphics.Color(0xFFF2F2F2.toInt()),
+                accent = androidx.compose.ui.graphics.Color(dev.kb896.aiusage.ui.glass.Ink.accent(lum)),
+                surface = androidx.compose.ui.graphics.Color(0xFF121212.toInt()),
+                face = androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Font(R.font.outfit)),
+            )
         }
+        showTab(tab)
     }
+
+    /** The bar's view of the screen, told when the rows under it change. */
+    private var tabBackdrop: dev.kb896.aiusage.ui.liquid.ViewBackdrop? = null
 
     private fun showTab(i: Int) {
         val sections = intArrayOf(R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)

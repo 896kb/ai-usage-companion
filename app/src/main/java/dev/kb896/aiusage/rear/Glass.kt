@@ -437,6 +437,8 @@ half4 main(float2 coord) {
     val sdf: RuntimeShader by lazy { RuntimeShader(SDF_TEXT) }
     val magnifier: RuntimeShader by lazy { RuntimeShader(MAGNIFIER) }
     val refraction: RuntimeShader by lazy { RuntimeShader(REFRACTION) }
+    /** A refraction of its own, for a RenderEffect: an effect snapshots its uniforms, so it must not share. */
+    fun newRefraction(): RuntimeShader = RuntimeShader(REFRACTION)
     val dispersion: RuntimeShader by lazy { RuntimeShader(DISPERSION) }
     val highlight: RuntimeShader by lazy { RuntimeShader(HIGHLIGHT) }
     val ambient: RuntimeShader by lazy { RuntimeShader(AMBIENT) }

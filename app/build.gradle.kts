@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -9,7 +10,7 @@ android {
     compileSdk = 36
 
     // buildConfig: BuildConfig.DEBUG gates the diagnostics section — see MainActivity.
-    buildFeatures { aidl = true; buildConfig = true }
+    buildFeatures { aidl = true; buildConfig = true; compose = true }
 
     defaultConfig {
         applicationId = "dev.kb896.aiusage"
@@ -99,6 +100,14 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // The settings' bottom bar: Kyant's liquid-glass tabs (LiquidBottomTabs, ported from
+    // the Backdrop catalog) on the Backdrop library, in a ComposeView. 1.0.x is the
+    // Android line; 2.x is Compose Multiplatform.
+    implementation(platform("androidx.compose:compose-bom:2025.08.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("io.github.kyant0:backdrop:1.0.6")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
