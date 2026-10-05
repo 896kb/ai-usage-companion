@@ -123,6 +123,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         buildSetupRows()
+        // Back from the notification access page, most likely: the hint rows go once it is held.
+        val access = Setup.notificationAccess(this)
+        if (rowsHadAccess != null && rowsHadAccess != access) buildSettingsRows()
+        rowsHadAccess = access
         syncCameraTip()
         stopWatchingConfig = ConfigStore(this).listen { syncCameraTip() }
         // Have the user service bound before any row needs it. Placement used to bind
@@ -377,6 +381,36 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * Notification access, asked for where it is needed rather than in onboarding: the
+     * panel's notifications and its media controls both read from it, and nothing else
+     * does. Switched on without it, the feature says so and offers the page; "Not now"
+     * runs [declined], which turns the feature back off.
+     */
+    private fun askNotificationAccess(feature: String, declined: () -> Unit) {
+        if (Setup.notificationAccess(this)) return
+        Modal.show(Modal.builder(this)
+            .setTitle("Allow notification access?")
+            .setMessage(
+                "$feature reads from Android's notification access — other apps' " +
+                    "notifications and what is playing both come through it. Allow it for " +
+                    "this app on the next screen."
+            )
+            .setPositiveButton("Allow") { _, _ -> openNotificationAccess() }
+            .setNegativeButton("Not now") { _, _ -> declined(); buildSettingsRows() })
+    }
+
+    private fun openNotificationAccess() {
+        try {
+            startActivity(Setup.notificationAccessIntent())
+        } catch (_: Exception) {
+            toast("Could not open that settings page")
+        }
+    }
+
+    /** Whether notification access was held when the rows were last built; rebuilt when it changes. */
+    private var rowsHadAccess: Boolean? = null
 
     /** On a phone without Xiaomi's rear app, whether the toggle last took the panel down. */
     private var panelHidden = false
@@ -879,13 +913,20 @@ class MainActivity : ComponentActivity() {
         )
         SettingsRows.toggleWithColor(
             clockRows, "Notifications", config.showNotifications, config.notificationTint,
-            onChange = { on -> write { it.copy(showNotifications = on) } },
+            onChange = { on ->
+                write { it.copy(showNotifications = on) }
+                if (on) askNotificationAccess("Notifications on the back") { write { it.copy(showNotifications = false) } }
+                buildSettingsRows()
+            },
             onPick = { c -> write { it.copy(notificationColor = c) } },
         )
         // A SEPARATE switch, and deliberately so. This display faces away from its owner,
         // so everything on it is shown to whoever is behind them. Knowing a message
         // arrived and broadcasting what it said are different decisions.
         if (config.showNotifications) {
+            if (!Setup.notificationAccess(this)) {
+                SettingsRows.navigation(clockRows, "  ↳ allow notification access") { openNotificationAccess() }
+            }
             SettingsRows.toggle(
                 clockRows, "  ↳ include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
@@ -1013,10 +1054,17 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggleWithColor(
             mediaRows, "Media controls", config.showMedia, config.mediaTint,
             // the cover and lyrics rows live under this switch: rebuild so they appear now
-            onChange = { on -> write { it.copy(showMedia = on) }; buildSettingsRows() },
+            onChange = { on ->
+                write { it.copy(showMedia = on) }
+                if (on) askNotificationAccess("Media controls") { write { it.copy(showMedia = false) } }
+                buildSettingsRows()
+            },
             onPick = { c -> write { it.copy(mediaColor = c) } },
         )
         if (config.showMedia) {
+            if (!Setup.notificationAccess(this)) {
+                SettingsRows.navigation(mediaRows, "  ↳ allow notification access") { openNotificationAccess() }
+            }
             SettingsRows.choice(
                 mediaRows, "  ↳ cover", listOf("SQUARE", "VINYL"),
                 config.mediaArt.ordinal,

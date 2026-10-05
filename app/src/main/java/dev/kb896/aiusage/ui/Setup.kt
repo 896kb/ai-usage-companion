@@ -103,16 +103,10 @@ object Setup {
             // Xiaomi's rear-screen app is not a step any more: removing or restoring it is
             // the settings' show/hide toggle, offered once the steps here are done — see
             // panelAllowed, and MainActivity.refreshControl.
-            Step(
-                title = "Notifications",
-                why = "The ongoing notification is what puts the readings in the status " +
-                    "bar and the island, and the limit warnings arrive the same way.",
-                satisfied = NotificationManagerCompat.from(context).areNotificationsEnabled(),
-                open = {
-                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                },
-            ),
+            // NOT HERE: this app's own notifications (the readings in the status bar, the
+            // limit warnings) are the user's to allow or not, and nothing on the back needs
+            // them. Notification access is asked for where it is needed — switching on the
+            // panel's notifications or media controls (MainActivity.askNotificationAccess).
             Step(
                 title = "No battery restrictions",
                 why = "Restricted, the poll service is stopped and the panel freezes on " +
@@ -127,17 +121,6 @@ object Setup {
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                         .setData(Uri.fromParts("package", context.packageName, null))
                 },
-            ),
-            Step(
-                title = "Notification access",
-                why = "Needed for two things: mirroring OTHER apps' notifications onto the " +
-                    "panel, and the media controls. Both read from this one grant — Android " +
-                    "hands out the active media sessions to whoever holds notification " +
-                    "access, so there is no separate switch for the player. Without it " +
-                    "neither feature does anything; everything else works.",
-                satisfied = NotificationManagerCompat.getEnabledListenerPackages(context)
-                    .contains(context.packageName),
-                open = { Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS") },
             ),
             Step(
                 title = "Autostart",
@@ -185,6 +168,16 @@ object Setup {
      * on either would leave the list permanently expanded on a setup that is, in every
      * sense the user can act on, finished.
      */
+    /**
+     * Whether this app holds notification access — what mirroring other apps'
+     * notifications onto the panel and the media controls both read from. Not a step:
+     * asked for when one of those is switched on.
+     */
+    fun notificationAccess(context: Context): Boolean =
+        NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+
+    fun notificationAccessIntent(): Intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+
     fun allDone(steps: List<Step>): Boolean =
         steps.filter { it.satisfied != null }.all { it.satisfied == true }
 
