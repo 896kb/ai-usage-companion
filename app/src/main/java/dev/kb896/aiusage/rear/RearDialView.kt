@@ -4342,7 +4342,11 @@ class RearDialView(context: Context) : View(context) {
                 onWheel = noticing >= 0.999f && shownHistory().isNotEmpty() &&
                     event.y < wheelGrabBottom()
                 wheelDownAt = noticeWheelAt
-                hit || pager.enabled() || onVolume || onScrub
+                // The wheel claims the gesture by itself. It used to ride on the pager's
+                // claim, and with no readout there is no other page — the clock page is
+                // the only one, the pager is off, and a finger on the notifications was
+                // let go on the way down: they could not be scrolled at all.
+                hit || pager.enabled() || onVolume || onScrub || onWheel
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 val dxTravel = Math.abs(event.x - downX)
