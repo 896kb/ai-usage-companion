@@ -10,26 +10,19 @@
     android:layout_height="wrap_content"
     android:orientation="vertical">
 
-    <!--
-      Collapsed by default. These are tools for whoever is building this, and even in a
-      debug build they are not what the app is for — a reset button and a five-mascot
-      animation harness sitting open above the real settings puts scaffolding in front of
-      the thing being scaffolded.
-    -->
+    <!-- A label at the card's top, like Theme's, and the card open: no accordion. -->
     <TextView
         android:id="@+id/debug_heading"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="DEBUG  ▸"
-        android:textSize="12sp" />
+        android:text="Debug"
+        android:textSize="13sp" />
 
     <LinearLayout
         android:id="@+id/debug_body"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:visibility="gone">
+        android:orientation="vertical">
 
     <dev.kb896.aiusage.ui.glass.GlassButton
         android:id="@+id/debug_reset_art"

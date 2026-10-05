@@ -230,24 +230,24 @@
             state that hands the display back to MIUI's SubScreenLauncher. The background
             is not optional; WHICH background it is, is the only question here.
         -->
-        <TextView
-            android:id="@+id/backdrop_heading"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="BACKGROUND"
-            android:textSize="11sp" />
-
         <dev.kb896.aiusage.ui.glass.GlassCard
             android:id="@+id/card_backdrop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+        <!-- Inside its card, at the top, like Theme's label — not a heading over it. -->
+        <TextView
+            android:id="@+id/backdrop_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Background"
+            android:textSize="13sp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="8dp"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
@@ -292,20 +292,19 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+        <!-- A label at the card's top, like Theme's, and the card open: no accordion. -->
         <TextView
             android:id="@+id/geo_heading"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="ADVANCED  ▸"
-            android:textSize="12sp" />
+            android:text="Advanced"
+            android:textSize="13sp" />
 
         <LinearLayout
             android:id="@+id/geo_body"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
+            android:orientation="vertical">
 
         <TextView
             android:id="@+id/geo_hint"

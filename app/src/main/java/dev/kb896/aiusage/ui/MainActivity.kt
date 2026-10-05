@@ -1500,15 +1500,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun bindAdvancedToggle() {
-        val heading = findViewById<TextView>(R.id.geo_heading)
-        val body = findViewById<View>(R.id.geo_body)
-        heading.setOnClickListener {
-            val show = body.visibility != View.VISIBLE
-            body.visibility = if (show) View.VISIBLE else View.GONE
-            heading.text = if (show) "ADVANCED  ▾" else "ADVANCED  ▸"
-        }
-    }
+    /** Advanced is an open card now, like every other: nothing to expand. */
+    private fun bindAdvancedToggle() = Unit
 
     /**
      * Live ring tuning, writing through to the panel config on every move.
