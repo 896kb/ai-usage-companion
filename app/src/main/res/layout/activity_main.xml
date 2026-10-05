@@ -38,6 +38,32 @@
         android:text="ON THE BACK"
         android:textSize="12sp" />
 
+    <!-- The app's icon and name, above the preview. Filled from the installed app's own
+         label and icon (MainActivity.bindHeader), so the dev build says "(dev)". -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="24dp"
+        android:paddingTop="18dp"
+        android:paddingEnd="24dp">
+
+        <ImageView
+            android:id="@+id/app_icon"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:importantForAccessibility="no" />
+
+        <TextView
+            android:id="@+id/app_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="#FFFFFFFF"
+            android:textSize="20sp" />
+    </LinearLayout>
+
     <dev.kb896.aiusage.ui.PanelPreviewView
         android:id="@+id/panel_preview"
         android:layout_width="match_parent"

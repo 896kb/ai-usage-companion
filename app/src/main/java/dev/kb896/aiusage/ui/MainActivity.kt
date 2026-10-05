@@ -154,6 +154,7 @@ class MainActivity : ComponentActivity() {
         bindAdvancedToggle()
         bindGeometrySliders()
         bindTabs()
+        bindHeader()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
@@ -317,6 +318,16 @@ class MainActivity : ComponentActivity() {
             )
         }
         showTab(tab)
+    }
+
+    /** The app's icon and name at the top, as the launcher shows them. */
+    private fun bindHeader() {
+        findViewById<android.widget.ImageView>(R.id.app_icon).setImageDrawable(packageManager.getApplicationIcon(applicationInfo))
+        findViewById<TextView>(R.id.app_name).apply {
+            text = applicationInfo.loadLabel(packageManager)
+            UiType.dress(this)
+            fontVariationSettings = "'wght' 600"
+        }
     }
 
     /** The bar's view of the screen, told when the rows under it change. */

@@ -4,14 +4,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class InkTest {
-    @Test fun `ink is black over a light cell and white over a dark one`() {
-        assertEquals(0xFF000000.toInt(), Ink.primary(0.8f))
+    /** Text is white whatever is behind it — it no longer flips to black over light cells. */
+    @Test fun `ink is white over a light cell and a dark one`() {
+        assertEquals(0xFFFFFFFF.toInt(), Ink.primary(0.8f))
         assertEquals(0xFFFFFFFF.toInt(), Ink.primary(0.2f))
-        assertEquals(0xFF000000.toInt(), Ink.primary(0.5f))
+        assertEquals(0xFFFFFFFF.toInt(), Ink.primary(0.5f))
     }
 
-    @Test fun `secondary ink is the same colour at sixty percent`() {
-        assertEquals(0x99000000.toInt(), Ink.secondary(0.9f))
+    @Test fun `secondary ink is white at sixty percent, light cell or dark`() {
+        assertEquals(0x99FFFFFF.toInt(), Ink.secondary(0.9f))
         assertEquals(0x99FFFFFF.toInt(), Ink.secondary(0.1f))
     }
 

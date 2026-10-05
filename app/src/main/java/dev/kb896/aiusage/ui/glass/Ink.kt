@@ -32,11 +32,18 @@ object Ink {
 
     fun isLight(luminance: Float) = luminance >= LIGHT
 
-    fun primary(luminance: Float): Int =
-        if (isLight(luminance)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+    /**
+     * TEXT IS WHITE, whatever is behind it. It used to flip to black over a light part
+     * of the background, so a card's words changed colour as it scrolled across the
+     * silk; the luminance is still taken, and still decides the glass's own tint and the
+     * tracks, but not the text.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun primary(luminance: Float): Int = 0xFFFFFFFF.toInt()
 
-    fun secondary(luminance: Float): Int =
-        if (isLight(luminance)) 0x99000000.toInt() else 0x99FFFFFF.toInt()
+    /** White at 60%, for the quieter text — and like [primary], whatever is behind it. */
+    @Suppress("UNUSED_PARAMETER")
+    fun secondary(luminance: Float): Int = 0x99FFFFFF.toInt()
 
     /** The toggle's on colour. LiquidToggle.kt:56-57. */
     fun on(luminance: Float): Int =
