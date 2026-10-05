@@ -8180,7 +8180,7 @@ class RearDialView(context: Context) : View(context) {
         val dateKeep = (if (config.showDate) 1f else 0f) +
             ((if (config.aodDate) 1f else 0f) - (if (config.showDate) 1f else 0f)) * aodNow
         val weatherOn = if (config.showWeatherLine) 1f else 0f
-        val weatherKeep = weatherOn + ((if (config.showWeatherLine && config.aodWeather) 1f else 0f) - weatherOn) * aodNow
+        val weatherKeep = weatherOn + ((if (config.aodWeather) 1f else 0f) - weatherOn) * aodNow
         if (dateKeep > 0.004f) {
             val date = java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault())
                 .format(now.time) + ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) +

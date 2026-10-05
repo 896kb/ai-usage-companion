@@ -313,7 +313,7 @@ data class PanelConfig(
     val aodDate: Boolean = true,
     /** The weather line on the clock page — the reading and the place. Off leaves only the weather on the glass. */
     val showWeatherLine: Boolean = true,
-    /** In always-on, the weather line too (when it shows at all). */
+    /** In always-on, the weather line — independent of [showWeatherLine], as the date's is of the Date switch. */
     val aodWeather: Boolean = true,
     /**
      * The whole panel drawn as if on a curved tube — scanlines, a shadow mask, a
