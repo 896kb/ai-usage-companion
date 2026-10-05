@@ -247,6 +247,8 @@ data class PanelConfig(
     val weatherColor: Int? = null,
     /** The table lights' colour; null for the clock's. */
     val tableColor: Int? = null,
+    /** Table lights at all: the margins glowing when the phone lies on its face. On by default, as they always were. */
+    val showTableLights: Boolean = true,
 
     /** The date, under the clock. Off by default, like the other two. */
     val showDate: Boolean = false,

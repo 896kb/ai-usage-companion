@@ -225,6 +225,9 @@ object SettingsRows {
         // on one right edge however long its label is.
         val holder = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         toggle(holder, name, initial, onChange)
+        // The switch's own row keeps no top margin in here: the 8dp it carries as a row of
+        // its own put it 8dp below the colour dot it now sits beside, which is centred.
+        (holder.getChildAt(0)?.layoutParams as? ViewGroup.MarginLayoutParams)?.topMargin = 0
         row.addView(holder, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(swatch(context, colour, onPick))
         parent.addView(row, rowParams(dp(context, 8)))

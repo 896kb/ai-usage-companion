@@ -988,9 +988,11 @@ class MainActivity : ComponentActivity() {
         )
         // The lights round the margin when the phone lies on its face — see table
         // mode in the README. They follow the clock's colour unless told otherwise.
-        SettingsRows.colorRow(clockRows, "Table lights", config.tableTint) { c ->
-            write { it.copy(tableColor = c) }
-        }
+        SettingsRows.toggleWithColor(
+            clockRows, "Table lights", config.showTableLights, config.tableTint,
+            onChange = { on -> write { it.copy(showTableLights = on) } },
+            onPick = { c -> write { it.copy(tableColor = c) } },
+        )
         SettingsRows.toggleWithColor(
             clockRows, "Battery", config.showBattery, config.batteryTint,
             onChange = { on -> write { it.copy(showBattery = on) } },

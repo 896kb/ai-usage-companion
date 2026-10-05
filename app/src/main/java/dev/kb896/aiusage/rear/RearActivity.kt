@@ -422,6 +422,10 @@ class RearActivity : Activity() {
             dial.weather = decoded.weather
             // The switch may have just been thrown either way: on has to take the hold
             // back immediately, off has to start a countdown that was never running.
+            // The table lights' switch, thrown either way: stop watching, or start again if the
+            // panel is up (tableWatch checks the switch itself).
+            if (!decoded.config.showTableLights) tableWatch(false)
+            else if (!tableWatching && panelResumed) tableWatch(true)
             if (keepAwake != decoded.config.keepPanelAwake) {
                 keepAwake = decoded.config.keepPanelAwake
                 armSleep()
@@ -739,7 +743,9 @@ class RearActivity : Activity() {
         }
         override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
     }
-    private fun tableWatch(on: Boolean) {
+    private fun tableWatch(asked: Boolean) {
+        // Only while the table lights are wanted at all — their switch is off, nothing watches.
+        val on = asked && dial.config.showTableLights
         if (on == tableWatching) return
         val sensor = gravitySensor ?: return
         tableWatching = on
@@ -1133,8 +1139,12 @@ class RearActivity : Activity() {
         }
     }
 
+    /** Between onResume and onPause — when the table lights may be watched for. */
+    private var panelResumed = false
+
     override fun onResume() {
         super.onResume()
+        panelResumed = true
         tableWatch(true)
         armEvictionTimer()
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
@@ -1156,6 +1166,7 @@ class RearActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        panelResumed = false
         window.decorView.removeCallbacks(evictIfStranded)
     }
 
