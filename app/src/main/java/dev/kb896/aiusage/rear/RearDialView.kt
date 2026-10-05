@@ -3115,32 +3115,38 @@ class RearDialView(context: Context) : View(context) {
                 // one page always there — and out of the notification card's way: the
                 // clock, date and battery row hangs in the bottom-right corner (its glass
                 // rounded to the screen's corner there, as it is at the top on the
-                // readout), and the camera and the controller sit between the two rings,
-                // to their right, where neither a card nor the clock's figures reach.
-                // They ride the page as it slides, and their touch targets follow.
+                // readout), the camera sits in the bay the two rings leave between them,
+                // and the controller in the bottom-left corner, under the bay. All three
+                // ride the page as it slides, their touch targets follow, and all three
+                // fade with always-on — not only the buttons with the slider's swap.
                 val pageDy = dy - (1f - noticing) * Panel.HEIGHT
-                canvas.save()
-                canvas.translate(0f, extrasBottomShift())
-                drawExtras(canvas, bottomRight = true)
-                canvas.restore()
+                val awake = 1f - aodFade(frameNowMs)
+                if (awake > 0.004f) {
+                    canvas.save()
+                    canvas.translate(0f, extrasBottomShift())
+                    fading(canvas, extrasBounds(), awake) { drawExtras(canvas, bottomRight = true) }
+                    canvas.restore()
+                }
+                val present = unlocked * awake
                 val gapY = (geometry.personal.cy + geometry.work.cy) / 2f
                 val camW = CAMERA_H * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
-                val camRight = CONTENT_EDGE + camW
-                val closeCx = camRight + CORNER_BUTTON_GAP + CLOSE_R
-                if (config.showCamera && unlocked > 0.004f) {
+                val camRight = RING_BAY_X + camW / 2f
+                val camBottom = gapY + CAMERA_H / 2f
+                val closeCy = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
+                if (config.showCamera && present > 0.004f) {
                     fading(canvas, android.graphics.RectF(
-                        camRight - camW - FADE_PAD, gapY - CAMERA_H / 2f - FADE_PAD,
-                        camRight + FADE_PAD, gapY + CAMERA_H / 2f + FADE_PAD,
-                    ), unlocked) {
-                        drawCamera(canvas, dx, pageDy, PointF(camRight, gapY + CAMERA_H / 2f))
+                        camRight - camW - FADE_PAD, camBottom - CAMERA_H - FADE_PAD,
+                        camRight + FADE_PAD, camBottom + FADE_PAD,
+                    ), present) {
+                        drawCamera(canvas, dx, pageDy, PointF(camRight, camBottom))
                     }
                 } else cameraButton = null
-                if (config.showClose && unlocked > 0.004f) {
+                if (config.showClose && present > 0.004f) {
                     fading(canvas, android.graphics.RectF(
-                        closeCx - CLOSE_R - FADE_PAD, gapY - CLOSE_R - FADE_PAD,
-                        closeCx + CLOSE_R + FADE_PAD, gapY + CLOSE_R + FADE_PAD,
-                    ), unlocked) {
-                        drawClose(canvas, dx, pageDy, PointF(closeCx, gapY))
+                        RING_BAY_X - CLOSE_R - FADE_PAD, closeCy - CLOSE_R - FADE_PAD,
+                        RING_BAY_X + CLOSE_R + FADE_PAD, closeCy + CLOSE_R + FADE_PAD,
+                    ), present) {
+                        drawClose(canvas, dx, pageDy, PointF(RING_BAY_X, closeCy))
                     }
                 } else closeButton = null
             }
@@ -4497,16 +4503,25 @@ class RearDialView(context: Context) : View(context) {
      * air under it as it has above it at the top right — the glass card's rect on GLASS,
      * the icons' and baselines' extent on ORIGINAL.
      */
+    /** The extras row's extent at its top-right place, for a fade layer round it. */
+    private fun extrasBounds(): android.graphics.RectF =
+        if (extrasCard(cardRect)) android.graphics.RectF(cardRect).apply { inset(-FADE_PAD, -FADE_PAD) }
+        else android.graphics.RectF(
+            CONTENT_RIGHT - 200f, TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H - FADE_PAD,
+            Panel.WIDTH.toFloat(), TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + FADE_PAD,
+        )
+
     private fun extrasBottomShift(): Float {
-        val top: Float
-        val bottom: Float
-        if (extrasCard(cardRect)) {
-            top = cardRect.top; bottom = cardRect.bottom
-        } else {
-            top = TITLE_BASELINE - EXTRA_LIFT - EXTRA_ICON_H + 2f
-            bottom = TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + 4f
-        }
-        return Panel.HEIGHT - bottom - top
+        val bottom =
+            if (extrasCard(cardRect)) cardRect.bottom
+            else TITLE_BASELINE - EXTRA_LIFT + (EXTRA_ROWS - 1) * EXTRA_LINE_H + 6f
+        // The corner, with the same air under the row as at its right; and while the
+        // unlock slider is up — always-on, or a wake — the row rises above its band, by
+        // the slider's own swap so the two move as one.
+        val corner = Panel.HEIGHT - CORNER_MARGIN
+        val aboveSlider = markRegion().top - CORNER_BUTTON_GAP
+        val target = corner + (aboveSlider - corner) * Tween.easeInOut(lockSwap(frameNowMs))
+        return target - bottom
     }
     private fun closeFadeBounds() = android.graphics.RectF(
         CLOSE_CX - CLOSE_R - FADE_PAD, CLOSE_CY - CLOSE_R - FADE_PAD,
@@ -6404,69 +6419,74 @@ class RearDialView(context: Context) : View(context) {
             else TITLE_BASELINE - EXTRA_LIFT
         // BATTERY FIRST, then the time, then the day. The order is the user's: the
         // reading that changes fastest and matters soonest is the one at the top.
-        if (config.showBattery) {
-            extras.color = colorFor("battery", config.batteryTint)
-            // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
-            // registering a receiver: this view is destroyed and recreated constantly,
-            // and a receiver would have to be unregistered on a lifecycle this view does
-            // not own. A sticky read is a snapshot with nothing to leak.
-            val level = batteryPercent()
-            if (level >= 0) {
-                val iconX = iconLeft
-                val iconY = baseline - EXTRA_ICON_H + 2f
+        // Battery, clock, date from the top at the top right; the same three from the
+        // bottom when the row hangs in the bottom-right corner, so the battery sits
+        // nearest the corner either way.
+        val rows = mutableListOf<() -> Unit>()
+        if (config.showBattery) rows += {
+                extras.color = colorFor("battery", config.batteryTint)
+                // Read from the sticky ACTION_BATTERY_CHANGED broadcast rather than
+                // registering a receiver: this view is destroyed and recreated constantly,
+                // and a receiver would have to be unregistered on a lifecycle this view does
+                // not own. A sticky read is a snapshot with nothing to leak.
+                val level = batteryPercent()
+                if (level >= 0) {
+                    val iconX = iconLeft
+                    val iconY = baseline - EXTRA_ICON_H + 2f
+                    extras.textAlign = align
+                    canvas.drawText("$level%", if (boxed) textLeft else iconX - 8f, baseline, extras)
+                    // The charging glyph replaces the outline entirely rather than being
+                    // overlaid: it already contains the bolt, and two glyphs stacked would
+                    // read as one badly drawn one.
+                    drawBatteryGlyph(canvas, iconX, iconY, EXTRA_ICON_H, level)
+                }
+                // DOWN A LINE, like the two below it. The battery had no advance for as long
+                // as it was drawn last, where there was nothing after it to push out of the
+                // way. Reading order put it first — battery, hour, date — and a row that does
+                // not move the baseline is a row the next one is drawn on top of.
+        }
+        if (config.showClock) rows += {
+                // Each extra takes its own colour, eased separately. They shared one until
+                // the panel had three of them, at which point "the extras colour" stopped
+                // describing anything — a clock and a battery are different readings and
+                // there is no reason they should agree.
+                extras.color = colorFor("clock", config.clockTint)
+                val now = java.util.Calendar.getInstance()
+                val text = String.format(
+                    "%02d:%02d",
+                    now.get(java.util.Calendar.HOUR_OF_DAY),
+                    now.get(java.util.Calendar.MINUTE),
+                )
+                // Icon on the RIGHT, text to its left. Both icons then share one edge at
+                // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
+                // ending wherever its own text happens to stop.
+                drawIcon(canvas, PanelIcons.CLOCK, iconLeft,
+                    baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
                 extras.textAlign = align
-                canvas.drawText("$level%", if (boxed) textLeft else iconX - 8f, baseline, extras)
-                // The charging glyph replaces the outline entirely rather than being
-                // overlaid: it already contains the bolt, and two glyphs stacked would
-                // read as one badly drawn one.
-                drawBatteryGlyph(canvas, iconX, iconY, EXTRA_ICON_H, level)
-            }
-            // DOWN A LINE, like the two below it. The battery had no advance for as long
-            // as it was drawn last, where there was nothing after it to push out of the
-            // way. Reading order put it first — battery, hour, date — and a row that does
-            // not move the baseline is a row the next one is drawn on top of.
-            baseline += EXTRA_LINE_H
+                canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
         }
-        if (config.showClock) {
-            // Each extra takes its own colour, eased separately. They shared one until
-            // the panel had three of them, at which point "the extras colour" stopped
-            // describing anything — a clock and a battery are different readings and
-            // there is no reason they should agree.
-            extras.color = colorFor("clock", config.clockTint)
-            val now = java.util.Calendar.getInstance()
-            val text = String.format(
-                "%02d:%02d",
-                now.get(java.util.Calendar.HOUR_OF_DAY),
-                now.get(java.util.Calendar.MINUTE),
-            )
-            // Icon on the RIGHT, text to its left. Both icons then share one edge at
-            // CONTENT_RIGHT, so the two lines end on a common vertical rather than each
-            // ending wherever its own text happens to stop.
-            drawIcon(canvas, PanelIcons.CLOCK, iconLeft,
-                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            extras.textAlign = align
-            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
-            baseline += EXTRA_LINE_H
+        if (config.showDate) rows += {
+                val now = java.util.Calendar.getInstance()
+                // Day of the week, then the day of the month. Not the month name: on a panel
+                // read at a glance, "which day is it" is the question, and the month is the
+                // one part of a date nobody needs reminding of.
+                val text = String.format(
+                    "%s %02d",
+                    DAYS[now.get(java.util.Calendar.DAY_OF_WEEK) - 1],
+                    now.get(java.util.Calendar.DAY_OF_MONTH),
+                )
+                extras.color = colorFor("date", config.dateTint)
+                // Icon on the right like its neighbours. It carries no information "TUE 20"
+                // does not — but a column of three rows where one lacks the mark the other
+                // two share reads as a rendering fault, and the alignment is worth more here
+                // than the argument against ornament.
+                drawIcon(canvas, PanelIcons.CALENDAR, iconLeft,
+                    baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
+                extras.textAlign = align
+                canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
         }
-        if (config.showDate) {
-            val now = java.util.Calendar.getInstance()
-            // Day of the week, then the day of the month. Not the month name: on a panel
-            // read at a glance, "which day is it" is the question, and the month is the
-            // one part of a date nobody needs reminding of.
-            val text = String.format(
-                "%s %02d",
-                DAYS[now.get(java.util.Calendar.DAY_OF_WEEK) - 1],
-                now.get(java.util.Calendar.DAY_OF_MONTH),
-            )
-            extras.color = colorFor("date", config.dateTint)
-            // Icon on the right like its neighbours. It carries no information "TUE 20"
-            // does not — but a column of three rows where one lacks the mark the other
-            // two share reads as a rendering fault, and the alignment is worth more here
-            // than the argument against ornament.
-            drawIcon(canvas, PanelIcons.CALENDAR, iconLeft,
-                baseline - EXTRA_ICON_H + 2f, EXTRA_ICON_H)
-            extras.textAlign = align
-            canvas.drawText(text, if (boxed) textLeft else CONTENT_RIGHT - EXTRA_ICON_H - 8f, baseline, extras)
+        for (row in if (bottomRight) rows.asReversed() else rows) {
+            row()
             baseline += EXTRA_LINE_H
         }
     }
@@ -11291,7 +11311,8 @@ class RearDialView(context: Context) : View(context) {
 
         /** Camera button height in panel units; its width follows the glyph's aspect. */
         private const val CAMERA_H = 30f
-        /** on the clock page with no readout: the air between the camera and the controller, between the rings */
+        /** on the clock page with no readout: the column in the rings' bay the camera sits on, and the controller under it */
+        private const val RING_BAY_X = 290f
         private const val CORNER_BUTTON_GAP = 16f
 
 
@@ -11778,6 +11799,8 @@ class RearDialView(context: Context) : View(context) {
 
         /** Air inside its card. */
         private const val EXTRA_PAD_X = 12f
+        /** the air under the extras row in the bottom-right corner: the same as at its right */
+        private const val CORNER_MARGIN = Panel.WIDTH - CONTENT_RIGHT - EXTRA_PAD_X
         private const val EXTRA_PAD_Y = 8f
 
         /** Between an icon and the text it introduces. */
