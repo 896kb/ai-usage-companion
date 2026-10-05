@@ -330,6 +330,21 @@ class RearUserService : IRearService.Stub {
         exec("input -d $displayId keyevent KEYCODE_BACK")
         // Seen in front, so the panel coming back next releases its process — see below.
         if (cameraLaunched) cameraWasOnTop = true
+        // AND IF BACK WAS NOT ENOUGH, THE TASK GOES. The camera decides what Back does: its
+        // pocket warning takes it, so does a recording it stops first, and something it
+        // shows that we cannot see might take every one. A tap here means "close the
+        // camera", so if it still has the display a moment later its task is removed —
+        // the same as swiping it away in recents: the activity is paused, stopped and
+        // destroyed, a recording finishes the way it does when Home is pressed, and the
+        // front-screen half goes with it (measured: both tasks gone, the panel in focus).
+        Thread {
+            try { Thread.sleep(BACK_SETTLE_MS) } catch (_: InterruptedException) { return@Thread }
+            val dump = exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='")
+            if (FocusDump.focusedPackage(dump, displayId) != CAMERA_PACKAGE) return@Thread
+            val task = FocusDump.focusedTask(dump, displayId) ?: return@Thread
+            Log.i(TAG, "camera close: still up after Back — removing its task $task")
+            exec("am stack remove $task")
+        }.apply { isDaemon = true; name = "camera-close-settle"; start() }
         return true
     }
 
@@ -753,6 +768,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val CAMERA_PACKAGE = "com.android.camera"
         /** The longest a band-tap watch runs, in case the camera's end is never seen. */
         private const val BAND_WATCH_MS = 30 * 60_000L
+        /** How long Back gets to close the camera before its task is removed instead. */
+        private const val BACK_SETTLE_MS = 900L
 
         /** NEW_TASK | SINGLE_TOP | EXCLUDE_FROM_RECENTS | RESET_TASK_IF_NEEDED | CLEAR_TASK */
         private const val CAMERA_FLAGS = "0x30a08000"

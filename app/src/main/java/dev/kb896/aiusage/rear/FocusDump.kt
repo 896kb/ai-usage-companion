@@ -17,6 +17,7 @@ object FocusDump {
 
     private val displayLine = Regex("""mDisplayId=(\d+)""")
     private val focusLine = Regex("""mFocusedApp=ActivityRecord\{\S+ u\d+ ([^\s/}]+)/""")
+    private val focusTask = Regex("""mFocusedApp=ActivityRecord\{.* t(\d+)\}""")
 
     /**
      * The package of the focused app on [displayId], or null when the dump does not say.
@@ -28,6 +29,17 @@ object FocusDump {
             val id = displayLine.find(line)?.groupValues?.get(1)
             if (id != null) inDisplay = id == displayId.toString()
             if (inDisplay) focusLine.find(line)?.let { return it.groupValues[1] }
+        }
+        return null
+    }
+
+    /** The task id of the focused app on [displayId] — the `t<id>` its record ends with. */
+    fun focusedTask(dump: String, displayId: Int): Int? {
+        var inDisplay = false
+        for (line in dump.lineSequence()) {
+            val id = displayLine.find(line)?.groupValues?.get(1)
+            if (id != null) inDisplay = id == displayId.toString()
+            if (inDisplay) focusTask.find(line)?.let { return it.groupValues[1].toIntOrNull() }
         }
         return null
     }

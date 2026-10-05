@@ -28,6 +28,12 @@ class FocusDumpTest {
         assertNull(FocusDump.focusedPackage(dump, 2))
     }
 
+    @Test fun `reads the rear display's focused task`() {
+        assertEquals(72093, FocusDump.focusedTask(dump, 1))
+        assertEquals(72094, FocusDump.focusedTask(dump, 0))
+        assertNull(FocusDump.focusedTask(dump, 2))
+    }
+
     @Test fun `null when the display has no focused app`() {
         assertNull(FocusDump.focusedPackage("Display: mDisplayId=1 (organized)\n  mCurrentFocus=null\n", 1))
     }

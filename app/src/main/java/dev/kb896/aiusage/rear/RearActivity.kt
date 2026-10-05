@@ -688,8 +688,13 @@ class RearActivity : Activity() {
     private var unlockingBySpent = false
     private var sliderTouch = false
 
+    /** [sleepPanel] re-arming itself needs a name for itself. */
+    private val sleepPanelRef: Runnable get() = sleepPanel
+
     private fun enterAod() {
         if (inAod) return
+        // The camera tip is never dimmed into always-on, whatever asks.
+        if (dial.cameraTipUp) return
         inAod = true
         window.decorView.removeCallbacks(sleepPanel)
         if (!holding) holdScreen(true)
@@ -826,6 +831,9 @@ class RearActivity : Activity() {
      */
     private val sleepPanel = Runnable {
         if (keepAwake) return@Runnable
+        // Never under the camera tip: it waits for a swipe, and gives up on its own. The
+        // countdown starts over instead, so the panel sleeps once the tip has gone.
+        if (dial.cameraTipUp) { window.decorView.postDelayed(sleepPanelRef, AWAKE_MS); return@Runnable }
         if (aodOn) enterAod() else holdScreen(false)
     }
 
