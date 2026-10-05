@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.data
 
 import android.content.Context
+import android.content.SharedPreferences
 
 /**
  * Persists [PanelConfig] as one JSON blob.
@@ -25,6 +26,19 @@ class ConfigStore(private val context: Context) {
 
     fun save(config: PanelConfig) =
         prefs.edit().putString(KEY, PanelConfig.encode(config)).apply()
+
+    /**
+     * Calls [onChange] whenever the stored config is written, by anyone in this process —
+     * the settings screen's own rows, or the service settling something the panel decided.
+     * Returns the way to stop. The listener is held by the returned function, since
+     * SharedPreferences keeps its listeners only weakly.
+     */
+    fun listen(onChange: () -> Unit): () -> Unit {
+        val p = prefs
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key == KEY) onChange() }
+        p.registerOnSharedPreferenceChangeListener(listener)
+        return { p.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     private companion object {
         const val PREFS = "panel_config"

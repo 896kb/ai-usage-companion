@@ -98,8 +98,24 @@ class MainActivity : ComponentActivity() {
         buildSetupRows()
     }
 
+    /**
+     * What the camera tip's switch shows. The panel turns the setting off by itself when it
+     * shows the tip — saved by the service, behind this screen's back — so while the screen
+     * is open it watches the store and redraws the rows when the two disagree. Only for that
+     * switch: redrawing on every write would rebuild the rows under someone typing a title.
+     */
+    private var shownCameraTip: Boolean? = null
+    private var stopWatchingConfig: (() -> Unit)? = null
+
+    private fun syncCameraTip() {
+        val shown = shownCameraTip ?: return
+        if (ConfigStore(this).load().cameraTip != shown) buildSettingsRows()
+    }
+
     override fun onPause() {
         super.onPause()
+        stopWatchingConfig?.invoke()
+        stopWatchingConfig = null
         // Backgrounding re-locks: the app may be resumed by someone else, and a phone
         // handed over while a screen is open is exactly the case this guards.
         Unlock.lock()
@@ -108,6 +124,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         buildSetupRows()
+        syncCameraTip()
+        stopWatchingConfig = ConfigStore(this).listen { syncCameraTip() }
         // Have the user service bound before any row needs it. Placement used to bind
         // it as a side effect; with placement gated on the onboarding, nothing else does.
         if (graph.bridge.status().granted) graph.bridge.bind()
@@ -951,9 +969,10 @@ class MainActivity : ComponentActivity() {
         SettingsRows.navigation(advanced, "Copy rear-display report") { copyRearReport() }
         // The camera tip shows once; this brings it back for the next camera, and goes off
         // by itself once it has been swiped through again.
+        shownCameraTip = config.cameraTip
         SettingsRows.toggle(
             advanced, "Show the camera tip next time", config.cameraTip,
-        ) { on -> write { it.copy(cameraTip = on) } }
+        ) { on -> shownCameraTip = on; write { it.copy(cameraTip = on) } }
         SettingsRows.colorGrid(advanced, config.rampColors.mapIndexed { i, colour ->
             SettingsRows.Swatch("RAMP ${i + 1}", colour) { c ->
                 write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }

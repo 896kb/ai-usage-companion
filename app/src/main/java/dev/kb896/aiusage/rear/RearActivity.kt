@@ -44,8 +44,8 @@ class RearActivity : Activity() {
          */
         const val ACTION_OPEN_CAMERA = "dev.kb896.aiusage.OPEN_CAMERA"
 
-        /** On [ACTION_OPEN_CAMERA]: the camera tip was swiped through — don't show it again. */
-        const val EXTRA_CAMERA_TIP_SEEN = "dev.kb896.aiusage.CAMERA_TIP_SEEN"
+        /** The camera tip has been shown on the back: its switch goes off. */
+        const val ACTION_CAMERA_TIP_SHOWN = "dev.kb896.aiusage.CAMERA_TIP_SHOWN"
 
         /** Another app's notification, on its way to the panel. */
         const val ACTION_NOTIFICATION = "dev.kb896.aiusage.NOTIFICATION"
@@ -341,13 +341,13 @@ class RearActivity : Activity() {
         dial.onCameraTap = {
             if (dial.config.cameraTip) {
                 // The first camera: the tip first, and the camera once it is swiped through.
-                // "Seen" goes with the open, to the main process that keeps the settings,
-                // and into this panel's own copy at once so a second press cannot repeat it.
+                // Shown is seen: the switch goes off now, in the main process that keeps
+                // the settings and in this panel's own copy, so a second press cannot
+                // repeat it — whether or not it is swiped through.
+                dial.config = dial.config.copy(cameraTip = false)
+                sendBroadcast(Intent(ACTION_CAMERA_TIP_SHOWN).setPackage(packageName))
                 dial.showCameraTip {
-                    dial.config = dial.config.copy(cameraTip = false)
-                    sendBroadcast(
-                        Intent(ACTION_OPEN_CAMERA).setPackage(packageName).putExtra(EXTRA_CAMERA_TIP_SEEN, true),
-                    )
+                    sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
                 }
             } else {
                 sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
