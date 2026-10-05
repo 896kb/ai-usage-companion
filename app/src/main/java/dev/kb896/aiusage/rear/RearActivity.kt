@@ -44,6 +44,9 @@ class RearActivity : Activity() {
          */
         const val ACTION_OPEN_CAMERA = "dev.kb896.aiusage.OPEN_CAMERA"
 
+        /** The close button over the camera was pressed. Same path as opening it. */
+        const val ACTION_CLOSE_CAMERA = "dev.kb896.aiusage.CLOSE_CAMERA"
+
         /** Another app's notification, on its way to the panel. */
         const val ACTION_NOTIFICATION = "dev.kb896.aiusage.NOTIFICATION"
         const val EXTRA_NOTIFICATION_APP = "app"
@@ -203,6 +206,8 @@ class RearActivity : Activity() {
         const val AWAKE_MS = 30_000L
         /** how long the rear proximity sensor has to stay covered before always-on lets the display go */
         const val POCKET_MS = 1_500L
+        /** How long after the camera button a stop still means the camera covered the panel. */
+        const val CAMERA_COVER_MS = 10_000L
         /** table mode: gravity along -z beyond this, x and y within this, for this long */
         const val TABLE_Z = 8.6f
         const val TABLE_XY = 2.2f
@@ -336,6 +341,7 @@ class RearActivity : Activity() {
         // learns nothing about whether the launch worked: there is no screen here to
         // report a failure on, and the camera either appears or it does not.
         dial.onCameraTap = {
+            cameraOpenedAt = SystemClock.elapsedRealtime()
             sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
         }
         // Same shape, same reason: the session lives in the main process, so a press
@@ -1136,7 +1142,31 @@ class RearActivity : Activity() {
         window.decorView.removeCallbacks(evictIfStranded)
     }
 
+    /**
+     * The camera this panel opened, covering it: a close button goes up over the camera,
+     * since its rear-screen layout has no way out of its own. It comes down when the panel
+     * is back in front, however the camera was closed. Only a stop soon after the camera
+     * button counts — anything else covering the panel gets no button.
+     */
+    private var cameraOpenedAt = 0L
+    private val cameraClose by lazy {
+        CameraCloseOverlay(applicationContext) {
+            sendBroadcast(Intent(ACTION_CLOSE_CAMERA).setPackage(packageName))
+        }
+    }
+    override fun onStop() {
+        super.onStop()
+        val sinceTap = SystemClock.elapsedRealtime() - cameraOpenedAt
+        if (cameraOpenedAt > 0L && sinceTap < CAMERA_COVER_MS) display?.let { cameraClose.show(it) }
+    }
+    override fun onStart() {
+        super.onStart()
+        cameraOpenedAt = 0L
+        cameraClose.hide()
+    }
+
     override fun onDestroy() {
+        cameraClose.hide()
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
         window.decorView.removeCallbacks(restorePanel)
         window.decorView.removeCallbacks(restoreBrightness)

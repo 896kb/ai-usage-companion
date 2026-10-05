@@ -84,5 +84,6 @@ interface IRearService {
     String rearReport() = 11;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
     void setKeeper(boolean on) = 12;
+    boolean closeCamera(int displayId) = 13;
 
 }

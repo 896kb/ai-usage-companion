@@ -235,6 +235,10 @@ class RearUserService : IRearService.Stub {
      */
     override fun openCamera(displayId: Int): Boolean {
         if (displayId < 0) return false
+        // The panel puts a close button over the camera — the camera's rear-screen layout
+        // has no way out of its own — and that button is an overlay window. Shell may
+        // grant the app "display over other apps"; idempotent, so asked every time.
+        exec("appops set $PKG SYSTEM_ALERT_WINDOW allow")
         val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
         val ok = !out.contains("Error", ignoreCase = true)
         if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
@@ -272,6 +276,26 @@ class RearUserService : IRearService.Stub {
      * Getting this wrong costs somebody their video; getting it too gently costs one
      * resident process until the next time.
      */
+    /**
+     * The close button on the back: Back, sent to the rear display — the camera's own way
+     * out, which takes its front-screen half with it, finishes a recording properly and
+     * hands the display back to the panel. Only while the camera has focus there, so a
+     * Back meant for it never reaches anything else.
+     */
+    override fun closeCamera(displayId: Int): Boolean {
+        if (displayId < 0) return false
+        val focused = FocusDump.focusedPackage(exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='"), displayId)
+        if (focused != CAMERA_PACKAGE) {
+            Log.w(TAG, "camera close: display $displayId has $focused in focus, not the camera — no Back")
+            return false
+        }
+        Log.i(TAG, "camera close: Back to display $displayId")
+        exec("input -d $displayId keyevent KEYCODE_BACK")
+        // Seen in front, so the panel coming back next releases its process — see below.
+        if (cameraLaunched) cameraWasOnTop = true
+        return true
+    }
+
     private fun closeCamera() {
         cameraLaunched = false
         cameraWasOnTop = false

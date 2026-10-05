@@ -157,6 +157,7 @@ class UsagePollService : Service() {
             // it comes here: the Shizuku binding lives in this process and the panel's
             // does not.
             addAction(RearActivity.ACTION_OPEN_CAMERA)
+            addAction(RearActivity.ACTION_CLOSE_CAMERA)
             // And its transport buttons, for the same reason again.
             addAction(RearActivity.ACTION_MEDIA_COMMAND)
             // The panel telling us it has let its display go, or taken it back.
@@ -293,6 +294,10 @@ class UsagePollService : Service() {
             // position at the exact moment something else is about to cover it.
             if (intent?.action == RearActivity.ACTION_OPEN_CAMERA) {
                 Graph.of(this@UsagePollService).bridge.openCamera()
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_CLOSE_CAMERA) {
+                Graph.of(this@UsagePollService).bridge.closeCamera()
                 return
             }
             // THE CHARGER GOING IN LIGHTS THE PANEL.

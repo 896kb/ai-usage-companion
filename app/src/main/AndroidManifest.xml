@@ -12,6 +12,8 @@
          prompt entirely, so this must never gate installation. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The close button over the camera on the rear display; granted through Shizuku. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- so the app may ask whether HyperOS's rear-screen app is installed (Setup.kt) -->
     <queries>

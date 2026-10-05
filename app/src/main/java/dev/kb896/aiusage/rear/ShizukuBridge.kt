@@ -258,6 +258,14 @@ class ShizukuBridge(private val context: Context) {
             .onFailure { Log.w(TAG, "camera launch failed: ${it.message}") }
     }
 
+    /** The camera's close button on the back: Back to the rear display, if the camera has it. */
+    fun closeCamera() {
+        val display = rearDisplayId()
+        if (display < 0) return
+        runCatching { service?.closeCamera(display) }
+            .onFailure { Log.w(TAG, "camera close failed: ${it.message}") }
+    }
+
     /**
      * Light the rear panel, if it has gone to sleep.
      *
