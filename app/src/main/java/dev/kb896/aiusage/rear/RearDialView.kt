@@ -2469,19 +2469,12 @@ class RearDialView(context: Context) : View(context) {
         val radius: Float,
         val thickness: Float,
         val clip: android.graphics.RectF,
-        /** The part of the circle that is glass: the reading, not the whole track. */
-        val start: Float = 0f,
-        val sweep: Float = 360f,
     )
 
     private val pendingRings = ArrayList<PendingRing>(4)
-    private val ringWedge = android.graphics.Path()
 
     /** Note a ring's band now, and lay its glass over the finished panel. */
-    private fun deferRing(
-        canvas: Canvas, cx: Float, cy: Float, radius: Float, thickness: Float,
-        start: Float = 0f, sweep: Float = 360f,
-    ) {
+    private fun deferRing(canvas: Canvas, cx: Float, cy: Float, radius: Float, thickness: Float) {
         if (!config.theme.isGlass || !recordingScene) return
         if (radius < 1f || thickness < 0.5f) return
         val m = canvas.getMatrix()
@@ -2500,7 +2493,7 @@ class RearDialView(context: Context) : View(context) {
             clip.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         }
         pendingRings.add(
-            PendingRing(ringPoint[0], ringPoint[1], radius * scale, thickness * scale, clip, start, sweep),
+            PendingRing(ringPoint[0], ringPoint[1], radius * scale, thickness * scale, clip),
         )
     }
 
@@ -2581,15 +2574,6 @@ class RearDialView(context: Context) : View(context) {
             )
             canvas.save()
             canvas.clipRect(r.clip)
-            // Only the part that is glass: a wedge out past the band, round the reading.
-            if (Math.abs(r.sweep) < 359.9f) {
-                val reach = outer + 2f
-                ringWedge.rewind()
-                ringWedge.moveTo(r.cx, r.cy)
-                ringWedge.arcTo(r.cx - reach, r.cy - reach, r.cx + reach, r.cy + reach, r.start, r.sweep, false)
-                ringWedge.close()
-                canvas.clipPath(ringWedge)
-            }
             if (glass < 0.996f) canvas.saveLayerAlpha(ringRect, (255 * glass).toInt())
             recorder.drawRenderNode(node)
             // The two edges, lit. A lens with no edge has nowhere to start and reads as a
@@ -4118,9 +4102,9 @@ class RearDialView(context: Context) : View(context) {
         // reads as glass with something in it.
         val fillStroke = stroke * Glass.RING_FILL
         paint.strokeWidth = fillStroke
-        // NO TRACK under glass: the path the reading runs along does not exist, only the
-        // reading does — a tinted band round the whole lens read as a ring filled with
-        // something, most of all on a page where the reading is empty.
+        paint.color = Panel.Palette.TRACK
+        paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
+        canvas.drawArc(oval, startAngle, fullSweep, false, paint)
         paint.color = reading
         paint.alpha = alpha
         if (Math.abs(fullSweep * f) > 0.4f) {
@@ -4134,10 +4118,9 @@ class RearDialView(context: Context) : View(context) {
         // panel and objects do not come and go with what they happen to be reporting: on
         // the readout it holds a usage figure, on the media page the same glass holds the
         // playback and the volume.
-        // The glass along the reading only, as the track above is gone.
-        if (Math.abs(fullSweep * f) > 0.4f) deferRing(
+        deferRing(
             canvas, oval.centerX(), oval.centerY(), oval.width() / 2f,
-            stroke * Glass.RING_BAND, startAngle, fullSweep * f,
+            stroke * Glass.RING_BAND,
         )
         val layer: android.graphics.RenderNode? = null
 
@@ -4148,14 +4131,6 @@ class RearDialView(context: Context) : View(context) {
         val cy = oval.centerY() + (Math.sin(angle) * r).toFloat()
         val tr = stroke * RING_THUMB * grow / 2f
         discRect.set(cx - tr, cy - tr, cx + tr, cy + tr)
-        // No reading, no knob: with the track gone there is nothing for it to ride, and a
-        // disc of glass by itself at the start of an empty ring is just a thing in the way.
-        if (Math.abs(fullSweep * f) <= 0.4f) {
-            paint.color = reading
-            paint.alpha = alpha
-            paint.strokeWidth = stroke
-            return
-        }
         if (!drawGlassPane(
                 canvas, discRect, tr, Glass.THUMB_TINT,
                 source = layer ?: sceneNode, held = true,
