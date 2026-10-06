@@ -308,6 +308,20 @@ class RearDialView(context: Context) : View(context) {
         )
     }
 
+    /**
+     * A piece of glass at [rect] under the chosen [style]: its tint, reacting to the
+     * brightness behind it or behind the whole panel. See GlassTint.
+     */
+    private fun styledTint(style: dev.kb896.aiusage.data.GlassStyle, rect: android.graphics.RectF): Int {
+        labLuminance?.let { return GlassTint.of(style, it(rect), it(null)) }
+        refreshLuminance()
+        val local = GlassLuminance.average(
+            lumCells, rect.left, rect.top, rect.right, rect.bottom,
+            Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(),
+        )
+        return GlassTint.of(style, local, lumCells.average().toFloat())
+    }
+
     /** [base], adjusted for how bright the panel is behind [rect]. */
     private fun reactive(base: Int, rect: android.graphics.RectF): Int {
         if (!config.theme.isGlass) return base
@@ -1406,7 +1420,8 @@ class RearDialView(context: Context) : View(context) {
 
     private fun drawPicture(canvas: Canvas) {
         canvas.save()
-        canvas.scale(fitX, fitY) // panel units from here on
+        // The lab is taller than the panel, and scaled alike on both axes: see Lab.
+        if (lab != null) canvas.scale(fitX, fitX) else canvas.scale(fitX, fitY) // panel units from here on
         try {
             drawPictureInPanelUnits(canvas)
         } finally {
@@ -1417,6 +1432,7 @@ class RearDialView(context: Context) : View(context) {
     private fun drawPictureInPanelUnits(canvas: Canvas) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
+        lab?.let { drawLab(canvas, it); return }
         pendingButtons.clear()
         pendingRings.clear()
         pendingOver.clear()
@@ -1486,6 +1502,87 @@ class RearDialView(context: Context) : View(context) {
 
     /** The panel behind the panes, so they have something to bend. */
     private val sceneNode = android.graphics.RenderNode("panel")
+
+    // ---- the glass lab ----
+
+    /**
+     * Glass settings' editor: the background alone, a strip from black through the greys to
+     * white under it ([STRIP] of the panel's height), and one round piece of glass, at
+     * ([cx], [cy]) in panel units, to move over both — drawn by this view's own glass, with
+     * the style the editor is trying, so what it shows is what the back will. Null on the
+     * back and in the preview.
+     */
+    class Lab(var cx: Float, var cy: Float) {
+        companion object {
+            const val STRIP = 0.5f
+            const val RADIUS = 78f
+            /** The lab's height, in panel units: the panel and the strip under it. */
+            val HEIGHT = Panel.HEIGHT * (1f + STRIP)
+        }
+    }
+
+    var lab: Lab? = null
+        set(value) { field = value; invalidate() }
+
+    /** While the lab draws: the brightness behind a rect, or behind everything for null. */
+    private var labLuminance: ((android.graphics.RectF?) -> Float)? = null
+    private val stripPaint = Paint()
+    private val labRect = android.graphics.RectF()
+
+    private fun drawLab(canvas: Canvas, lab: Lab) {
+        val recorder = canvas as? android.graphics.RecordingCanvas ?: return
+        frameNowMs = SystemClock.uptimeMillis()
+        animating = false
+        parallaxDx = 0f
+        parallaxDy = 0f
+        tickSilk()
+        val w = Panel.WIDTH
+        val h = Panel.HEIGHT
+        val total = Lab.HEIGHT.toInt()
+        groundColor = config.background or (0xFF shl 24)
+        sceneNode.setPosition(0, 0, w, total)
+        val scene = sceneNode.beginRecording(w, total)
+        recordingScene = true
+        try {
+            scene.save()
+            scene.clipRect(0f, 0f, w.toFloat(), h.toFloat())
+            scene.drawColor(groundColor)
+            drawBackdrop(scene)
+            scene.restore()
+            // Black through a long run of greys to white: every brightness the glass can sit on.
+            stripPaint.shader = android.graphics.LinearGradient(
+                0f, 0f, w.toFloat(), 0f,
+                intArrayOf(0xFF000000.toInt(), 0xFF3A3A3A.toInt(), 0xFF7F7F7F.toInt(), 0xFFC4C4C4.toInt(), 0xFFFFFFFF.toInt()),
+                null, android.graphics.Shader.TileMode.CLAMP,
+            )
+            scene.drawRect(0f, h.toFloat(), w.toFloat(), total.toFloat(), stripPaint)
+        } finally {
+            recordingScene = false
+            sceneNode.endRecording()
+        }
+        recorder.drawRenderNode(sceneNode)
+        paneBackdrop = sceneNode
+        refreshLuminance()
+        val mean = lumCells.average().toFloat() / (1f + Lab.STRIP) + 0.5f * Lab.STRIP / (1f + Lab.STRIP)
+        labLuminance = { rect ->
+            when {
+                rect == null -> mean
+                // Over the strip: its grey at the piece's middle — the strip runs black to white across.
+                rect.centerY() > h -> (rect.centerX() / w).coerceIn(0f, 1f)
+                else -> GlassLuminance.average(
+                    lumCells, rect.left, rect.top, rect.right, minOf(rect.bottom, h.toFloat()),
+                    w.toFloat(), h.toFloat(),
+                )
+            }
+        }
+        try {
+            val r = Lab.RADIUS
+            labRect.set(lab.cx - r, lab.cy - r, lab.cx + r, lab.cy + r)
+            drawGlassPane(canvas, labRect, r)
+        } finally {
+            labLuminance = null
+        }
+    }
 
     /**
      * Just the ground and the picture on it, for panes that sit UNDER the readout.
@@ -1757,6 +1854,10 @@ class RearDialView(context: Context) : View(context) {
         val w = rect.width()
         val h = rect.height()
         if (w < 1f || h < 1f) return false
+        // The glass chosen in Glass settings, when it has been: one tint for every piece,
+        // reacting as asked. Until then each piece keeps the tint it was given.
+        @Suppress("NAME_SHADOWING")
+        val tint = config.glassStyle?.let { styledTint(it, rect) } ?: tint
 
         // GLASS WITH NOTHING BEHIND IT IS STILL GLASS, and this is the common case rather
         // than a failure. Only the OVERLAYS can bend the panel: the scene is recorded and

@@ -978,9 +978,14 @@ class MainActivity : ComponentActivity() {
             dev.kb896.aiusage.data.PanelTheme.entries.map { it.name },
             config.theme.ordinal,
         ) { i ->
-            // The back's look only: the front is glass whichever it is (UiTheme), so nothing
-            // here needs rebuilding — the preview redraws with the rest.
+            // The back's look only: the front is glass whichever it is (UiTheme). Rebuilt,
+            // for the rows that belong to one theme: Glass settings, a notification's colour.
             write { it.copy(theme = dev.kb896.aiusage.data.PanelTheme.entries[i]) }
+            buildSettingsRows()
+        }
+        // The back's glass, under the theme that has it: see GlassSettings.
+        if (config.theme.isGlass) SettingsRows.navigation(generalRows, "GLASS SETTINGS") {
+            GlassSettings.show(this, store.load()) { style -> write { it.copy(glassStyle = style) } }
         }
         // The panel's face, over the theme's own: the app's two, the phone's, or a file.
         SettingsRows.navigation(generalRows, "Font: ${config.font?.name ?: "Theme default"}") {

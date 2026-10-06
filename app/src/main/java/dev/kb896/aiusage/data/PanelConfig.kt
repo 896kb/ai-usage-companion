@@ -168,6 +168,38 @@ data class AccountStyle(
  * Pan and zoom are fractions of the art REGION, not of the panel, so they survive a
  * change to where that region is.
  */
+/**
+ * How the back's glass answers what is behind it. NONE keeps one tint; GLOBAL reacts to
+ * the whole background's brightness; SHARD lets each piece react to what is right behind
+ * it, as the back always has.
+ */
+@Serializable
+enum class GlassReactivity { NONE, GLOBAL, SHARD }
+
+/**
+ * The back's glass, chosen in Glass settings: one [color] for every piece, at [intensity]
+ * (0 clear to 1, half opaque), reacting as [reactivity] says. Until it is chosen
+ * (PanelConfig.glassStyle null) each piece keeps its own built-in tint.
+ */
+@Serializable
+data class GlassStyle(
+    val color: Int = 0xFFFFFFFF.toInt(),
+    val intensity: Float = DEFAULT_INTENSITY,
+    val reactivity: GlassReactivity = GlassReactivity.SHARD,
+) {
+    /** The colour at its intensity: up to half opaque. */
+    fun tint(): Int =
+        (color and 0x00FFFFFF) or (Math.round(intensity.coerceIn(0f, 1f) * MAX_ALPHA) shl 24)
+
+    companion object {
+        /** The most a piece of glass is ever tinted: half opaque. */
+        const val MAX_ALPHA = 127.5f
+        /** The main glass's built-in tint (Glass.TINT, 0x26 white) as an intensity. */
+        const val DEFAULT_INTENSITY = 38f / MAX_ALPHA
+        val DEFAULT = GlassStyle()
+    }
+}
+
 /** What the panel's background is. See PanelConfig.effectiveBackdrop. */
 @Serializable
 enum class BackdropKind { COLOR, IMAGE, VIDEO, SHADER }
@@ -515,6 +547,8 @@ data class PanelConfig(
      */
     val parallaxTilt: Boolean = false,
     val parallaxScroll: Boolean = false,
+    /** The back's glass, once chosen in Glass settings; null keeps each piece's built-in tint. */
+    val glassStyle: GlassStyle? = null,
     /** The Shader background's choice. Only the front screen's silk, for now. */
     val shader: String = "silk",
     /** Appearance per account, by index. Short lists are fine — a missing entry is
