@@ -82,6 +82,10 @@ android {
     }
 
     testOptions { unitTests { isIncludeAndroidResources = true } }
+    // The lifecycle library's LiveData check crashes lint itself on this Kotlin (an
+    // IncompatibleClassChangeError inside the detector, reading Panel.kt) and failed the
+    // release build. The app has no LiveData for it to check.
+    lint { disable += "NullSafeMutableLiveData" }
 }
 
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
