@@ -1002,10 +1002,25 @@ class RearDialView(context: Context) : View(context) {
      * bright. Only as wide as the clock, with a little air: the rings round the lenses
      * share these rows, and a band the full width of the panel left their arcs bright.
      */
+    /**
+     * The battery figure's baseline over the clock: [AOD_BATTERY_GAP] above the clock's
+     * FIGURES, measured in the face they are set in, not above the clock's whole em. The
+     * figures stop well short of the em's top, so measuring from it left an empty strip
+     * between the battery and the time and pushed the battery up into the notifications.
+     */
+    private fun clockBatteryBaseline(): Float {
+        val keep = extras.textSize
+        extras.textSize = typed(CLOCK_SIZE)
+        extras.getTextBounds("0", 0, 1, digitBounds)
+        extras.textSize = keep
+        return CLOCK_BASELINE + digitBounds.top - AOD_BATTERY_GAP
+    }
+    private val digitBounds = android.graphics.Rect()
+
     private fun aodClockBand(): RectF {
         val half = if (aodClockSpan > 0f) aodClockSpan / 2f + AOD_BAND_AIR else Panel.WIDTH.toFloat()
         return RectF(
-            aodClockCx - half, CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP - DATE_SIZE - 8f,
+            aodClockCx - half, clockBatteryBaseline() - typed(DATE_SIZE) - 8f,
             // Stops just under the baseline: the figures have no descenders, and the old
             // fifth of the clock's height below it reached into the top of the date's
             // glass card, which then sat eight pixels brighter than the rest of it.
@@ -8351,7 +8366,7 @@ class RearDialView(context: Context) : View(context) {
         if (batteryAlpha > 0.001f) {
             val pct = batteryPercent()
             if (pct >= 0) {
-                val top = CLOCK_BASELINE - CLOCK_SIZE - AOD_BATTERY_GAP
+                val top = clockBatteryBaseline()
                 val figure = "$pct%"
                 extras.textSize = typed(DATE_SIZE)
                 extras.textAlign = Paint.Align.CENTER
@@ -11327,7 +11342,7 @@ class RearDialView(context: Context) : View(context) {
         const val AOD_FADE_MS = 500L
         /** the table lights' laps and painting quarter as the glow comes on */
         const val TABLE_INTRO_MS = 3_200L
-        /** the battery figure's distance above the clock's cap height, in always-on */
+        /** the battery figure's distance above the clock's figures — see clockBatteryBaseline */
         const val AOD_BATTERY_GAP = 18f
         /** how dark always-on makes everything but the slider */
         const val AOD_VEIL_ALPHA = 0.6f
