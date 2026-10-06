@@ -89,6 +89,9 @@ class PanelPreviewView @JvmOverloads constructor(
     init {
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
         clipChildren = true
+        // Black behind the panel, as the rear display is: a translucent ground or picture
+        // must not let the settings scrolling behind the preview show through it.
+        setBackgroundColor(android.graphics.Color.BLACK)
         dial.interactive = false
         // The slider has its own timeout; the back re-locks it under always-on, so the
         // preview does the same from the last mirror rather than letting it leave alone.

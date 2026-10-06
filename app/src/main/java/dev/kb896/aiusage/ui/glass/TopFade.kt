@@ -15,19 +15,16 @@ import android.view.View
 import android.widget.ScrollView
 
 /**
- * The settings' scroller, its content fading out over its top edge — and only there: the
- * bottom runs on under the tab bar as it is. With [TopBlurStrip] over that edge, rows blur
- * and fade away under the preview instead of being cut off in a straight line.
+ * The settings' scroller. Its own fading edge is off: a scroller fades from below its top
+ * padding, which here is the pinned preview's height, so it dimmed the rows BELOW the
+ * preview and left those behind it untouched. The fading is [TopBlurStrip]'s alone.
  */
 class TopFadeScrollView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null,
 ) : ScrollView(context, attrs) {
     init {
-        isVerticalFadingEdgeEnabled = true
-        setFadingEdgeLength((FADE_DP * resources.displayMetrics.density).toInt())
+        isVerticalFadingEdgeEnabled = false
     }
-
-    override fun getBottomFadingEdgeStrength(): Float = 0f
 
     companion object {
         /** How far down from the top edge the settings fade and blur. */

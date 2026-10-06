@@ -156,9 +156,11 @@ class MainActivity : ComponentActivity() {
         bindGeometrySliders()
         bindTabs()
         bindHeader()
+        // The activity's findViewById, not the band's: inside apply {} the band's own would
+        // search only its children, find nothing, and leave the band drawing nothing at all.
         findViewById<dev.kb896.aiusage.ui.glass.TopBlurStrip>(R.id.top_blur).apply {
-            scroll = findViewById(R.id.root_scroll)
-            host = findViewById(R.id.root_host)
+            scroll = this@MainActivity.findViewById(R.id.root_scroll)
+            host = this@MainActivity.findViewById(R.id.root_host)
         }
         bindPinned()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
@@ -347,7 +349,6 @@ class MainActivity : ComponentActivity() {
             if (h <= 0) return
             scroll.setPadding(scroll.paddingLeft, h, scroll.paddingRight, scroll.paddingBottom)
             val fade = (dev.kb896.aiusage.ui.glass.TopFadeScrollView.FADE_DP * d).toInt()
-            scroll.setFadingEdgeLength(h + fade)
             strip.solid = h - (16 * d).toInt()
             strip.layoutParams = strip.layoutParams.apply { height = h + fade }
         }
