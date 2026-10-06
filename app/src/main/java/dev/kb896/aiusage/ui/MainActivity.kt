@@ -1608,14 +1608,13 @@ class MainActivity : ComponentActivity() {
                 SettingsRows.toggle(rows, "Loop", config.video.loop) { on ->
                     saveBackdrop { it.copy(video = it.video.copy(loop = on)) }
                 }
-                // Only a video that plays once has ends to ease: a loop has none.
-                if (!config.video.loop) {
-                    SettingsRows.toggle(rows, "  ↳ ease in", config.video.easeIn) { on ->
-                        saveBackdrop { it.copy(video = it.video.copy(easeIn = on)) }
-                    }
-                    SettingsRows.toggle(rows, "  ↳ ease out", config.video.easeOut) { on ->
-                        saveBackdrop { it.copy(video = it.video.copy(easeOut = on)) }
-                    }
+                // A run eases at its ends; any video, looping or not, also eases into its stops
+                // (the double tap, always-on) and out of them (a wake).
+                SettingsRows.toggle(rows, "Ease in", config.video.easeIn) { on ->
+                    saveBackdrop { it.copy(video = it.video.copy(easeIn = on)) }
+                }
+                SettingsRows.toggle(rows, "Ease out", config.video.easeOut) { on ->
+                    saveBackdrop { it.copy(video = it.video.copy(easeOut = on)) }
                 }
             }
             // One shader for now, shown as the choice it will be among others.

@@ -10997,6 +10997,8 @@ class RearDialView(context: Context) : View(context) {
             else -> video.open(clip!!)
         }
         val (loopIn, loopOut) = VideoState.loopEase(!interactive, v.loop, v.easeIn, v.easeOut)
+        // On the back, the ease also softens every stop and start: the double tap, always-on, a wake.
+        video.easeStops(into = interactive && v.easeIn, out = interactive && v.easeOut)
         when (VideoState.afterOpen(action, created)) {
             VideoAction.FREEZE -> video.freeze()
             VideoAction.LOOP -> video.loop(restart = false, loopIn, loopOut)

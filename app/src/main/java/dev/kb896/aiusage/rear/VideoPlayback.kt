@@ -116,6 +116,14 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         else { d.command(Mode.IDLE, restart = false, easeIn = false, easeOut = false); still = snapshot() }
     }
 
+    /**
+     * Whether stopping slows to a stop ([out]) and carrying on picks up speed ([into]) rather
+     * than halting and jumping — the double tap, always-on, a wake. See LoopPace.
+     */
+    fun easeStops(into: Boolean, out: Boolean) {
+        decoder?.easeStops(into, out)
+    }
+
     /** One run from the start, fading in from the frame it stopped on, eased if asked. */
     fun playOnce(easeIn: Boolean, easeOut: Boolean) {
         val d = decoder ?: return
@@ -201,6 +209,12 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         private var quitting = false
         /** When each frame is due; moved on by a pause. Read and written under [lock]. */
         private val clock = RunClock()
+        /** The clock with its eased stops and starts. Under [lock] too. */
+        private val pace = LoopPace(clock)
+        private var stopEased = false
+        private var startEased = false
+        /** Whether a frame of this decoder's has been put up, so a stop has something to slow. */
+        @Volatile private var shownOne = false
         /** The blend window the next frame to arrive is put up with; set before it is released. */
         @Volatile private var nextFrom = 0L
         @Volatile private var nextTo = 0L
@@ -228,10 +242,29 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
             }
         }
 
+        fun easeStops(into: Boolean, out: Boolean) = synchronized(lock) {
+            startEased = into
+            stopEased = out
+        }
+
         fun command(mode: Mode, restart: Boolean, easeIn: Boolean, easeOut: Boolean) = synchronized(lock) {
             val now = SystemClock.uptimeMillis()
-            if (this.mode == Mode.IDLE && mode != Mode.IDLE && !restart) clock.resume(now)
-            if (mode == Mode.IDLE && this.mode != Mode.IDLE) clock.pause(now)
+            val playing = this.mode == Mode.LOOP || this.mode == Mode.ONCE
+            if (mode == Mode.IDLE && playing) {
+                if (stopEased && shownOne && !pace.stopping) {
+                    // Slows to its stop; present() puts it to rest when the ramp ends.
+                    pace.easeOut(now, positionMs)
+                    lock.notifyAll()
+                    return@synchronized
+                }
+                if (!pace.stopping) clock.pause(now)
+            }
+            // Carrying on — from a hold, or part-way into slowing down — picks up speed, or goes on at once.
+            if (mode != Mode.IDLE && !restart && (this.mode == Mode.IDLE || pace.stopping) && shownOne) {
+                if (startEased) pace.easeIn(now, positionMs) else pace.resume(now, positionMs)
+            } else if (mode != Mode.IDLE && !restart && this.mode == Mode.IDLE) {
+                clock.resume(now)
+            }
             this.mode = mode
             this.restart = this.restart || restart
             // Only a run says how it is eased; a freeze keeps the run's, which its held frame is timed by.
@@ -287,6 +320,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                         inputDone = false
                         lastPts = -1L
                         clock.start(SystemClock.uptimeMillis())
+                        pace.steady()
                     }
                     while (mode == Mode.IDLE && !quitting && !restart) lock.wait()
                     if (quitting) return
@@ -315,6 +349,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                             extractor.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                             inputDone = false
                             clock.restartAt(lastDue + frameMs)
+                            pace.wrapped(lastPts + frameMs)
                             lastPts = -1L
                         } else {
                             mode = Mode.IDLE   // a run's end: its last frame stays up
@@ -329,9 +364,11 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                         skipUntil <= 0L || restart -> false
                         pts < skipUntil -> true
                         else -> {
-                            // The frame it slept on: due now, and the run's clock set from it.
+                            // The frame it slept on: due now, and the run's clock set from it —
+                            // picking up speed from there, if that is how it starts.
                             skipUntil = 0L
-                            clock.startFrom(SystemClock.uptimeMillis(), wall(pts))
+                            val now = SystemClock.uptimeMillis()
+                            if (startEased && mode == Mode.LOOP) pace.easeIn(now, pts) else pace.resume(now, wall(pts))
                             false
                         }
                     }
@@ -339,8 +376,9 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                 if (skip) { codec.releaseOutputBuffer(o, false); continue }
                 if (!present(o, pts, lastPts, lastDue)) continue
                 positionMs = pts
+                shownOne = true
                 if (lastPts >= 0 && pts > lastPts) frameMs = pts - lastPts
-                lastDue = synchronized(lock) { clock.due(wall(pts)) }
+                lastDue = synchronized(lock) { pace.due(pts, ::wall) ?: lastDue }
                 lastPts = pts
             }
         }
@@ -362,7 +400,12 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                         return true
                     }
                     if (mode == Mode.IDLE) { lock.wait(); return@synchronized null to null }
-                    val due = clock.due(wall(pts))
+                    // Null: an ease-out has reached its stop. It rests here, this frame held for the resume.
+                    val due = pace.due(pts, ::wall) ?: run {
+                        mode = Mode.IDLE
+                        clock.pause(SystemClock.uptimeMillis())
+                        return@synchronized null to null
+                    }
                     val slowed = lastPts >= 0 && (due - lastDue) > (pts - lastPts) * SLOWED
                     due to (if (slowed) lastDue else due)
                 }
