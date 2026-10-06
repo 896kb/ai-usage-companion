@@ -469,20 +469,13 @@
             android:layout_height="wrap_content"
             android:orientation="vertical" />
 
-        </dev.kb896.aiusage.ui.glass.GlassCard>
-
-        <dev.kb896.aiusage.ui.glass.GlassCard
-            android:id="@+id/card_art"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="vertical">
-
-        <!-- Inside its card, at the top, like every other card's title. -->
+        <!-- The bottom artwork, in the usage card with the page's other settings rather than
+             a card of its own. -->
         <TextView
             android:id="@+id/settings_art_label"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:layout_marginBottom="8dp"
             android:text="Bottom artwork"
             android:textSize="13sp" />
@@ -496,6 +489,7 @@
             android:textSize="13sp" />
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
+
 
         </LinearLayout>
 

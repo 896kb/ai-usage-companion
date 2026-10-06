@@ -1038,7 +1038,7 @@ class MainActivity : ComponentActivity() {
         // than described. "Camera button on the panel" was a sentence where the others
         // were labels, which made two controls of the same kind look like two kinds.
         SettingsRows.toggleWithColor(
-            container, "Camera", config.showCamera, config.cameraTint,
+            generalRows, "Camera", config.showCamera, config.cameraTint,
             onChange = { on -> write { it.copy(showCamera = on) } },
             onPick = { c -> write { it.copy(cameraColor = c) } },
         )
@@ -1220,7 +1220,7 @@ class MainActivity : ComponentActivity() {
             )
         }
         SettingsRows.toggleWithColor(
-            container, "Game", config.showClose, config.closeColor,
+            generalRows, "Game", config.showClose, config.closeColor,
             onChange = { on -> write { it.copy(showClose = on) } },
             onPick = { c -> write { it.copy(closeColor = c) } },
         )
