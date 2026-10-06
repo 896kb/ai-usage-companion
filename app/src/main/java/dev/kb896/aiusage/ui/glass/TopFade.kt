@@ -52,6 +52,8 @@ class TopBlurStrip @JvmOverloads constructor(
     private val node = RenderNode("top-blur")
     private val mask = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
     private var maskFor = -1
+    /** The rows' own fade inside the band: none of them at the top, all of them at the end. */
+    private val rowsMask = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
 
     /**
      * How far down the band stays whole — the pinned header and preview, which the rows
@@ -78,6 +80,13 @@ class TopBlurStrip @JvmOverloads constructor(
             mask.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
                 intArrayOf(0xFF000000.toInt(), 0xFF000000.toInt(), 0x00000000),
                 floatArrayOf(0f, stop, 1f), Shader.TileMode.CLAMP)
+            // NOTHING OF THE ROWS AT THE TOP: they are gone from the top of the screen down
+            // to just above the preview's bottom, and only come in — blurred — from there.
+            // Without this the blurred rows showed above the preview, beside the header.
+            val from = ((solid - ROWS_IN_DP * density) / h).coerceIn(0f, 0.98f)
+            rowsMask.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
+                intArrayOf(0x00000000, 0x00000000, 0xFF000000.toInt()),
+                floatArrayOf(0f, from, 1f), Shader.TileMode.CLAMP)
         }
         getLocationInWindow(here)
         canvas.saveLayer(0f, 0f, w.toFloat(), h.toFloat(), null)
@@ -100,7 +109,10 @@ class TopBlurStrip @JvmOverloads constructor(
         } finally {
             node.endRecording()
         }
+        canvas.saveLayer(0f, 0f, w.toFloat(), h.toFloat(), null)
         canvas.drawRenderNode(node)
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), rowsMask)
+        canvas.restore()
         // Whole at the top, gone at the bottom: the sharp rows show through below.
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), mask)
         canvas.restore()
@@ -108,5 +120,7 @@ class TopBlurStrip @JvmOverloads constructor(
 
     private companion object {
         const val BLUR_DP = 14f
+        /** How far above the band's solid end the blurred rows start to show. */
+        const val ROWS_IN_DP = 24f
     }
 }
