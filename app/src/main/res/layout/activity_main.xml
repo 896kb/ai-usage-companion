@@ -78,11 +78,18 @@
         android:layout_height="1dp"
         android:layout_marginTop="16dp" />
 
-    <ScrollView
-        android:id="@+id/root_scroll"
+    <!-- The scroller and, over its top edge, the band that blurs and fades the rows rising
+         under the preview (TopFadeScrollView, TopBlurStrip). -->
+    <FrameLayout
+        android:id="@+id/scroll_frame"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_weight="1">
+
+    <dev.kb896.aiusage.ui.glass.TopFadeScrollView
+        android:id="@+id/root_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:clipToPadding="false">
 
         <LinearLayout
@@ -639,7 +646,14 @@
         </FrameLayout>
 
         </LinearLayout>
-    </ScrollView>
+    </dev.kb896.aiusage.ui.glass.TopFadeScrollView>
+
+    <dev.kb896.aiusage.ui.glass.TopBlurStrip
+        android:id="@+id/top_blur"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="top" />
+    </FrameLayout>
 </LinearLayout>
 
 <!-- The bottom bar: Kyant's liquid-glass tabs, in Compose. It floats over the bottom

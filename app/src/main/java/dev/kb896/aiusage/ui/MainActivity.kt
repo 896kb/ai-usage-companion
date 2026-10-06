@@ -156,6 +156,10 @@ class MainActivity : ComponentActivity() {
         bindGeometrySliders()
         bindTabs()
         bindHeader()
+        findViewById<dev.kb896.aiusage.ui.glass.TopBlurStrip>(R.id.top_blur).apply {
+            scroll = findViewById(R.id.root_scroll)
+            host = findViewById(R.id.root_host)
+        }
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
