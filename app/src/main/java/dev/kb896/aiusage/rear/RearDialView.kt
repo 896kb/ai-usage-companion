@@ -51,8 +51,12 @@ class RearDialView(context: Context) : View(context) {
 
     var config: PanelConfig = PanelConfig.DEFAULT
         set(value) {
+            val oldClip = field.video.clipPath
             field = value
             applyTheme(value.theme, value.font)
+            // A new clip while the panel is open plays its run at once, so it is seen;
+            // otherwise the player only follows the panel's state. See syncVideo.
+            syncVideo(justUnlocked = value.video.clipPath != oldClip && !locked)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -945,6 +949,7 @@ class RearDialView(context: Context) : View(context) {
                 pager.goTo(aodReturnPage, now, AOD_FADE_MS.toFloat()) // and the swipe returns where you were, with the fade
             }
             invalidate()
+            syncVideo()
         }
     private var aodReturnPage = PAGE_READOUT
     /** Until when a clock figure is rolling over; the always-on freeze waits for it. */
@@ -1172,6 +1177,7 @@ class RearDialView(context: Context) : View(context) {
             // Straight back to work, without waiting on the heartbeat: whatever moved
             // while the panel was dark has to be caught up in the first frame after it.
             if (value) invalidate()
+            syncVideo()
         }
 
     /**
@@ -1230,6 +1236,7 @@ class RearDialView(context: Context) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        syncVideo()
         postDelayed(redrawTick, REDRAW_INTERVAL_MS)
         // The charger going in. ACTION_POWER_CONNECTED rather than watching
         // ACTION_BATTERY_CHANGED for a status flip: the former fires once on the event,
@@ -1303,6 +1310,7 @@ class RearDialView(context: Context) : View(context) {
     private fun gravityPanelY(): Float = gravityY
 
     override fun onDetachedFromWindow() {
+        video.release()
         removeCallbacks(redrawTick)
         runCatching { context.unregisterReceiver(powerReceiver) }
         runCatching {
@@ -5723,6 +5731,7 @@ class RearDialView(context: Context) : View(context) {
         lockExpiredSent = false
         if (locked) { invalidate(); return }
         locked = true
+        syncVideo()
         lockAt = now
         lockProgress = 0f
         lockSpringAt = 0L
@@ -5742,6 +5751,7 @@ class RearDialView(context: Context) : View(context) {
     fun unlock() {
         if (!locked) return
         locked = false
+        syncVideo(justUnlocked = true)
         // The tip's slider, swiped: "I understand" — the camera opens, after the panel has
         // had its usual unlock. A tip that gave up has already ended itself, so nothing.
         val tipConfirmed = endCameraTip()
@@ -10929,7 +10939,48 @@ class RearDialView(context: Context) : View(context) {
         if (!aod) animating = true
     }
 
-    private fun drawVideoBackdrop(canvas: Canvas) = Unit
+    private val video = VideoPlayback { invalidate() }
+
+    /** Brings the player in line with the panel. See VideoState. */
+    private fun syncVideo(justUnlocked: Boolean = false) {
+        val v = config.video
+        val clip = v.clipPath?.takeIf { java.io.File(it).canRead() }
+        val action = VideoState.decide(
+            isVideo = config.effectiveBackdrop == dev.kb896.aiusage.data.BackdropKind.VIDEO,
+            hasClip = clip != null, attached = isAttachedToWindow, displayAwake = displayAwake,
+            aod = aod, locked = locked, loop = v.loop, preview = !interactive, justUnlocked = justUnlocked,
+        )
+        if (action != VideoAction.RELEASE) video.open(clip!!)
+        when (action) {
+            VideoAction.RELEASE -> video.release()
+            VideoAction.PAUSE -> video.pause()
+            VideoAction.LOOP -> video.loop()
+            VideoAction.HOLD_FIRST -> video.holdFirst()
+            VideoAction.PLAY_ONCE -> video.playOnce(v.easeIn, v.easeOut)
+            VideoAction.KEEP -> Unit
+        }
+    }
+
+    private val videoPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    /**
+     * The video's latest frame over the whole panel, at its opacity, darkening to black in
+     * always-on as the picture does. A hardware bitmap draws only on a hardware canvas;
+     * the software ones (brightness, the weather's cached ground) take the stored values.
+     */
+    private fun drawVideoBackdrop(canvas: Canvas) {
+        val frame = video.frame ?: return
+        if (!canvas.isHardwareAccelerated) return
+        val fade = aodFade(frameNowMs)
+        if (fade >= 0.999f) return
+        panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        videoPaint.alpha = (255 * config.video.opacity.coerceIn(0f, 1f)).toInt()
+        videoPaint.colorFilter = if (fade > 0f) {
+            val keep = (255 * (1f - fade)).toInt().coerceIn(0, 255)
+            android.graphics.LightingColorFilter((keep shl 16) or (keep shl 8) or keep, 0)
+        } else null
+        canvas.drawBitmap(frame, null, panelRect, videoPaint)
+    }
 
     /**
      * The ground as a shader when the background moves: the silk, or the video's frame over
@@ -10942,7 +10993,25 @@ class RearDialView(context: Context) : View(context) {
         else -> null
     }
 
-    private fun videoGround(): android.graphics.Shader? = null
+    /** The frame over the ground colour at the video's opacity, as one shader for the weather. */
+    private fun videoGround(): android.graphics.Shader? {
+        val frame = video.frame ?: return null
+        val sx = Panel.WIDTH / frame.width.toFloat()
+        val sy = Panel.HEIGHT / frame.height.toFloat()
+        val picture = android.graphics.BitmapShader(frame,
+            android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP,
+        ).apply { setLocalMatrix(android.graphics.Matrix().apply { setScale(sx, sy) }) }
+        val alpha = (255 * config.video.opacity.coerceIn(0f, 1f)).toInt() shl 24
+        val thinned = android.graphics.ComposeShader(
+            picture, solid(alpha), android.graphics.PorterDuff.Mode.DST_IN,
+        )
+        return android.graphics.ComposeShader(solid(groundColor), thinned, android.graphics.PorterDuff.Mode.SRC_OVER)
+    }
+
+    /** One colour as a shader: a gradient between the same two stops. */
+    private fun solid(argb: Int) = android.graphics.LinearGradient(
+        0f, 0f, 1f, 0f, argb, argb, android.graphics.Shader.TileMode.CLAMP,
+    )
 
     private fun drawImageBackdrop(canvas: Canvas) {
         val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
