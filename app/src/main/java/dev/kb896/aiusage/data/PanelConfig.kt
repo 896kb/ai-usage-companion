@@ -204,15 +204,31 @@ data class VideoConfig(
     val loop: Boolean = true,
     /** How it plays; null in configs saved before the choice. See [mode]. */
     val playback: VideoPlayMode? = null,
-    /** Loop off only: start slow and speed up / slow into the last frame. See EaseCurve. */
+    /** The old switches, before the eases had lengths: read only through [easeInWallMs] / [easeOutWallMs]. */
     val easeIn: Boolean = false,
     val easeOut: Boolean = false,
+    /**
+     * How long, on screen, it takes to speed up from slow and to slow into a stop — at a
+     * run's ends and at every stop and start. 0 for none, up to [MAX_EASE_MS]; null in
+     * configs saved before there were lengths. See EaseCurve.
+     */
+    val easeInMs: Int? = null,
+    val easeOutMs: Int? = null,
     /** The clip's middle frame's brightness, GlassLuminance.SIDE squared cells, row by row. */
     val luminance: List<Float> = emptyList(),
 ) {
+    val easeInWallMs: Int get() = easeInMs ?: if (easeIn) DEFAULT_EASE_MS else 0
+    val easeOutWallMs: Int get() = easeOutMs ?: if (easeOut) DEFAULT_EASE_MS else 0
+
     /** How it was asked to play: the choice, or the old switch's meaning. */
     val mode: VideoPlayMode
         get() = playback ?: if (loop) VideoPlayMode.LINEAR_LOOP else VideoPlayMode.LINEAR
+
+    companion object {
+        /** What an ease that was simply on lasted: a second of clip, about two on screen. */
+        const val DEFAULT_EASE_MS = 2000
+        const val MAX_EASE_MS = 2500
+    }
 
     /** How it can play: going backwards needs the reversed copy, and without it the nearest forward way. */
     val playable: VideoPlayMode

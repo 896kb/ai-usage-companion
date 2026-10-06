@@ -40,4 +40,14 @@ class BackdropConfigTest {
         assertEquals(VideoPlayMode.LINEAR_LOOP, VideoConfig(playback = VideoPlayMode.PING_PONG).playable)
         assertEquals(VideoPlayMode.YOYO, VideoConfig(playback = VideoPlayMode.YOYO, reversePath = "/r.mp4").playable)
     }
+
+    @Test fun `an ease that was switched on lasts two seconds, one that was off none`() {
+        assertEquals(2000, VideoConfig(easeIn = true).easeInWallMs)
+        assertEquals(0, VideoConfig(easeOut = false).easeOutWallMs)
+    }
+
+    @Test fun `a chosen ease length wins over the old switch`() {
+        assertEquals(700, VideoConfig(easeIn = false, easeInMs = 700).easeInWallMs)
+        assertEquals(0, VideoConfig(easeOut = true, easeOutMs = 0).easeOutWallMs)
+    }
 }

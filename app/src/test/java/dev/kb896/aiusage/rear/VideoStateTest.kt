@@ -78,11 +78,11 @@ class VideoStateTest {
     }
 
     @Test fun `the preview eases each pass of what plays once on the back, and nothing else`() {
-        assertEquals(true to false, VideoState.passEase(preview = true, mode = LINEAR, easeIn = true, easeOut = false))
-        assertEquals(true to true, VideoState.passEase(preview = true, mode = YOYO, easeIn = true, easeOut = true))
-        assertEquals(false to false, VideoState.passEase(preview = true, mode = LINEAR_LOOP, easeIn = true, easeOut = true))
-        assertEquals(false to false, VideoState.passEase(preview = true, mode = PING_PONG, easeIn = true, easeOut = true))
-        assertEquals(false to false, VideoState.passEase(preview = false, mode = LINEAR, easeIn = true, easeOut = true))
+        assertEquals(300L to 0L, VideoState.passEase(preview = true, mode = LINEAR, easeIn = 300, easeOut = 0))
+        assertEquals(300L to 900L, VideoState.passEase(preview = true, mode = YOYO, easeIn = 300, easeOut = 900))
+        assertEquals(0L to 0L, VideoState.passEase(preview = true, mode = LINEAR_LOOP, easeIn = 300, easeOut = 900))
+        assertEquals(0L to 0L, VideoState.passEase(preview = true, mode = PING_PONG, easeIn = 300, easeOut = 900))
+        assertEquals(0L to 0L, VideoState.passEase(preview = false, mode = LINEAR, easeIn = 300, easeOut = 900))
     }
 
     @Test fun `a yoyo's leg ends where it is — only the other way is made ready`() {

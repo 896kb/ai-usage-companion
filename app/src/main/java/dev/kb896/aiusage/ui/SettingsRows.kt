@@ -53,6 +53,34 @@ object SettingsRows {
         return view
     }
 
+    /**
+     * A value along a range: a label that says it, over a slider. [text] writes the label
+     * for a position, live under the finger; [onDone] gets the position once the finger
+     * lets go — saving on every step would rebuild the card under the slider mid-drag.
+     */
+    fun slider(
+        parent: LinearLayout,
+        max: Int,
+        progress: Int,
+        text: (Int) -> String,
+        onDone: (Int) -> Unit,
+    ) {
+        val context = parent.context
+        val caption = label(context, text(progress))
+        parent.addView(caption, rowParams(dp(context, 10)))
+        val bar = dev.kb896.aiusage.ui.glass.GlassSlider(context).apply {
+            background = null
+            this.max = max
+            this.progress = progress.coerceIn(0, max)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: android.widget.SeekBar, p: Int, fromUser: Boolean) { caption.text = text(p) }
+                override fun onStartTrackingTouch(bar: android.widget.SeekBar) = Unit
+                override fun onStopTrackingTouch(bar: android.widget.SeekBar) = onDone(bar.progress)
+            })
+        }
+        parent.addView(bar, rowParams(0))
+    }
+
     private fun rowParams(topDp: Int) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
     ).apply { topMargin = topDp }

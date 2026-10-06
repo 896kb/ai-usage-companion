@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LoopPaceTest {
-    private val r = EaseCurve.RAMP_MS
+    private val r = 1000L
 
     private fun steadyFrom(base: Long): LoopPace = LoopPace(RunClock().apply { start(base) })
 
@@ -17,7 +17,7 @@ class LoopPaceTest {
 
     @Test fun `easing out, the frames come further and further apart, then stop`() {
         val p = steadyFrom(0)
-        p.easeOut(now = 10_000, at = 2_000)
+        p.easeOut(now = 10_000, at = 2_000, rampMs = r)
         val gaps = (2_033L..(2_000 + r) step 33).map { p.due(it)!! }.zipWithNext { a, b -> b - a }
         assertTrue("gaps $gaps", gaps.zipWithNext().all { (a, b) -> b >= a - 1 })
         assertTrue("first ${gaps.first()} last ${gaps.last()}", gaps.last() > gaps.first() * 2)
@@ -26,7 +26,7 @@ class LoopPaceTest {
 
     @Test fun `easing in, it picks up speed and then runs at its own pace, with no jump`() {
         val p = steadyFrom(0)
-        p.easeIn(now = 50_000, at = 3_000)
+        p.easeIn(now = 50_000, at = 3_000, rampMs = r)
         val first = p.due(3_033)!! - 50_000
         assertTrue("first frame after $first ms", first > 33)
         val atEnd = p.due(3_000 + r)!!
@@ -37,14 +37,14 @@ class LoopPaceTest {
 
     @Test fun `resumed without ease, it carries on at once from the frame it stopped on`() {
         val p = steadyFrom(0)
-        p.easeOut(now = 10_000, at = 2_000)
+        p.easeOut(now = 10_000, at = 2_000, rampMs = r)
         p.resume(now = 20_000, at = 2_500)
         assertEquals(20_033L, p.due(2_533))
     }
 
     @Test fun `a loop going round in a ramp keeps the ramp's clock`() {
         val p = steadyFrom(0)
-        p.easeOut(now = 10_000, at = 3_900)       // a 4 s clip, stopping 1 s on: into the next pass
+        p.easeOut(now = 10_000, at = 3_900, rampMs = r)       // a 4 s clip, stopping 1 s on: into the next pass
         val before = p.due(3_966)!!
         p.wrapped(passMs = 4_000)
         val after = p.due(0)!!

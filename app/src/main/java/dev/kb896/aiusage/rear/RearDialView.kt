@@ -58,7 +58,7 @@ class RearDialView(context: Context) : View(context) {
             // change is seen; otherwise the player only follows the panel's state.
             val changed = value.video.clipPath != old.video.clipPath ||
                 value.effectiveBackdrop != old.effectiveBackdrop || value.video.playable != old.video.playable ||
-                value.video.easeIn != old.video.easeIn || value.video.easeOut != old.video.easeOut
+                value.video.easeInWallMs != old.video.easeInWallMs || value.video.easeOutWallMs != old.video.easeOutWallMs
             syncVideo(fresh = changed, changed = changed)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
@@ -10999,16 +10999,19 @@ class RearDialView(context: Context) : View(context) {
             VideoAction.SLEEP -> { video.sleep(); false }
             else -> video.open(clip!!, v.reversePath?.takeIf { backwards && java.io.File(it).canRead() })
         }
-        val (passIn, passOut) = VideoState.passEase(!interactive, v.playable, v.easeIn, v.easeOut)
+        // The eases' seconds on screen, as the stretches of clip that take that long.
+        val easeIn = EaseCurve.clipRampFor(v.easeInWallMs.toLong())
+        val easeOut = EaseCurve.clipRampFor(v.easeOutWallMs.toLong())
+        val (passIn, passOut) = VideoState.passEase(!interactive, v.playable, easeIn, easeOut)
         // On the back, the ease also softens every stop and start: the double tap, always-on, a wake.
-        video.easeStops(into = interactive && v.easeIn, out = interactive && v.easeOut)
+        video.easeStops(into = if (interactive) easeIn else 0L, out = if (interactive) easeOut else 0L)
         when (VideoState.afterOpen(action, created)) {
             VideoAction.FREEZE -> video.freeze()
             VideoAction.LOOP -> video.loop(restart = false, passIn, passOut)
             VideoAction.RESTART_LOOP -> video.loop(restart = true, passIn, passOut)
-            VideoAction.PLAY_ONCE -> video.playOnce(v.easeIn, v.easeOut)
-            VideoAction.TO_END -> video.toEnd(v.easeIn, v.easeOut)
-            VideoAction.TO_START -> video.toStart(v.easeIn, v.easeOut)
+            VideoAction.PLAY_ONCE -> video.playOnce(easeIn, easeOut)
+            VideoAction.TO_END -> video.toEnd(easeIn, easeOut)
+            VideoAction.TO_START -> video.toStart(easeIn, easeOut)
             VideoAction.PING_PONG -> video.pingPong(restart = false, passIn, passOut)
             VideoAction.RESTART_PING_PONG -> video.pingPong(restart = true, passIn, passOut)
             else -> Unit

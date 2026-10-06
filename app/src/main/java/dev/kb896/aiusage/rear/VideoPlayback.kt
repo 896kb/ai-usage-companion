@@ -72,8 +72,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
     /** What runs after a run ends: going round there and back, and how each leg is eased. */
     private var pingPong = false
-    private var legIn = false
-    private var legOut = false
+    private var legIn = 0L
+    private var legOut = 0L
 
     /** What to show: the live frame, or the still while there is none. */
     val shown: Bitmap? get() = frame ?: still
@@ -134,14 +134,14 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         if (from === to) return
         // The new one first: the old one is no longer on show, so it stops at once, not eased.
         active = to
-        from?.command(Mode.IDLE, restart = false, easeIn = false, easeOut = false)
+        from?.command(Mode.IDLE, restart = false, easeIn = 0L, easeOut = 0L)
     }
 
     /**
      * Plays round and round; [restart] starts it over with the fade, else it carries on.
      * Each pass eased as asked — the preview's, see VideoState.passEase.
      */
-    fun loop(restart: Boolean, easeIn: Boolean = false, easeOut: Boolean = false) {
+    fun loop(restart: Boolean, easeIn: Long = 0L, easeOut: Long = 0L) {
         val f = fwd ?: return
         pingPong = false
         if (restart) fadeOut()
@@ -149,7 +149,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
             // Was going backwards: on forward from the same frame.
             val at = position()
             switchTo(f)
-            if (!restart) f.leg(at, easeIn = false, easeOut = false)
+            if (!restart) f.leg(at, easeIn = 0L, easeOut = 0L)
         }
         f.command(Mode.LOOP, restart, easeIn, easeOut)
     }
@@ -161,12 +161,12 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
     fun freeze() {
         val d = active ?: return
         pingPong = false
-        if (frame == null && still == null) d.command(Mode.FIRST, restart = true, easeIn = false, easeOut = false)
-        else { d.command(Mode.IDLE, restart = false, easeIn = false, easeOut = false); still = snapshot() }
+        if (frame == null && still == null) d.command(Mode.FIRST, restart = true, easeIn = 0L, easeOut = 0L)
+        else { d.command(Mode.IDLE, restart = false, easeIn = 0L, easeOut = 0L); still = snapshot() }
     }
 
     /** One run from the start, fading in from the frame it stopped on, eased if asked. */
-    fun playOnce(easeIn: Boolean, easeOut: Boolean) {
+    fun playOnce(easeIn: Long, easeOut: Long) {
         val f = fwd ?: return
         pingPong = false
         fadeOut()
@@ -175,12 +175,12 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
     }
 
     /** Yoyo, the panel open: on forward from where it is to the end, and rest there. */
-    fun toEnd(easeIn: Boolean, easeOut: Boolean) = leg(forward = true, easeIn, easeOut)
+    fun toEnd(easeIn: Long, easeOut: Long) = leg(forward = true, easeIn, easeOut)
 
     /** Yoyo, the panel shut: back from where it is to the start, and rest there. */
-    fun toStart(easeIn: Boolean, easeOut: Boolean) = leg(forward = false, easeIn, easeOut)
+    fun toStart(easeIn: Long, easeOut: Long) = leg(forward = false, easeIn, easeOut)
 
-    private fun leg(forward: Boolean, easeIn: Boolean, easeOut: Boolean) {
+    private fun leg(forward: Boolean, easeIn: Long, easeOut: Long) {
         val f = fwd ?: return
         val r = rev ?: return
         pingPong = false
@@ -202,7 +202,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
      * Forward and back without end: on from where it is, the way it was going, each leg
      * eased as asked (the preview's yoyo); [restart] starts it over from the start.
      */
-    fun pingPong(restart: Boolean, easeIn: Boolean = false, easeOut: Boolean = false) {
+    fun pingPong(restart: Boolean, easeIn: Long = 0L, easeOut: Long = 0L) {
         val f = fwd ?: return
         val r = rev ?: return
         legIn = easeIn
@@ -241,7 +241,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
      * Whether stopping slows to a stop ([out]) and carrying on picks up speed ([into]) rather
      * than halting and jumping — the double tap, always-on, a wake. See LoopPace.
      */
-    fun easeStops(into: Boolean, out: Boolean) {
+    fun easeStops(into: Long, out: Long) {
         fwd?.easeStops(into, out)
         rev?.easeStops(into, out)
     }
@@ -367,15 +367,16 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         private var legFrom = 0L
         /** The frame a preroll is holding unshown, or -1. */
         private var armedPts = -1L
-        private var easeIn = false
-        private var easeOut = false
+        private var easeIn = 0L
+        private var easeOut = 0L
         private var quitting = false
         /** When each frame is due; moved on by a pause. Read and written under [lock]. */
         private val clock = RunClock()
         /** The clock with its eased stops and starts. Under [lock] too. */
         private val pace = LoopPace(clock)
-        private var stopEased = false
-        private var startEased = false
+        /** The clip ramps a stop slows over and a start speeds up over; 0 for none. */
+        private var stopRamp = 0L
+        private var startRamp = 0L
         /** Whether a frame of this decoder's has been put up, so a stop has something to slow. */
         @Volatile private var shownOne = false
         /** The blend window the next frame to arrive is put up with; set before it is released. */
@@ -397,7 +398,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
         /** Carries a [legPaused] leg on from where it stopped. */
         fun resumeLeg() {
-            synchronized(lock) { if (!shownOne && startEased) easeInPending = true }
+            synchronized(lock) { if (!shownOne && startRamp > 0) easeInPending = true }
             command(Mode.LEG, restart = false, easeIn = easeIn, easeOut = easeOut)
         }
 
@@ -425,18 +426,18 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
             }
         }
 
-        fun easeStops(into: Boolean, out: Boolean) = synchronized(lock) {
-            startEased = into
-            stopEased = out
+        fun easeStops(into: Long, out: Long) = synchronized(lock) {
+            startRamp = into
+            stopRamp = out
         }
 
-        fun command(mode: Mode, restart: Boolean, easeIn: Boolean, easeOut: Boolean) = synchronized(lock) {
+        fun command(mode: Mode, restart: Boolean, easeIn: Long, easeOut: Long) = synchronized(lock) {
             val now = SystemClock.uptimeMillis()
             val playing = this.mode == Mode.LOOP || this.mode == Mode.LEG
             if (mode == Mode.IDLE && playing) {
-                if (stopEased && shownOne && !pace.stopping && active === this) {
+                if (stopRamp > 0 && shownOne && !pace.stopping && active === this) {
                     // Slows to its stop; present() puts it to rest when the ramp ends.
-                    pace.easeOut(now, positionMs)
+                    pace.easeOut(now, positionMs, stopRamp)
                     lock.notifyAll()
                     return@synchronized
                 }
@@ -444,7 +445,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
             }
             // Carrying on — from a hold, or part-way into slowing down — picks up speed, or goes on at once.
             if (mode != Mode.IDLE && !restart && (this.mode == Mode.IDLE || pace.stopping) && shownOne) {
-                if (startEased) pace.easeIn(now, positionMs) else pace.resume(now, positionMs)
+                if (startRamp > 0) pace.easeIn(now, positionMs, startRamp) else pace.resume(now, positionMs)
             } else if (mode != Mode.IDLE && !restart && this.mode == Mode.IDLE) {
                 clock.resume(now)
             }
@@ -463,7 +464,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
          * A run from [from] to the end, eased at its ends as asked. Started at once from a
          * prerolled frame there; otherwise it seeks, and starts at the first frame it reaches.
          */
-        fun leg(from: Long, easeIn: Boolean, easeOut: Boolean) = synchronized(lock) {
+        fun leg(from: Long, easeIn: Long, easeOut: Long) = synchronized(lock) {
             this.easeIn = easeIn
             this.easeOut = easeOut
             legEnded = false
@@ -502,7 +503,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         /** When clip time [ptsMs] is due, as an offset from the run's start. */
         private fun wall(ptsMs: Long): Long = when {
             mode == Mode.LEG -> EaseCurve.wallMs(ptsMs - legFrom, durationMs - legFrom, easeIn, easeOut).toLong()
-            easeIn || easeOut -> EaseCurve.wallMs(ptsMs, durationMs, easeIn, easeOut).toLong()
+            easeIn > 0 || easeOut > 0 -> EaseCurve.wallMs(ptsMs, durationMs, easeIn, easeOut).toLong()
             else -> ptsMs
         }
 
@@ -602,8 +603,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                             val now = SystemClock.uptimeMillis()
                             when {
                                 mode == Mode.PREROLL -> Unit
-                                mode == Mode.LOOP && startEased -> pace.easeIn(now, pts)
-                                easeInPending -> { easeInPending = false; pace.easeIn(now, pts) }
+                                mode == Mode.LOOP && startRamp > 0 -> pace.easeIn(now, pts, startRamp)
+                                easeInPending -> { easeInPending = false; pace.easeIn(now, pts, startRamp) }
                                 else -> pace.resume(now, wall(pts))
                             }
                             false
@@ -703,8 +704,11 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         const val TAG = "AiUsageVideo"
         /** How long a decoder call waits for a buffer before looking at the commands again. */
         const val TICK_US = 5_000L
-        /** A frame held this much longer than the clip spaced it is slowed, and blends. */
-        const val SLOWED = 1.3f
+        /**
+         * A frame held this much longer than the clip spaced it is slowed, and blends into the
+         * next — all through an ease, its first and last moments too, not only its slowest.
+         */
+        const val SLOWED = 1.05f
         /** The cross-fade from the frame it stopped on into a new run. */
         const val FADE_MS = 450L
         const val MAX_LOSSES = 3

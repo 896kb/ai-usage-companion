@@ -83,8 +83,8 @@ object VideoState {
      * once — a linear run, a yoyo's legs — so each pass is eased as that is. A loop and a
      * ping-pong have no ends to ease: on the back their eases soften only stops and wakes.
      */
-    fun passEase(preview: Boolean, mode: VideoPlayMode, easeIn: Boolean, easeOut: Boolean): Pair<Boolean, Boolean> =
-        if (preview && (mode == VideoPlayMode.LINEAR || mode == VideoPlayMode.YOYO)) easeIn to easeOut else false to false
+    fun passEase(preview: Boolean, mode: VideoPlayMode, easeIn: Long, easeOut: Long): Pair<Long, Long> =
+        if (preview && (mode == VideoPlayMode.LINEAR || mode == VideoPlayMode.YOYO)) easeIn to easeOut else 0L to 0L
 
     /**
      * A run reached its end. A ping-pong turns round and readies the finished way for the

@@ -1620,12 +1620,16 @@ class MainActivity : ComponentActivity() {
                     "This clip has no reversed copy, so it plays as ${if (config.video.playable == dev.kb896.aiusage.data.VideoPlayMode.LINEAR) "Linear" else "Loop"} for now. Edit video, then Use it, to make one.")
                 // A run eases at its ends; any video, looping or not, also eases into its stops
                 // (the double tap, always-on) and out of them (a wake).
-                SettingsRows.toggle(rows, "Ease in", config.video.easeIn) { on ->
-                    saveBackdrop { it.copy(video = it.video.copy(easeIn = on)) }
-                }
-                SettingsRows.toggle(rows, "Ease out", config.video.easeOut) { on ->
-                    saveBackdrop { it.copy(video = it.video.copy(easeOut = on)) }
-                }
+                // Seconds on screen, a tenth at a time: 0 is none, up to two and a half.
+                val step = 100
+                val most = dev.kb896.aiusage.data.VideoConfig.MAX_EASE_MS / step
+                fun seconds(p: Int) = if (p == 0) "off" else "%.1f s".format(p * step / 1000f)
+                SettingsRows.slider(rows, most, config.video.easeInWallMs / step,
+                    text = { "Ease in  ${seconds(it)}" },
+                ) { p -> saveBackdrop { it.copy(video = it.video.copy(easeInMs = p * step)) } }
+                SettingsRows.slider(rows, most, config.video.easeOutWallMs / step,
+                    text = { "Ease out  ${seconds(it)}" },
+                ) { p -> saveBackdrop { it.copy(video = it.video.copy(easeOutMs = p * step)) } }
             }
             // One shader for now, shown as the choice it will be among others.
             // The same gap under the kinds as the rows the other kinds put there.
@@ -1647,7 +1651,8 @@ class MainActivity : ComponentActivity() {
         dev.kb896.aiusage.ui.video.VideoFiles.hold(this, uri)
         // A new original starts from a clean crop and trim; loop and ease carry over.
         val keep = ConfigStore(this).load().video
-        editVideo(uri, dev.kb896.aiusage.data.VideoConfig(loop = keep.loop, playback = keep.playback, easeIn = keep.easeIn, easeOut = keep.easeOut))
+        editVideo(uri, dev.kb896.aiusage.data.VideoConfig(loop = keep.loop, playback = keep.playback,
+            easeIn = keep.easeIn, easeOut = keep.easeOut, easeInMs = keep.easeInMs, easeOutMs = keep.easeOutMs))
     }
 
     private fun editVideo(

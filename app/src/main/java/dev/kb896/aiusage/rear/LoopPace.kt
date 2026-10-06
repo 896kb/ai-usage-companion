@@ -3,9 +3,9 @@ package dev.kb896.aiusage.rear
 /**
  * When a video's frames are due as it eases to a stop and back up again — the double tap,
  * always-on, a wake — rather than halting and jumping. Steady, a frame is due by [clock];
- * easing out from the frame at clip time `at`, the next [EaseCurve.RAMP_MS] of clip slow
- * down along the ease curve and the frames past that are not due at all (null: hold there);
- * easing in, that ramp is run the other way and the clock takes over where it ends.
+ * easing out from the frame at clip time `at`, the next `rampMs` of clip slow down along the
+ * ease curve and the frames past that are not due at all (null: hold there); easing in, a
+ * ramp is run the other way and the clock takes over where it ends.
  *
  * Clip times are a pass's own; a loop going round mid-ramp says so with [wrapped], so the
  * ramp's frames keep counting on from the pass before.
@@ -16,20 +16,22 @@ class LoopPace(private val clock: RunClock) {
     private var phase = Phase.STEADY
     private var wall0 = 0L
     private var clip0 = 0L
-    private val ramp = EaseCurve.RAMP_MS
+    private var ramp = 0L
 
     /** Slows from the frame at [at] to a stop, starting [now]. */
-    fun easeOut(now: Long, at: Long) {
+    fun easeOut(now: Long, at: Long, rampMs: Long) {
         phase = Phase.OUT
         wall0 = now
         clip0 = at
+        ramp = rampMs
     }
 
     /** Picks up speed from the frame at [at], starting [now]. */
-    fun easeIn(now: Long, at: Long) {
+    fun easeIn(now: Long, at: Long, rampMs: Long) {
         phase = Phase.IN
         wall0 = now
         clip0 = at
+        ramp = rampMs
     }
 
     /** Carries on at once from the frame at [at], [now]. */
@@ -68,9 +70,8 @@ class LoopPace(private val clock: RunClock) {
         }
     }
 
-    private fun inWall(d: Long): Long = EaseCurve.wallMs(d.coerceAtLeast(0), ramp * 4, easeIn = true, easeOut = false).toLong()
+    private fun inWall(d: Long): Long = EaseCurve.wallMs(d.coerceAtLeast(0), ramp * 4, ramp, 0).toLong()
 
     private fun outWall(d: Long): Long =
-        (EaseCurve.wallMs(ramp + d.coerceAtLeast(0), ramp * 2, easeIn = false, easeOut = true) -
-            EaseCurve.wallMs(ramp, ramp * 2, easeIn = false, easeOut = true)).toLong()
+        (EaseCurve.wallMs(ramp + d.coerceAtLeast(0), ramp * 2, 0, ramp) - EaseCurve.wallMs(ramp, ramp * 2, 0, ramp)).toLong()
 }
