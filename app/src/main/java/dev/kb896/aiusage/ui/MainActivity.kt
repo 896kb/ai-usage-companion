@@ -160,6 +160,7 @@ class MainActivity : ComponentActivity() {
             scroll = findViewById(R.id.root_scroll)
             host = findViewById(R.id.root_host)
         }
+        bindPinned()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
@@ -328,6 +329,32 @@ class MainActivity : ComponentActivity() {
             )
         }
         showTab(tab)
+    }
+
+    /**
+     * The header and preview float over the settings, which scroll the whole height: the
+     * scroller starts its rows below them (top padding = their height), and the band that
+     * blurs and fades rows covers them and 56dp more — whole down to just above the
+     * preview's bottom, fading after — so a row rising behind the preview softens and goes
+     * instead of meeting an edge. Kept in step with the block's height as it lays out.
+     */
+    private fun bindPinned() {
+        val pinned = findViewById<View>(R.id.pinned)
+        val scroll = findViewById<android.widget.ScrollView>(R.id.root_scroll)
+        val strip = findViewById<dev.kb896.aiusage.ui.glass.TopBlurStrip>(R.id.top_blur)
+        val d = resources.displayMetrics.density
+        fun apply(h: Int) {
+            if (h <= 0) return
+            scroll.setPadding(scroll.paddingLeft, h, scroll.paddingRight, scroll.paddingBottom)
+            val fade = (dev.kb896.aiusage.ui.glass.TopFadeScrollView.FADE_DP * d).toInt()
+            scroll.setFadingEdgeLength(h + fade)
+            strip.solid = h - (16 * d).toInt()
+            strip.layoutParams = strip.layoutParams.apply { height = h + fade }
+        }
+        pinned.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) apply(bottom - top)
+        }
+        pinned.post { apply(pinned.height) }
     }
 
     /** The app's icon and name at the top, as the launcher shows them. */

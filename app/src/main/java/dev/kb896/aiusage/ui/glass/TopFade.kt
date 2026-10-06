@@ -52,6 +52,13 @@ class TopBlurStrip @JvmOverloads constructor(
     private val node = RenderNode("top-blur")
     private val mask = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
     private var maskFor = -1
+
+    /**
+     * How far down the band stays whole — the pinned header and preview, which the rows
+     * pass behind — before it fades out over the rest of its height.
+     */
+    var solid = 0
+        set(value) { field = value; maskFor = -1; invalidate() }
     private val here = IntArray(2)
     private val there = IntArray(2)
 
@@ -67,7 +74,10 @@ class TopBlurStrip @JvmOverloads constructor(
         if (w <= 0 || h <= 0 || canvas !is RecordingCanvas) return
         if (maskFor != h) {
             maskFor = h
-            mask.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), 0xFF000000.toInt(), 0x00000000, Shader.TileMode.CLAMP)
+            val stop = (solid.toFloat() / h).coerceIn(0f, 0.99f)
+            mask.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
+                intArrayOf(0xFF000000.toInt(), 0xFF000000.toInt(), 0x00000000),
+                floatArrayOf(0f, stop, 1f), Shader.TileMode.CLAMP)
         }
         getLocationInWindow(here)
         canvas.saveLayer(0f, 0f, w.toFloat(), h.toFloat(), null)
