@@ -16,9 +16,9 @@ import dev.kb896.aiusage.ui.glass.Ink
 
 /**
  * The panel's font: every face it can be set in, each name written in its own face, the
- * chosen one ticked. The theme's own face first, then the two the app ships, the phone's
- * families (found in the background — that means opening every font file on it), and
- * imported ones, which a long press removes. Import is the button at the end.
+ * chosen one ticked. Import first, then the theme's own face, the two the app ships,
+ * imported ones (a long press removes them) and the phone's families — found in the
+ * background, as that means opening every font file on it, with a glass spinner turning meanwhile.
  */
 object FontPicker {
 
@@ -90,6 +90,7 @@ object FontPicker {
                 box.addView(this, at)
             }
 
+        SettingsRows.navigation(box, "Import a font file") { dialog.dismiss(); onImport() }
         val own = PanelType.face(res, theme, null)
         row("Theme default", null, own)
         for (font in PanelFonts.bundled) row(font.name, font, PanelType.face(res, theme, font))
@@ -99,14 +100,7 @@ object FontPicker {
             for (font in imported) row(font.name, font, PanelType.face(res, theme, font))
         }
         val phoneHeading = heading("On this phone")
-        val looking = TextView(context).apply {
-            text = "Looking for fonts…"
-            textSize = 14f
-            setTextColor(Ink.secondary(0f))
-            setPadding(dp(context, 14), dp(context, 8), dp(context, 14), dp(context, 8))
-            box.addView(this)
-        }
-        SettingsRows.navigation(box, "Import a font file") { dialog.dismiss(); onImport() }
+        val looking = dev.kb896.aiusage.ui.glass.GlassSpinner(context).also { box.addView(it) }
 
         dialog = Modal.show(Modal.builder(context)
             .setTitle("Font")
