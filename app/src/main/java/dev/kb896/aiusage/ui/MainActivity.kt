@@ -281,7 +281,7 @@ class MainActivity : ComponentActivity() {
         R.id.clock_heading, R.id.media_heading, R.id.aod_heading)
 
     /**
-     * The bottom bar: the panel's clock page, its usage page, its media page, and
+     * The bottom bar: the panel's info page (clock, date, notices), its usage page, its media page, and
      * always-on — the order the pages sit in on the back. Each tab shows its own section
      * of settings (the usage tab also holds everything general) and has the preview show
      * that screen. Onboarding and recovery stay above every tab.
@@ -305,7 +305,7 @@ class MainActivity : ComponentActivity() {
         val lum = dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(host)
         val tabs = listOf(
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_general, "General"),
-            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_clock, "Clock"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_info, "Info"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_usage, "Usage"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_media, "Media"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_aod, "Always-on"),
@@ -439,11 +439,11 @@ class MainActivity : ComponentActivity() {
         }
         val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
         when (i) {
-            TAB_CLOCK -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
+            TAB_INFO -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
             TAB_MEDIA -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_MEDIA, aod = false)
             TAB_AOD -> preview.show(null, aod = true)
             TAB_USAGE -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_READOUT, aod = false)
-            // General is about the whole panel: its top page, the clock's — as the Clock tab
+            // General is about the whole panel: its top page, the clock's — as the Info tab
             // shows it, rather than whatever the back is doing (always-on, as often as not).
             else -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
         }
@@ -1966,7 +1966,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** The bottom bar's tabs, in its order. See bindTabs. */
         private const val TAB_GENERAL = 0
-        private const val TAB_CLOCK = 1
+        private const val TAB_INFO = 1
         private const val TAB_USAGE = 2
         private const val TAB_MEDIA = 3
         private const val TAB_AOD = 4
