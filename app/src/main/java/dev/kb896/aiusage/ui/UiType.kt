@@ -2,38 +2,44 @@ package dev.kb896.aiusage.ui
 
 import android.content.Context
 import android.graphics.Typeface
-import dev.kb896.aiusage.data.ConfigStore
+import dev.kb896.aiusage.R
 import dev.kb896.aiusage.rear.PanelType
 
 /**
- * The front screen's face, which is the panel's face.
+ * The front screen's face: Outfit at SemiBold, always — the front is glass whatever the
+ * back is (UiTheme), and the font chosen for the back is the back's alone.
  *
- * THE THEME IS THE WHOLE APP'S, not the rear display's. The settings screen exists to
- * describe the panel, and describing it in a face the panel does not use is the same
- * mistake as a preview drawn in the wrong colours — you are choosing by looking at
- * something that is not the thing.
- *
- * Reads the stored config rather than being handed one, because the callers are a
- * scattered set of view builders that have no config between them and should not grow a
- * parameter each to carry one down.
+ * THE WEIGHT IS IN THE FACE. Outfit is one variable file whose default instance is Thin,
+ * and the front has a couple of dozen places that set the face without its weight. They
+ * only looked right while the activity's one sweep reached them; anything built after it —
+ * every card rebuilt when a setting changed — came out Thin, and stayed so. Built from a
+ * copy of the file with the weight set on its axis, the face is SemiBold wherever it goes,
+ * and a lighter weight asked of it on top (CardTitle's 500) still applies.
  */
 object UiType {
+    @Volatile private var face: Typeface? = null
 
-    /** The front screen's face: GLASS's, always — the front is glass whatever the back is (UiTheme). */
     fun of(context: Context): Typeface =
+        face ?: synchronized(this) { face ?: build(context.applicationContext).also { face = it } }
+
+    private fun build(context: Context): Typeface = try {
+        val file = java.io.File(context.cacheDir, "outfit.ttf")
+        if (!file.exists()) context.resources.openRawResource(R.font.outfit).use { input ->
+            file.outputStream().use { input.copyTo(it) }
+        }
+        Typeface.Builder(file).setFontVariationSettings("'wght' ${PanelType.GLASS_WEIGHT}").build()
+    } catch (_: Exception) {
         PanelType.of(context.resources, dev.kb896.aiusage.data.PanelTheme.GLASS)
+    }
 
     /**
-     * The variation axes to set alongside it, or null.
-     *
-     * Separate from the face for the reason PanelType.variation gives: a variable font is
-     * one file with an axis, and asking a Typeface for a weight it has no siblings for
-     * returns its default instance — which for Outfit is Thin.
+     * The axes to set alongside the face: none — the weight is already in it. Kept for the
+     * callers that set both, which then clear any weight a view had been given.
      */
-    fun variation(context: Context): String? =
-        PanelType.variation(dev.kb896.aiusage.data.PanelTheme.GLASS)
+    @Suppress("UNUSED_PARAMETER")
+    fun variation(context: Context): String? = null
 
-    /** The front's face on [view], with its axes — set, or cleared when the face has none. */
+    /** The front's face on [view]. */
     fun dress(view: android.widget.TextView) {
         PanelType.weigh(view, of(view.context), variation(view.context))
     }

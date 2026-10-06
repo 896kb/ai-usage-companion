@@ -329,7 +329,7 @@ class MainActivity : ComponentActivity() {
                 // SemiBold, as the rest of the front — baked into the face itself. Asked of
                 // Compose as a FontWeight, Outfit's one variable file came out at its own
                 // light default: the weight never reached the axis.
-                face = androidx.compose.ui.text.font.FontFamily(tabFace()),
+                face = androidx.compose.ui.text.font.FontFamily(UiType.of(this)),
             )
         }
         showTab(tab)
@@ -361,23 +361,6 @@ class MainActivity : ComponentActivity() {
     }
 
     /** The app's icon and name at the top, as the launcher shows them. */
-    /**
-     * Outfit at SemiBold, for the tab bar — from a file of it in the cache, since a resource
-     * font is stored compressed and cannot be opened by descriptor, and a face built from a
-     * file is the one way to have the weight set on its axis rather than asked for.
-     */
-    private fun tabFace(): android.graphics.Typeface = try {
-        val file = java.io.File(cacheDir, "outfit.ttf")
-        if (!file.exists()) resources.openRawResource(R.font.outfit).use { input ->
-            file.outputStream().use { input.copyTo(it) }
-        }
-        android.graphics.Typeface.Builder(file)
-            .setFontVariationSettings("'wght' ${dev.kb896.aiusage.rear.PanelType.GLASS_WEIGHT}")
-            .build()
-    } catch (_: Exception) {
-        UiType.of(this)
-    }
-
     private fun bindHeader() {
         findViewById<android.widget.ImageView>(R.id.app_icon).setImageDrawable(packageManager.getApplicationIcon(applicationInfo))
         findViewById<TextView>(R.id.app_name).apply {
