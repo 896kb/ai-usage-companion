@@ -4829,6 +4829,18 @@ class RearDialView(context: Context) : View(context) {
             history.addFirst(next)
             while (history.size > HISTORY_MAX) history.removeLast()
             saveHistory()
+            // The Info page's wheel moves with its cards and, on the newest, turns to the
+            // new one: the card in view slides down and the new one comes in from above.
+            val arrival = NoticeWheel.afterArrival(noticeWheelAt, held = onWheel)
+            if (onWheel) wheelDownAt += arrival.at - noticeWheelAt
+            noticeWheelAt = arrival.at.coerceAtMost((history.size - 1).toFloat())
+            arrival.settleTo?.let { to ->
+                wheelFrom = noticeWheelAt
+                wheelTo = to
+                wheelSettleAt = SystemClock.uptimeMillis()
+                wheelSettling = true
+            }
+            invalidate()
         }
 
         // A NOTIFICATION THAT ARRIVES WHILE THE PANEL IS DARK IS NOT NEWS, IT IS HISTORY.
