@@ -8471,12 +8471,8 @@ class RearDialView(context: Context) : View(context) {
         }
         canvas.restore()
 
-        // The label's edge, and the spindle punched through the middle of it.
-        vinylPaint.style = Paint.Style.STROKE
-        vinylPaint.strokeWidth = VINYL_RIM_W
-        vinylPaint.color = shade(VINYL_LABEL_ALPHA)
-        canvas.drawCircle(disc.cx, disc.cy, label, vinylPaint)
-
+        // NO EDGE ROUND THE LABEL: a hairline in the playback colour round the cover read as
+        // a stroke on the picture, not as part of the record. The spindle is punched through.
         // Cut, not painted. Anti-aliased, which is the whole reason this is a layer.
         vinylPaint.style = Paint.Style.FILL
         vinylPaint.xfermode = clearMode
