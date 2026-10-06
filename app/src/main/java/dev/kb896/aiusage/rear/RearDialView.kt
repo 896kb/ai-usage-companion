@@ -2539,10 +2539,19 @@ class RearDialView(context: Context) : View(context) {
         // mid-sweep meant restarting from nothing in the opposite sense, so a second tap
         // had to be ignored until the first finished.
         val v = ambientSweep(rippleNow)
-        val hidden = v >= 0.999f
-        val front = if (v > 0.001f && v < 0.999f) android.graphics.Path().apply {
+        // The camera tip opens the same way: a circle of its own, out of the camera button,
+        // taking the readout away and leaving the background. See tipCircle.
+        val tv = cameraTipFade(frameNowMs)
+        val hidden = v >= 0.999f || tv >= 0.999f
+        val ambientFront = if (v > 0.001f && v < 0.999f) android.graphics.Path().apply {
             addCircle(rippleCx, rippleCy, rippleReach() * v, android.graphics.Path.Direction.CW)
         } else null
+        val tipFront = tipCircle(tv)
+        val front = when {
+            ambientFront == null -> tipFront
+            tipFront == null -> ambientFront
+            else -> android.graphics.Path(ambientFront).apply { op(tipFront, android.graphics.Path.Op.UNION) }
+        }
 
         // Opaque, and the colour is the user's.
         //
@@ -3275,7 +3284,7 @@ class RearDialView(context: Context) : View(context) {
             // that had been there all along and was being revealed.
             if (v > 0.001f) {
                 canvas.save()
-                if (front != null) canvas.clipPath(front)
+                if (ambientFront != null) canvas.clipPath(ambientFront)
                 // NOTHING IS PAINTED HERE ANY MORE, and that is the fix rather than an
                 // omission. This used to wash the swept region with a see-through copy of
                 // the background colour, because the ground itself was drawn only when
@@ -5831,6 +5840,7 @@ class RearDialView(context: Context) : View(context) {
     /** Puts the tip up; [done] runs once its slider is swiped. */
     fun showCameraTip(done: () -> Unit) {
         if (tipAt != 0L) return
+        cameraButton?.let { tipCx = it.centerX(); tipCy = it.centerY() }
         tipAt = SystemClock.uptimeMillis()
         tipLeftAt = 0L
         tipDone = done
@@ -5890,14 +5900,23 @@ class RearDialView(context: Context) : View(context) {
     )
     private val tipGlowMatrix = android.graphics.Matrix()
 
-    /** The tip's ground: the front screen's silk, at its settings, over the panel's units. */
-    private val tipSilk by lazy {
-        dev.kb896.aiusage.ui.glass.Silk.create().apply {
-            setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+    /** Where the tip opens from: the camera button that was pressed. */
+    private var tipCx = Panel.WIDTH.toFloat()
+    private var tipCy = Panel.HEIGHT.toFloat()
+
+    /**
+     * The tip's circle at [reveal] (0 to 1): out of the camera button to the farthest
+     * corner, as the gamepad's ripple opens out of the gamepad. Null when it is not between
+     * — wholly shut, or wholly open.
+     */
+    private fun tipCircle(reveal: Float): android.graphics.Path? {
+        if (reveal <= 0.001f || reveal >= 0.999f) return null
+        var far = 0f
+        for (x in floatArrayOf(0f, Panel.WIDTH.toFloat())) for (y in floatArrayOf(0f, Panel.HEIGHT.toFloat())) {
+            far = maxOf(far, kotlin.math.hypot(x - tipCx, y - tipCy))
         }
+        return android.graphics.Path().apply { addCircle(tipCx, tipCy, far * reveal, android.graphics.Path.Direction.CW) }
     }
-    private var tipSilkTime = 0f
-    private var tipSilkLastMs = 0L
 
     /**
      * The left edge of the usable area, in panel units: the left inset of the cutout this
@@ -5924,17 +5943,18 @@ class RearDialView(context: Context) : View(context) {
         if (fade <= 0.001f) return
         // The countdown, the flash and the tap's pulse move for as long as the tip is up.
         if (tipAt != 0L) animating = true
-        fun alpha(of: Float) = (255 * of * fade).toInt().coerceIn(0, 255)
+        // Whole inside the circle: revealed, not faded in. See tipCircle.
+        fun alpha(of: Float) = (255 * of).toInt().coerceIn(0, 255)
 
-        // The silk moves as the front's does: a tenth of a second of shader time per second.
-        if (tipSilkLastMs != 0L) tipSilkTime += 0.1f * (now - tipSilkLastMs) / 1000f
-        tipSilkLastMs = now
-        tipSilk.setFloatUniform("time", tipSilkTime)
-        tipFill.shader = tipSilk
+        // ON THE PANEL'S OWN BACKGROUND, revealed as the gamepad's screen is: inside the
+        // circle opening out of the camera button, with the readout swept away underneath
+        // (see drawFrame). A light shade over the background keeps the words readable on
+        // a bright picture without hiding it.
+        canvas.save()
+        tipCircle(fade)?.let { canvas.clipPath(it) }
         tipFill.color = android.graphics.Color.BLACK
-        tipFill.alpha = alpha(1f)
+        tipFill.alpha = TIP_SHADE
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
-        tipFill.shader = null
 
         // ONE POINT, NOT THE ZONE. The whole lens column closes the camera, but the lenses
         // fill most of it, so a finger goes where it is shown: right on the usable area's
@@ -6009,6 +6029,7 @@ class RearDialView(context: Context) : View(context) {
                 )
             }
         }
+        canvas.restore()
     }
 
     /**
@@ -11977,7 +11998,10 @@ class RearDialView(context: Context) : View(context) {
         private const val CAMERA_TIP_MS = 5_000L
         /** Nobody swiped in this long after it appeared: the tip gives up, the camera stays shut. */
         private const val CAMERA_TIP_GIVE_UP_MS = 90_000L
-        private const val CAMERA_TIP_FADE_MS = 260f
+        /** The tip's circle opening and closing: the gamepad's ripple's time. */
+        private const val CAMERA_TIP_FADE_MS = 1200f   // RIPPLE_MS, below: a const cannot read one declared after it
+        /** The shade over the background inside the tip's circle, for the words' sake. */
+        private const val TIP_SHADE = 0x66
         private const val CAMERA_TIP_LABEL = "I UNDERSTAND"
         private const val CAMERA_TIP_TITLE = 32f
         private const val CAMERA_TIP_BODY = 23f
