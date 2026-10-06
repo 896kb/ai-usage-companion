@@ -5951,15 +5951,16 @@ class RearDialView(context: Context) : View(context) {
         // Whole inside the circle: revealed, not faded in. See tipCircle.
         fun alpha(of: Float) = (255 * of).toInt().coerceIn(0, 255)
 
-        // ON THE PANEL'S OWN BACKGROUND, revealed as the gamepad's screen is: inside the
-        // circle opening out of the camera button, with the readout swept away underneath
-        // (see drawFrame). A light shade over the background keeps the words readable on
-        // a bright picture without hiding it.
+        // ON THE PANEL'S OWN BACKGROUND — the same one, never a copy in a circle. It only
+        // dims, panel-wide, as the tip opens, so the words read on a bright picture. The
+        // ripple is for the page's things: the readout is swept away by the circle out of
+        // the camera button (see drawFrame), and the tip's are revealed inside it, as the
+        // gamepad's screen is.
+        tipFill.color = android.graphics.Color.BLACK
+        tipFill.alpha = (TIP_SHADE * fade).toInt()
+        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
         canvas.save()
         tipCircle(fade)?.let { canvas.clipPath(it) }
-        tipFill.color = android.graphics.Color.BLACK
-        tipFill.alpha = TIP_SHADE
-        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
 
         // ONE POINT, NOT THE ZONE. The whole lens column closes the camera, but the lenses
         // fill most of it, so a finger goes where it is shown: right on the usable area's
