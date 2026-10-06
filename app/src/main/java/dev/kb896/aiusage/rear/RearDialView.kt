@@ -12217,13 +12217,11 @@ class RearDialView(context: Context) : View(context) {
         private const val LOCK_BAND_SLOP = 60f
 
         /**
-         * The colour the instruction is revealed in under the indicator.
-         *
-         * Blue for now, to see the mechanism working. It is the reference's own dark
-         * accent, which is as good a placeholder as any and will be a setting if it
-         * stays.
+         * The colour the instruction is revealed in under the indicator: the app's accent,
+         * as the front shows it — on the lock slider and on the camera tip's, which is the
+         * same slider with another word.
          */
-        private const val LOCK_REVEAL = 0xFF0091FF.toInt()
+        private const val LOCK_REVEAL = dev.kb896.aiusage.ui.glass.Ink.ACCENT
 
         /** Slack around a faded corner glyph, covering its margin and the drift. */
         private const val FADE_PAD = 60f
