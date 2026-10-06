@@ -5803,6 +5803,15 @@ class RearDialView(context: Context) : View(context) {
     )
     private val tipGlowMatrix = android.graphics.Matrix()
 
+    /** The tip's ground: the front screen's silk, at its settings, over the panel's units. */
+    private val tipSilk by lazy {
+        dev.kb896.aiusage.ui.glass.Silk.create().apply {
+            setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        }
+    }
+    private var tipSilkTime = 0f
+    private var tipSilkLastMs = 0L
+
     /**
      * The left edge of the usable area, in panel units: the left inset of the cutout this
      * view's display reports (296 of 904 on the 17 Pro's rear display), scaled. The 17
@@ -5816,7 +5825,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * The page: black over everything, and the real place to tap lit up where it is — the
+     * The page: the front screen's silk over everything, and the real place to tap lit up where it is — the
      * strip at the left of this very screen that the camera leaves grey and the tap watch
      * listens to ([BandTap.BAND] of the width), flashing, with a tap pulsing between the
      * lenses. Beside it, what to do, centred in the room above the slider; and until the
@@ -5830,9 +5839,15 @@ class RearDialView(context: Context) : View(context) {
         if (tipAt != 0L) animating = true
         fun alpha(of: Float) = (255 * of * fade).toInt().coerceIn(0, 255)
 
+        // The silk moves as the front's does: a tenth of a second of shader time per second.
+        if (tipSilkLastMs != 0L) tipSilkTime += 0.1f * (now - tipSilkLastMs) / 1000f
+        tipSilkLastMs = now
+        tipSilk.setFloatUniform("time", tipSilkTime)
+        tipFill.shader = tipSilk
         tipFill.color = android.graphics.Color.BLACK
         tipFill.alpha = alpha(1f)
         canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
+        tipFill.shader = null
 
         // ONE POINT, NOT THE ZONE. The whole lens column closes the camera, but the lenses
         // fill most of it, so a finger goes where it is shown: right on the usable area's

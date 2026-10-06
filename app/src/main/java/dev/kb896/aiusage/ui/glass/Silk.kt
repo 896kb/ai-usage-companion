@@ -74,7 +74,14 @@ half4 main(float2 coord) {
     /** Shader time, in the original's units. */
     var time = 0f; private set
 
-    val shader: RuntimeShader by lazy {
+    val shader: RuntimeShader by lazy { create() }
+
+    /**
+     * A silk of its own, at the same settings, for a canvas that keeps its own time — the
+     * camera tip on the back, which must not move the front's (both live in one process
+     * when the preview draws the panel).
+     */
+    fun create(): RuntimeShader =
         RuntimeShader(SRC).apply {
             setFloatUniform("color",
                 ((COLOR shr 16) and 0xFF) / 255f, ((COLOR shr 8) and 0xFF) / 255f, (COLOR and 0xFF) / 255f)
@@ -85,7 +92,6 @@ half4 main(float2 coord) {
             setFloatUniform("time", 0f)
             setFloatUniform("size", 1f, 1f)
         }
-    }
 
     fun size(w: Int, h: Int) { shader.setFloatUniform("size", w.toFloat(), h.toFloat()) }
 
