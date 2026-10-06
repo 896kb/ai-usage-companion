@@ -188,7 +188,12 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         if (active === to && to.inLeg) return                 // already on its way there
         val at = position()
         val from = if (forward) at else maxOf(0L, f.durationMs - at)
-        if (active === to && from >= f.durationMs - END_SLACK_MS) return   // already there
+        if (active === to && from >= f.durationMs - END_SLACK_MS) {
+            // Already there. Just opened — after a sleep — it has put nothing up yet: the
+            // frame it is resting on goes up, or the panel would stand on its bare ground.
+            if (frame == null) to.showHere()
+            return
+        }
         switchTo(to)
         to.leg(from, easeIn, easeOut)
     }
@@ -272,8 +277,39 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
     }
 
     /** A copy of what is on show, safe from the reader reusing its buffer. */
-    private fun snapshot(): Bitmap? =
-        frame?.let { runCatching { it.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() } ?: still
+    private fun snapshot(): Bitmap? = frame?.let(::copyOf) ?: still
+
+    /**
+     * A frame the decoder lent, as a bitmap of our own. A plain copy reads the frame back
+     * to the CPU, which a decoder's YUV buffer may refuse; then the GPU draws it into a
+     * buffer of our own instead, which is a picture any canvas can draw.
+     */
+    private fun copyOf(src: Bitmap): Bitmap? {
+        runCatching { src.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()?.let { return it }
+        return try {
+            val reader = ImageReader.newInstance(src.width, src.height, android.graphics.PixelFormat.RGBA_8888, 1,
+                HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
+            val node = android.graphics.RenderNode("still").apply {
+                setPosition(0, 0, src.width, src.height)
+                beginRecording().apply { drawBitmap(src, 0f, 0f, null) }
+                endRecording()
+            }
+            val renderer = android.graphics.HardwareRenderer().apply {
+                setSurface(reader.surface)
+                setContentRoot(node)
+            }
+            renderer.createRenderRequest().setWaitForPresent(true).syncAndDraw()
+            val copy = reader.acquireNextImage()?.use { image ->
+                image.hardwareBuffer?.use { Bitmap.wrapHardwareBuffer(it, ColorSpace.get(ColorSpace.Named.SRGB)) }
+            }
+            renderer.destroy()
+            reader.close()
+            copy
+        } catch (e: Exception) {
+            Log.w(TAG, "could not keep the frame on show", e)
+            null
+        }
+    }
 
     /** From the start: the frame on show is what the new run fades in from. */
     private fun fadeOut() {
@@ -362,6 +398,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                 reader.setOnImageAvailableListener({ took(it) }, Handler(frames.looper))
                 codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
                 codec.configure(format, reader.surface, null, 0)
+                // Never past the last frame: a clip slept at its very end reopens on that frame.
+                skipUntil = minOf(skipUntil, maxOf(0L, durationMs - END_SLACK_MS * 2))
             } catch (e: Exception) {
                 extractor.release()
                 frames.quitSafely()
@@ -423,6 +461,11 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
             }
             mode = Mode.LEG
             lock.notifyAll()
+        }
+
+        /** Puts up the frame it was opened at — or its first — and holds it there. */
+        fun showHere() = synchronized(lock) {
+            if (mode == Mode.IDLE) { mode = Mode.FIRST; lock.notifyAll() }
         }
 
         /** Decodes to the frame at [at] and holds it unshown, ready for a [leg] from there. */
