@@ -81,10 +81,8 @@ class PanelPreviewView @JvmOverloads constructor(
 
     /** The back's corner radius in panel pixels, until the back says otherwise. */
     private var cornerPx = DEFAULT_CORNER
-    private var dimming = false
     private var last: RearDialView.Mirror? = null
 
-    private val veil = android.graphics.Paint()
 
     init {
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
@@ -105,12 +103,16 @@ class PanelPreviewView @JvmOverloads constructor(
         }
     }
 
-    /** The back's state: page, always-on, slider, rings, table lights, corner — and its dim. */
+    /**
+     * The back's state: page, always-on, slider, rings, table lights, corner. Not its dim:
+     * the preview is for seeing the settings, and a preview that went dark with the back's
+     * double tap hid the very thing being set.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun mirror(m: RearDialView.Mirror, dim: Boolean) {
         last = m
         if (cornerPx != m.corner) { cornerPx = m.corner; invalidateOutline() }
         dial.mirror(shown(m))
-        if (dimming != dim) { dimming = dim; invalidate() }
     }
 
     /**
@@ -135,20 +137,9 @@ class PanelPreviewView @JvmOverloads constructor(
         else -> m
     }
 
-    override fun dispatchDraw(canvas: android.graphics.Canvas) {
-        super.dispatchDraw(canvas)
-        // The double tap's dim is the window's brightness and a veil on the back; here
-        // only a veil can stand for both.
-        if (dimming) {
-            veil.color = (255 * DIM_VEIL).toInt() shl 24
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), veil)
-        }
-    }
-
     private companion object {
         /** The 17 Pro's rear display corner, in its own pixels, until measured. */
         const val DEFAULT_CORNER = 97f
-        const val DIM_VEIL = 0.7f
     }
 
     /**
