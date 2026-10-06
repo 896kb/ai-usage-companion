@@ -5894,7 +5894,12 @@ class RearDialView(context: Context) : View(context) {
     /** The tap's glow: one unit-radius gradient, placed and sized by its matrix each frame. */
     private val tipGlow = android.graphics.RadialGradient(
         0f, 0f, 1f,
-        intArrayOf(0xCC0091FF.toInt(), 0x550091FF, 0x000091FF),
+        // The app's accent (Ink.ACCENT), glowing: strong at the point, gone at the edge.
+        intArrayOf(
+            (CAMERA_TIP_TAP and 0x00FFFFFF) or (0xCC shl 24),
+            (CAMERA_TIP_TAP and 0x00FFFFFF) or (0x55 shl 24),
+            CAMERA_TIP_TAP and 0x00FFFFFF,
+        ),
         floatArrayOf(0f, 0.45f, 1f),
         android.graphics.Shader.TileMode.CLAMP,
     )
@@ -12019,7 +12024,8 @@ class RearDialView(context: Context) : View(context) {
         private const val CAMERA_TIP_BREATH_MS = 2_400L
         private const val CAMERA_TIP_GLOW = 54f
         /** The tap, in the accent the slider reveals. */
-        private const val CAMERA_TIP_TAP = 0xFF0091FF.toInt()
+        /** The tap point's colour: the app's accent, as the front shows it. */
+        private const val CAMERA_TIP_TAP = dev.kb896.aiusage.ui.glass.Ink.ACCENT
 
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
