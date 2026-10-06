@@ -19,8 +19,8 @@ class InkTest {
     /** Nothing on the front reacts to the cell behind it: light or dark, the dark background's tokens. */
     @Test fun `the catalog tokens are the dark background's, whatever the cell`() {
         for (cell in floatArrayOf(0.7f, 0.3f)) {
-            assertEquals(0xFF30D158.toInt(), Ink.on(cell))
-            assertEquals(0xFFFDFB76.toInt(), Ink.accent(cell))
+            assertEquals(0xFFE7FF00.toInt(), Ink.on(cell))
+            assertEquals(0xFFE7FF00.toInt(), Ink.accent(cell))
             assertEquals(0x5C787880, Ink.track(cell))
             assertEquals(0.56f, Ink.scrimAlpha(cell), 0.001f)
         }

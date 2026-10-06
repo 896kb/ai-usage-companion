@@ -52,20 +52,20 @@ object Ink {
     @Suppress("UNUSED_PARAMETER")
     fun secondary(luminance: Float): Int = 0x99FFFFFF.toInt()
 
-    /** The toggle's on colour. LiquidToggle.kt:56-57. */
-    fun on(luminance: Float): Int =
-        if (isLight(luminance)) 0xFF34C759.toInt() else 0xFF30D158.toInt()
+    /** The toggle's on colour: the accent, as every switch's is. */
+    @Suppress("UNUSED_PARAMETER")
+    fun on(luminance: Float): Int = ACCENT
 
     /** The slider fill and the segmented selection. LiquidSlider.kt:59-60. */
     /**
-     * The app's green: the launcher icon's own background (ic_launcher_background,
-     * #FDFB76) — the bottom bar's open tab, the confirm in every dialog, a slider's fill.
-     * It was the catalog's blue.
+     * The app's accent, #E7FF00 — the bottom bar's open tab, the confirm in every dialog,
+     * a slider's fill, a switch that is on, the font list's tick. The one place it is
+     * written; styles_dialog.xml repeats it for what the framework tints.
      */
     @Suppress("UNUSED_PARAMETER")
-    fun accent(luminance: Float): Int = ICON_GREEN
+    fun accent(luminance: Float): Int = ACCENT
 
-    const val ICON_GREEN = 0xFFFDFB76.toInt()
+    const val ACCENT = 0xFFE7FF00.toInt()
 
     /** An inactive track. LiquidToggle.kt:59-60: grey at 0.2 light, 0.36 dark. */
     fun track(luminance: Float): Int =

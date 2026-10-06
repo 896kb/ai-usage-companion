@@ -46,9 +46,9 @@
     <style name="PanelDialog.Glass">
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowIsFloating">true</item>
-        <!-- The front's accent, the app icon's green the bottom bar shows the open tab in
-             (Ink.accent), for cursors and anything else the framework tints. -->
-        <item name="android:colorAccent">#FDFB76</item>
-        <item name="android:colorControlActivated">#FDFB76</item>
+        <!-- The front's accent, the colour the bottom bar shows the open tab in
+             (Ink.ACCENT), for cursors and anything else the framework tints. -->
+        <item name="android:colorAccent">#E7FF00</item>
+        <item name="android:colorControlActivated">#E7FF00</item>
     </style>
 </resources>

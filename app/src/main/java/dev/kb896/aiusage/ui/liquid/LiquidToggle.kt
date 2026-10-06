@@ -8,7 +8,7 @@
 // Changed only where the two apps differ: what the thumb bends is this app's silk background
 // (SilkContent, from Backdrop) rather than the store's, it is redrawn with the silk's frames
 // as a Glassy view rather than through the store's registry, the shaders are this app's own
-// (rear/Glass, the same sources) and the accent is the app icon's green. The helpers are
+// (rear/Glass, the same sources) and the accent is the app's (Ink.ACCENT). The helpers are
 // file-private so they sit beside the app's own glass helpers without clashing.
 package dev.kb896.aiusage.ui.liquid
 
@@ -560,8 +560,8 @@ class LiquidToggle(context: Context) : View(context), Checkable, dev.kb896.aiusa
         /** Room around the track for the pressed (1.5x) thumb. */
         const val PAD_X = 12f
         const val PAD_Y = 8f
-        /** The catalog's dark-theme track colour, 0x787880 at 0.36; the accent is the app icon's green. */
+        /** The catalog's dark-theme track colour, 0x787880 at 0.36; the accent is the app's (Ink.ACCENT). */
         const val TRACK = 0x5C787880
-        val ACCENT = dev.kb896.aiusage.ui.glass.Ink.ICON_GREEN
+        val ACCENT = dev.kb896.aiusage.ui.glass.Ink.ACCENT
     }
 }
