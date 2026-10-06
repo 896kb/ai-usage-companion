@@ -411,8 +411,9 @@ class MainActivity : ComponentActivity() {
             TAB_MEDIA -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_MEDIA, aod = false)
             TAB_AOD -> preview.show(null, aod = true)
             TAB_USAGE -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_READOUT, aod = false)
-            // General is about the whole panel: the back as it is.
-            else -> preview.show(null, aod = false)
+            // General is about the whole panel: its top page, the clock's — as the Clock tab
+            // shows it, rather than whatever the back is doing (always-on, as often as not).
+            else -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
         }
         inkHeadings()
     }
