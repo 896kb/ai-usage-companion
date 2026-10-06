@@ -108,6 +108,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("io.github.kyant0:backdrop:1.0.6")
+    // The video background's clip is cut once, on the phone, by Media3's Transformer: trim,
+    // crop, scale to the rear display, no audio. See ui/video/ClipExport.
+    implementation("androidx.media3:media3-transformer:1.11.1")
+    implementation("androidx.media3:media3-effect:1.11.1")
+    implementation("androidx.media3:media3-common:1.11.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
