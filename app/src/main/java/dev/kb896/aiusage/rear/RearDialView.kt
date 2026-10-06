@@ -11013,21 +11013,36 @@ class RearDialView(context: Context) : View(context) {
         val fade = aodFade(frameNowMs)
         if (fade >= 0.999f) return
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
-        val opacity = 255 * config.video.opacity.coerceIn(0f, 1f)
-        videoPaint.alpha = opacity.toInt()
+        val now = SystemClock.uptimeMillis()
+        // A slowed run: the frame fading in over the one before it. A restart: the frame it
+        // stopped on, fading out over the new run.
+        val blend = video.blend(now)
+        val previous = video.previous?.takeIf { blend < 1f }
+        val from = video.fadeFrom
+        val left = video.fadeLeft(now)
+        val opacity = config.video.opacity.coerceIn(0f, 1f)
+        // Stacked frames at the video's opacity would let more through mid-blend than at
+        // either end; drawn whole into a layer that has the opacity, they cannot.
+        val stacked = previous != null || (from != null && left > 0f)
+        val layered = stacked && opacity < 0.999f
+        if (layered) canvas.saveLayerAlpha(panelRect, (255 * opacity).toInt())
+        val full = if (layered) 255f else 255f * opacity
         videoPaint.colorFilter = if (fade > 0f) {
             val keep = (255 * (1f - fade)).toInt().coerceIn(0, 255)
             android.graphics.LightingColorFilter((keep shl 16) or (keep shl 8) or keep, 0)
         } else null
-        canvas.drawBitmap(frame, null, panelRect, videoPaint)
-        // Starting over: the frame it stopped on, fading out over the new run.
-        val from = video.fadeFrom
-        val left = video.fadeLeft(SystemClock.uptimeMillis())
-        if (from != null && left > 0f) {
-            videoPaint.alpha = (opacity * left).toInt()
-            canvas.drawBitmap(from, null, panelRect, videoPaint)
-            animating = true
+        if (previous != null) {
+            videoPaint.alpha = full.toInt()
+            canvas.drawBitmap(previous, null, panelRect, videoPaint)
         }
+        videoPaint.alpha = (full * if (previous != null) blend else 1f).toInt()
+        canvas.drawBitmap(frame, null, panelRect, videoPaint)
+        if (from != null && left > 0f) {
+            videoPaint.alpha = (full * left).toInt()
+            canvas.drawBitmap(from, null, panelRect, videoPaint)
+        }
+        if (layered) canvas.restore()
+        if (stacked) animating = true
     }
 
     /**

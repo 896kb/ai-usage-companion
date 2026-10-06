@@ -6,8 +6,9 @@ import android.graphics.ImageFormat
 import android.hardware.HardwareBuffer
 import android.media.Image
 import android.media.ImageReader
-import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -22,20 +23,28 @@ import android.util.Log
  * frame is wrapped (no copy) and [onFrame] asks for a redraw; the frames before it stay
  * open a little longer, since the render thread may still be reading them.
  *
- * The reader is the clip's own size, read from the file: the decoder writes at that size,
- * and the panel scales the frame into place when it draws it.
+ * OUR CLOCK, NOT THE PLAYER'S. The clip is decoded by MediaCodec directly and every frame
+ * is put up when [EaseCurve.wallMs] says it is due. A MediaPlayer eased by changing its
+ * speed sixty times a second resynced on every change and stuttered; this has no speed to
+ * change, only times. And where the run is slowed, a frame is put up one frame early and
+ * [blend] fades it in over the one before it across the time between them — at a quarter
+ * speed a 30 fps clip would otherwise step at seven and a half.
  *
  * STOPPING NEVER BLANKS IT. A frozen or sleeping video keeps [still], a copy of the frame
  * it stopped on, and starting over cross-fades from that copy into the new run over
  * [FADE_MS] — the panel draws [fadeFrom] over the live frame at [fadeLeft].
  *
- * NOTHING HERE MAY THROW INTO THE PANEL. A player in its error state (mediaserver gone,
- * the decoder taken back) throws on every call; that is caught, the player let go, and
- * [onLost] asks the panel to open a new one. The reader is closed on its own thread, the
- * one its frames arrive on, so a frame being taken can never meet a reader being closed.
+ * NOTHING HERE MAY THROW INTO THE PANEL. A decoder that fails is let go and [onLost] asks
+ * the panel to open a new one. The reader is closed on the thread its frames arrive on,
+ * so a frame being taken can never meet a reader being closed.
  */
 class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> Unit) {
     @Volatile var frame: Bitmap? = null; private set
+
+    /** The frame [frame] is fading in over while a slowed run blends, else null. */
+    @Volatile var previous: Bitmap? = null; private set
+    @Volatile private var blendFrom = 0L
+    @Volatile private var blendTo = 0L
 
     /** The frame the video stopped on, kept through sleep: a copy, not the reader's buffer. */
     var still: Bitmap? = null; private set
@@ -44,94 +53,19 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
     var fadeFrom: Bitmap? = null; private set
     @Volatile private var fadeStart = 0L
     @Volatile private var awaitingRun = false
-    @Volatile private var pauseOnFrame = false
-    /** Bumped on every close: frames from a closed reader are dropped. */
-    @Volatile private var generation = 0
 
-    private var player: MediaPlayer? = null
-    private var reader: ImageReader? = null
-    private var thread: HandlerThread? = null
-    private var path: String? = null
-    private val held = ArrayDeque<Image>()
+    private var decoder: Decoder? = null
     private val main = Handler(Looper.getMainLooper())
-    private var easeIn = false
-    private var easeOut = false
-    private var easing = false
-    private var lastSpeed = 1f
-
-    /** Opens [path]; true when that made a new player, which has drawn nothing yet. */
-    fun open(path: String): Boolean {
-        if (path == this.path && player != null) return false
-        // Another clip: the old one's frame is not this one's to fade from.
-        if (this.path != null && path != this.path) drop() else close()
-        val (w, h) = sizeOf(path) ?: return false
-        this.path = path
-        val t = HandlerThread("video-backdrop").also { it.start() }
-        thread = t
-        val gen = generation
-        val r = ImageReader.newInstance(w, h, ImageFormat.PRIVATE, 5, HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE)
-        r.setOnImageAvailableListener({ took(it, gen) }, Handler(t.looper))
-        reader = r
-        player = try {
-            MediaPlayer().apply {
-                setDataSource(path)
-                setSurface(r.surface)
-                setVolume(0f, 0f)
-                setOnErrorListener { _, what, extra ->
-                    Log.w(TAG, "player error $what/$extra")
-                    main.post { lost() }
-                    true
-                }
-                prepare()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "could not open $path", e)
-            close()
-            return false
-        }
-        return true
-    }
-
-    private fun sizeOf(path: String): Pair<Int, Int>? {
-        val r = MediaMetadataRetriever()
-        return try {
-            r.setDataSource(path)
-            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 0
-            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 0
-            if (w > 0 && h > 0) w to h else null
-        } catch (_: Exception) {
-            null
-        } finally {
-            r.release()
-        }
-    }
-
-    /** On the reader's thread. Never throws: a frame that cannot be had is skipped. */
-    private fun took(r: ImageReader, gen: Int) {
-        if (gen != generation) return
-        val image = try { r.acquireLatestImage() } catch (_: Exception) { null } ?: return
-        val bmp = try {
-            image.hardwareBuffer?.use { Bitmap.wrapHardwareBuffer(it, ColorSpace.get(ColorSpace.Named.SRGB)) }
-        } catch (_: Exception) {
-            null
-        }
-        if (bmp == null || gen != generation) {
-            if (bmp == null) Log.w(TAG, "a frame would not wrap")
-            image.close()
-            return
-        }
-        synchronized(held) {
-            held.addLast(image)
-            while (held.size > 3) held.removeFirst().close()
-        }
-        frame = bmp
-        if (awaitingRun) { awaitingRun = false; fadeStart = SystemClock.uptimeMillis() }
-        if (pauseOnFrame) { pauseOnFrame = false; main.post { guard { if (it.isPlaying) it.pause() } } }
-        main.post(onFrame)
-    }
+    private val losses = ArrayDeque<Long>()
 
     /** What to show: the live frame, or the still while there is none. */
     val shown: Bitmap? get() = frame ?: still
+
+    /** How far [frame] has faded in over [previous], 0 to 1; 1 when nothing is blending. */
+    fun blend(now: Long): Float {
+        if (previous == null || blendTo <= blendFrom) return 1f
+        return ((now - blendFrom).toFloat() / (blendTo - blendFrom)).coerceIn(0f, 1f)
+    }
 
     /** How much of [fadeFrom] still shows, 1 to 0 over [FADE_MS] from the run's first frame. */
     fun fadeLeft(now: Long): Float {
@@ -143,109 +77,48 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         return left
     }
 
-    /** A copy of what is on show, safe from the reader reusing its buffer. */
-    private fun snapshot(): Bitmap? =
-        frame?.let { runCatching { it.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() } ?: still
-
-    /** Runs [block] on the player; a player that has failed is let go and reopened, never thrown from. */
-    private inline fun guard(block: (MediaPlayer) -> Unit) {
-        val p = player ?: return
-        try {
-            block(p)
-        } catch (e: IllegalStateException) {
-            Log.w(TAG, "player refused a call", e)
-            lost()
+    /** Opens [path]; true when that made a new decoder, which has drawn nothing yet. */
+    fun open(path: String): Boolean {
+        val d = decoder
+        if (d != null && d.path == path) return false
+        // Another clip: the old one's frame is not this one's to fade from.
+        if (d != null) drop() else close()
+        decoder = try {
+            Decoder(path).also { it.start() }
+        } catch (e: Exception) {
+            Log.w(TAG, "could not open $path", e)
+            null
         }
-    }
-
-    /** The player failed: keep what was on show, let go of it, and ask for a new one. */
-    private fun lost() {
-        if (player == null) return
-        still = snapshot()
-        close()
-        // A clip that fails every time it opens must not be reopened forever: three losses
-        // in half a minute and it stays on its still until the panel next changes state.
-        val now = SystemClock.uptimeMillis()
-        losses.removeAll { now - it > LOSS_WINDOW_MS }
-        losses.addLast(now)
-        if (losses.size <= MAX_LOSSES) onLost()
-    }
-    private val losses = ArrayDeque<Long>()
-
-    /** From the start, fading out of whatever was on show. */
-    private fun startOver(p: MediaPlayer) {
-        fadeFrom = snapshot()
-        fadeStart = 0L
-        awaitingRun = fadeFrom != null
-        p.seekTo(0, MediaPlayer.SEEK_CLOSEST)
+        return decoder != null
     }
 
     /** Plays round and round; [restart] starts it over with the fade, else it carries on. */
-    fun loop(restart: Boolean) = guard { p ->
-        stopEasing()
-        pauseOnFrame = false
-        p.isLooping = true
-        if (restart) startOver(p)
-        if (lastSpeed != 1f || !p.isPlaying) {
-            lastSpeed = 1f
-            // A speed set on a paused player starts it: this is the start.
-            p.playbackParams = p.playbackParams.setSpeed(1f)
-        }
-        if (!p.isPlaying) p.start()
+    fun loop(restart: Boolean) {
+        val d = decoder ?: return
+        if (restart) fadeOut()
+        d.command(Mode.LOOP, restart, easeIn = false, easeOut = false)
     }
 
     /**
-     * Holds the frame where it is. A player that has drawn nothing yet — just opened, after
-     * a sleep with no still — runs to its first frame and stops there, since a paused
-     * player shows nothing until it has played.
+     * Holds the frame where it is. A decoder that has drawn nothing yet — just opened, after
+     * a sleep with no still — puts up its first frame and stops there.
      */
-    fun freeze() = guard { p ->
-        stopEasing()
-        if (p.isPlaying) {
-            p.pause()
-            still = snapshot()
-        } else if (frame == null && still == null) {
-            pauseOnFrame = true
-            p.seekTo(0, MediaPlayer.SEEK_CLOSEST)
-            p.start()
-        }
+    fun freeze() {
+        val d = decoder ?: return
+        if (frame == null && still == null) d.command(Mode.FIRST, restart = true, easeIn = false, easeOut = false)
+        else { d.command(Mode.IDLE, restart = false, easeIn = false, easeOut = false); still = snapshot() }
     }
 
     /** One run from the start, fading in from the frame it stopped on, eased if asked. */
-    fun playOnce(easeIn: Boolean, easeOut: Boolean) = guard { p ->
-        stopEasing()
-        pauseOnFrame = false
-        p.isLooping = false
-        startOver(p)
-        this.easeIn = easeIn
-        this.easeOut = easeOut
-        lastSpeed = EaseCurve.speed(0, p.duration.toLong(), easeIn, easeOut)
-        p.playbackParams = p.playbackParams.setSpeed(lastSpeed)
-        if (!p.isPlaying) p.start()
-        if (easeIn || easeOut) { easing = true; main.post(ease) }
+    fun playOnce(easeIn: Boolean, easeOut: Boolean) {
+        val d = decoder ?: return
+        fadeOut()
+        d.command(Mode.ONCE, restart = true, easeIn = easeIn, easeOut = easeOut)
     }
-
-    /** The ramp, followed while it runs; stops itself with the clip. */
-    private val ease = object : Runnable {
-        override fun run() {
-            if (!easing) return
-            guard { p ->
-                if (!p.isPlaying) { easing = false; return@guard }
-                val s = EaseCurve.speed(p.currentPosition.toLong(), p.duration.toLong(), easeIn, easeOut)
-                if (kotlin.math.abs(s - lastSpeed) > 0.01f) {
-                    lastSpeed = s
-                    p.playbackParams = p.playbackParams.setSpeed(s)
-                }
-                main.postDelayed(this, EASE_STEP_MS)
-            }
-        }
-    }
-
-    private fun stopEasing() { easing = false; main.removeCallbacks(ease) }
 
     /** Lets go of the decoder, keeping the frame it was on to show until it is back. */
     fun sleep() {
-        if (player == null) return
+        if (decoder == null) return
         still = snapshot()
         close()
     }
@@ -258,30 +131,259 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
     }
 
     private fun close() {
-        stopEasing()
-        pauseOnFrame = false
+        decoder?.quit()
+        decoder = null
         awaitingRun = false
-        generation++
-        runCatching { player?.release() }
-        player = null
-        // The reader, and the images it lent, are closed on the thread its frames arrive on.
-        val r = reader
-        val t = thread
-        reader = null
-        thread = null
-        if (t != null) Handler(t.looper).post {
-            synchronized(held) { held.forEach { it.close() }; held.clear() }
-            r?.close()
-            t.quitSafely()
-        }
         frame = null
-        path = null
+        previous = null
+    }
+
+    /** A copy of what is on show, safe from the reader reusing its buffer. */
+    private fun snapshot(): Bitmap? =
+        frame?.let { runCatching { it.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() } ?: still
+
+    /** From the start: the frame on show is what the new run fades in from. */
+    private fun fadeOut() {
+        fadeFrom = snapshot()
+        fadeStart = 0L
+        awaitingRun = fadeFrom != null
+    }
+
+    /** The decoder failed: keep what was on show, let go of it, and ask for a new one. */
+    private fun lost(which: Decoder) {
+        if (decoder !== which) return
+        still = snapshot()
+        close()
+        // A clip that fails every time it opens must not be reopened forever: three losses
+        // in half a minute and it stays on its still until the panel next changes state.
+        val now = SystemClock.uptimeMillis()
+        losses.removeAll { now - it > LOSS_WINDOW_MS }
+        losses.addLast(now)
+        if (losses.size <= MAX_LOSSES) onLost()
+    }
+
+    private enum class Mode { IDLE, FIRST, LOOP, ONCE }
+
+    /**
+     * One clip: its extractor, its codec, the reader its frames land in, and the thread
+     * that feeds the one and paces the other. Commands from the main thread go through
+     * [lock]; a wait for a frame's time wakes for them.
+     */
+    private inner class Decoder(val path: String) : Thread("video-backdrop") {
+        private val lock = Object()
+        private val extractor = MediaExtractor()
+        private val codec: MediaCodec
+        private val reader: ImageReader
+        private val frames = HandlerThread("video-frames").also { it.start() }
+        private val held = ArrayDeque<Image>()
+        private val durationMs: Long
+
+        private var mode = Mode.IDLE
+        private var restart = false
+        private var easeIn = false
+        private var easeOut = false
+        private var quitting = false
+        /** Wall time (uptime ms) at which clip time 0 is due; moved on by a pause. */
+        private var base = 0L
+        private var pausedAt = 0L
+        /** The blend window the next frame to arrive is put up with; set before it is released. */
+        @Volatile private var nextFrom = 0L
+        @Volatile private var nextTo = 0L
+        @Volatile private var closed = false
+
+        init {
+            try {
+                extractor.setDataSource(path)
+                val track = (0 until extractor.trackCount).first {
+                    extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+                }
+                extractor.selectTrack(track)
+                val format = extractor.getTrackFormat(track)
+                val w = format.getInteger(MediaFormat.KEY_WIDTH)
+                val h = format.getInteger(MediaFormat.KEY_HEIGHT)
+                durationMs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) / 1000 else 0L
+                reader = ImageReader.newInstance(w, h, ImageFormat.PRIVATE, 5, HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE)
+                reader.setOnImageAvailableListener({ took(it) }, Handler(frames.looper))
+                codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                codec.configure(format, reader.surface, null, 0)
+            } catch (e: Exception) {
+                extractor.release()
+                frames.quitSafely()
+                throw e
+            }
+        }
+
+        fun command(mode: Mode, restart: Boolean, easeIn: Boolean, easeOut: Boolean) = synchronized(lock) {
+            val now = SystemClock.uptimeMillis()
+            if (this.mode == Mode.IDLE && mode != Mode.IDLE && !restart && pausedAt != 0L) base += now - pausedAt
+            if (mode == Mode.IDLE && this.mode != Mode.IDLE) pausedAt = now
+            this.mode = mode
+            this.restart = this.restart || restart
+            this.easeIn = easeIn
+            this.easeOut = easeOut
+            lock.notifyAll()
+        }
+
+        fun quit() = synchronized(lock) { quitting = true; lock.notifyAll() }
+
+        /** When clip time [ptsMs] is due, as an offset from [base]. */
+        private fun wall(ptsMs: Long): Long =
+            if (mode == Mode.ONCE) EaseCurve.wallMs(ptsMs, durationMs, easeIn, easeOut).toLong() else ptsMs
+
+        override fun run() {
+            try {
+                codec.start()
+                decode()
+            } catch (e: Exception) {
+                Log.w(TAG, "decoder failed", e)
+                main.post { lost(this) }
+            } finally {
+                runCatching { codec.stop() }
+                runCatching { codec.release() }
+                runCatching { extractor.release() }
+                // The reader, and the images it lent, close on the thread frames arrive on.
+                Handler(frames.looper).post {
+                    closed = true
+                    synchronized(held) { held.forEach { it.close() }; held.clear() }
+                    runCatching { reader.close() }
+                    frames.quitSafely()
+                }
+            }
+        }
+
+        private fun decode() {
+            val info = MediaCodec.BufferInfo()
+            var inputDone = false
+            var lastPts = -1L
+            var lastDue = 0L
+            var frameMs = 33L
+            while (true) {
+                synchronized(lock) {
+                    if (quitting) return
+                    if (restart) {
+                        restart = false
+                        codec.flush()
+                        extractor.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                        inputDone = false
+                        lastPts = -1L
+                        base = SystemClock.uptimeMillis()
+                        pausedAt = 0L
+                    }
+                    while (mode == Mode.IDLE && !quitting && !restart) lock.wait()
+                    if (quitting) return
+                }
+                if (!inputDone) {
+                    val i = codec.dequeueInputBuffer(TICK_US)
+                    if (i >= 0) {
+                        val n = extractor.readSampleData(codec.getInputBuffer(i)!!, 0)
+                        if (n < 0) {
+                            codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            codec.queueInputBuffer(i, 0, n, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val o = codec.dequeueOutputBuffer(info, TICK_US)
+                if (o < 0) continue
+                if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                    codec.releaseOutputBuffer(o, false)
+                    synchronized(lock) {
+                        if (mode == Mode.LOOP) {
+                            // Round again, the first frame due one frame after the last.
+                            codec.flush()
+                            extractor.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                            inputDone = false
+                            base = lastDue + frameMs
+                            lastPts = -1L
+                        } else {
+                            mode = Mode.IDLE   // a run's end: its last frame stays up
+                            pausedAt = SystemClock.uptimeMillis()
+                        }
+                    }
+                    continue
+                }
+                val pts = info.presentationTimeUs / 1000
+                if (!present(o, pts, lastPts, lastDue)) continue
+                if (lastPts >= 0 && pts > lastPts) frameMs = pts - lastPts
+                lastDue = synchronized(lock) { base } + wall(pts)
+                lastPts = pts
+            }
+        }
+
+        /**
+         * Waits until frame [pts] is due and puts it up; false when a command overtook it
+         * (a restart drops it, a pause holds it until resumed). A slowed frame goes up one
+         * frame early and blends in across the gap — see the class comment.
+         */
+        private fun present(o: Int, pts: Long, lastPts: Long, lastDue: Long): Boolean {
+            while (true) {
+                val (due, releaseAt) = synchronized(lock) {
+                    if (quitting || restart) { codec.releaseOutputBuffer(o, false); return false }
+                    if (mode == Mode.FIRST) {
+                        nextFrom = 0L; nextTo = 0L
+                        codec.releaseOutputBuffer(o, true)
+                        mode = Mode.IDLE
+                        pausedAt = SystemClock.uptimeMillis()
+                        return true
+                    }
+                    if (mode == Mode.IDLE) { lock.wait(); return@synchronized null to null }
+                    val due = base + wall(pts)
+                    val slowed = lastPts >= 0 && (due - lastDue) > (pts - lastPts) * SLOWED
+                    due to (if (slowed) lastDue else due)
+                }
+                if (due == null || releaseAt == null) continue
+                val wait = releaseAt - SystemClock.uptimeMillis()
+                if (wait > 0) {
+                    synchronized(lock) { lock.wait(wait) }
+                    continue   // re-read: a command may have moved the clock
+                }
+                if (releaseAt < due) { nextFrom = releaseAt; nextTo = due } else { nextFrom = 0L; nextTo = 0L }
+                codec.releaseOutputBuffer(o, true)
+                return true
+            }
+        }
+
+        /** On the frames thread. Never throws: a frame that cannot be had is skipped. */
+        private fun took(r: ImageReader) {
+            if (closed) return
+            val image = try { r.acquireLatestImage() } catch (_: Exception) { null } ?: return
+            val bmp = try {
+                image.hardwareBuffer?.use { Bitmap.wrapHardwareBuffer(it, ColorSpace.get(ColorSpace.Named.SRGB)) }
+            } catch (_: Exception) {
+                null
+            }
+            if (bmp == null) {
+                Log.w(TAG, "a frame would not wrap")
+                image.close()
+                return
+            }
+            synchronized(held) {
+                held.addLast(image)
+                while (held.size > 3) held.removeFirst().close()
+            }
+            val from = nextFrom
+            val to = nextTo
+            if (to > from) {
+                previous = frame
+                blendFrom = from
+                blendTo = to
+            } else {
+                previous = null
+            }
+            frame = bmp
+            if (awaitingRun) { awaitingRun = false; fadeStart = SystemClock.uptimeMillis() }
+            main.post(onFrame)
+        }
     }
 
     private companion object {
         const val TAG = "AiUsageVideo"
-        /** How often the ramp's speed is updated; frames still arrive at the clip's own rate. */
-        const val EASE_STEP_MS = 16L
+        /** How long a decoder call waits for a buffer before looking at the commands again. */
+        const val TICK_US = 5_000L
+        /** A frame held this much longer than the clip spaced it is slowed, and blends. */
+        const val SLOWED = 1.3f
         /** The cross-fade from the frame it stopped on into a new run. */
         const val FADE_MS = 450L
         const val MAX_LOSSES = 3
