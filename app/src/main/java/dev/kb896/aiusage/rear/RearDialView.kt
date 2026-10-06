@@ -218,7 +218,26 @@ class RearDialView(context: Context) : View(context) {
     private var lumKey: String? = null
 
     private fun refreshLuminance() {
-        val path = config.backdrop.imagePath
+        when (config.effectiveBackdrop) {
+            dev.kb896.aiusage.data.BackdropKind.SHADER -> {
+                if (lumKey == "silk") return
+                lumKey = "silk"
+                dev.kb896.aiusage.ui.glass.Silk.cells(GlassLuminance.SIDE).copyInto(lumCells)
+                return
+            }
+            dev.kb896.aiusage.data.BackdropKind.VIDEO -> {
+                val cells = config.video.luminance
+                val key = "video|" + config.video.clipPath
+                if (lumKey == key) return
+                lumKey = key
+                if (cells.size == lumCells.size) cells.forEachIndexed { i, v -> lumCells[i] = v }
+                else lumCells.fill(GlassLuminance.of(config.background or (0xFF shl 24)))
+                return
+            }
+            else -> Unit
+        }
+        // The picture only while it is the background: switching to a colour keeps it stored.
+        val path = config.backdrop.imagePath.takeIf { config.effectiveBackdrop == dev.kb896.aiusage.data.BackdropKind.IMAGE }
         val key = (path ?: "-") + "|" + config.background + "|" +
             config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom +
             "|" + config.backdrop.opacity
@@ -10766,12 +10785,20 @@ class RearDialView(context: Context) : View(context) {
         // Nothing falls on a frozen page: the weather fades with the backdrop and is not
         // even prepared once always-on has settled — its shader is the dearest thing here.
         if (aodFade(frameNowMs) >= 0.999f) return false
+        // A background that moves cannot be a cached bitmap: the weather's ground is then
+        // the live shader itself, rebuilt as cheaply as a shader object per frame.
+        val live = liveGround()
+        if (live != null) {
+            groundKey = null
+            groundBitmap?.recycle(); groundBitmap = null
+            groundShader = null
+        }
         // THE GROUND, AS A TEXTURE. Rebuilt only when the background changes — it is a
         // colour and a photograph, and neither moves between frames.
-        val key = (config.backdrop.imagePath ?: "-") + "|" + groundColor + "|" +
+        val key = config.effectiveBackdrop.name + "|" + (config.backdrop.imagePath ?: "-") + "|" + groundColor + "|" +
             config.backdrop.panX + "," + config.backdrop.panY + "," + config.backdrop.zoom +
             "|" + config.backdrop.opacity + "|" + width + "x" + height
-        if (key != groundKey || groundShader == null) {
+        if (live == null && (key != groundKey || groundShader == null)) {
             groundKey = key
             groundBitmap?.recycle()
             val bmp = android.graphics.Bitmap.createBitmap(
@@ -10779,7 +10806,7 @@ class RearDialView(context: Context) : View(context) {
             )
             val onto = Canvas(bmp)
             onto.drawColor(groundColor)
-            drawBackdropImage(onto)
+            drawBackdrop(onto)
             groundBitmap = bmp
             groundShader = android.graphics.BitmapShader(
                 bmp,
@@ -10800,7 +10827,7 @@ class RearDialView(context: Context) : View(context) {
         // frame. This is one, for the whole panel, and there is no version of an animated
         // shader that avoids it: the uniform is the animation.
         val shader = Weather.shader
-        shader.setInputShader("ground", groundShader!!)
+        shader.setInputShader("ground", live ?: groundShader!!)
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
         shader.setFloatUniform("mode", if (weatherMode() == Weather.SNOW) 1f else 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
@@ -10833,7 +10860,7 @@ class RearDialView(context: Context) : View(context) {
             // bitmap that knows nothing of the fade, so it must not be the only thing drawn.
             if (keep < 0.999f) {
                 canvas.drawColor(groundColor)
-                drawBackdropImage(canvas)
+                drawBackdrop(canvas)
             }
             panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
             weatherPaint.alpha = (255 * keep).toInt()
@@ -10844,7 +10871,7 @@ class RearDialView(context: Context) : View(context) {
             return
         }
         canvas.drawColor(groundColor)
-        drawBackdropImage(canvas)
+        drawBackdrop(canvas)
         drawAodBandVeil(canvas)
     }
 
@@ -10858,7 +10885,66 @@ class RearDialView(context: Context) : View(context) {
 
     private val weatherNode = android.graphics.RenderNode("weather")
 
-    private fun drawBackdropImage(canvas: Canvas) {
+    /**
+     * The background over the ground colour, whichever it is: the picture, the video's
+     * latest frame, or the silk. Every place that drew the picture draws this.
+     */
+    private fun drawBackdrop(canvas: Canvas) {
+        when (config.effectiveBackdrop) {
+            dev.kb896.aiusage.data.BackdropKind.IMAGE -> drawImageBackdrop(canvas)
+            dev.kb896.aiusage.data.BackdropKind.SHADER -> drawSilkBackdrop(canvas)
+            dev.kb896.aiusage.data.BackdropKind.VIDEO -> drawVideoBackdrop(canvas)
+            dev.kb896.aiusage.data.BackdropKind.COLOR -> Unit
+        }
+    }
+
+    /** The silk, at the front's settings, over the panel's units; its own clock. */
+    private val silk by lazy {
+        dev.kb896.aiusage.ui.glass.Silk.create().apply {
+            setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        }
+    }
+    private val silkPaint = Paint()
+    private var silkTime = 0f
+    private var silkLastMs = 0L
+
+    /**
+     * The silk moving while the panel is awake and frozen in always-on, where it darkens to
+     * black at the backdrop's pace as the picture does. Software canvases (the brightness
+     * map, the weather's ground) never reach here — see refreshLuminance and liveGround.
+     */
+    private fun drawSilkBackdrop(canvas: Canvas) {
+        val fade = aodFade(frameNowMs)
+        if (fade >= 0.999f) { silkLastMs = 0L; return }
+        if (!aod && silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f
+        silkLastMs = if (aod) 0L else frameNowMs
+        silk.setFloatUniform("time", silkTime)
+        silkPaint.shader = silk
+        silkPaint.colorFilter = if (fade > 0f) {
+            val keep = (255 * (1f - fade)).toInt().coerceIn(0, 255)
+            android.graphics.LightingColorFilter((keep shl 16) or (keep shl 8) or keep, 0)
+        } else null
+        panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        canvas.drawRect(panelRect, silkPaint)
+        if (!aod) animating = true
+    }
+
+    private fun drawVideoBackdrop(canvas: Canvas) = Unit
+
+    /**
+     * The ground as a shader when the background moves: the silk, or the video's frame over
+     * the ground colour at its opacity. Null for a colour or a picture, whose ground is the
+     * cached bitmap.
+     */
+    private fun liveGround(): android.graphics.Shader? = when (config.effectiveBackdrop) {
+        dev.kb896.aiusage.data.BackdropKind.SHADER -> silk
+        dev.kb896.aiusage.data.BackdropKind.VIDEO -> videoGround()
+        else -> null
+    }
+
+    private fun videoGround(): android.graphics.Shader? = null
+
+    private fun drawImageBackdrop(canvas: Canvas) {
         val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         val dest = ArtPlacement.destination(

@@ -130,4 +130,27 @@ half4 main(float2 coord) {
         val small = Bitmap.createBitmap(px, sw, sh, Bitmap.Config.ARGB_8888)
         return Bitmap.createScaledBitmap(small, w, h, true)
     }
+
+    /**
+     * The silk's brightness in [side]×[side] cells at shader time 0, row by row, worked out
+     * on the CPU as [still] is: what the back's glass reads when the silk is behind it.
+     * Rec.709, as GlassLuminance.of weighs a colour.
+     */
+    fun cells(side: Int): FloatArray {
+        val r = ((COLOR shr 16) and 0xFF) / 255f
+        val g = ((COLOR shr 8) and 0xFF) / 255f
+        val b = (COLOR and 0xFF) / 255f
+        val grain = 0.5f / 15f * NOISE
+        val c = cos(ROTATION); val s = sin(ROTATION)
+        return FloatArray(side * side) { i ->
+            val u = ((i % side) + 0.5f) / side * SCALE
+            val v = (1f - ((i / side) + 0.5f) / side) * SCALE
+            val tx = (c * u + s * v) * SCALE
+            var ty = (-s * u + c * v) * SCALE
+            ty += 0.03f * sin(8f * tx)
+            val pattern = 0.6f + 0.4f * sin(5f * (tx + ty + cos(3f * tx + 5f * ty)) + sin(20f * (tx + ty)))
+            fun ch(k: Float) = (k * pattern - grain).coerceIn(0f, 1f)
+            0.2126f * ch(r) + 0.7152f * ch(g) + 0.0722f * ch(b)
+        }
+    }
 }
