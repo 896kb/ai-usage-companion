@@ -7,7 +7,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import android.view.View
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.ArtPlacement
@@ -54,19 +53,18 @@ class ArtCropView @JvmOverloads constructor(
 
     private var bitmap: Bitmap? = null
 
+    private val gesture = CropGesture(context, ::region, { bitmap?.let { it.width to it.height } }, ::invalidate)
+
     /** Pan as a fraction of the slack at the current zoom, matching ArtConfig. */
-    var panX = 0f
-        private set
-    var panY = 0f
-        private set
-    var zoom = 1f
-        private set
+    val panX get() = gesture.panX
+    val panY get() = gesture.panY
+    val zoom get() = gesture.zoom
 
     fun setImage(bitmap: Bitmap?, panX: Float, panY: Float, zoom: Float) {
         this.bitmap = bitmap
-        this.panX = panX
-        this.panY = panY
-        this.zoom = zoom
+        gesture.panX = panX
+        gesture.panY = panY
+        gesture.zoom = zoom
         invalidate()
     }
 
@@ -79,40 +77,9 @@ class ArtCropView @JvmOverloads constructor(
         return RectF(left, top, left + w, top + h)
     }
 
-    private val scaleDetector = ScaleGestureDetector(context,
-        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                zoom = (zoom * detector.scaleFactor)
-                    .coerceIn(ArtPlacement.MIN_ZOOM, ArtPlacement.MAX_ZOOM)
-                invalidate()
-                return true
-            }
-        })
-
-    private var lastX = 0f
-    private var lastY = 0f
-
     @Suppress("ClickableViewAccessibility")   // a crop frame has no click semantics
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        scaleDetector.onTouchEvent(event)
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { lastX = event.x; lastY = event.y }
-            MotionEvent.ACTION_MOVE -> if (!scaleDetector.isInProgress) {
-                val box = region()
-                val bmp = bitmap
-                if (bmp != null) {
-                    // Pan is a fraction of the slack, so a drag moves further when there
-                    // is more image hidden — which is what makes it feel like moving the
-                    // picture rather than scrubbing a value.
-                    val (slackX, slackY) = ArtPlacement.slack(box, bmp.width, bmp.height, zoom)
-                    if (slackX > 0) panX = (panX + (event.x - lastX) / slackX).coerceIn(-1f, 1f)
-                    if (slackY > 0) panY = (panY + (event.y - lastY) / slackY).coerceIn(-1f, 1f)
-                }
-                lastX = event.x
-                lastY = event.y
-                invalidate()
-            }
-        }
+        gesture.onTouch(event)
         return true
     }
 
