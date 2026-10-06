@@ -916,9 +916,9 @@ class MainActivity : ComponentActivity() {
         val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
         val container = findViewById<LinearLayout>(R.id.settings_rows)
         val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
-        // One container per tab of the bottom bar — see bindTabs. The panel card holds the
-        // usage page's rows and everything general; the clock page, the media page and
-        // always-on each have their own.
+        // One container per tab of the bottom bar — see bindTabs. General holds what is not
+        // one page's: the look, the camera and game, notifications and the weather. The
+        // usage page, the info page, the media page and always-on each have their own.
         val generalRows = findViewById<LinearLayout>(R.id.general_rows)
         val clockRows = findViewById<LinearLayout>(R.id.clock_rows)
         val mediaRows = findViewById<LinearLayout>(R.id.media_rows)
@@ -1082,7 +1082,7 @@ class MainActivity : ComponentActivity() {
             onPick = { c -> write { it.copy(cameraColor = c) } },
         )
         SettingsRows.toggleWithColor(
-            clockRows, "Notifications", config.showNotifications, config.notificationTint,
+            generalRows, "Notifications", config.showNotifications, config.notificationTint,
             onChange = { on ->
                 write { it.copy(showNotifications = on) }
                 if (on) askNotificationAccess("Notifications on the back") { write { it.copy(showNotifications = false) } }
@@ -1095,13 +1095,13 @@ class MainActivity : ComponentActivity() {
         // arrived and broadcasting what it said are different decisions.
         if (config.showNotifications) {
             if (!Setup.notificationAccess(this)) {
-                SettingsRows.navigation(clockRows, "  ↳ allow notification access") { openNotificationAccess() }
+                SettingsRows.navigation(generalRows, "  ↳ allow notification access") { openNotificationAccess() }
             }
             SettingsRows.toggle(
-                clockRows, "  ↳ include the message text", config.showNotificationText,
+                generalRows, "  ↳ include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
             SettingsRows.colorRow(
-                clockRows, "  ↳ background", config.notificationGround,
+                generalRows, "  ↳ background", config.notificationGround,
             ) { c -> write { it.copy(notificationBg = c) } }
         }
         // NOT a "show" row like the ones above it — it changes nothing on the panel, only
@@ -1134,7 +1134,7 @@ class MainActivity : ComponentActivity() {
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
         SettingsRows.choice(
-            clockRows, "Weather", listOf("None", "Auto", "Rain", "Snow"),
+            generalRows, "Weather", listOf("None", "Auto", "Rain", "Snow"),
             when (config.weather) {
                 Weather.AUTO -> 1
                 Weather.RAIN -> 2
@@ -1166,7 +1166,7 @@ class MainActivity : ComponentActivity() {
             }
             return what + "Weather by Open-Meteo"
         }
-        SettingsRows.textField(clockRows, "Place", config.weatherPlace, 40) { typed ->
+        SettingsRows.textField(generalRows, "Place", config.weatherPlace, 40) { typed ->
             write { it.copy(weatherPlace = typed) }
             geocodeJob?.cancel()
             geocodeJob = lifecycleScope.launch {
@@ -1182,9 +1182,9 @@ class MainActivity : ComponentActivity() {
                 if (place != null) WeatherPoll.nudge()
             }
         }
-        placeNote = SettingsRows.note(clockRows, placeNoteText(config))
+        placeNote = SettingsRows.note(generalRows, placeNoteText(config))
 
-        SettingsRows.toggle(clockRows, "Use the phone's location", config.weatherUseDevice) { on ->
+        SettingsRows.toggle(generalRows, "Use the phone's location", config.weatherUseDevice) { on ->
             val allowed = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
             when {
