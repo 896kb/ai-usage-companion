@@ -594,6 +594,7 @@ class RearActivity : Activity() {
         // The dim itself is a window attribute and needs no hold to keep applying.
         if (holding) holdScreen(false)
         dial.ringsClosed = true
+        dial.videoPaused = true // the video stops on its frame while the panel dims
         window.attributes = window.attributes.apply { screenBrightness = DoubleTapSleep.DIM_BRIGHTNESS }
         val v = veil ?: View(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -622,6 +623,7 @@ class RearActivity : Activity() {
         } else {
             restoreBrightness.run()
             dial.ringsClosed = false
+            dial.videoPaused = false // called off: it starts over from that frame
             holdScreen(true)
             armSleep()
         }
@@ -941,6 +943,9 @@ class RearActivity : Activity() {
             return
         }
         if (sleepStage.dimming) endDim(off = false)
+        // Lit again after the dim's sleep: no longer paused. The display coming on is what
+        // starts the video over (RearDialView.displayAwake), with its frame faded from.
+        dial.videoPaused = false
         tableWatch(true)
         val wokeFromSleep = sleptByDoubleTap
         sleptByDoubleTap = false // lit by something real: holds mean something again

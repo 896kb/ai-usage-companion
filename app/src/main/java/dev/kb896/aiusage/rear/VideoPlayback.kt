@@ -23,9 +23,22 @@ import android.util.Log
  *
  * The reader is the clip's own size, read from the file: the decoder writes at that size,
  * and the panel scales the frame into place when it draws it.
+ *
+ * STOPPING NEVER BLANKS IT. A frozen or sleeping video keeps [still], a copy of the frame
+ * it stopped on, and starting over cross-fades from that copy into the new run over
+ * [FADE_MS] — the panel draws [fadeFrom] over the live frame at [fadeLeft].
  */
 class VideoPlayback(private val onFrame: () -> Unit) {
     @Volatile var frame: Bitmap? = null; private set
+
+    /** The frame the video stopped on, kept through sleep: a copy, not the reader's buffer. */
+    var still: Bitmap? = null; private set
+
+    /** The frame a restart fades out of, and when its fade began (0: not yet, the run has no frame). */
+    var fadeFrom: Bitmap? = null; private set
+    @Volatile private var fadeStart = 0L
+    @Volatile private var awaitingRun = false
+    @Volatile private var pauseOnFrame = false
 
     private var player: MediaPlayer? = null
     private var reader: ImageReader? = null
@@ -40,7 +53,8 @@ class VideoPlayback(private val onFrame: () -> Unit) {
 
     fun open(path: String) {
         if (path == this.path && player != null) return
-        release()
+        // Another clip: the old one's frame is not this one's to fade from.
+        if (this.path != null && path != this.path) drop() else close()
         val (w, h) = sizeOf(path) ?: return
         this.path = path
         val t = HandlerThread("video-backdrop").also { it.start() }
@@ -58,7 +72,7 @@ class VideoPlayback(private val onFrame: () -> Unit) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "could not open $path", e)
-            release(); null
+            close(); null
         }
     }
 
@@ -87,38 +101,75 @@ class VideoPlayback(private val onFrame: () -> Unit) {
             while (held.size > 3) held.removeFirst().close()
         }
         frame = bmp
+        if (awaitingRun) { awaitingRun = false; fadeStart = android.os.SystemClock.uptimeMillis() }
+        if (pauseOnFrame) { pauseOnFrame = false; main.post { player?.let { if (it.isPlaying) it.pause() } } }
         main.post(onFrame)
     }
 
-    fun loop() {
+    /** What to show: the live frame, or the still while there is none. */
+    val shown: Bitmap? get() = frame ?: still
+
+    /** How much of [fadeFrom] still shows, 1 to 0 over [FADE_MS] from the run's first frame. */
+    fun fadeLeft(now: Long): Float {
+        if (fadeFrom == null) return 0f
+        val start = fadeStart
+        if (start == 0L) return 1f
+        val left = 1f - (now - start).toFloat() / FADE_MS
+        if (left <= 0f) { fadeFrom = null; return 0f }
+        return left
+    }
+
+    /** A copy of what is on show, safe from the reader reusing its buffer. */
+    private fun snapshot(): Bitmap? = frame?.let { runCatching { it.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() } ?: still
+
+    /** From the start, fading out of whatever was on show. */
+    private fun startOver() {
+        val p = player ?: return
+        fadeFrom = snapshot()
+        fadeStart = 0L
+        awaitingRun = fadeFrom != null
+        p.seekTo(0, MediaPlayer.SEEK_CLOSEST)
+    }
+
+    /** Plays round and round; [restart] starts it over with the fade, else it carries on. */
+    fun loop(restart: Boolean) {
         val p = player ?: return
         stopEasing()
         p.isLooping = true
-        if (!p.isPlaying) {
-            p.playbackParams = p.playbackParams.setSpeed(1f)
-            if (!p.isPlaying) p.start()
-        } else if (lastSpeed != 1f) {
+        if (restart) startOver()
+        if (lastSpeed != 1f || !p.isPlaying) {
+            lastSpeed = 1f
+            // A speed set on a paused player starts it: this is the start.
             p.playbackParams = p.playbackParams.setSpeed(1f)
         }
-        lastSpeed = 1f
+        if (!p.isPlaying) p.start()
     }
 
-    fun holdFirst() {
+    /**
+     * Holds the frame where it is. A player that has drawn nothing yet — just opened, after
+     * a sleep with no still — runs to its first frame and stops there, since a paused
+     * player shows nothing until it has played.
+     */
+    fun freeze() {
         val p = player ?: return
         stopEasing()
-        p.isLooping = false
-        if (p.isPlaying) p.pause()
-        p.seekTo(0, MediaPlayer.SEEK_CLOSEST)
+        if (p.isPlaying) { p.pause(); still = snapshot(); return }
+        if (frame == null && still == null) {
+            pauseOnFrame = true
+            p.seekTo(0, MediaPlayer.SEEK_CLOSEST)
+            p.start()
+        }
     }
 
+    /** One run from the start, fading in from the frame it stopped on, eased if asked. */
     fun playOnce(easeIn: Boolean, easeOut: Boolean) {
         val p = player ?: return
         stopEasing()
+        pauseOnFrame = false
         p.isLooping = false
-        p.seekTo(0, MediaPlayer.SEEK_CLOSEST)
+        startOver()
         this.easeIn = easeIn; this.easeOut = easeOut
         lastSpeed = EaseCurve.speed(0, p.duration.toLong(), easeIn, easeOut)
-        // A speed set on a paused player starts it: this is the start.
         p.playbackParams = p.playbackParams.setSpeed(lastSpeed)
         if (!p.isPlaying) p.start()
         if (easeIn || easeOut) { easing = true; main.post(ease) }
@@ -140,13 +191,24 @@ class VideoPlayback(private val onFrame: () -> Unit) {
 
     private fun stopEasing() { easing = false; main.removeCallbacks(ease) }
 
-    fun pause() {
-        stopEasing()
-        player?.let { if (it.isPlaying) it.pause() }
+    /** Lets go of the decoder, keeping the frame it was on to show until it is back. */
+    fun sleep() {
+        if (player == null) return
+        still = snapshot()
+        close()
     }
 
-    fun release() {
+    /** Lets go of everything, the last frame too: there is no video any more. */
+    fun drop() {
+        close()
+        still = null
+        fadeFrom = null
+    }
+
+    private fun close() {
         stopEasing()
+        pauseOnFrame = false
+        awaitingRun = false
         player?.release(); player = null
         reader?.close(); reader = null
         synchronized(held) { held.forEach { it.close() }; held.clear() }
@@ -159,5 +221,7 @@ class VideoPlayback(private val onFrame: () -> Unit) {
         const val TAG = "AiUsageVideo"
         /** How often the ramp's speed is updated; frames still arrive at the clip's own rate. */
         const val EASE_STEP_MS = 16L
+        /** The cross-fade from the frame it stopped on into a new run. */
+        const val FADE_MS = 450L
     }
 }

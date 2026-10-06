@@ -6,37 +6,44 @@ import org.junit.Test
 class VideoStateTest {
     private fun d(
         isVideo: Boolean = true, hasClip: Boolean = true, attached: Boolean = true,
-        displayAwake: Boolean = true, aod: Boolean = false, locked: Boolean = false,
-        loop: Boolean = true, preview: Boolean = false, justUnlocked: Boolean = false,
-    ) = VideoState.decide(isVideo, hasClip, attached, displayAwake, aod, locked, loop, preview, justUnlocked)
+        displayAwake: Boolean = true, aod: Boolean = false, paused: Boolean = false, locked: Boolean = false,
+        loop: Boolean = true, preview: Boolean = false, fresh: Boolean = false,
+    ) = VideoState.decide(isVideo, hasClip, attached, displayAwake, aod, paused, locked, loop, preview, fresh)
 
-    @Test fun `no video, no clip, detached or dark releases the decoder`() {
-        assertEquals(VideoAction.RELEASE, d(isVideo = false))
-        assertEquals(VideoAction.RELEASE, d(hasClip = false))
-        assertEquals(VideoAction.RELEASE, d(attached = false))
-        assertEquals(VideoAction.RELEASE, d(displayAwake = false))
+    @Test fun `no video or no clip lets go of everything, the last frame too`() {
+        assertEquals(VideoAction.DROP, d(isVideo = false))
+        assertEquals(VideoAction.DROP, d(hasClip = false))
     }
 
-    @Test fun `always-on pauses, looping or not`() {
-        assertEquals(VideoAction.PAUSE, d(aod = true))
-        assertEquals(VideoAction.PAUSE, d(aod = true, loop = false, locked = true))
+    @Test fun `a dark display or a detached panel sleeps the decoder and keeps the last frame`() {
+        assertEquals(VideoAction.SLEEP, d(attached = false))
+        assertEquals(VideoAction.SLEEP, d(displayAwake = false))
     }
 
-    @Test fun `a looping video plays whether locked or not`() {
+    @Test fun `always-on and the double tap's dim freeze the frame where it is`() {
+        assertEquals(VideoAction.FREEZE, d(aod = true))
+        assertEquals(VideoAction.FREEZE, d(paused = true))
+        assertEquals(VideoAction.FREEZE, d(paused = true, loop = false))
+    }
+
+    @Test fun `a looping video carries on, and starts over when the panel comes back`() {
+        assertEquals(VideoAction.LOOP, d())
         assertEquals(VideoAction.LOOP, d(locked = true))
-        assertEquals(VideoAction.LOOP, d(locked = false))
+        assertEquals(VideoAction.RESTART_LOOP, d(fresh = true))
+        assertEquals(VideoAction.RESTART_LOOP, d(fresh = true, locked = true))
     }
 
-    @Test fun `a non-looping video waits on its first frame behind the slider`() {
-        assertEquals(VideoAction.HOLD_FIRST, d(loop = false, locked = true))
+    @Test fun `a non-looping video waits on its frame behind the slider`() {
+        assertEquals(VideoAction.FREEZE, d(loop = false, locked = true))
+        assertEquals(VideoAction.FREEZE, d(loop = false, locked = true, fresh = true))
     }
 
-    @Test fun `unlocking plays a non-looping video once, and later checks leave it be`() {
-        assertEquals(VideoAction.PLAY_ONCE, d(loop = false, justUnlocked = true))
+    @Test fun `a non-looping video plays its run from the start when the panel comes back open`() {
+        assertEquals(VideoAction.PLAY_ONCE, d(loop = false, fresh = true))
         assertEquals(VideoAction.KEEP, d(loop = false))
     }
 
-    @Test fun `the front's preview always loops`() {
-        assertEquals(VideoAction.LOOP, d(loop = false, preview = true, locked = true))
+    @Test fun `the front's preview always loops, untouched by the panel's state`() {
+        assertEquals(VideoAction.LOOP, d(loop = false, preview = true, locked = true, fresh = true))
     }
 }
