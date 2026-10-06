@@ -92,11 +92,14 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         return decoder != null
     }
 
-    /** Plays round and round; [restart] starts it over with the fade, else it carries on. */
-    fun loop(restart: Boolean) {
+    /**
+     * Plays round and round; [restart] starts it over with the fade, else it carries on.
+     * Each pass eased as asked — the preview's, see VideoState.loopEase.
+     */
+    fun loop(restart: Boolean, easeIn: Boolean = false, easeOut: Boolean = false) {
         val d = decoder ?: return
         if (restart) fadeOut()
-        d.command(Mode.LOOP, restart, easeIn = false, easeOut = false)
+        d.command(Mode.LOOP, restart, easeIn, easeOut)
     }
 
     /**
@@ -218,8 +221,11 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
             if (mode == Mode.IDLE && this.mode != Mode.IDLE) clock.pause(now)
             this.mode = mode
             this.restart = this.restart || restart
-            this.easeIn = easeIn
-            this.easeOut = easeOut
+            // Only a run says how it is eased; a freeze keeps the run's, which its held frame is timed by.
+            if (mode == Mode.LOOP || mode == Mode.ONCE) {
+                this.easeIn = easeIn
+                this.easeOut = easeOut
+            }
             lock.notifyAll()
         }
 
@@ -227,7 +233,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
         /** When clip time [ptsMs] is due, as an offset from the run's start. */
         private fun wall(ptsMs: Long): Long =
-            if (mode == Mode.ONCE) EaseCurve.wallMs(ptsMs, durationMs, easeIn, easeOut).toLong() else ptsMs
+            if (easeIn || easeOut) EaseCurve.wallMs(ptsMs, durationMs, easeIn, easeOut).toLong() else ptsMs
 
         override fun run() {
             try {

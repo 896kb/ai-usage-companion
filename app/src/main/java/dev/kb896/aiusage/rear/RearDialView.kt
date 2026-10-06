@@ -57,7 +57,8 @@ class RearDialView(context: Context) : View(context) {
             // A new clip, the video just chosen, or Loop switched: it starts over, so the
             // change is seen; otherwise the player only follows the panel's state.
             syncVideo(fresh = value.video.clipPath != old.video.clipPath ||
-                value.effectiveBackdrop != old.effectiveBackdrop || value.video.loop != old.video.loop)
+                value.effectiveBackdrop != old.effectiveBackdrop || value.video.loop != old.video.loop ||
+                value.video.easeIn != old.video.easeIn || value.video.easeOut != old.video.easeOut)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -10990,10 +10991,11 @@ class RearDialView(context: Context) : View(context) {
             VideoAction.SLEEP -> { video.sleep(); false }
             else -> video.open(clip!!)
         }
+        val (loopIn, loopOut) = VideoState.loopEase(!interactive, v.loop, v.easeIn, v.easeOut)
         when (VideoState.afterOpen(action, created)) {
             VideoAction.FREEZE -> video.freeze()
-            VideoAction.LOOP -> video.loop(restart = false)
-            VideoAction.RESTART_LOOP -> video.loop(restart = true)
+            VideoAction.LOOP -> video.loop(restart = false, loopIn, loopOut)
+            VideoAction.RESTART_LOOP -> video.loop(restart = true, loopIn, loopOut)
             VideoAction.PLAY_ONCE -> video.playOnce(v.easeIn, v.easeOut)
             else -> Unit
         }

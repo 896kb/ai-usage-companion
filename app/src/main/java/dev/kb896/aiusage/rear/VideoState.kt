@@ -35,4 +35,12 @@ object VideoState {
      */
     fun afterOpen(action: VideoAction, created: Boolean): VideoAction =
         if (created && action == VideoAction.KEEP) VideoAction.FREEZE else action
+
+    /**
+     * The ease a loop's passes run with. The front's preview loops a video that plays once
+     * on the back, so each pass is eased as that one run is — the preview is there to show
+     * how it will look. A video set to loop has no ends to ease.
+     */
+    fun loopEase(preview: Boolean, loop: Boolean, easeIn: Boolean, easeOut: Boolean): Pair<Boolean, Boolean> =
+        if (preview && !loop) easeIn to easeOut else false to false
 }

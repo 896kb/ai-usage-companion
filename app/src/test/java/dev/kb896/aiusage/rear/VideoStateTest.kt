@@ -57,4 +57,14 @@ class VideoStateTest {
         assertEquals(VideoAction.KEEP, VideoState.afterOpen(VideoAction.KEEP, created = false))
         assertEquals(VideoAction.LOOP, VideoState.afterOpen(VideoAction.LOOP, created = true))
     }
+
+    @Test fun `the preview's loop runs each pass eased, as the back plays its one run`() {
+        assertEquals(true to true, VideoState.loopEase(preview = true, loop = false, easeIn = true, easeOut = true))
+        assertEquals(false to true, VideoState.loopEase(preview = true, loop = false, easeIn = false, easeOut = true))
+    }
+
+    @Test fun `a real loop has no ends to ease`() {
+        assertEquals(false to false, VideoState.loopEase(preview = true, loop = true, easeIn = true, easeOut = true))
+        assertEquals(false to false, VideoState.loopEase(preview = false, loop = true, easeIn = true, easeOut = true))
+    }
 }
