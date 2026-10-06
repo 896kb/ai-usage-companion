@@ -218,7 +218,9 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         }
         val a = active ?: f
         switchTo(a)
-        a.leg(a.positionMs, easeIn, easeOut)
+        // Stopped part-way through a leg: that leg carries on, picking up speed if the ease
+        // asks — starting it afresh would set its clock at full speed and skip the ease-in.
+        if (a.legPaused) a.resumeLeg() else a.leg(a.positionMs, easeIn, easeOut)
         (if (a === f) r else f).preroll(0L)
     }
 
@@ -383,6 +385,22 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
         val inLeg: Boolean get() = synchronized(lock) { mode == Mode.LEG }
 
+        /** A leg reached its end; a stop before then leaves it to be carried on. */
+        private var legEnded = false
+        /** Opened part-way after a sleep with no frame yet: its first frame starts with the ease-in. */
+        private var easeInPending = false
+
+        /** Stopped in a leg — or opened part-way into one after a sleep — with the rest of it to run. */
+        val legPaused: Boolean get() = synchronized(lock) {
+            !legEnded && (mode == Mode.IDLE || pace.stopping) && (shownOne || skipUntil > 0)
+        }
+
+        /** Carries a [legPaused] leg on from where it stopped. */
+        fun resumeLeg() {
+            synchronized(lock) { if (!shownOne && startEased) easeInPending = true }
+            command(Mode.LEG, restart = false, easeIn = easeIn, easeOut = easeOut)
+        }
+
         init {
             try {
                 extractor.setDataSource(path)
@@ -448,6 +466,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         fun leg(from: Long, easeIn: Boolean, easeOut: Boolean) = synchronized(lock) {
             this.easeIn = easeIn
             this.easeOut = easeOut
+            legEnded = false
+            easeInPending = false
             val armed = armedPts
             if (armed >= 0 && kotlin.math.abs(armed - from) <= ARM_SLACK_MS && !restart) {
                 legFrom = armed
@@ -560,6 +580,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                             false
                         } else {
                             val wasLeg = mode == Mode.LEG
+                            if (wasLeg) legEnded = true
                             mode = Mode.IDLE   // a run's end: its last frame stays up
                             clock.pause(SystemClock.uptimeMillis())
                             wasLeg
@@ -579,9 +600,10 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                             // preroll's clock waits for its leg.
                             skipUntil = 0L
                             val now = SystemClock.uptimeMillis()
-                            when (mode) {
-                                Mode.PREROLL -> Unit
-                                Mode.LOOP -> if (startEased) pace.easeIn(now, pts) else pace.resume(now, wall(pts))
+                            when {
+                                mode == Mode.PREROLL -> Unit
+                                mode == Mode.LOOP && startEased -> pace.easeIn(now, pts)
+                                easeInPending -> { easeInPending = false; pace.easeIn(now, pts) }
                                 else -> pace.resume(now, wall(pts))
                             }
                             false
