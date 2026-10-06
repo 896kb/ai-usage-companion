@@ -4393,14 +4393,17 @@ class RearDialView(context: Context) : View(context) {
                 // on the page is still turning the page, which is how you get back down
                 // to the readout. Noted on the way down because that is when the finger
                 // chose, not when it has moved far enough to say so.
-                onWheel = noticing >= 0.999f && shownHistory().isNotEmpty() &&
+                // The cards' place: a sideways swipe there puts them away or brings them
+                // back; up and down turns them — while they are there to turn.
+                onStash = noticing >= 0.999f && shownHistory().isNotEmpty() &&
                     event.y < wheelGrabBottom()
+                onWheel = onStash && !noticesStashed
                 wheelDownAt = noticeWheelAt
                 // The wheel claims the gesture by itself. It used to ride on the pager's
                 // claim, and with no readout there is no other page — the clock page is
                 // the only one, the pager is off, and a finger on the notifications was
                 // let go on the way down: they could not be scrolled at all.
-                hit || pager.enabled() || onVolume || onScrub || onWheel
+                hit || pager.enabled() || onVolume || onScrub || onWheel || onStash
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 val dxTravel = Math.abs(event.x - downX)
@@ -4412,6 +4415,7 @@ class RearDialView(context: Context) : View(context) {
                     drag = when {
                         !sideways && onVolume -> Drag.VOLUME
                         sideways && onScrub -> Drag.SCRUB
+                        sideways && onStash -> Drag.STASH
                         else -> Drag.PAGE
                     }
                     // NO auto-unmute here any more. It used to fire on the first move,
@@ -4458,11 +4462,17 @@ class RearDialView(context: Context) : View(context) {
                         }
                         true
                     }
+                    Drag.STASH -> {
+                        stashDx = event.x - downX
+                        invalidate()
+                        true
+                    }
                     Drag.UNDECIDED -> hit
                 }
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
                 // The system taking the gesture away is not a decision to commit to it.
+                if (drag == Drag.STASH) letGoOfStash(commit = false)
                 endDrag(commit = false)
                 pager.onUp(android.os.SystemClock.uptimeMillis())
                 invalidate()
@@ -4472,6 +4482,13 @@ class RearDialView(context: Context) : View(context) {
                 if (drag == Drag.VOLUME || drag == Drag.SCRUB) {
                     if (drag == Drag.VOLUME) dragVolume(event.y)
                     endDrag(commit = dragInBounds)
+                    return true
+                }
+                if (drag == Drag.STASH) {
+                    drag = Drag.UNDECIDED
+                    onWheel = false
+                    letGoOfStash(commit = true)
+                    pager.onUp(android.os.SystemClock.uptimeMillis())
                     return true
                 }
                 drag = Drag.UNDECIDED
@@ -5447,7 +5464,7 @@ class RearDialView(context: Context) : View(context) {
      * Decided at the moment the slop is crossed and then not revisited, because a gesture
      * that changes its mind halfway does both things badly.
      */
-    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE }
+    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, STASH }
 
     private var drag = Drag.UNDECIDED
     private var downX = 0f
@@ -8656,6 +8673,10 @@ class RearDialView(context: Context) : View(context) {
         // The strip does not drift either — it is drawn in the overlay pass, outside every
         // translate — so this is the same decision, not a new one.
         canvas.translate(-dxNow, -dyNow)
+        // Put away to the right, or on its way there or back. See NoticeStash.
+        val stashed = stashOffset()
+        if (stashed >= Panel.WIDTH - 0.5f) { canvas.restore(); return }
+        canvas.translate(stashed, 0f)
         // THE STRIP'S OWN RECT, not a second one that looks similar. A notification seen
         // arriving on the readout and the same one found again up here is one object seen
         // twice, so it sits exactly where it sat: same left edge, same margin, same
@@ -8837,6 +8858,45 @@ class RearDialView(context: Context) : View(context) {
 
     /** Where the wheel stood when the finger landed, so the drag is relative to it. */
     private var wheelDownAt = 0f
+
+    // ---- the cards put away ----
+
+    /** The finger landed on the cards' place: a sideways swipe there puts them away or brings them back. */
+    private var onStash = false
+    private var stashDx = 0f
+    private var stashFrom = 0f
+    private var stashTo = 0f
+    private var stashAt = 0L
+
+    /** Put away by a swipe to the right, and kept so across restarts. */
+    private var noticesStashed: Boolean = false
+        get() { if (!stashLoaded) { field = panelPrefs.getBoolean(KEY_NOTICES_STASHED, false); stashLoaded = true; stashFrom = if (field) Panel.WIDTH.toFloat() else 0f; stashTo = stashFrom }; return field }
+        set(value) { field = value; stashLoaded = true; panelPrefs.edit().putBoolean(KEY_NOTICES_STASHED, value).apply() }
+    private var stashLoaded = false
+
+    /** How far right the cards are now: under a finger, settling, or at rest. */
+    private fun stashOffset(): Float {
+        val w = Panel.WIDTH.toFloat()
+        val stashed = noticesStashed
+        if (drag == Drag.STASH) return NoticeStash.offset(stashed, stashDx, w)
+        val t = ((frameNowMs - stashAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        if (t < 1f) animating = true
+        return stashFrom + (stashTo - stashFrom) * Tween.easeInOut(t)
+    }
+
+    /** The finger let go: away, back, or springing to where it was, from wherever it is. */
+    private fun letGoOfStash(commit: Boolean) {
+        val w = Panel.WIDTH.toFloat()
+        val was = noticesStashed
+        val now = NoticeStash.offset(was, stashDx, w)
+        val stash = if (commit) NoticeStash.release(was, stashDx, w) else was
+        if (stash != was) noticesStashed = stash
+        stashFrom = now
+        stashTo = if (stash) w else 0f
+        stashAt = SystemClock.uptimeMillis()
+        stashDx = 0f
+        invalidate()
+    }
 
     private val noticeWheelRect = android.graphics.RectF()
     private val noticeWheelShape = android.graphics.Path()
@@ -12194,6 +12254,8 @@ class RearDialView(context: Context) : View(context) {
         private const val PANEL_PREFS = "rear_panel"
         private const val KEY_PAGE = "page"
         private const val KEY_HISTORY = "notices"
+        /** The Info page's notifications, put away by a swipe to the right. */
+        private const val KEY_NOTICES_STASHED = "notices_stashed"
         private const val FIELD_SEP = "\u0001"
         private const val RECORD_SEP = "\u0002"
 
