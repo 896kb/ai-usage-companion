@@ -1081,15 +1081,11 @@ class MainActivity : ComponentActivity() {
             onChange = { on -> write { it.copy(showCamera = on) } },
             onPick = { c -> write { it.copy(cameraColor = c) } },
         )
-        SettingsRows.toggleWithColor(
-            generalRows, "Notifications", config.showNotifications, config.notificationTint,
-            onChange = { on ->
-                write { it.copy(showNotifications = on) }
-                if (on) askNotificationAccess("Notifications on the back") { write { it.copy(showNotifications = false) } }
-                buildSettingsRows()
-            },
-            onPick = { c -> write { it.copy(notificationColor = c) } },
-        )
+        SettingsRows.toggle(generalRows, "Notifications", config.showNotifications) { on ->
+            write { it.copy(showNotifications = on) }
+            if (on) askNotificationAccess("Notifications on the back") { write { it.copy(showNotifications = false) } }
+            buildSettingsRows()
+        }
         // A SEPARATE switch, and deliberately so. This display faces away from its owner,
         // so everything on it is shown to whoever is behind them. Knowing a message
         // arrived and broadcasting what it said are different decisions.
@@ -1100,7 +1096,13 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 generalRows, "  ↳ include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
+            // Named rows, not a swatch beside the switch: a colour next to "Notifications"
+            // left it to be guessed what it coloured.
             SettingsRows.colorRow(
+                generalRows, "  ↳ text", config.notificationTint,
+            ) { c -> write { it.copy(notificationColor = c) } }
+            // Only the original theme's cards are painted; under glass they are glass.
+            if (!config.theme.isGlass) SettingsRows.colorRow(
                 generalRows, "  ↳ background", config.notificationGround,
             ) { c -> write { it.copy(notificationBg = c) } }
         }
