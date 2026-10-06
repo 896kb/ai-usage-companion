@@ -52,7 +52,7 @@ class RearDialView(context: Context) : View(context) {
     var config: PanelConfig = PanelConfig.DEFAULT
         set(value) {
             field = value
-            applyTheme(value.theme)
+            applyTheme(value.theme, value.font)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -703,6 +703,7 @@ class RearDialView(context: Context) : View(context) {
 
     private var typeScale = 1f
     private var themeApplied: dev.kb896.aiusage.data.PanelTheme? = null
+    private var fontApplied: dev.kb896.aiusage.data.PanelFont? = null
 
     /**
      * Point every paint at the theme's face.
@@ -716,29 +717,28 @@ class RearDialView(context: Context) : View(context) {
      * in place and would otherwise stay there under a face that needs different ones.
      */
 
-    private fun applyTheme(theme: dev.kb896.aiusage.data.PanelTheme) {
-        if (theme == themeApplied) return
+    private fun applyTheme(theme: dev.kb896.aiusage.data.PanelTheme, font: dev.kb896.aiusage.data.PanelFont?) {
+        if (theme == themeApplied && font == fontApplied) return
         themeApplied = theme
-        typeScale = PanelType.scale(theme)
-        val face = PanelType.of(resources, theme)
-        val axes = PanelType.variation(theme)
-        for (p in listOf(label, heading, value, title, timeTag, cascadePaint,
-                         extrasBody, extrasMedia, extrasDate, planTag)) {
-            p.typeface = face
-            // Cleared as well as set: switching back to ORIGINAL has to take the axis off
-            // again, or a paint carries a weight request for a face that has no axes.
-            p.fontVariationSettings = axes
+        fontApplied = font
+        // The theme's face, or the one chosen in General — see PanelType.face.
+        val face = PanelType.face(resources, theme, font)
+        typeScale = face.scale
+        for (p in listOf(label, heading, value, timeTag, cascadePaint, extrasBody, planTag)) {
+            face.set(p, PanelType.BODY)
         }
         // Each weight told once, here, and never again — see extrasMedia.
-        extrasMedia.fontVariationSettings = PanelType.mediaVariation(theme)
-        chargeFigure.typeface = face
-        chargeFigure.fontVariationSettings = PanelType.heaviestVariation(theme)
+        face.set(extrasMedia, PanelType.MEDIA)
+        face.set(chargeFigure, PanelType.HEAVIEST)
         // The date on the notification page, at the masthead's weight. That page is read
         // from further away than the readout is — it is a clock and a date, the things you
         // glance at across a desk — and the body weight over a record was not enough.
-        extrasDate.fontVariationSettings = PanelType.titleVariation(theme)
-        // The masthead is heavier than the body — see PanelType.titleVariation.
-        title.fontVariationSettings = PanelType.titleVariation(theme)
+        face.set(extrasDate, PanelType.TITLE)
+        // The masthead is heavier than the body: under glass it is a lens shaped like the
+        // letters, and a lens needs a stroke wide enough to have an inside.
+        face.set(title, PanelType.TITLE)
+        tipText.typeface = label.typeface
+        tipText.fontVariationSettings = label.fontVariationSettings
         label.textSize = typed(18f)
         heading.textSize = typed(22.5f)
         value.textSize = typed(21f)
@@ -10542,7 +10542,7 @@ class RearDialView(context: Context) : View(context) {
         // The same wheel the media page uses, for the same reason: a track changing is
         // news and should be seen changing. `rolling` hands each line to the marquee when
         // it does not fit, so a long title both turns over and then scrolls.
-        // LIGHTER THAN THE PANEL, and put back afterwards. See PanelType.mediaVariation:
+        // LIGHTER THAN THE PANEL, and put back afterwards. See PanelType.MEDIA:
         // this is the one string here that is somebody else's writing rather than a label
         // this app chose, and at the readings' weight it competes with them.
         //

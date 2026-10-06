@@ -4,6 +4,31 @@ import dev.kb896.aiusage.Panel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/**
+ * A face for the panel's text other than its theme's own.
+ *
+ * Either one the app ships ([bundled], by its PanelType id) or files on the phone — a
+ * system family's, or one imported into the app's own folder. The files are named here,
+ * weights and all, rather than looked up again by the family's name: the rear process
+ * builds the face from them directly, without scanning every font on the phone first.
+ */
+@Serializable
+data class PanelFont(
+    /** The family's own name, as the list shows it. */
+    val name: String,
+    val bundled: String? = null,
+    val files: List<PanelFontFile> = emptyList(),
+)
+
+/** One file of a [PanelFont]: [index] into a collection, [variable] when it has a weight axis. */
+@Serializable
+data class PanelFontFile(
+    val path: String,
+    val index: Int = 0,
+    val weight: Int = 400,
+    val variable: Boolean = false,
+)
+
 /** Which window a ring reports on. */
 @Serializable
 enum class RingWindow { SESSION, WEEKLY_ALL, WEEKLY_SCOPED }
@@ -185,6 +210,8 @@ data class PanelConfig(
      * the BACK's theme only: the front screen is always glass (see UiTheme).
      */
     val theme: PanelTheme = PanelTheme.GLASS,
+    /** The panel's face, when it is not the theme's own; null is the theme's. See PanelType. */
+    val font: PanelFont? = null,
     val title: String = "CLAUDE USAGE",
     val background: Int = Panel.Palette.BG,
     /**

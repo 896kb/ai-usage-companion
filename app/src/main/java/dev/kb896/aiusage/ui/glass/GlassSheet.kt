@@ -88,7 +88,8 @@ object GlassSheet {
 
     /** Recolour every TextView under [view] — title, message, buttons — from [lum]. */
     private fun ink(view: View, lum: Float) {
-        if (view is TextView) view.setTextColor(Ink.primary(lum))
+        // A card title inside a sheet keeps its dimmer ink, as it does on a card.
+        if (view is TextView) view.setTextColor(if (view.tag == CardTitle.TAG) Ink.secondary(lum) else Ink.primary(lum))
         if (view is ViewGroup) for (i in 0 until view.childCount) ink(view.getChildAt(i), lum)
     }
 

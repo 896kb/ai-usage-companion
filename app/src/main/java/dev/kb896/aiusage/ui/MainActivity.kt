@@ -840,6 +840,30 @@ class MainActivity : ComponentActivity() {
         cropBackdrop(path, pending = true)
     }
 
+    /** A font file, copied in and set on the panel at once. See PanelFonts.import. */
+    private val pickFont = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val font = PanelFonts.import(this, uri)
+        if (font == null) {
+            toast("That file is not a font the panel can use")
+            return@registerForActivityResult
+        }
+        setFont(font)
+        toast("${font.name} imported")
+    }
+
+    /** The panel's face, saved and sent, the preview and the Font row brought up to date. */
+    private fun setFont(font: dev.kb896.aiusage.data.PanelFont?) {
+        val store = ConfigStore(this)
+        val config = store.load().copy(font = font)
+        store.save(config)
+        graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
+        refreshPreview()
+        buildSettingsRows()
+    }
+
     private val pickArt = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -957,6 +981,20 @@ class MainActivity : ComponentActivity() {
             // The back's look only: the front is glass whichever it is (UiTheme), so nothing
             // here needs rebuilding — the preview redraws with the rest.
             write { it.copy(theme = dev.kb896.aiusage.data.PanelTheme.entries[i]) }
+        }
+        // The panel's face, over the theme's own: the app's two, the phone's, or a file.
+        SettingsRows.navigation(generalRows, "Font: ${config.font?.name ?: "Theme default"}") {
+            FontPicker.show(
+                this, config.theme, config.font,
+                onPick = ::setFont,
+                onImport = { pickFont.launch(arrayOf("font/*", "application/*")) },
+                onRemove = { font ->
+                    val wasSet = store.load().font == font
+                    PanelFonts.remove(font)
+                    if (wasSet) setFont(null)
+                    toast("${font.name} removed")
+                },
+            )
         }
         // A look over whichever theme: the panel on a curved tube. Off by default —
         // it bends the picture, and touches with it. See CrtScreen.
