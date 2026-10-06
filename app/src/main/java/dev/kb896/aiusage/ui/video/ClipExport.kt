@@ -13,6 +13,7 @@ import androidx.media3.effect.Crop
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
@@ -65,7 +66,12 @@ class ClipExport(private val context: Context) {
             })
             .build()
         transformer = t
-        t.start(item, out.path)
+        // HDR made SDR: left as HDR, Media3 falls back to 10-bit HEVC when there is no H.264
+        // HDR encoder, and the panel draws frames as sRGB — a phone's HDR clip came out washed.
+        val composition = Composition.Builder(EditedMediaItemSequence.Builder(item).build())
+            .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
+            .build()
+        t.start(composition, out.path)
         val holder = ProgressHolder()
         main.post(object : Runnable {
             override fun run() {

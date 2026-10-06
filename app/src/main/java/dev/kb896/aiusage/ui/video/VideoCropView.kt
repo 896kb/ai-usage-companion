@@ -16,7 +16,6 @@ import android.view.View
 import android.widget.FrameLayout
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.ArtPlacement
-import dev.kb896.aiusage.ui.ArtCropView
 import dev.kb896.aiusage.ui.CropGesture
 
 /**
@@ -32,6 +31,15 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     var videoSize: Pair<Int, Int>? = null; private set
     private var rangeStart = 0L
     private var rangeEnd = Long.MAX_VALUE
+    /** Only a prepared player may be seeked or started; calls before that are kept for it. */
+    private var prepared = false
+    private var pendingSeek: Long? = null
+
+    /** Said when the video cannot be played here, so the editor can say so and refuse to cut it. */
+    var onFailed: (() -> Unit)? = null
+
+    /** The rear display's own shape, so the clip made at its pixels fills it exactly. */
+    private val aspect = RearSize.pixels(context).let { (w, h) -> w.toFloat() / h }
 
     private val gesture = CropGesture(context, ::region, { videoSize }, ::place)
     val panX get() = gesture.panX
@@ -85,10 +93,10 @@ class VideoCropView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /** The region, centred, at the rear display's shape — the image cropper's for a background. */
+    /** The region, centred, at the rear display's shape, read from the display. */
     fun region(): RectF {
         val w = width * 0.86f
-        val h = w / ArtCropView.PANEL_ASPECT
+        val h = w / aspect
         return RectF((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f)
     }
 
@@ -116,16 +124,30 @@ class VideoCropView(context: Context) : FrameLayout(context) {
         val s = surface ?: return
         val u = uri ?: return
         if (player != null) return
-        player = MediaPlayer().apply {
-            setDataSource(context, u)
-            setSurface(s)
-            setVolume(0f, 0f)
-            setOnPreparedListener { p ->
-                p.seekTo(rangeStart, MediaPlayer.SEEK_CLOSEST)
-                p.start()
-                postOnAnimation(watch)
+        prepared = false
+        player = try {
+            MediaPlayer().apply {
+                setDataSource(context, u)
+                setSurface(s)
+                setVolume(0f, 0f)
+                setOnPreparedListener { p ->
+                    prepared = true
+                    val scrub = pendingSeek
+                    pendingSeek = null
+                    if (scrub != null) {
+                        p.seekTo(scrub, MediaPlayer.SEEK_CLOSEST)
+                    } else {
+                        p.seekTo(rangeStart, MediaPlayer.SEEK_CLOSEST)
+                        p.start()
+                    }
+                    postOnAnimation(watch)
+                }
+                setOnErrorListener { _, _, _ -> failed(); true }
+                prepareAsync()
             }
-            prepareAsync()
+        } catch (_: Exception) {
+            failed()
+            null
         }
         place()
     }
@@ -133,7 +155,7 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     /** Back to the range's start whenever playback passes its end. */
     private val watch = object : Runnable {
         override fun run() {
-            val p = player ?: return
+            val p = player?.takeIf { prepared } ?: return
             if (p.isPlaying && p.currentPosition >= rangeEnd) p.seekTo(rangeStart, MediaPlayer.SEEK_CLOSEST)
             postOnAnimation(this)
         }
@@ -143,7 +165,8 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     fun loopRange(startMs: Long, endMs: Long) {
         rangeStart = startMs
         rangeEnd = endMs
-        player?.let {
+        pendingSeek = null
+        player?.takeIf { prepared }?.let {
             it.seekTo(startMs, MediaPlayer.SEEK_CLOSEST)
             if (!it.isPlaying) it.start()
         }
@@ -151,10 +174,19 @@ class VideoCropView(context: Context) : FrameLayout(context) {
 
     /** Scrubbing a trim handle: paused on that frame until the handle is let go. */
     fun seek(ms: Long) {
-        player?.let {
-            if (it.isPlaying) it.pause()
-            it.seekTo(ms, MediaPlayer.SEEK_CLOSEST)
-        }
+        val p = player ?: return
+        if (!prepared) { pendingSeek = ms; return }
+        if (p.isPlaying) p.pause()
+        p.seekTo(ms, MediaPlayer.SEEK_CLOSEST)
+    }
+
+    /** The player cannot play this video: let it go and tell the editor. */
+    private fun failed() {
+        removeCallbacks(watch)
+        runCatching { player?.release() }
+        player = null
+        prepared = false
+        onFailed?.invoke()
     }
 
     /** The TextureView stretches the video to its bounds; the matrix puts it where ArtPlacement says. */
@@ -190,8 +222,9 @@ class VideoCropView(context: Context) : FrameLayout(context) {
 
     fun release() {
         removeCallbacks(watch)
-        player?.release()
+        runCatching { player?.release() }
         player = null
+        prepared = false
         surface?.release()
         surface = null
     }

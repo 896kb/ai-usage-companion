@@ -6,9 +6,9 @@ import org.junit.Test
 class VideoStateTest {
     private fun d(
         isVideo: Boolean = true, hasClip: Boolean = true, attached: Boolean = true,
-        displayAwake: Boolean = true, aod: Boolean = false, paused: Boolean = false, locked: Boolean = false,
-        loop: Boolean = true, preview: Boolean = false, fresh: Boolean = false,
-    ) = VideoState.decide(isVideo, hasClip, attached, displayAwake, aod, paused, locked, loop, preview, fresh)
+        displayAwake: Boolean = true, visible: Boolean = true, aod: Boolean = false, paused: Boolean = false,
+        locked: Boolean = false, loop: Boolean = true, preview: Boolean = false, fresh: Boolean = false,
+    ) = VideoState.decide(isVideo, hasClip, attached, displayAwake, visible, aod, paused, locked, loop, preview, fresh)
 
     @Test fun `no video or no clip lets go of everything, the last frame too`() {
         assertEquals(VideoAction.DROP, d(isVideo = false))
@@ -45,5 +45,16 @@ class VideoStateTest {
 
     @Test fun `the front's preview always loops, untouched by the panel's state`() {
         assertEquals(VideoAction.LOOP, d(loop = false, preview = true, locked = true, fresh = true))
+    }
+
+    @Test fun `a panel nobody can see — the front app in the background — sleeps the decoder`() {
+        assertEquals(VideoAction.SLEEP, d(visible = false))
+        assertEquals(VideoAction.SLEEP, d(visible = false, preview = true))
+    }
+
+    @Test fun `a player just opened with nothing to do shows its frame rather than nothing`() {
+        assertEquals(VideoAction.FREEZE, VideoState.afterOpen(VideoAction.KEEP, created = true))
+        assertEquals(VideoAction.KEEP, VideoState.afterOpen(VideoAction.KEEP, created = false))
+        assertEquals(VideoAction.LOOP, VideoState.afterOpen(VideoAction.LOOP, created = true))
     }
 }

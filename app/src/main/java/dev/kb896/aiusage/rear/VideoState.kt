@@ -7,7 +7,8 @@ enum class VideoAction { DROP, SLEEP, FREEZE, LOOP, RESTART_LOOP, PLAY_ONCE, KEE
  * apart from the player so every case can be pinned by a test.
  *
  * DROP lets go of everything (no video any more); SLEEP only the decoder, keeping the last
- * frame to show when the display lights again. FREEZE holds the frame where it is: always-on,
+ * frame to show when the display lights again — a dark display, or a panel nobody can see
+ * (the front's preview with the app in the background). FREEZE holds the frame where it is: always-on,
  * the double tap's dim, a non-looping video behind the slider. [fresh] is the panel coming
  * back — woken, unlocked, the dim called off, always-on left, a new clip — and starts the
  * video over, cross-fading from the frame it had stopped on. KEEP is an open, non-looping
@@ -15,11 +16,11 @@ enum class VideoAction { DROP, SLEEP, FREEZE, LOOP, RESTART_LOOP, PLAY_ONCE, KEE
  */
 object VideoState {
     fun decide(
-        isVideo: Boolean, hasClip: Boolean, attached: Boolean, displayAwake: Boolean,
+        isVideo: Boolean, hasClip: Boolean, attached: Boolean, displayAwake: Boolean, visible: Boolean,
         aod: Boolean, paused: Boolean, locked: Boolean, loop: Boolean, preview: Boolean, fresh: Boolean,
     ): VideoAction = when {
         !isVideo || !hasClip -> VideoAction.DROP
-        !attached || !displayAwake -> VideoAction.SLEEP
+        !attached || !displayAwake || !visible -> VideoAction.SLEEP
         preview -> VideoAction.LOOP
         aod || paused -> VideoAction.FREEZE
         loop -> if (fresh) VideoAction.RESTART_LOOP else VideoAction.LOOP
@@ -27,4 +28,11 @@ object VideoState {
         fresh -> VideoAction.PLAY_ONCE
         else -> VideoAction.KEEP
     }
+
+    /**
+     * A player that was only just [created] has drawn nothing, so leaving it be would leave
+     * the panel on its bare ground: it shows its frame instead.
+     */
+    fun afterOpen(action: VideoAction, created: Boolean): VideoAction =
+        if (created && action == VideoAction.KEEP) VideoAction.FREEZE else action
 }

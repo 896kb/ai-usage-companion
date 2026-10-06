@@ -51,12 +51,13 @@ class RearDialView(context: Context) : View(context) {
 
     var config: PanelConfig = PanelConfig.DEFAULT
         set(value) {
-            val oldClip = field.video.clipPath
+            val old = field
             field = value
             applyTheme(value.theme, value.font)
-            // A new clip starts over, so it is seen; otherwise the player only follows the
-            // panel's state. See syncVideo.
-            syncVideo(fresh = value.video.clipPath != oldClip)
+            // A new clip, the video just chosen, or Loop switched: it starts over, so the
+            // change is seen; otherwise the player only follows the panel's state.
+            syncVideo(fresh = value.video.clipPath != old.video.clipPath ||
+                value.effectiveBackdrop != old.effectiveBackdrop || value.video.loop != old.video.loop)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -230,11 +231,12 @@ class RearDialView(context: Context) : View(context) {
                 return
             }
             dev.kb896.aiusage.data.BackdropKind.VIDEO -> {
-                val cells = config.video.luminance
-                val key = "video|" + config.video.clipPath
+                val v = config.video
+                val key = "video|" + v.clipPath + "|" + v.opacity + "|" + config.background
                 if (lumKey == key) return
                 lumKey = key
-                if (cells.size == lumCells.size) cells.forEachIndexed { i, v -> lumCells[i] = v }
+                // The clip at its opacity over the colour behind, as the panes see it.
+                if (v.luminance.size == lumCells.size) VideoLuminance.blend(v.luminance, v.opacity, config.background).copyInto(lumCells)
                 else lumCells.fill(GlassLuminance.of(config.background or (0xFF shl 24)))
                 return
             }
@@ -2544,6 +2546,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // AMBIENT is the one exception, and it is a deliberate risk: see AMBIENT_ALPHA.
         // Recorded here, before the ground or the scene opens a recording of its own.
+        tickSilk()
         weatherReady = prepareWeather()
 
         // NOT GATED ON `hidden`, and that is the point of it. The gamepad takes the
@@ -10923,12 +10926,23 @@ class RearDialView(context: Context) : View(context) {
      * black at the backdrop's pace as the picture does. Software canvases (the brightness
      * map, the weather's ground) never reach here — see refreshLuminance and liveGround.
      */
+    /**
+     * The silk's clock, once a frame, before anything draws it — the weather's ground is the
+     * same shader, and under rain the backdrop itself is never drawn, so the clock cannot
+     * live in the drawing.
+     */
+    private fun tickSilk() {
+        if (config.effectiveBackdrop != dev.kb896.aiusage.data.BackdropKind.SHADER) { silkLastMs = 0L; return }
+        val moving = !aod && aodFade(frameNowMs) < 0.999f
+        if (moving && silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f
+        silkLastMs = if (moving) frameNowMs else 0L
+        silk.setFloatUniform("time", silkTime)
+        if (moving) animating = true
+    }
+
     private fun drawSilkBackdrop(canvas: Canvas) {
         val fade = aodFade(frameNowMs)
-        if (fade >= 0.999f) { silkLastMs = 0L; return }
-        if (!aod && silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f
-        silkLastMs = if (aod) 0L else frameNowMs
-        silk.setFloatUniform("time", silkTime)
+        if (fade >= 0.999f) return
         silkPaint.shader = silk
         silkPaint.colorFilter = if (fade > 0f) {
             val keep = (255 * (1f - fade)).toInt().coerceIn(0, 255)
@@ -10936,10 +10950,20 @@ class RearDialView(context: Context) : View(context) {
         } else null
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         canvas.drawRect(panelRect, silkPaint)
-        if (!aod) animating = true
     }
 
-    private val video = VideoPlayback { invalidate() }
+    private val video = VideoPlayback(onFrame = { invalidate() }, onLost = { syncVideo(fresh = true) })
+
+    /** Whether this panel's window is on screen — the front's preview, with the app in the background, is not. */
+    private var windowShown = true
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        val shown = visibility == VISIBLE
+        if (shown == windowShown) return
+        windowShown = shown
+        syncVideo(fresh = shown)
+    }
 
     /**
      * The double tap's dim: the video stops on the frame it was showing. Set by the activity
@@ -10958,15 +10982,15 @@ class RearDialView(context: Context) : View(context) {
         val clip = v.clipPath?.takeIf { java.io.File(it).canRead() }
         val action = VideoState.decide(
             isVideo = config.effectiveBackdrop == dev.kb896.aiusage.data.BackdropKind.VIDEO,
-            hasClip = clip != null, attached = isAttachedToWindow, displayAwake = displayAwake,
+            hasClip = clip != null, attached = isAttachedToWindow, displayAwake = displayAwake, visible = windowShown,
             aod = aod, paused = videoPaused, locked = locked, loop = v.loop, preview = !interactive, fresh = fresh,
         )
-        when (action) {
-            VideoAction.DROP -> video.drop()
-            VideoAction.SLEEP -> video.sleep()
+        val created = when (action) {
+            VideoAction.DROP -> { video.drop(); false }
+            VideoAction.SLEEP -> { video.sleep(); false }
             else -> video.open(clip!!)
         }
-        when (action) {
+        when (VideoState.afterOpen(action, created)) {
             VideoAction.FREEZE -> video.freeze()
             VideoAction.LOOP -> video.loop(restart = false)
             VideoAction.RESTART_LOOP -> video.loop(restart = true)

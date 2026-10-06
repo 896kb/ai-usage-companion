@@ -105,6 +105,12 @@ object VideoEditor {
             visibility = View.GONE
         }
         sheet.addView(message)
+        fun say(why: String) {
+            // Coloured here, not at creation: the sheet inks every text once it is laid out.
+            message.setTextColor(Panel.Palette.CRIT)
+            message.text = why
+            message.visibility = View.VISIBLE
+        }
 
         val export = ClipExport(activity)
         var exporting = false
@@ -117,6 +123,11 @@ object VideoEditor {
                 if (exporting) export.cancel()
                 frame.release()
             })
+        // A video the phone cannot play here cannot be cut either: said, and Use it refused.
+        frame.onFailed = {
+            say("This video can't be played on this phone")
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
+        }
         // Use it does not close the editor: the clip is cut first, with its progress here.
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
             val size = frame.videoSize ?: return@setOnClickListener
@@ -142,10 +153,7 @@ object VideoEditor {
                     exporting = false
                     progress.visibility = View.GONE
                     button.isEnabled = true
-                    // Coloured here, not at creation: the sheet inks every text once it is laid out.
-                    message.setTextColor(Panel.Palette.CRIT)
-                    message.text = why
-                    message.visibility = View.VISIBLE
+                    say(why)
                 })
         }
     }
