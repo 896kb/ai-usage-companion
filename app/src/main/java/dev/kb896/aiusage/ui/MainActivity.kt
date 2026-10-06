@@ -1212,19 +1212,32 @@ class MainActivity : ComponentActivity() {
         // Directly under Notifications, because it runs on the same grant — see Setup's
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.
-        SettingsRows.toggleWithColor(
-            mediaRows, "Media controls", config.showMedia, config.mediaTint,
-            // the cover and lyrics rows live under this switch: rebuild so they appear now
-            onChange = { on ->
-                write { it.copy(showMedia = on) }
-                if (on) askNotificationAccess("Media controls") { write { it.copy(showMedia = false) } }
-                buildSettingsRows()
-            },
-            onPick = { c -> write { it.copy(mediaColor = c) } },
-        )
+        // the cover, lyrics and colour rows live under this switch: rebuild so they appear now
+        SettingsRows.toggle(mediaRows, "Media controls", config.showMedia) { on ->
+            write { it.copy(showMedia = on) }
+            if (on) askNotificationAccess("Media controls") { write { it.copy(showMedia = false) } }
+            buildSettingsRows()
+        }
         if (config.showMedia) {
             if (!Setup.notificationAccess(this)) {
                 SettingsRows.navigation(mediaRows, "  ↳ allow notification access") { openNotificationAccess() }
+            }
+            // A colour for each part of the page, named for what it paints rather than one
+            // swatch beside the switch for all of it.
+            SettingsRows.colorRow(mediaRows, "  ↳ playback ring", config.mediaPlaybackTint) { c ->
+                write { it.copy(mediaPlaybackColor = c) }
+            }
+            SettingsRows.colorRow(mediaRows, "  ↳ volume ring", config.mediaVolumeTint) { c ->
+                write { it.copy(mediaVolumeColor = c) }
+            }
+            SettingsRows.colorRow(mediaRows, "  ↳ buttons", config.mediaButtonsTint) { c ->
+                write { it.copy(mediaButtonsColor = c) }
+            }
+            SettingsRows.colorRow(mediaRows, "  ↳ title", config.mediaTitleTint) { c ->
+                write { it.copy(mediaTitleColor = c) }
+            }
+            SettingsRows.colorRow(mediaRows, "  ↳ artist", config.mediaArtistTint) { c ->
+                write { it.copy(mediaArtistColor = c) }
             }
             SettingsRows.choice(
                 mediaRows, "  ↳ cover", listOf("SQUARE", "VINYL"),

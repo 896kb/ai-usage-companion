@@ -3089,7 +3089,9 @@ class RearDialView(context: Context) : View(context) {
         // with the phone's actual camera lenses, so moving them was never an option: a
         // ring in motion is a circle visibly not on the lens it traces.
         val playing = media ?: departing
-        val mediaRingTint = colorFor("media", config.mediaTint)
+        // The playback ring and the volume ring, each in its own colour.
+        val playbackRingTint = colorFor("media:playback", config.mediaPlaybackTint)
+        val volumeRingTint = colorFor("media:volume", config.mediaVolumeTint)
         // EASED, which matters for exactly one moment: the end of a track. The reading
         // goes from nearly full to nothing between two frames, and a dial that jumps
         // there reads as the panel having lost its place rather than as a record
@@ -3219,7 +3221,7 @@ class RearDialView(context: Context) : View(context) {
                 canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath,
                 blend = paging,
                 mediaFraction = mediaFractions.getOrElse(at) { 0f },
-                mediaColor = mediaRingTint,
+                mediaColor = if (isVolume) volumeRingTint else playbackRingTint,
                 mediaStart =
                     if (isVolume) MediaPage.VOLUME_ARC_START
                     else MediaPage.PLAYBACK_ARC_START,
@@ -8223,7 +8225,7 @@ class RearDialView(context: Context) : View(context) {
             // construction — the old one was dropped the moment the title moved — so
             // there is nothing to carry through the swap and nothing to decide about how
             // it should travel.
-            drawLyrics(canvas, resting, paging, notice, colorFor("media", config.mediaTint))
+            drawLyrics(canvas, resting, paging, notice, colorFor("media:title", config.mediaTitleTint))
             return
         }
         animating = true
@@ -8260,7 +8262,7 @@ class RearDialView(context: Context) : View(context) {
                 val going = lerpDisc(resting, inRing, e)
                 drawCoverAt(canvas, going, leaving, paging)
                 drawLeavingLyrics(canvas, going, 1f - e, paging,
-                    colorFor("media", config.mediaTint))
+                    colorFor("media:title", config.mediaTitleTint))
             } else {
                 val e = Tween.easeInOut((progress - exit) / (1f - exit))
                 drawCoverAt(canvas, lerpDisc(inRing, resting, e), m, paging)
@@ -8275,7 +8277,7 @@ class RearDialView(context: Context) : View(context) {
                 val going = shifted(e)
                 drawCoverAt(canvas, going, leaving, paging)
                 drawLeavingLyrics(canvas, going, 1f - e, paging,
-                    colorFor("media", config.mediaTint))
+                    colorFor("media:title", config.mediaTitleTint))
             }
             drawCoverAt(canvas, shifted(-(1f - e)), m, paging)
             return
@@ -8287,7 +8289,7 @@ class RearDialView(context: Context) : View(context) {
             val going = shifted(e)
             drawCoverAt(canvas, going, leaving, paging)
             drawLeavingLyrics(canvas, going, 1f - e, paging,
-                colorFor("media", config.mediaTint))
+                colorFor("media:title", config.mediaTitleTint))
         } else {
             val e = Tween.easeInOut((progress - exit) / (1f - exit))
             drawCoverAt(canvas, shifted(1f - e), m, paging)
@@ -8325,7 +8327,7 @@ class RearDialView(context: Context) : View(context) {
         // The record takes the media colour like everything else on the row. It used to
         // have a colour of its own, which is a setting that existed because the record was
         // DRAWN — and a drawn record is a shape that has to be told what colour to be.
-        val ink = colorFor("media", config.mediaTint)
+        val ink = colorFor("media:playback", config.mediaPlaybackTint)
         // Full strength throughout: the slide is what says it is leaving, and a record
         // that faded as it slid would read as two things happening to one object.
         fun shade(alpha: Int) = (ink and 0x00FFFFFF) or (alpha shl 24)
@@ -9243,7 +9245,12 @@ class RearDialView(context: Context) : View(context) {
         volumeShown: Float,
     ) {
         val m = media ?: return
-        val tint = colorFor("media", config.mediaTint)
+        // Each part in its own colour: see PanelConfig.mediaPlaybackColor and the rest.
+        val playbackTint = colorFor("media:playback", config.mediaPlaybackTint)
+        val volumeTint = colorFor("media:volume", config.mediaVolumeTint)
+        val buttonsTint = colorFor("media:buttons", config.mediaButtonsTint)
+        val titleTint = colorFor("media:title", config.mediaTitleTint)
+        val artistTint = colorFor("media:artist", config.mediaArtistTint)
         val alpha = { a: Int -> (a * paging).toInt().coerceIn(0, 255) }
         fun shade(base: Int, a: Int) = (base and 0x00FFFFFF) or (alpha(a) shl 24)
 
@@ -9271,7 +9278,7 @@ class RearDialView(context: Context) : View(context) {
         // anything attached to a ring has to keep the ring's frame.
         canvas.save()
         canvas.translate(-dx, -dy)
-        drawMediaRings(canvas, rings, paging, tint, volumeShown)
+        drawMediaRings(canvas, rings, paging, playbackTint, volumeTint, volumeShown)
         canvas.restore()
 
         // ---- title and artist, centred under the disc -------------------------
@@ -9365,11 +9372,11 @@ class RearDialView(context: Context) : View(context) {
         val aBase = nameHomeArtist + (artistBase - nameHomeArtist) * nt
 
         extras.textSize = typed(titleSize)
-        extras.color = solid(tint, 0xFF)
+        extras.color = solid(titleTint, 0xFF)
         line(canvas, "page:title", pageTitle, nt, cx, tBase, titleSize, bandW)
         if (m.artist.isNotBlank()) {
             extras.textSize = typed(artistSize)
-            extras.color = solid(tint, MediaLayout.ARTIST_ALPHA)
+            extras.color = solid(artistTint, MediaLayout.ARTIST_ALPHA)
             line(canvas, "page:artist", pageArtist, nt, cx, aBase, artistSize, bandW)
         }
         extras = wasPen
@@ -9427,11 +9434,11 @@ class RearDialView(context: Context) : View(context) {
             if (!transportHomeKnown) pageCx[i]
             else transportHomeX[i] + (pageCx[i] - transportHomeX[i]) * t
 
-        extras.color = solid(tint, 0xFF)
+        extras.color = solid(buttonsTint, 0xFF)
         val prevCx = travelled(0)
         val prevX = prevCx - bh * Glyphs.aspect(PanelIcons.PREV, config.theme) / 2f
         glassButton(canvas, prevCx, bcy, bh) { c ->
-            extras.color = solid(tint, 0xFF)
+            extras.color = solid(buttonsTint, 0xFF)
             drawIcon(c, PanelIcons.PREV, prevX, bTop, bh)
         }
         centres += prevCx
@@ -9442,7 +9449,7 @@ class RearDialView(context: Context) : View(context) {
         glassButton(canvas, playCx, bcy, bh) { c ->
             c.save()
             c.clipRect(playX, bTop - bh, playX + bh, bTop + bh * 2f)
-            drawPlayPause(c, playX, bTop, bh, solid(tint, 0xFF))
+            drawPlayPause(c, playX, bTop, bh, solid(buttonsTint, 0xFF))
             c.restore()
         }
         centres += playCx
@@ -9450,7 +9457,7 @@ class RearDialView(context: Context) : View(context) {
         val nextCx = travelled(2)
         val nextX = nextCx - bh * Glyphs.aspect(PanelIcons.NEXT, config.theme) / 2f
         glassButton(canvas, nextCx, bcy, bh) { c ->
-            extras.color = solid(tint, 0xFF)
+            extras.color = solid(buttonsTint, 0xFF)
             drawIcon(c, PanelIcons.NEXT, nextX, bTop, bh)
         }
         centres += nextCx
@@ -9517,7 +9524,7 @@ class RearDialView(context: Context) : View(context) {
         val speakerW = mh * speaker.aspect
 
         extras.color = shade(
-            tint,
+            volumeTint,
             ((if (isMuted) MediaLayout.ARTIST_ALPHA else 0xFF) * paging).toInt()
                 .coerceIn(0, 255),
         )
@@ -9748,6 +9755,8 @@ class RearDialView(context: Context) : View(context) {
         rings: PanelGeometry,
         paging: Float,
         tint: Int,
+        /** The volume ring's colour; [tint] is the playback ring's. */
+        volumeTint: Int,
         /** The eased volume the arc is drawn at, so its label reads the same number. */
         volumeShown: Float,
     ) {
@@ -9762,10 +9771,10 @@ class RearDialView(context: Context) : View(context) {
         // shows how far it has to run.
         tick(canvas, rings.personal, MediaPage.PLAYBACK_ARC_START, tint, alpha)
         tick(canvas, rings.personal, MediaPage.PLAYBACK_ARC_END, tint, alpha)
-        tick(canvas, rings.work, MediaPage.VOLUME_ARC_START, tint, alpha)
+        tick(canvas, rings.work, MediaPage.VOLUME_ARC_START, volumeTint, alpha)
         tick(
             canvas, rings.work,
-            MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP, tint, alpha,
+            MediaPage.VOLUME_ARC_START + MediaPage.VOLUME_ARC_SWEEP, volumeTint, alpha,
         )
 
         // The rings themselves are drawn with the readout's, sweeping from the usage
@@ -9829,6 +9838,7 @@ class RearDialView(context: Context) : View(context) {
             // enough, and any further out is inside the ring above. Down here there is
             // open panel. VOLUME with its reading attached, so the percentage rolls in the
             // same wheel as everything else and the word acts as its unit.
+            extras.color = (volumeTint and 0x00FFFFFF) or (labelColor and 0xFF000000.toInt())
             curvedRolling(
                 c, "dial:volume",
                 MediaPage.VOLUME_LABEL + " " + Math.round(volumeShown * 100f) + "%",
@@ -10676,10 +10686,10 @@ class RearDialView(context: Context) : View(context) {
         dy: Float,
     ) {
         val m = media ?: departing ?: return
-        val tint = colorFor("media", config.mediaTint)
+        val tint = colorFor("media:buttons", config.mediaButtonsTint)
         val band = mediaRegion(region)
 
-        drawMediaProgress(canvas, m, band, tint)
+        drawMediaProgress(canvas, m, band, colorFor("media:playback", config.mediaPlaybackTint))
 
         // The cover first, because where it ends is where the text begins.
         //
@@ -10835,7 +10845,7 @@ class RearDialView(context: Context) : View(context) {
         extras = extrasMedia
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(MediaLayout.TEXT_SIZE)
-        extras.color = tint
+        extras.color = colorFor("media:title", config.mediaTitleTint)
         // Only where the row owns them. Off rest the name belongs to the travelling copy
         // the media page draws — see nameHomeCard.
         if (pagingNow <= 0.001f) rolling(
@@ -10851,7 +10861,7 @@ class RearDialView(context: Context) : View(context) {
             // Dimmed against the title rather than given a colour of its own. Which of
             // the two lines is the track is the only thing this row has to say at a
             // glance, and a second hue would make that a question about the palette.
-            extras.color = (tint and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
+            extras.color = (colorFor("media:artist", config.mediaArtistTint) and 0x00FFFFFF) or (MediaLayout.ARTIST_ALPHA shl 24)
             // The artist goes with the title. Left at the panel's weight it would come
             // out bolder than the name of the track above it.
             if (pagingNow <= 0.001f) rolling(

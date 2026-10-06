@@ -502,7 +502,18 @@ data class PanelConfig(
      * effect of agreeing to mirror notifications is not something the user asked for.
      */
     val showMedia: Boolean = false,
+    /** The media page's one colour, from before each part had its own: what they all start in. */
     val mediaColor: Int? = null,
+    /**
+     * The media page's parts, each coloured on its own: the playback ring and what goes
+     * with it (times, scrubber, its icons), the volume ring and what goes with it, the
+     * three transport buttons, the artist and the title. Null: the one media colour.
+     */
+    val mediaPlaybackColor: Int? = null,
+    val mediaVolumeColor: Int? = null,
+    val mediaButtonsColor: Int? = null,
+    val mediaArtistColor: Int? = null,
+    val mediaTitleColor: Int? = null,
     val mediaArt: MediaArt = MediaArt.SQUARE,
 
 
@@ -568,6 +579,11 @@ data class PanelConfig(
     val cameraTint: Int get() = cameraColor ?: extrasColor
     val notificationTint: Int get() = notificationColor ?: extrasColor
     val mediaTint: Int get() = mediaColor ?: extrasColor
+    val mediaPlaybackTint: Int get() = mediaPlaybackColor ?: mediaTint
+    val mediaVolumeTint: Int get() = mediaVolumeColor ?: mediaTint
+    val mediaButtonsTint: Int get() = mediaButtonsColor ?: mediaTint
+    val mediaArtistTint: Int get() = mediaArtistColor ?: mediaTint
+    val mediaTitleTint: Int get() = mediaTitleColor ?: mediaTint
     val notificationGround: Int get() = notificationBg ?: background
 
     /**
