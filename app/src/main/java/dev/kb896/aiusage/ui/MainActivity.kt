@@ -1616,8 +1616,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
             // One shader for now, shown as the choice it will be among others.
+            // The same gap under the kinds as the rows the other kinds put there.
             dev.kb896.aiusage.data.BackdropKind.SHADER ->
-                rows.addView(dev.kb896.aiusage.ui.glass.GlassSegmented(this, listOf("Silk"), 0))
+                rows.addView(
+                    dev.kb896.aiusage.ui.glass.GlassSegmented(this, listOf("Silk"), 0),
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        .apply { topMargin = (8 * resources.displayMetrics.density).toInt() },
+                )
         }
         dev.kb896.aiusage.ui.glass.Unclip.tree(rows)
     }
