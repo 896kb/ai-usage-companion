@@ -1222,6 +1222,13 @@ class MainActivity : ComponentActivity() {
             if (!Setup.notificationAccess(this)) {
                 SettingsRows.navigation(mediaRows, "  ↳ allow notification access") { openNotificationAccess() }
             }
+            // The cover first, right under the switch: the page's biggest thing.
+            SettingsRows.choice(
+                mediaRows, "  ↳ cover", listOf("SQUARE", "VINYL"),
+                config.mediaArt.ordinal,
+            ) { i ->
+                write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
+            }
             // A colour for each part of the page, named for what it paints rather than one
             // swatch beside the switch for all of it.
             SettingsRows.colorRow(mediaRows, "  ↳ playback ring", config.mediaPlaybackTint) { c ->
@@ -1238,12 +1245,6 @@ class MainActivity : ComponentActivity() {
             }
             SettingsRows.colorRow(mediaRows, "  ↳ artist", config.mediaArtistTint) { c ->
                 write { it.copy(mediaArtistColor = c) }
-            }
-            SettingsRows.choice(
-                mediaRows, "  ↳ cover", listOf("SQUARE", "VINYL"),
-                config.mediaArt.ordinal,
-            ) { i ->
-                write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
             }
             // Its own row and its own warning, because it is the only setting in this app
             // that sends anything anywhere. The note is not a disclaimer — it is the

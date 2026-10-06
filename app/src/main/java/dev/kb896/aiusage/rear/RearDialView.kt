@@ -12519,10 +12519,6 @@ class RearDialView(context: Context) : View(context) {
         private const val VINYL_BODY_ALPHA = 0xC4
 
 
-        /** The lip at the edge of the disc, the brightest line on it. */
-        private const val VINYL_RIM_W = 1.6f
-
-
         /** The cover on the label, held back so the buttons over it stay findable. */
         /** How far the empty part of the battery is held back. See the battery block. */
         private const val BATTERY_SHELL_ALPHA = 0x59
