@@ -1183,6 +1183,8 @@ class RearDialView(context: Context) : View(context) {
             // Straight back to work, without waiting on the heartbeat: whatever moved
             // while the panel was dark has to be caught up in the first frame after it.
             if (value) invalidate()
+            // Dark: still at once, so that lighting again picks the silk up from a standstill.
+            if (!value) silkSpeed.stopNow()
             syncVideo(fresh = value)
             syncTilt()
         }
@@ -10999,6 +11001,7 @@ class RearDialView(context: Context) : View(context) {
         }
     }
     private val silkPaint = Paint()
+    private val silkSpeed = SpeedRamp()
     private val silkShift = android.graphics.Matrix()
     private var silkTime = 0f
     private var silkLastMs = 0L
@@ -11015,8 +11018,12 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun tickSilk() {
         if (config.effectiveBackdrop != dev.kb896.aiusage.data.BackdropKind.SHADER) { silkLastMs = 0L; return }
-        val moving = !aod && aodFade(frameNowMs) < 0.999f
-        if (moving && silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f
+        // It slows to a stop going into always-on or the double tap's dim, and picks up
+        // again coming out — always, as the videos do with their ease. See SpeedRamp.
+        silkSpeed.toward(if (aod || videoPaused) 0f else 1f, frameNowMs)
+        val speed = silkSpeed.at(frameNowMs)
+        if (silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f * speed
+        val moving = speed > 0f || silkSpeed.turning(frameNowMs)
         silkLastMs = if (moving) frameNowMs else 0L
         silk.setFloatUniform("time", silkTime)
         silkShift.setTranslate(parallaxDx, parallaxDy)
