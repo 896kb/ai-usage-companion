@@ -1522,93 +1522,127 @@ class MainActivity : ComponentActivity() {
                     ArtImport.promote(this, ArtImport.Slot.BACKGROUND_PENDING, ArtImport.Slot.BACKGROUND)
                         ?: run { toast("Could not keep that image"); return@setPositiveButton }
                 } else path
-                var config = store.load().copy(backdrop = ArtConfig(
-                    imagePath = finalPath, panX = view.panX, panY = view.panY, zoom = view.zoom, opacity = opacity))
+                var config = store.load().copy(
+                    backdrop = ArtConfig(
+                        imagePath = finalPath, panX = view.panX, panY = view.panY, zoom = view.zoom, opacity = opacity),
+                    backdropKind = dev.kb896.aiusage.data.BackdropKind.IMAGE,
+                )
                 // The colour behind is the panel's ground; it only matters below full.
                 if (opacity < 1f) config = config.copy(background = behind)
                 store.save(config)
                 dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
                 graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
                 refreshPreview()
-                refreshBackdropClear()
+                bindBackdrop()
                 toast("Background set")
             })
     }
 
-    /**
-     * The background: a colour, or a picture, in one place.
-     *
-     * They used to be two controls in two sections — the colour as a row among the
-     * toggles, the picture under a heading of its own further down — which asked the user
-     * to know that they were the same decision. The panel has ONE ground and it is either
-     * of those; the section says so.
-     */
-    private fun bindBackdrop() {
-        findViewById<Button>(R.id.backdrop_color).setOnClickListener {
-            ColorPickerDialog.show(this, ConfigStore(this).load().background) { picked ->
-                val store = ConfigStore(this)
-                // A COLOUR REPLACES A PICTURE. The panel has one ground and these are two
-                // ways of saying what it is, so leaving the image in place would mean
-                // choosing a colour and seeing no change at all — the picture is drawn
-                // over the ground, and would go on covering it.
-                //
-                // The file goes with it, as it does from the bin: a megabyte of somebody's
-                // photograph that nothing will read again. Said out loud in the toast,
-                // because a control that quietly deletes something is worse than one that
-                // asks — and this one is one tap from a picker that puts it back.
-                val had = store.load().backdrop.imagePath != null
-                val config = store.load().copy(background = picked, backdrop = ArtConfig())
-                store.save(config)
-                if (had) ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
-                graph.bridge.update(
-                    StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest),
-                )
-                refreshPreview()
-                dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
-                refreshBackdropClear()
-                if (had) toast("Colour set, image removed")
-            }
-        }
-
-        val pick = findViewById<Button>(R.id.backdrop_pick)
-        pick.setOnClickListener { pickBackdrop.launch("image/*") }
-        // Long-press re-crops what is already there, without going back through the
-        // picker to choose the same file again — the same affordance the artwork has.
-        pick.setOnLongClickListener {
-            val path = ConfigStore(this).load().backdrop.imagePath
-            if (path == null) toast("No image chosen yet")
-            else cropBackdrop(path, reuseTransform = true)
-            true
-        }
-
-        findViewById<android.widget.ImageButton>(R.id.backdrop_clear).setOnClickListener {
-            val store = ConfigStore(this)
-            val config = store.load().copy(backdrop = ArtConfig())
-            store.save(config)
-            // The file goes too. It is a megabyte of somebody's photograph that nothing
-            // will ever read again, and leaving it would make "remove" a lie about disk.
-            ArtImport.clear(this, ArtImport.Slot.BACKGROUND)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
-            refreshPreview()
-            dev.kb896.aiusage.ui.glass.Backdrop.rebuild(this)
-            refreshBackdropClear()
-            toast("Background removed")
-        }
-        refreshBackdropClear()
+    /** Saves, sends to the back, and redraws the preview and the card. */
+    private fun saveBackdrop(edit: (PanelConfig) -> PanelConfig) {
+        val store = ConfigStore(this)
+        val config = edit(store.load())
+        store.save(config)
+        graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
+        refreshPreview()
+        bindBackdrop()
     }
 
     /**
-     * The bin is live only when there is something in it.
+     * The background: one of four kinds, and the chosen kind's controls under it.
      *
-     * A control that is always available and does nothing most of the time teaches people
-     * to ignore it. Dimmed, it also answers a question the section would otherwise leave
-     * open — whether a picture is set at all — without a line of text saying so.
+     * Switching deletes nothing — the picture and the video stay with their settings, so
+     * switching back restores them; a kind with nothing chosen yet opens its picker
+     * instead, and becomes the background once something is chosen. A picture or a video
+     * that is set offers Edit and Choose another: plain buttons, where a long press on one
+     * button used to be the only way back into the cropper.
      */
-    private fun refreshBackdropClear() {
-        val has = ConfigStore(this).load().backdrop.imagePath != null
-        findViewById<android.widget.ImageButton>(R.id.backdrop_clear).apply {
-            isEnabled = has
-            alpha = if (has) 1f else 0.35f
+    private fun bindBackdrop() {
+        val rows = findViewById<LinearLayout>(R.id.backdrop_rows)
+        rows.removeAllViews()
+        val config = ConfigStore(this).load()
+        val kinds = dev.kb896.aiusage.data.BackdropKind.entries
+        val kind = config.effectiveBackdrop
+        rows.addView(
+            dev.kb896.aiusage.ui.glass.GlassSegmented(this, listOf("Color", "Image", "Video", "Shader"), kind.ordinal).apply {
+                onChange = { i ->
+                    when (val picked = kinds[i]) {
+                        dev.kb896.aiusage.data.BackdropKind.IMAGE ->
+                            if (config.backdrop.imagePath == null) { pickBackdrop.launch("image/*"); bindBackdrop() }
+                            else saveBackdrop { it.copy(backdropKind = picked) }
+                        dev.kb896.aiusage.data.BackdropKind.VIDEO ->
+                            if (config.video.clipPath == null) { pickVideo.launch(arrayOf("video/*")); bindBackdrop() }
+                            else saveBackdrop { it.copy(backdropKind = picked) }
+                        else -> saveBackdrop { it.copy(backdropKind = picked) }
+                    }
+                }
+            },
+        )
+        when (kind) {
+            dev.kb896.aiusage.data.BackdropKind.COLOR ->
+                SettingsRows.colorRow(rows, "Colour", config.background) { c -> saveBackdrop { it.copy(background = c) } }
+            dev.kb896.aiusage.data.BackdropKind.IMAGE -> {
+                val path = config.backdrop.imagePath
+                if (path != null) SettingsRows.navigation(rows, "Edit image") { cropBackdrop(path, reuseTransform = true) }
+                SettingsRows.navigation(rows, if (path != null) "Choose another" else "Choose image") {
+                    pickBackdrop.launch("image/*")
+                }
+            }
+            dev.kb896.aiusage.data.BackdropKind.VIDEO -> {
+                val set = config.video.clipPath != null
+                if (set) SettingsRows.navigation(rows, "Edit video") {
+                    val uri = config.video.originalUri
+                    if (dev.kb896.aiusage.ui.video.VideoFiles.canOpen(this, uri)) editVideo(android.net.Uri.parse(uri))
+                    else {
+                        // The clip keeps playing; only the original it was cut from is gone.
+                        toast("The original video is gone — choose it again")
+                        pickVideo.launch(arrayOf("video/*"))
+                    }
+                }
+                SettingsRows.navigation(rows, if (set) "Choose another" else "Choose video") {
+                    pickVideo.launch(arrayOf("video/*"))
+                }
+                SettingsRows.toggle(rows, "Loop", config.video.loop) { on ->
+                    saveBackdrop { it.copy(video = it.video.copy(loop = on)) }
+                }
+                // Only a video that plays once has ends to ease: a loop has none.
+                if (!config.video.loop) {
+                    SettingsRows.toggle(rows, "  ↳ ease in", config.video.easeIn) { on ->
+                        saveBackdrop { it.copy(video = it.video.copy(easeIn = on)) }
+                    }
+                    SettingsRows.toggle(rows, "  ↳ ease out", config.video.easeOut) { on ->
+                        saveBackdrop { it.copy(video = it.video.copy(easeOut = on)) }
+                    }
+                }
+            }
+            // One shader for now, shown as the choice it will be among others.
+            dev.kb896.aiusage.data.BackdropKind.SHADER ->
+                rows.addView(dev.kb896.aiusage.ui.glass.GlassSegmented(this, listOf("Silk"), 0))
+        }
+        dev.kb896.aiusage.ui.glass.Unclip.tree(rows)
+    }
+
+    /** A video, picked: its read permission kept, then straight into the editor. */
+    private val pickVideo = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        dev.kb896.aiusage.ui.video.VideoFiles.hold(this, uri)
+        // A new original starts from a clean crop and trim; loop and ease carry over.
+        val keep = ConfigStore(this).load().video
+        editVideo(uri, dev.kb896.aiusage.data.VideoConfig(loop = keep.loop, easeIn = keep.easeIn, easeOut = keep.easeOut))
+    }
+
+    private fun editVideo(
+        uri: android.net.Uri,
+        initial: dev.kb896.aiusage.data.VideoConfig = ConfigStore(this).load().video,
+    ) {
+        dev.kb896.aiusage.ui.video.VideoEditor.show(this, uri, initial, ConfigStore(this).load().background) { video, behind ->
+            saveBackdrop {
+                it.copy(video = video, background = behind, backdropKind = dev.kb896.aiusage.data.BackdropKind.VIDEO)
+            }
+            dev.kb896.aiusage.ui.video.VideoFiles.keepOnly(this, video.clipPath)
+            toast("Background set")
         }
     }
 

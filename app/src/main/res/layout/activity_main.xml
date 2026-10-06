@@ -170,6 +170,40 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
+        <!--
+            ONE SECTION FOR ONE THING. The panel has a single background — a colour, a
+            picture, a video or a shader — chosen here, first in General, with only the
+            chosen kind's controls under the choice. See MainActivity.bindBackdrop.
+
+            There is no switch on the heading. There was, and it offered a choice between
+            the panel as it is and the panel with no ground at all — which is the one
+            state that hands the display back to MIUI's SubScreenLauncher. The background
+            is not optional; WHICH background it is, is the only question here.
+        -->
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_backdrop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+        <!-- Inside its card, at the top, like Theme's label — not a heading over it. -->
+        <TextView
+            android:id="@+id/backdrop_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Background"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/backdrop_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <dev.kb896.aiusage.ui.glass.GlassCard
             android:id="@+id/card_general"
             android:layout_width="match_parent"
@@ -182,67 +216,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
-
-        </dev.kb896.aiusage.ui.glass.GlassCard>
-
-        <!--
-            ONE SECTION FOR ONE THING. The panel has a single background and it is either
-            a colour or a picture, but the two used to be set in different places — the
-            colour as a row up in the toggles, the picture as its own heading down here —
-            so choosing between them meant knowing that they were the same decision.
-
-            There is no switch on the heading. There was, and it offered a choice between
-            the panel as it is and the panel with no ground at all — which is the one
-            state that hands the display back to MIUI's SubScreenLauncher. The background
-            is not optional; WHICH background it is, is the only question here.
-        -->
-        <dev.kb896.aiusage.ui.glass.GlassCard
-            android:id="@+id/card_backdrop"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-        <!-- Inside its card, at the top, like Theme's label — not a heading over it. -->
-        <TextView
-            android:id="@+id/backdrop_heading"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Background"
-            android:textSize="13sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:baselineAligned="false"
-            android:orientation="horizontal">
-
-            <dev.kb896.aiusage.ui.glass.GlassButton
-                android:id="@+id/backdrop_color"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="COLOR"
-                android:textSize="13sp" />
-
-            <dev.kb896.aiusage.ui.glass.GlassButton
-                android:id="@+id/backdrop_pick"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:text="IMAGE"
-                android:textSize="13sp" />
-
-            <dev.kb896.aiusage.ui.glass.GlassIconButton
-                android:id="@+id/backdrop_clear"
-                android:layout_width="52dp"
-                android:layout_height="match_parent"
-                android:layout_marginStart="6dp"
-                android:contentDescription="Remove the background image"
-                android:scaleType="centerInside"
-                android:src="@drawable/ic_trash" />
-        </LinearLayout>
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
