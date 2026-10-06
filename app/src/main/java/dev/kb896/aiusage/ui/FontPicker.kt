@@ -34,7 +34,7 @@ object FontPicker {
         val res = context.resources
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(context, 16), dp(context, 4), dp(context, 16), dp(context, 8))
+            setPadding(dp(context, 16), dp(context, 16), dp(context, 16), dp(context, 8))
         }
         lateinit var dialog: AlertDialog
         // Each row with its face, put back after Modal's sweep sets the app's face on every
@@ -104,8 +104,8 @@ object FontPicker {
         val looking = dev.kb896.aiusage.ui.glass.GlassSpinner(context).also { box.addView(it) }
 
         val scroll = ScrollView(context).apply { addView(box) }
+        // No title: the row that opened it already says Font, and the list starts at once.
         dialog = Modal.show(Modal.builder(context)
-            .setTitle("Font")
             .setView(scroll)
             .setNegativeButton("Close", null))
         // The sheet keeps the height it opened at: the phone's fonts arriving scroll inside
