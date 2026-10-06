@@ -168,6 +168,35 @@ data class AccountStyle(
  * Pan and zoom are fractions of the art REGION, not of the panel, so they survive a
  * change to where that region is.
  */
+/** What the panel's background is. See PanelConfig.effectiveBackdrop. */
+@Serializable
+enum class BackdropKind { COLOR, IMAGE, VIDEO, SHADER }
+
+/**
+ * A video background: the original the user picked (kept as a document URI the app holds
+ * permission for, so it can be edited again), the clip made from it for the panel, and how
+ * it plays. The clip is already cropped, scaled to the rear display and trimmed — the
+ * trim and crop are kept to reopen the editor where it was left.
+ */
+@Serializable
+data class VideoConfig(
+    val originalUri: String? = null,
+    val clipPath: String? = null,
+    val trimStartMs: Long = 0,
+    val trimEndMs: Long = 0,
+    val panX: Float = 0f,
+    val panY: Float = 0f,
+    val zoom: Float = 1f,
+    /** As the picture's: how much of the video shows over the panel's ground colour. */
+    val opacity: Float = 1f,
+    val loop: Boolean = true,
+    /** Loop off only: start slow and speed up / slow into the last frame. See EaseCurve. */
+    val easeIn: Boolean = false,
+    val easeOut: Boolean = false,
+    /** The clip's middle frame's brightness, GlassLuminance.SIDE squared cells, row by row. */
+    val luminance: List<Float> = emptyList(),
+)
+
 @Serializable
 data class ArtConfig(
     val imagePath: String? = null,
@@ -429,6 +458,11 @@ data class PanelConfig(
      * every panel had before this existed.
      */
     val backdrop: ArtConfig = ArtConfig(),
+    /** Which background the panel has; null in configs saved before there was a choice. See [effectiveBackdrop]. */
+    val backdropKind: BackdropKind? = null,
+    val video: VideoConfig = VideoConfig(),
+    /** The Shader background's choice. Only the front screen's silk, for now. */
+    val shader: String = "silk",
     /** Appearance per account, by index. Short lists are fine — a missing entry is
      *  the same as an entry of all-nulls: use the built-ins. */
     val accounts: List<AccountStyle> = listOf(AccountStyle(), AccountStyle()),
@@ -447,6 +481,13 @@ data class PanelConfig(
     val notificationTint: Int get() = notificationColor ?: extrasColor
     val mediaTint: Int get() = mediaColor ?: extrasColor
     val notificationGround: Int get() = notificationBg ?: background
+
+    /**
+     * The background in force. A config from before the choice existed had a picture or a
+     * colour, and opens on whichever it had.
+     */
+    val effectiveBackdrop: BackdropKind
+        get() = backdropKind ?: if (backdrop.imagePath != null) BackdropKind.IMAGE else BackdropKind.COLOR
 
     /**
      * Every colour the panel is drawn in, once each, in a stable order — the picker's
