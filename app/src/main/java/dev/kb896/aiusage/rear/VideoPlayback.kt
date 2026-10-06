@@ -56,6 +56,9 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
     private var decoder: Decoder? = null
     private val main = Handler(Looper.getMainLooper())
+    /** Where a slept clip was, to carry a loop on from there when it is opened again. */
+    private var sleptPath: String? = null
+    private var sleptAtMs = 0L
     private val losses = ArrayDeque<Long>()
 
     /** What to show: the live frame, or the still while there is none. */
@@ -83,8 +86,9 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         if (d != null && d.path == path) return false
         // Another clip: the old one's frame is not this one's to fade from.
         if (d != null) drop() else close()
+        val from = if (path == sleptPath) sleptAtMs else 0L
         decoder = try {
-            Decoder(path).also { it.start() }
+            Decoder(path, from).also { it.start() }
         } catch (e: Exception) {
             Log.w(TAG, "could not open $path", e)
             null
@@ -121,8 +125,10 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
     /** Lets go of the decoder, keeping the frame it was on to show until it is back. */
     fun sleep() {
-        if (decoder == null) return
+        val d = decoder ?: return
         still = snapshot()
+        sleptPath = d.path
+        sleptAtMs = d.positionMs
         close()
     }
 
@@ -131,6 +137,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         close()
         still = null
         fadeFrom = null
+        sleptPath = null
+        sleptAtMs = 0L
     }
 
     private fun close() {
@@ -170,9 +178,14 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
     /**
      * One clip: its extractor, its codec, the reader its frames land in, and the thread
      * that feeds the one and paces the other. Commands from the main thread go through
-     * [lock]; a wait for a frame's time wakes for them.
+     * [lock]; a wait for a frame's time wakes for them. Opened at [fromMs] — a loop carried
+     * on after a sleep — it seeks there and puts nothing up before it.
      */
-    private inner class Decoder(val path: String) : Thread("video-backdrop") {
+    private inner class Decoder(val path: String, fromMs: Long) : Thread("video-backdrop") {
+        /** The clip time of the frame last put up: where a sleep leaves it. */
+        @Volatile var positionMs = fromMs; private set
+        /** Frames before this are decoded and dropped; the first at or after it starts the clock. */
+        private var skipUntil = fromMs
         private val lock = Object()
         private val extractor = MediaExtractor()
         private val codec: MediaCodec
@@ -259,6 +272,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         private fun decode() {
             val info = MediaCodec.BufferInfo()
             var inputDone = false
+            if (skipUntil > 0) extractor.seekTo(skipUntil * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             var lastPts = -1L
             var lastDue = 0L
             var frameMs = 33L
@@ -267,6 +281,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                     if (quitting) return
                     if (restart) {
                         restart = false
+                        skipUntil = 0L
                         codec.flush()
                         extractor.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         inputDone = false
@@ -309,7 +324,21 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                     continue
                 }
                 val pts = info.presentationTimeUs / 1000
+                val skip = synchronized(lock) {
+                    when {
+                        skipUntil <= 0L || restart -> false
+                        pts < skipUntil -> true
+                        else -> {
+                            // The frame it slept on: due now, and the run's clock set from it.
+                            skipUntil = 0L
+                            clock.startFrom(SystemClock.uptimeMillis(), wall(pts))
+                            false
+                        }
+                    }
+                }
+                if (skip) { codec.releaseOutputBuffer(o, false); continue }
                 if (!present(o, pts, lastPts, lastDue)) continue
+                positionMs = pts
                 if (lastPts >= 0 && pts > lastPts) frameMs = pts - lastPts
                 lastDue = synchronized(lock) { clock.due(wall(pts)) }
                 lastPts = pts

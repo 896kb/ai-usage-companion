@@ -56,9 +56,10 @@ class RearDialView(context: Context) : View(context) {
             applyTheme(value.theme, value.font)
             // A new clip, the video just chosen, or Loop switched: it starts over, so the
             // change is seen; otherwise the player only follows the panel's state.
-            syncVideo(fresh = value.video.clipPath != old.video.clipPath ||
+            val changed = value.video.clipPath != old.video.clipPath ||
                 value.effectiveBackdrop != old.effectiveBackdrop || value.video.loop != old.video.loop ||
-                value.video.easeIn != old.video.easeIn || value.video.easeOut != old.video.easeOut)
+                value.video.easeIn != old.video.easeIn || value.video.easeOut != old.video.easeOut
+            syncVideo(fresh = changed, changed = changed)
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -10977,14 +10978,18 @@ class RearDialView(context: Context) : View(context) {
             syncVideo(fresh = !value)
         }
 
-    /** Brings the player in line with the panel; [fresh] when the panel has just come back. See VideoState. */
-    private fun syncVideo(fresh: Boolean = false) {
+    /**
+     * Brings the player in line with the panel; [fresh] when the panel has just come back,
+     * [changed] when the video itself was changed. See VideoState.
+     */
+    private fun syncVideo(fresh: Boolean = false, changed: Boolean = false) {
         val v = config.video
         val clip = v.clipPath?.takeIf { java.io.File(it).canRead() }
         val action = VideoState.decide(
             isVideo = config.effectiveBackdrop == dev.kb896.aiusage.data.BackdropKind.VIDEO,
             hasClip = clip != null, attached = isAttachedToWindow, displayAwake = displayAwake, visible = windowShown,
             aod = aod, paused = videoPaused, locked = locked, loop = v.loop, preview = !interactive, fresh = fresh,
+            changed = changed,
         )
         val created = when (action) {
             VideoAction.DROP -> { video.drop(); false }

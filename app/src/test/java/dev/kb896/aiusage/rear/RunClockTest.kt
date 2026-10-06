@@ -40,6 +40,13 @@ class RunClockTest {
         assertEquals(300L, c.due(0))
     }
 
+    @Test fun `a run resumed part-way is due from now at the frame it resumes on`() {
+        val c = RunClock()
+        c.startFrom(now = 10_000, offsetMs = 1_234)
+        assertEquals(10_000L, c.due(1_234))
+        assertEquals(10_033L, c.due(1_267))
+    }
+
     @Test fun `a loop goes round from the base it is given`() {
         val c = RunClock()
         c.start(now = 0)

@@ -8,7 +8,8 @@ class VideoStateTest {
         isVideo: Boolean = true, hasClip: Boolean = true, attached: Boolean = true,
         displayAwake: Boolean = true, visible: Boolean = true, aod: Boolean = false, paused: Boolean = false,
         locked: Boolean = false, loop: Boolean = true, preview: Boolean = false, fresh: Boolean = false,
-    ) = VideoState.decide(isVideo, hasClip, attached, displayAwake, visible, aod, paused, locked, loop, preview, fresh)
+        changed: Boolean = false,
+    ) = VideoState.decide(isVideo, hasClip, attached, displayAwake, visible, aod, paused, locked, loop, preview, fresh, changed)
 
     @Test fun `no video or no clip lets go of everything, the last frame too`() {
         assertEquals(VideoAction.DROP, d(isVideo = false))
@@ -26,11 +27,16 @@ class VideoStateTest {
         assertEquals(VideoAction.FREEZE, d(paused = true, loop = false))
     }
 
-    @Test fun `a looping video carries on, and starts over when the panel comes back`() {
+    @Test fun `a looping video carries on, even when the panel comes back`() {
         assertEquals(VideoAction.LOOP, d())
         assertEquals(VideoAction.LOOP, d(locked = true))
-        assertEquals(VideoAction.RESTART_LOOP, d(fresh = true))
-        assertEquals(VideoAction.RESTART_LOOP, d(fresh = true, locked = true))
+        assertEquals(VideoAction.LOOP, d(fresh = true))
+        assertEquals(VideoAction.LOOP, d(fresh = true, locked = true))
+    }
+
+    @Test fun `a looping video starts over only when it was changed`() {
+        assertEquals(VideoAction.RESTART_LOOP, d(changed = true))
+        assertEquals(VideoAction.RESTART_LOOP, d(fresh = true, changed = true))
     }
 
     @Test fun `a non-looping video waits on its frame behind the slider`() {

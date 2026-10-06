@@ -15,6 +15,9 @@ class RunClock {
         pausedAt = null
     }
 
+    /** A run picked up part-way: the frame [offsetMs] into it is due [now]. */
+    fun startFrom(now: Long, offsetMs: Long) = start(now - offsetMs)
+
     fun pause(now: Long) {
         if (pausedAt == null) pausedAt = now
     }
