@@ -1606,6 +1606,8 @@ class MainActivity : ComponentActivity() {
                         dev.kb896.aiusage.data.BackdropKind.VIDEO ->
                             if (config.video.clipPath == null) { pickVideo.launch(arrayOf("video/*")); bindBackdrop() }
                             else saveBackdrop { it.copy(backdropKind = picked) }
+                        // Not offered yet: said so, and the choice goes back to what it was.
+                        dev.kb896.aiusage.data.BackdropKind.SHADER -> { toast("Coming soon"); bindBackdrop() }
                         else -> saveBackdrop { it.copy(backdropKind = picked) }
                     }
                 }
