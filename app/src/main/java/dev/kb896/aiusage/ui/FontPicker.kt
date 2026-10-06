@@ -7,6 +7,7 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.view.doOnLayout
 import dev.kb896.aiusage.R
 import dev.kb896.aiusage.data.PanelFont
 import dev.kb896.aiusage.data.PanelTheme
@@ -102,10 +103,14 @@ object FontPicker {
         val phoneHeading = heading("On this phone")
         val looking = dev.kb896.aiusage.ui.glass.GlassSpinner(context).also { box.addView(it) }
 
+        val scroll = ScrollView(context).apply { addView(box) }
         dialog = Modal.show(Modal.builder(context)
             .setTitle("Font")
-            .setView(ScrollView(context).apply { addView(box) })
+            .setView(scroll)
             .setNegativeButton("Close", null))
+        // The sheet keeps the height it opened at: the phone's fonts arriving scroll inside
+        // it rather than stretching it.
+        scroll.doOnLayout { scroll.layoutParams = scroll.layoutParams.apply { height = scroll.height } }
         faced.forEach { (row, face) -> dress(row, face) }
 
         Thread {
