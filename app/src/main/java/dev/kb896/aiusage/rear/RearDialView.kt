@@ -6640,11 +6640,12 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * The glass card's own tint: the glass's, as every other piece has. A notification's
-     * background colour is the original theme's — the settings only offer it there — and
-     * under glass the card is glass, tinted in Glass settings (see drawGlassPane).
+     * The glass card's own tint, until Glass settings chooses one (see drawGlassPane): the
+     * notification colour at most of its opacity, so the card stays a surface to read on.
      */
-    private fun glassNoticeTint(): Int = Glass.TINT
+    private fun glassNoticeTint(): Int =
+        (colorFor("notice:bg", config.notificationGround or (0xFF shl 24)) and 0x00FFFFFF) or
+            (GLASS_NOTICE_ALPHA shl 24)
 
     /**
      * The display's own corner radius, asked of the display rather than assumed.
