@@ -514,6 +514,8 @@ data class PanelConfig(
     val mediaButtonsColor: Int? = null,
     val mediaArtistColor: Int? = null,
     val mediaTitleColor: Int? = null,
+    /** The lyrics round the record; null: the title's colour, which they had before. */
+    val mediaLyricsColor: Int? = null,
     val mediaArt: MediaArt = MediaArt.SQUARE,
 
 
@@ -584,6 +586,7 @@ data class PanelConfig(
     val mediaButtonsTint: Int get() = mediaButtonsColor ?: mediaTint
     val mediaArtistTint: Int get() = mediaArtistColor ?: mediaTint
     val mediaTitleTint: Int get() = mediaTitleColor ?: mediaTint
+    val mediaLyricsTint: Int get() = mediaLyricsColor ?: mediaTitleTint
     val notificationGround: Int get() = notificationBg ?: background
 
     /**

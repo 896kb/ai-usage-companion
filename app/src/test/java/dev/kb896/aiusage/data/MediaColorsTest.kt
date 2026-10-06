@@ -16,4 +16,9 @@ class MediaColorsTest {
         assertEquals(0xFFAA0000.toInt(), c.mediaVolumeTint)
         assertEquals(0xFF112233.toInt(), c.mediaPlaybackTint)
     }
+
+    @Test fun `the lyrics start in the title's colour and can have their own`() {
+        assertEquals(0xFF00AA00.toInt(), PanelConfig(mediaTitleColor = 0xFF00AA00.toInt()).mediaLyricsTint)
+        assertEquals(0xFF0000AA.toInt(), PanelConfig(mediaTitleColor = 0xFF00AA00.toInt(), mediaLyricsColor = 0xFF0000AA.toInt()).mediaLyricsTint)
+    }
 }

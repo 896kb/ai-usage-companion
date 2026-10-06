@@ -8225,7 +8225,7 @@ class RearDialView(context: Context) : View(context) {
             // construction — the old one was dropped the moment the title moved — so
             // there is nothing to carry through the swap and nothing to decide about how
             // it should travel.
-            drawLyrics(canvas, resting, paging, notice, colorFor("media:title", config.mediaTitleTint))
+            drawLyrics(canvas, resting, paging, notice, colorFor("media:lyrics", config.mediaLyricsTint))
             return
         }
         animating = true
@@ -8262,7 +8262,7 @@ class RearDialView(context: Context) : View(context) {
                 val going = lerpDisc(resting, inRing, e)
                 drawCoverAt(canvas, going, leaving, paging)
                 drawLeavingLyrics(canvas, going, 1f - e, paging,
-                    colorFor("media:title", config.mediaTitleTint))
+                    colorFor("media:lyrics", config.mediaLyricsTint))
             } else {
                 val e = Tween.easeInOut((progress - exit) / (1f - exit))
                 drawCoverAt(canvas, lerpDisc(inRing, resting, e), m, paging)
@@ -8277,7 +8277,7 @@ class RearDialView(context: Context) : View(context) {
                 val going = shifted(e)
                 drawCoverAt(canvas, going, leaving, paging)
                 drawLeavingLyrics(canvas, going, 1f - e, paging,
-                    colorFor("media:title", config.mediaTitleTint))
+                    colorFor("media:lyrics", config.mediaLyricsTint))
             }
             drawCoverAt(canvas, shifted(-(1f - e)), m, paging)
             return
@@ -8289,7 +8289,7 @@ class RearDialView(context: Context) : View(context) {
             val going = shifted(e)
             drawCoverAt(canvas, going, leaving, paging)
             drawLeavingLyrics(canvas, going, 1f - e, paging,
-                colorFor("media:title", config.mediaTitleTint))
+                colorFor("media:lyrics", config.mediaLyricsTint))
         } else {
             val e = Tween.easeInOut((progress - exit) / (1f - exit))
             drawCoverAt(canvas, shifted(1f - e), m, paging)

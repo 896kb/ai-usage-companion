@@ -1261,6 +1261,10 @@ class MainActivity : ComponentActivity() {
                 write { it.copy(showLyrics = on) }
                 buildSettingsRows() // the note under this row says what the switch does
             }
+            // Their colour, under their switch: only while there are lyrics to colour.
+            if (config.showLyrics) SettingsRows.colorRow(mediaRows, "      lyrics colour", config.mediaLyricsTint) { c ->
+                write { it.copy(mediaLyricsColor = c) }
+            }
             SettingsRows.note(
                 mediaRows,
                 if (config.showLyrics) {
