@@ -151,9 +151,16 @@ class PanelPreviewView @JvmOverloads constructor(
         const val DIM_VEIL = 0.7f
     }
 
+    /**
+     * The back's real proportions. The panel is drawn in its 904x572 units and the back
+     * stretches it to its own pixels, a little differently on each axis on a Pro Max; the
+     * preview stretches it the same way, so it is the shape of the phone's own back.
+     */
+    private val aspect = dev.kb896.aiusage.ui.video.RearSize.pixels(context).let { (w, h) -> w.toFloat() / h }
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         val width = MeasureSpec.getSize(widthSpec)
-        val height = (width * Panel.HEIGHT / Panel.WIDTH.toFloat()).toInt()
+        val height = (width / aspect).toInt()
         setMeasuredDimension(width, height)
         dial.measure(
             MeasureSpec.makeMeasureSpec(Panel.WIDTH, MeasureSpec.EXACTLY),
@@ -166,10 +173,9 @@ class PanelPreviewView @JvmOverloads constructor(
         // Pivot at the top-left so the scaled child lands exactly on this view's origin;
         // the default pivot is the centre, which would leave it offset by half the
         // difference between the panel's size and the preview's.
-        val scale = width / Panel.WIDTH.toFloat()
         dial.pivotX = 0f
         dial.pivotY = 0f
-        dial.scaleX = scale
-        dial.scaleY = scale
+        dial.scaleX = width / Panel.WIDTH.toFloat()
+        dial.scaleY = height / Panel.HEIGHT.toFloat()
     }
 }

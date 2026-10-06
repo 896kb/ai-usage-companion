@@ -41,6 +41,11 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     /** The rear display's own shape, so the clip made at its pixels fills it exactly. */
     private val aspect = RearSize.pixels(context).let { (w, h) -> w.toFloat() / h }
 
+    /** Its rounded corners, as a share of the frame's width — the frame drawn the shape of the back. */
+    private val corner = RearSize.cornerShare(context)
+    private val framePath = android.graphics.Path()
+    private fun cornerRadius() = region().width() * corner
+
     private val gesture = CropGesture(context, ::region, { videoSize }, ::place)
     val panX get() = gesture.panX
     val panY get() = gesture.panY
@@ -56,7 +61,8 @@ class VideoCropView(context: Context) : FrameLayout(context) {
         private val paint = Paint()
         override fun onDraw(canvas: Canvas) {
             paint.color = ground or (0xFF shl 24)
-            canvas.drawRect(region(), paint)
+            val r = cornerRadius()
+            canvas.drawRoundRect(region(), r, r, paint)
         }
     }
 
@@ -70,15 +76,22 @@ class VideoCropView(context: Context) : FrameLayout(context) {
         }
         override fun onDraw(canvas: Canvas) {
             val box = region()
+            val r = cornerRadius()
+            framePath.reset()
+            framePath.addRoundRect(box, r, r, android.graphics.Path.Direction.CW)
             canvas.save()
-            canvas.clipOutRect(box)
+            canvas.clipOutPath(framePath)
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
             canvas.restore()
-            canvas.drawRect(box, frame)
+            canvas.drawRoundRect(box, r, r, frame)
         }
     }
 
     init {
+        // The video runs past the region; it must not run past this view — the dialog's title
+        // sits just above. Unclip leaves this view alone for the same reason.
+        clipChildren = true
+        clipToPadding = true
         addView(under, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(texture, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(over, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))

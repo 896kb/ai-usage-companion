@@ -1450,6 +1450,9 @@ class MainActivity : ComponentActivity() {
         var behind = store.load().background
         val view = ArtCropView(this).apply {
             regionAspect = ArtCropView.PANEL_ASPECT
+            // Drawn the shape of the back: its real proportions and its rounded corners.
+            displayAspect = dev.kb896.aiusage.ui.video.RearSize.pixels(this@MainActivity).let { (w, h) -> w.toFloat() / h }
+            regionCorner = dev.kb896.aiusage.ui.video.RearSize.cornerShare(this@MainActivity)
             setImage(
                 bitmap,
                 if (reuseTransform) existing.panX else 0f,

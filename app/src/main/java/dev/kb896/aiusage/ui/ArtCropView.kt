@@ -53,7 +53,7 @@ class ArtCropView @JvmOverloads constructor(
 
     private var bitmap: Bitmap? = null
 
-    private val gesture = CropGesture(context, ::region, { bitmap?.let { it.width to it.height } }, ::invalidate)
+    private val gesture = CropGesture(context, ::placement, { bitmap?.let { it.width to it.height } }, ::invalidate)
 
     /** Pan as a fraction of the slack at the current zoom, matching ArtConfig. */
     val panX get() = gesture.panX
@@ -68,8 +68,28 @@ class ArtCropView @JvmOverloads constructor(
         invalidate()
     }
 
-    /** The region, centred in this view, at the panel's own aspect. */
+    /**
+     * The back's own shape, for a background: the frame is drawn at it, rounded at its
+     * corners ([regionCorner], a share of the frame's width), and the picture stretched into
+     * it as the back stretches the panel — the placement is still the panel's, in its units.
+     * Null for the artwork, whose strip is the panel's and square.
+     */
+    var displayAspect: Float? = null
+        set(value) { field = value; invalidate() }
+    var regionCorner: Float = 0f
+        set(value) { field = value; invalidate() }
+
+    /** The frame, centred in this view, at the back's shape when it has one. */
     private fun region(): RectF {
+        val w = width * 0.86f
+        val h = w / (displayAspect ?: regionAspect)
+        val left = (width - w) / 2f
+        val top = (height - h) / 2f
+        return RectF(left, top, left + w, top + h)
+    }
+
+    /** Where the picture is placed: the frame's width at the panel's own shape. */
+    private fun placement(): RectF {
         val w = width * 0.86f
         val h = w / regionAspect
         val left = (width - w) / 2f
@@ -95,18 +115,31 @@ class ArtCropView @JvmOverloads constructor(
         // The whole image is drawn and the outside dimmed, rather than only the kept
         // part: a crop you cannot see the outside of is a guess. The placement itself is
         // the panel's own, so this preview cannot lie about the result.
-        val dest = ArtPlacement.destination(box, bmp.width, bmp.height, panX, panY, zoom)
+        // Placed in the panel's shape, then stretched into the frame's as the back stretches it.
+        val placed = placement()
+        val dest = ArtPlacement.destination(placed, bmp.width, bmp.height, panX, panY, zoom)
+        val sy = box.height() / placed.height()
+        dest.top = box.centerY() + (dest.top - placed.centerY()) * sy
+        dest.bottom = box.centerY() + (dest.bottom - placed.centerY()) * sy
+        val r = box.width() * regionCorner
+        // Inside its own bounds: the dialog lets its children draw past theirs, and a
+        // picture running over the title above is not a crop preview.
+        canvas.save()
+        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         // The colour behind the picture, where the panel has it — inside the region — and
         // the picture at the opacity it will have there.
-        ground?.let { groundPaint.color = it or (0xFF shl 24); canvas.drawRect(box, groundPaint) }
+        ground?.let { groundPaint.color = it or (0xFF shl 24); canvas.drawRoundRect(box, r, r, groundPaint) }
         paint.alpha = (255 * imageAlpha.coerceIn(0f, 1f)).toInt()
         canvas.drawBitmap(bmp, null, dest, paint)
         paint.alpha = 255
+        framePath.reset()
+        framePath.addRoundRect(box, r, r, android.graphics.Path.Direction.CW)
         canvas.save()
-        canvas.clipOutRect(box)
+        canvas.clipOutPath(framePath)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
         canvas.restore()
-        canvas.drawRect(box, frame)
+        canvas.drawRoundRect(box, r, r, frame)
+        canvas.restore()
     }
 
     /**
@@ -122,6 +155,7 @@ class ArtCropView @JvmOverloads constructor(
         set(value) { field = value; invalidate() }
 
     private val groundPaint = Paint()
+    private val framePath = android.graphics.Path()
 
     companion object {
         /** The art region's shape: 278 by 70 panel units. */
