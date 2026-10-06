@@ -4102,9 +4102,9 @@ class RearDialView(context: Context) : View(context) {
         // reads as glass with something in it.
         val fillStroke = stroke * Glass.RING_FILL
         paint.strokeWidth = fillStroke
-        paint.color = Panel.Palette.TRACK
-        paint.alpha = (255 * RING_TRACK_ALPHA).toInt()
-        canvas.drawArc(oval, startAngle, fullSweep, false, paint)
+        // NO TRACK PAINTED INSIDE THE GLASS. The band of glass round the lens already is
+        // the ring's whole circle; a grey stroke laid inside it as well read as a second
+        // layer, a ring filled with something, most of all where the reading is empty.
         paint.color = reading
         paint.alpha = alpha
         if (Math.abs(fullSweep * f) > 0.4f) {
