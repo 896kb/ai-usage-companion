@@ -2568,7 +2568,8 @@ class RearDialView(context: Context) : View(context) {
             node.setRenderEffect(
                 ringLensFor(
                     r.cx - ringRect.left, r.cy - ringRect.top, r.radius, half,
-                    clearReactive(ringRect),
+                    // The glass chosen in Glass settings, as every other piece takes it.
+                    config.glassStyle?.let { styledTint(it, ringRect) } ?: clearReactive(ringRect),
                 ),
             )
             canvas.save()
