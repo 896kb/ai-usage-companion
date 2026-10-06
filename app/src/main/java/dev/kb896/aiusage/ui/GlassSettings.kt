@@ -63,7 +63,8 @@ object GlassSettings {
     private class LabView(context: Context, config: PanelConfig) : FrameLayout(context) {
         private val dial = RearDialView(context)
         private val base = config.copy(crt = false, parallaxTilt = false, parallaxScroll = false)
-        private val lab = RearDialView.Lab(Panel.WIDTH / 2f, Panel.HEIGHT.toFloat())
+        /** The piece to drag starts on the background, clear of the three on the strip. */
+        private val lab = RearDialView.Lab(Panel.WIDTH / 2f, Panel.HEIGHT / 2f)
 
         var style: GlassStyle = GlassStyle.DEFAULT
             set(value) { field = value; dial.config = base.copy(glassStyle = value) }

@@ -1518,6 +1518,26 @@ class RearDialView(context: Context) : View(context) {
             const val RADIUS = 78f
             /** The lab's height, in panel units: the panel and the strip under it. */
             val HEIGHT = Panel.HEIGHT * (1f + STRIP)
+
+            /**
+             * The strip: black, grey and white in three plain zones with short switches
+             * between them, so each of the three fixed pieces ([SHARDS], across the strip)
+             * sits on one brightness rather than on a slope.
+             */
+            val STOPS = floatArrayOf(0f, 0.38f, 0.42f, 0.58f, 0.62f, 1f)
+            val GREYS = floatArrayOf(0f, 0f, 0.5f, 0.5f, 1f, 1f)
+            val SHARDS = floatArrayOf(0.19f, 0.5f, 0.81f)
+            const val SHARD_RADIUS = 62f
+
+            /** The strip's brightness at [x], 0 to 1 across. */
+            fun grey(x: Float): Float {
+                val t = x.coerceIn(0f, 1f)
+                for (i in 1 until STOPS.size) if (t <= STOPS[i]) {
+                    val f = (t - STOPS[i - 1]) / (STOPS[i] - STOPS[i - 1])
+                    return GREYS[i - 1] + (GREYS[i] - GREYS[i - 1]) * f
+                }
+                return 1f
+            }
         }
     }
 
@@ -1549,11 +1569,11 @@ class RearDialView(context: Context) : View(context) {
             scene.drawColor(groundColor)
             drawBackdrop(scene)
             scene.restore()
-            // Black through a long run of greys to white: every brightness the glass can sit on.
+            // Black, grey, white: three brightnesses the glass can sit on. See Lab.STOPS.
             stripPaint.shader = android.graphics.LinearGradient(
                 0f, 0f, w.toFloat(), 0f,
-                intArrayOf(0xFF000000.toInt(), 0xFF3A3A3A.toInt(), 0xFF7F7F7F.toInt(), 0xFFC4C4C4.toInt(), 0xFFFFFFFF.toInt()),
-                null, android.graphics.Shader.TileMode.CLAMP,
+                IntArray(Lab.GREYS.size) { val g = (Lab.GREYS[it] * 255f).toInt(); (0xFF shl 24) or (g shl 16) or (g shl 8) or g },
+                Lab.STOPS, android.graphics.Shader.TileMode.CLAMP,
             )
             scene.drawRect(0f, h.toFloat(), w.toFloat(), total.toFloat(), stripPaint)
         } finally {
@@ -1567,8 +1587,8 @@ class RearDialView(context: Context) : View(context) {
         labLuminance = { rect ->
             when {
                 rect == null -> mean
-                // Over the strip: its grey at the piece's middle — the strip runs black to white across.
-                rect.centerY() > h -> (rect.centerX() / w).coerceIn(0f, 1f)
+                // Over the strip: its grey at the piece's middle.
+                rect.centerY() > h -> Lab.grey(rect.centerX() / w)
                 else -> GlassLuminance.average(
                     lumCells, rect.left, rect.top, rect.right, minOf(rect.bottom, h.toFloat()),
                     w.toFloat(), h.toFloat(),
@@ -1576,6 +1596,14 @@ class RearDialView(context: Context) : View(context) {
             }
         }
         try {
+            // A piece fixed on each of the strip's three zones, to see them side by side…
+            val sr = Lab.SHARD_RADIUS
+            val sy = h + (total - h) / 2f
+            for (at in Lab.SHARDS) {
+                labRect.set(at * w - sr, sy - sr, at * w + sr, sy + sr)
+                drawGlassPane(canvas, labRect, sr)
+            }
+            // …and the one under the finger, to try anywhere.
             val r = Lab.RADIUS
             labRect.set(lab.cx - r, lab.cy - r, lab.cx + r, lab.cy + r)
             drawGlassPane(canvas, labRect, r)
