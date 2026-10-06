@@ -326,10 +326,15 @@ class MainActivity : ComponentActivity() {
                 text = androidx.compose.ui.graphics.Color(0xFFF2F2F2.toInt()),
                 accent = androidx.compose.ui.graphics.Color(dev.kb896.aiusage.ui.glass.Ink.accent(lum)),
                 surface = androidx.compose.ui.graphics.Color(0xFF121212.toInt()),
-                // SemiBold, as the rest of the front: Outfit's file is light by itself.
-                // (A resource font's weight is turned into its weight axis by Compose itself.)
+                // SemiBold, as the rest of the front — baked into the face itself. Asked of
+                // Compose as a FontWeight, Outfit's one variable file came out at its own
+                // light default: the weight never reached the axis.
                 face = androidx.compose.ui.text.font.FontFamily(
-                    androidx.compose.ui.text.font.Font(R.font.outfit, weight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    resources.openRawResourceFd(R.font.outfit).use { fd ->
+                        android.graphics.Typeface.Builder(fd.fileDescriptor)
+                            .setFontVariationSettings("'wght' ${dev.kb896.aiusage.rear.PanelType.GLASS_WEIGHT}")
+                            .build()
+                    },
                 ),
             )
         }

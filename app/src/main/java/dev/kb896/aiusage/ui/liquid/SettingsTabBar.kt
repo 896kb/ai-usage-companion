@@ -111,7 +111,6 @@ fun SettingsTabBar(
                             fontSize = (12f * SCALE).sp,
                             lineHeight = (14f * SCALE).sp,
                             fontFamily = face,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                         ),
                     )
                 }
