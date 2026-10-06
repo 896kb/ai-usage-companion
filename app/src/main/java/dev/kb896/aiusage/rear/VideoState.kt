@@ -2,6 +2,13 @@ package dev.kb896.aiusage.rear
 
 import dev.kb896.aiusage.data.VideoPlayMode
 
+/**
+ * What follows a run reaching its end: [turn] the other way at once (ping-pong), and which
+ * decoders to send back to their first frame, unshown, ready to start: the finished one
+ * ([readyFinished]) and the other one ([readyOther]).
+ */
+data class LegEnd(val turn: Boolean, val readyFinished: Boolean, val readyOther: Boolean)
+
 enum class VideoAction {
     DROP, SLEEP, FREEZE, LOOP, RESTART_LOOP, PLAY_ONCE, KEEP,
     /** Yoyo: forward from where it is to its end, and rest there. */
@@ -78,4 +85,14 @@ object VideoState {
      */
     fun passEase(preview: Boolean, mode: VideoPlayMode, easeIn: Boolean, easeOut: Boolean): Pair<Boolean, Boolean> =
         if (preview && (mode == VideoPlayMode.LINEAR || mode == VideoPlayMode.YOYO)) easeIn to easeOut else false to false
+
+    /**
+     * A run reached its end. A ping-pong turns round and readies the finished way for the
+     * turn after. A yoyo rests where it is — its decoder must stay at that end, which is
+     * where the panel thinks it is — and readies only the other way, whose first frame is
+     * this very end.
+     */
+    fun afterLeg(pingPong: Boolean): LegEnd =
+        if (pingPong) LegEnd(turn = true, readyFinished = true, readyOther = false)
+        else LegEnd(turn = false, readyFinished = false, readyOther = true)
 }

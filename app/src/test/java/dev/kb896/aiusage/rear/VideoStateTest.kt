@@ -84,4 +84,14 @@ class VideoStateTest {
         assertEquals(false to false, VideoState.passEase(preview = true, mode = PING_PONG, easeIn = true, easeOut = true))
         assertEquals(false to false, VideoState.passEase(preview = false, mode = LINEAR, easeIn = true, easeOut = true))
     }
+
+    @Test fun `a yoyo's leg ends where it is — only the other way is made ready`() {
+        // Readying the finished one sent it back to its start: the next leg ran from the
+        // wrong end, was over at once, and the yoyo sat still for good.
+        assertEquals(LegEnd(turn = false, readyFinished = false, readyOther = true), VideoState.afterLeg(pingPong = false))
+    }
+
+    @Test fun `a ping-pong's leg ends by turning round, the finished way made ready for the next turn`() {
+        assertEquals(LegEnd(turn = true, readyFinished = true, readyOther = false), VideoState.afterLeg(pingPong = true))
+    }
 }

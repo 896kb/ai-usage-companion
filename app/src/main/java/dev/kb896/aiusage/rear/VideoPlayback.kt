@@ -217,17 +217,17 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         (if (a === f) r else f).preroll(0L)
     }
 
-    /** A run reached its end. Ping-pong turns round; anything else rests, the other way made ready. */
+    /** A run reached its end: turn round or rest, the next way made ready. See VideoState.afterLeg. */
     private fun legEnded(d: Decoder) {
         if (d !== active) return
         val other = (if (d === fwd) rev else fwd) ?: return
-        if (pingPong) {
+        val next = VideoState.afterLeg(pingPong)
+        if (next.turn) {
             active = other
             other.leg(0L, legIn, legOut)
-        } else {
-            other.preroll(0L)
         }
-        d.preroll(0L)
+        if (next.readyOther) other.preroll(0L)
+        if (next.readyFinished) d.preroll(0L)
     }
 
     /**
