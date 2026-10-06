@@ -183,9 +183,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
         private var easeIn = false
         private var easeOut = false
         private var quitting = false
-        /** Wall time (uptime ms) at which clip time 0 is due; moved on by a pause. */
-        private var base = 0L
-        private var pausedAt = 0L
+        /** When each frame is due; moved on by a pause. Read and written under [lock]. */
+        private val clock = RunClock()
         /** The blend window the next frame to arrive is put up with; set before it is released. */
         @Volatile private var nextFrom = 0L
         @Volatile private var nextTo = 0L
@@ -215,8 +214,8 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
         fun command(mode: Mode, restart: Boolean, easeIn: Boolean, easeOut: Boolean) = synchronized(lock) {
             val now = SystemClock.uptimeMillis()
-            if (this.mode == Mode.IDLE && mode != Mode.IDLE && !restart && pausedAt != 0L) base += now - pausedAt
-            if (mode == Mode.IDLE && this.mode != Mode.IDLE) pausedAt = now
+            if (this.mode == Mode.IDLE && mode != Mode.IDLE && !restart) clock.resume(now)
+            if (mode == Mode.IDLE && this.mode != Mode.IDLE) clock.pause(now)
             this.mode = mode
             this.restart = this.restart || restart
             this.easeIn = easeIn
@@ -226,7 +225,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
 
         fun quit() = synchronized(lock) { quitting = true; lock.notifyAll() }
 
-        /** When clip time [ptsMs] is due, as an offset from [base]. */
+        /** When clip time [ptsMs] is due, as an offset from the run's start. */
         private fun wall(ptsMs: Long): Long =
             if (mode == Mode.ONCE) EaseCurve.wallMs(ptsMs, durationMs, easeIn, easeOut).toLong() else ptsMs
 
@@ -266,8 +265,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                         extractor.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         inputDone = false
                         lastPts = -1L
-                        base = SystemClock.uptimeMillis()
-                        pausedAt = 0L
+                        clock.start(SystemClock.uptimeMillis())
                     }
                     while (mode == Mode.IDLE && !quitting && !restart) lock.wait()
                     if (quitting) return
@@ -295,11 +293,11 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                             codec.flush()
                             extractor.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                             inputDone = false
-                            base = lastDue + frameMs
+                            clock.restartAt(lastDue + frameMs)
                             lastPts = -1L
                         } else {
                             mode = Mode.IDLE   // a run's end: its last frame stays up
-                            pausedAt = SystemClock.uptimeMillis()
+                            clock.pause(SystemClock.uptimeMillis())
                         }
                     }
                     continue
@@ -307,7 +305,7 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                 val pts = info.presentationTimeUs / 1000
                 if (!present(o, pts, lastPts, lastDue)) continue
                 if (lastPts >= 0 && pts > lastPts) frameMs = pts - lastPts
-                lastDue = synchronized(lock) { base } + wall(pts)
+                lastDue = synchronized(lock) { clock.due(wall(pts)) }
                 lastPts = pts
             }
         }
@@ -325,11 +323,11 @@ class VideoPlayback(private val onFrame: () -> Unit, private val onLost: () -> U
                         nextFrom = 0L; nextTo = 0L
                         codec.releaseOutputBuffer(o, true)
                         mode = Mode.IDLE
-                        pausedAt = SystemClock.uptimeMillis()
+                        clock.pause(SystemClock.uptimeMillis())
                         return true
                     }
                     if (mode == Mode.IDLE) { lock.wait(); return@synchronized null to null }
-                    val due = base + wall(pts)
+                    val due = clock.due(wall(pts))
                     val slowed = lastPts >= 0 && (due - lastDue) > (pts - lastPts) * SLOWED
                     due to (if (slowed) lastDue else due)
                 }
