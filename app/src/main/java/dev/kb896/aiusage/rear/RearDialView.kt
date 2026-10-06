@@ -57,7 +57,7 @@ class RearDialView(context: Context) : View(context) {
             // A new clip, the video just chosen, or Loop switched: it starts over, so the
             // change is seen; otherwise the player only follows the panel's state.
             val changed = value.video.clipPath != old.video.clipPath ||
-                value.effectiveBackdrop != old.effectiveBackdrop || value.video.loop != old.video.loop ||
+                value.effectiveBackdrop != old.effectiveBackdrop || value.video.playable != old.video.playable ||
                 value.video.easeIn != old.video.easeIn || value.video.easeOut != old.video.easeOut
             syncVideo(fresh = changed, changed = changed)
             // Switching the feature OFF has to act now, not at the next thing the player
@@ -10988,22 +10988,29 @@ class RearDialView(context: Context) : View(context) {
         val action = VideoState.decide(
             isVideo = config.effectiveBackdrop == dev.kb896.aiusage.data.BackdropKind.VIDEO,
             hasClip = clip != null, attached = isAttachedToWindow, displayAwake = displayAwake, visible = windowShown,
-            aod = aod, paused = videoPaused, locked = locked, loop = v.loop, preview = !interactive, fresh = fresh,
-            changed = changed,
+            aod = aod, paused = videoPaused, locked = locked, mode = v.playable, preview = !interactive,
+            fresh = fresh, changed = changed,
         )
+        // The reversed copy only when the video goes backwards.
+        val backwards = v.playable == dev.kb896.aiusage.data.VideoPlayMode.YOYO ||
+            v.playable == dev.kb896.aiusage.data.VideoPlayMode.PING_PONG
         val created = when (action) {
             VideoAction.DROP -> { video.drop(); false }
             VideoAction.SLEEP -> { video.sleep(); false }
-            else -> video.open(clip!!)
+            else -> video.open(clip!!, v.reversePath?.takeIf { backwards && java.io.File(it).canRead() })
         }
-        val (loopIn, loopOut) = VideoState.loopEase(!interactive, v.loop, v.easeIn, v.easeOut)
+        val (passIn, passOut) = VideoState.passEase(!interactive, v.playable, v.easeIn, v.easeOut)
         // On the back, the ease also softens every stop and start: the double tap, always-on, a wake.
         video.easeStops(into = interactive && v.easeIn, out = interactive && v.easeOut)
         when (VideoState.afterOpen(action, created)) {
             VideoAction.FREEZE -> video.freeze()
-            VideoAction.LOOP -> video.loop(restart = false, loopIn, loopOut)
-            VideoAction.RESTART_LOOP -> video.loop(restart = true, loopIn, loopOut)
+            VideoAction.LOOP -> video.loop(restart = false, passIn, passOut)
+            VideoAction.RESTART_LOOP -> video.loop(restart = true, passIn, passOut)
             VideoAction.PLAY_ONCE -> video.playOnce(v.easeIn, v.easeOut)
+            VideoAction.TO_END -> video.toEnd(v.easeIn, v.easeOut)
+            VideoAction.TO_START -> video.toStart(v.easeIn, v.easeOut)
+            VideoAction.PING_PONG -> video.pingPong(restart = false, passIn, passOut)
+            VideoAction.RESTART_PING_PONG -> video.pingPong(restart = true, passIn, passOut)
             else -> Unit
         }
         invalidate()

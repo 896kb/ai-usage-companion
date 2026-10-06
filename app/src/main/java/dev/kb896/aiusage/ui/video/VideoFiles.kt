@@ -16,9 +16,9 @@ object VideoFiles {
 
     fun newClip(context: Context): File = File(dir(context), "clip-${System.nanoTime()}.mp4")
 
-    /** Deletes every clip but [clip] — the one the config now names. */
-    fun keepOnly(context: Context, clip: String?) {
-        dir(context).listFiles().orEmpty().filter { it.path != clip }.forEach { it.delete() }
+    /** Deletes every clip but [keep] — the ones the config now names. */
+    fun keepOnly(context: Context, vararg keep: String?) {
+        dir(context).listFiles().orEmpty().filter { it.path !in keep }.forEach { it.delete() }
     }
 
     fun discard(file: File) { file.delete() }

@@ -1605,9 +1605,19 @@ class MainActivity : ComponentActivity() {
                 SettingsRows.navigation(rows, if (set) "Choose another" else "Choose video") {
                     pickVideo.launch(arrayOf("video/*"))
                 }
-                SettingsRows.toggle(rows, "Loop", config.video.loop) { on ->
-                    saveBackdrop { it.copy(video = it.video.copy(loop = on)) }
-                }
+                // How it plays: once, there and back, round and round, or forward and back.
+                val modes = dev.kb896.aiusage.data.VideoPlayMode.entries
+                rows.addView(
+                    dev.kb896.aiusage.ui.glass.GlassSegmented(this, listOf("Linear", "Yoyo", "Loop", "Ping-pong"),
+                        config.video.mode.ordinal).apply {
+                        onChange = { i -> saveBackdrop { it.copy(video = it.video.copy(playback = modes[i])) } }
+                    },
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        .apply { topMargin = (8 * resources.displayMetrics.density).toInt() },
+                )
+                // A clip cut before there was a reversed copy cannot go backwards until it is cut again.
+                if (config.video.mode != config.video.playable) SettingsRows.note(rows,
+                    "This clip has no reversed copy, so it plays as ${if (config.video.playable == dev.kb896.aiusage.data.VideoPlayMode.LINEAR) "Linear" else "Loop"} for now. Edit video, then Use it, to make one.")
                 // A run eases at its ends; any video, looping or not, also eases into its stops
                 // (the double tap, always-on) and out of them (a wake).
                 SettingsRows.toggle(rows, "Ease in", config.video.easeIn) { on ->
@@ -1637,7 +1647,7 @@ class MainActivity : ComponentActivity() {
         dev.kb896.aiusage.ui.video.VideoFiles.hold(this, uri)
         // A new original starts from a clean crop and trim; loop and ease carry over.
         val keep = ConfigStore(this).load().video
-        editVideo(uri, dev.kb896.aiusage.data.VideoConfig(loop = keep.loop, easeIn = keep.easeIn, easeOut = keep.easeOut))
+        editVideo(uri, dev.kb896.aiusage.data.VideoConfig(loop = keep.loop, playback = keep.playback, easeIn = keep.easeIn, easeOut = keep.easeOut))
     }
 
     private fun editVideo(
@@ -1648,7 +1658,7 @@ class MainActivity : ComponentActivity() {
             saveBackdrop {
                 it.copy(video = video, background = behind, backdropKind = dev.kb896.aiusage.data.BackdropKind.VIDEO)
             }
-            dev.kb896.aiusage.ui.video.VideoFiles.keepOnly(this, video.clipPath)
+            dev.kb896.aiusage.ui.video.VideoFiles.keepOnly(this, video.clipPath, video.reversePath)
             toast("Background set")
         }
     }

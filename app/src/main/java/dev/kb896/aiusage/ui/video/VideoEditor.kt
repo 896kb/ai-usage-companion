@@ -139,10 +139,10 @@ object VideoEditor {
             val crop = VideoCrop.forPan(frame.region(), size.first, size.second, frame.panX, frame.panY, frame.zoom)
             export.start(source, trim.startMs, trim.endMs, crop,
                 onProgress = { progress.progress = it },
-                onDone = { clip, cells ->
+                onDone = { clip, reverse, cells ->
                     exporting = false
                     onUsed(initial.copy(
-                        originalUri = source.toString(), clipPath = clip.path,
+                        originalUri = source.toString(), clipPath = clip.path, reversePath = reverse?.path,
                         trimStartMs = trim.startMs, trimEndMs = trim.endMs,
                         panX = frame.panX, panY = frame.panY, zoom = frame.zoom,
                         opacity = opacity, luminance = cells,

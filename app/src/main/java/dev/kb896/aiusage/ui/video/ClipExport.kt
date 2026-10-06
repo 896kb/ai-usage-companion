@@ -12,6 +12,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Crop
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.VideoEncoderSettings
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
@@ -24,19 +26,26 @@ import java.io.File
 
 /**
  * Cuts the panel's clip from the original: the trimmed range, the editor's crop, scaled to
- * the rear display, no audio, H.264. Runs on the main looper, as Transformer requires;
- * progress is polled every 100 ms. A cancel or a failure deletes the partial file.
+ * the rear display, no audio, H.264, a key frame every half second — then its reversed copy
+ * (ReverseExport), which the short stretches between key frames keep quick and small in
+ * memory. Transformer runs on the main looper, as it requires; the reversing on a thread of
+ * its own. One progress for both, polled every 100 ms. A cancel or a failure deletes what
+ * was written. The clip without its reversed copy is still a clip: if only the reversing
+ * fails, the clip is kept and plays forward.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 class ClipExport(private val context: Context) {
     private var transformer: Transformer? = null
     private var output: File? = null
+    private var reversed: File? = null
+    @Volatile private var cancelled = false
     private val main = Handler(Looper.getMainLooper())
 
     fun start(
         source: Uri, startMs: Long, endMs: Long, crop: FloatArray,
-        onProgress: (Int) -> Unit, onDone: (File, List<Float>) -> Unit, onError: (String) -> Unit,
+        onProgress: (Int) -> Unit, onDone: (File, File?, List<Float>) -> Unit, onError: (String) -> Unit,
     ) {
+        cancelled = false
         val (w, h) = RearSize.pixels(context)
         val out = VideoFiles.newClip(context).also { output = it }
         val item = EditedMediaItem.Builder(
@@ -51,12 +60,16 @@ class ClipExport(private val context: Context) {
                 Presentation.createForWidthAndHeight(w, h, Presentation.LAYOUT_SCALE_TO_FIT),
             )))
             .build()
+        val encoders = DefaultEncoderFactory.Builder(context)
+            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setiFrameIntervalSeconds(0.5f).build())
+            .build()
         val t = Transformer.Builder(context)
             .setVideoMimeType(MimeTypes.VIDEO_H264)
+            .setEncoderFactory(encoders)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     finish()
-                    onDone(out, luminance(out))
+                    reverse(out, onProgress, onDone)
                 }
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
                     finish()
@@ -76,16 +89,35 @@ class ClipExport(private val context: Context) {
         main.post(object : Runnable {
             override fun run() {
                 val now = transformer ?: return
-                if (now.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) onProgress(holder.progress)
+                if (now.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) onProgress(holder.progress * FORWARD_SHARE / 100)
                 main.postDelayed(this, PROGRESS_MS)
             }
         })
     }
 
+    /** The clip played backwards, on a thread of its own; then everything back on main. */
+    private fun reverse(clip: File, onProgress: (Int) -> Unit, onDone: (File, File?, List<Float>) -> Unit) {
+        val back = VideoFiles.newClip(context).also { reversed = it }
+        Thread {
+            val ok = ReverseExport.run(clip, back,
+                onProgress = { p -> main.post { if (!cancelled) onProgress(FORWARD_SHARE + p * (100 - FORWARD_SHARE) / 100) } },
+                cancelled = { cancelled },
+            )
+            val cells = luminance(clip)
+            main.post {
+                if (cancelled) return@post
+                if (!ok) VideoFiles.discard(back)
+                onDone(clip, back.takeIf { ok }, cells)
+            }
+        }.start()
+    }
+
     fun cancel() {
+        cancelled = true
         transformer?.cancel()
         finish()
         output?.let(VideoFiles::discard)
+        reversed?.let(VideoFiles::discard)
     }
 
     private fun finish() {
@@ -111,5 +143,7 @@ class ClipExport(private val context: Context) {
 
     private companion object {
         const val PROGRESS_MS = 100L
+        /** The forward cut's share of the progress; the reversing is the rest. */
+        const val FORWARD_SHARE = 70
     }
 }

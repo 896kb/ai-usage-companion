@@ -1,6 +1,15 @@
 package dev.kb896.aiusage.rear
 
-enum class VideoAction { DROP, SLEEP, FREEZE, LOOP, RESTART_LOOP, PLAY_ONCE, KEEP }
+import dev.kb896.aiusage.data.VideoPlayMode
+
+enum class VideoAction {
+    DROP, SLEEP, FREEZE, LOOP, RESTART_LOOP, PLAY_ONCE, KEEP,
+    /** Yoyo: forward from where it is to its end, and rest there. */
+    TO_END,
+    /** Yoyo: backward from where it is to its start, and rest there. */
+    TO_START,
+    PING_PONG, RESTART_PING_PONG,
+}
 
 /**
  * What a video background's player should be doing, from the panel's state alone — kept
@@ -8,28 +17,51 @@ enum class VideoAction { DROP, SLEEP, FREEZE, LOOP, RESTART_LOOP, PLAY_ONCE, KEE
  *
  * DROP lets go of everything (no video any more); SLEEP only the decoder, keeping the last
  * frame to show when the display lights again — a dark display, or a panel nobody can see
- * (the front's preview with the app in the background). FREEZE holds the frame where it is: always-on,
- * the double tap's dim, a non-looping video behind the slider. [fresh] is the panel coming
- * back — woken, unlocked, the dim called off, always-on left: a video that plays once starts
- * its run over, cross-fading from the frame it had stopped on, while a loop carries on from
- * where it was. [changed] is the video itself changed — a new clip, chosen, Loop or the ease
- * switched — and starts even a loop over. KEEP is an open, non-looping video between those
- * moments: playing its one run or holding its last frame.
+ * (the front's preview with the app in the background). FREEZE holds the frame where it
+ * is: always-on, the double tap's dim, a linear run behind the slider.
+ *
+ * [fresh] is the panel coming back — woken, unlocked, the dim called off, always-on left: a
+ * linear run starts over, cross-fading from the frame it had stopped on, while a loop or a
+ * ping-pong carries on from where it was. [changed] is the video itself changed — a new
+ * clip, chosen, its way of playing or its ease switched — and starts even those over. A
+ * yoyo only ever knows where it is going: to its end while the panel is open, back to its
+ * start while it is not. KEEP is an open linear run between those moments: playing or
+ * holding its last frame. [mode] is the way the clip can play (VideoConfig.playable).
  */
 object VideoState {
     fun decide(
         isVideo: Boolean, hasClip: Boolean, attached: Boolean, displayAwake: Boolean, visible: Boolean,
-        aod: Boolean, paused: Boolean, locked: Boolean, loop: Boolean, preview: Boolean, fresh: Boolean,
-        changed: Boolean,
-    ): VideoAction = when {
-        !isVideo || !hasClip -> VideoAction.DROP
-        !attached || !displayAwake || !visible -> VideoAction.SLEEP
-        preview -> VideoAction.LOOP
-        aod || paused -> VideoAction.FREEZE
-        loop -> if (changed) VideoAction.RESTART_LOOP else VideoAction.LOOP
-        locked -> VideoAction.FREEZE
-        fresh -> VideoAction.PLAY_ONCE
-        else -> VideoAction.KEEP
+        aod: Boolean, paused: Boolean, locked: Boolean, mode: VideoPlayMode, preview: Boolean,
+        fresh: Boolean, changed: Boolean,
+    ): VideoAction {
+        if (!isVideo || !hasClip) return VideoAction.DROP
+        if (!attached || !displayAwake || !visible) return VideoAction.SLEEP
+        // The preview shows each way going round: what plays once, round and round; what
+        // goes there and back, there and back.
+        if (preview) return when (mode) {
+            VideoPlayMode.LINEAR, VideoPlayMode.LINEAR_LOOP ->
+                if (changed) VideoAction.RESTART_LOOP else VideoAction.LOOP
+            VideoPlayMode.YOYO, VideoPlayMode.PING_PONG ->
+                if (changed) VideoAction.RESTART_PING_PONG else VideoAction.PING_PONG
+        }
+        return when (mode) {
+            VideoPlayMode.YOYO -> if (aod || paused || locked) VideoAction.TO_START else VideoAction.TO_END
+            VideoPlayMode.LINEAR_LOOP -> when {
+                aod || paused -> VideoAction.FREEZE
+                changed -> VideoAction.RESTART_LOOP
+                else -> VideoAction.LOOP
+            }
+            VideoPlayMode.PING_PONG -> when {
+                aod || paused -> VideoAction.FREEZE
+                changed -> VideoAction.RESTART_PING_PONG
+                else -> VideoAction.PING_PONG
+            }
+            VideoPlayMode.LINEAR -> when {
+                aod || paused || locked -> VideoAction.FREEZE
+                fresh -> VideoAction.PLAY_ONCE
+                else -> VideoAction.KEEP
+            }
+        }
     }
 
     /**
@@ -40,10 +72,10 @@ object VideoState {
         if (created && action == VideoAction.KEEP) VideoAction.FREEZE else action
 
     /**
-     * The ease a loop's passes run with. The front's preview loops a video that plays once
-     * on the back, so each pass is eased as that one run is — the preview is there to show
-     * how it will look. A video set to loop has no ends to ease.
+     * The ease each pass of the preview runs with. The preview goes round what the back plays
+     * once — a linear run, a yoyo's legs — so each pass is eased as that is. A loop and a
+     * ping-pong have no ends to ease: on the back their eases soften only stops and wakes.
      */
-    fun loopEase(preview: Boolean, loop: Boolean, easeIn: Boolean, easeOut: Boolean): Pair<Boolean, Boolean> =
-        if (preview && !loop) easeIn to easeOut else false to false
+    fun passEase(preview: Boolean, mode: VideoPlayMode, easeIn: Boolean, easeOut: Boolean): Pair<Boolean, Boolean> =
+        if (preview && (mode == VideoPlayMode.LINEAR || mode == VideoPlayMode.YOYO)) easeIn to easeOut else false to false
 }

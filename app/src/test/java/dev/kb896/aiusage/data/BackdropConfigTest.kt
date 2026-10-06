@@ -25,4 +25,19 @@ class BackdropConfigTest {
         assertEquals(v, back.video)
         assertEquals(BackdropKind.VIDEO, back.effectiveBackdrop)
     }
+
+    @Test fun `a video saved with Loop on plays as a loop, with it off as a linear run`() {
+        assertEquals(VideoPlayMode.LINEAR_LOOP, VideoConfig(loop = true).mode)
+        assertEquals(VideoPlayMode.LINEAR, VideoConfig(loop = false).mode)
+    }
+
+    @Test fun `a chosen playback wins over the old switch`() {
+        assertEquals(VideoPlayMode.PING_PONG, VideoConfig(loop = false, playback = VideoPlayMode.PING_PONG).mode)
+    }
+
+    @Test fun `going backwards needs the reversed copy — without it Yoyo is Linear and Ping-pong is a loop`() {
+        assertEquals(VideoPlayMode.LINEAR, VideoConfig(playback = VideoPlayMode.YOYO).playable)
+        assertEquals(VideoPlayMode.LINEAR_LOOP, VideoConfig(playback = VideoPlayMode.PING_PONG).playable)
+        assertEquals(VideoPlayMode.YOYO, VideoConfig(playback = VideoPlayMode.YOYO, reversePath = "/r.mp4").playable)
+    }
 }

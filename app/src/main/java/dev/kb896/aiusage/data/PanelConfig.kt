@@ -173,6 +173,15 @@ data class AccountStyle(
 enum class BackdropKind { COLOR, IMAGE, VIDEO, SHADER }
 
 /**
+ * How a video background plays. LINEAR runs once, forward, when the panel opens and holds
+ * its last frame. YOYO runs forward when the panel opens and back to its start when it is
+ * locked, double-tapped or goes into always-on. LINEAR_LOOP goes round and round; PING_PONG
+ * goes forward and back, forward and back. Going backwards plays the reversed copy.
+ */
+@Serializable
+enum class VideoPlayMode { LINEAR, YOYO, LINEAR_LOOP, PING_PONG }
+
+/**
  * A video background: the original the user picked (kept as a document URI the app holds
  * permission for, so it can be edited again), the clip made from it for the panel, and how
  * it plays. The clip is already cropped, scaled to the rear display and trimmed — the
@@ -182,6 +191,8 @@ enum class BackdropKind { COLOR, IMAGE, VIDEO, SHADER }
 data class VideoConfig(
     val originalUri: String? = null,
     val clipPath: String? = null,
+    /** The clip played backwards, for YOYO's return and PING_PONG; null for clips cut before it existed. */
+    val reversePath: String? = null,
     val trimStartMs: Long = 0,
     val trimEndMs: Long = 0,
     val panX: Float = 0f,
@@ -189,13 +200,29 @@ data class VideoConfig(
     val zoom: Float = 1f,
     /** As the picture's: how much of the video shows over the panel's ground colour. */
     val opacity: Float = 1f,
+    /** The old switch, before there were four ways to play: read only through [mode]. */
     val loop: Boolean = true,
+    /** How it plays; null in configs saved before the choice. See [mode]. */
+    val playback: VideoPlayMode? = null,
     /** Loop off only: start slow and speed up / slow into the last frame. See EaseCurve. */
     val easeIn: Boolean = false,
     val easeOut: Boolean = false,
     /** The clip's middle frame's brightness, GlassLuminance.SIDE squared cells, row by row. */
     val luminance: List<Float> = emptyList(),
-)
+) {
+    /** How it was asked to play: the choice, or the old switch's meaning. */
+    val mode: VideoPlayMode
+        get() = playback ?: if (loop) VideoPlayMode.LINEAR_LOOP else VideoPlayMode.LINEAR
+
+    /** How it can play: going backwards needs the reversed copy, and without it the nearest forward way. */
+    val playable: VideoPlayMode
+        get() = when {
+            reversePath != null -> mode
+            mode == VideoPlayMode.YOYO -> VideoPlayMode.LINEAR
+            mode == VideoPlayMode.PING_PONG -> VideoPlayMode.LINEAR_LOOP
+            else -> mode
+        }
+}
 
 @Serializable
 data class ArtConfig(
