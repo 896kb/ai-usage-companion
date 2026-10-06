@@ -20,6 +20,7 @@ import dev.kb896.aiusage.ui.glass.Ink
  * chosen one ticked. Import first, then the theme's own face, the two the app ships,
  * imported ones (a long press removes them) and the phone's families — found in the
  * background, as that means opening every font file on it, with a glass spinner turning meanwhile.
+ * The spinner fades out and the fonts slide in from the left, fading up one after another.
  */
 object FontPicker {
 
@@ -117,13 +118,34 @@ object FontPicker {
             val found = PanelFonts.system().map { it to PanelType.face(res, theme, it) }
             box.post {
                 if (!dialog.isShowing) return@post
-                var at = box.indexOfChild(looking)
-                box.removeView(looking)
-                if (found.isEmpty()) { box.removeView(phoneHeading); return@post }
-                for ((font, face) in found) row(font.name, font, face, at++)
+                // The spinner fades out; then the fonts come in one after another, each
+                // sliding in from the left as it fades up, a beat behind the one above.
+                looking.animate().alpha(0f).setDuration(SPINNER_OUT_MS).withEndAction {
+                    var at = box.indexOfChild(looking)
+                    box.removeView(looking)
+                    if (found.isEmpty()) { box.removeView(phoneHeading); return@withEndAction }
+                    val from = -dp(context, 28).toFloat()
+                    found.forEachIndexed { i, (font, face) ->
+                        row(font.name, font, face, at++).apply {
+                            alpha = 0f
+                            translationX = from
+                            animate().alpha(1f).translationX(0f)
+                                // Capped, so a long list below the fold is not still waiting
+                                // its turn when it is scrolled to.
+                                .setStartDelay(ROW_STAGGER_MS * minOf(i, ROW_STAGGER_CAP))
+                                .setDuration(ROW_IN_MS)
+                                .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
+                        }
+                    }
+                }
             }
         }.start()
     }
+
+    private const val SPINNER_OUT_MS = 160L
+    private const val ROW_IN_MS = 240L
+    private const val ROW_STAGGER_MS = 35L
+    private const val ROW_STAGGER_CAP = 14
 
     private fun dp(context: Context, value: Int) =
         (value * context.resources.displayMetrics.density).toInt()
