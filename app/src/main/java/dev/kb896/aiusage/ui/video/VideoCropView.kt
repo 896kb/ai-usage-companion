@@ -46,7 +46,7 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     private val framePath = android.graphics.Path()
     private fun cornerRadius() = region().width() * corner
 
-    private val gesture = CropGesture(context, ::region, { videoSize }, ::place)
+    private val gesture = CropGesture(context, ::placement, { videoSize }, ::place)
     val panX get() = gesture.panX
     val panY get() = gesture.panY
     val zoom get() = gesture.zoom
@@ -69,6 +69,7 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     /** Outside the region dimmed, and the region's edge. */
     private val over = object : View(context) {
         private val shade = Paint().apply { color = 0xB0000000.toInt() }
+        private val marginShade = Paint().apply { color = 0x58000000 }
         private val frame = Paint().apply {
             style = Paint.Style.STROKE
             strokeWidth = 2f * resources.displayMetrics.density
@@ -76,12 +77,19 @@ class VideoCropView(context: Context) : FrameLayout(context) {
         }
         override fun onDraw(canvas: Canvas) {
             val box = region()
+            val margin = placement()
             val r = cornerRadius()
             framePath.reset()
             framePath.addRoundRect(box, r, r, android.graphics.Path.Direction.CW)
+            // Outside what is cut: dark. The margin parallax moves into: half as dark.
             canvas.save()
-            canvas.clipOutPath(framePath)
+            canvas.clipOutRect(margin)
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
+            canvas.restore()
+            canvas.save()
+            canvas.clipRect(margin)
+            canvas.clipOutPath(framePath)
+            canvas.drawRect(margin, marginShade)
             canvas.restore()
             canvas.drawRoundRect(box, r, r, frame)
         }
@@ -106,9 +114,20 @@ class VideoCropView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Where the video is placed and cut from: the frame and, around it, the parallax margin
+     * of real footage every clip is now cut with (Parallax.MARGIN of the frame on each side).
+     */
+    fun placement(): RectF = region().apply {
+        val mx = width() * dev.kb896.aiusage.rear.Parallax.MARGIN
+        val my = height() * dev.kb896.aiusage.rear.Parallax.MARGIN
+        inset(-mx, -my)
+    }
+
     /** The region, centred, at the rear display's shape, read from the display. */
     fun region(): RectF {
-        val w = width * 0.86f
+        // Narrower than the picture's, to leave room for the margin around it.
+        val w = width * 0.86f / (1f + 2f * dev.kb896.aiusage.rear.Parallax.MARGIN)
         val h = w / aspect
         return RectF((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f)
     }
@@ -206,7 +225,7 @@ class VideoCropView(context: Context) : FrameLayout(context) {
     private fun place() {
         val (w, h) = videoSize ?: return
         if (width == 0 || height == 0) return
-        val dest = ArtPlacement.destination(region(), w, h, gesture.panX, gesture.panY, gesture.zoom)
+        val dest = ArtPlacement.destination(placement(), w, h, gesture.panX, gesture.panY, gesture.zoom)
         texture.setTransform(Matrix().apply {
             setScale(dest.width() / width, dest.height() / height)
             postTranslate(dest.left, dest.top)

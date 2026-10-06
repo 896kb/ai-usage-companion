@@ -136,7 +136,8 @@ object VideoEditor {
             message.visibility = View.GONE
             progress.visibility = View.VISIBLE
             progress.progress = 0
-            val crop = VideoCrop.forPan(frame.region(), size.first, size.second, frame.panX, frame.panY, frame.zoom)
+            // Cut with the margin around the frame, so parallax moves into real footage.
+            val crop = VideoCrop.forPan(frame.placement(), size.first, size.second, frame.panX, frame.panY, frame.zoom)
             export.start(source, trim.startMs, trim.endMs, crop,
                 onProgress = { progress.progress = it },
                 onDone = { clip, reverse, cells ->
@@ -145,7 +146,7 @@ object VideoEditor {
                         originalUri = source.toString(), clipPath = clip.path, reversePath = reverse?.path,
                         trimStartMs = trim.startMs, trimEndMs = trim.endMs,
                         panX = frame.panX, panY = frame.panY, zoom = frame.zoom,
-                        opacity = opacity, luminance = cells,
+                        opacity = opacity, luminance = cells, margin = dev.kb896.aiusage.rear.Parallax.MARGIN,
                     ), ground)
                     dialog.dismiss()
                 },

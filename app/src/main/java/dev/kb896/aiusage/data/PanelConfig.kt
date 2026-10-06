@@ -191,6 +191,11 @@ enum class VideoPlayMode { LINEAR, YOYO, LINEAR_LOOP, PING_PONG }
 data class VideoConfig(
     val originalUri: String? = null,
     val clipPath: String? = null,
+    /**
+     * The real footage cut past the frame on each side, as a share of the panel — what
+     * parallax moves into without enlarging the clip. 0 for clips cut before parallax.
+     */
+    val margin: Float = 0f,
     /** The clip played backwards, for YOYO's return and PING_PONG; null for clips cut before it existed. */
     val reversePath: String? = null,
     val trimStartMs: Long = 0,
@@ -504,6 +509,12 @@ data class PanelConfig(
     /** Which background the panel has; null in configs saved before there was a choice. See [effectiveBackdrop]. */
     val backdropKind: BackdropKind? = null,
     val video: VideoConfig = VideoConfig(),
+    /**
+     * Depth for the background (a picture, a video, the shader): it shifts a little as the
+     * phone tilts, and as the panel's pages scroll. See Parallax.
+     */
+    val parallaxTilt: Boolean = false,
+    val parallaxScroll: Boolean = false,
     /** The Shader background's choice. Only the front screen's silk, for now. */
     val shader: String = "silk",
     /** Appearance per account, by index. Short lists are fine — a missing entry is

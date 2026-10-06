@@ -1453,6 +1453,9 @@ class MainActivity : ComponentActivity() {
             // Drawn the shape of the back: its real proportions and its rounded corners.
             displayAspect = dev.kb896.aiusage.ui.video.RearSize.pixels(this@MainActivity).let { (w, h) -> w.toFloat() / h }
             regionCorner = dev.kb896.aiusage.ui.video.RearSize.cornerShare(this@MainActivity)
+            // With parallax, the picture also covers the margin it moves into.
+            val moving = store.load().let { it.parallaxTilt || it.parallaxScroll }
+            margin = if (moving) dev.kb896.aiusage.rear.Parallax.MARGIN else 0f
             setImage(
                 bitmap,
                 if (reuseTransform) existing.panX else 0f,
@@ -1639,6 +1642,19 @@ class MainActivity : ComponentActivity() {
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                         .apply { topMargin = (8 * resources.displayMetrics.density).toInt() },
                 )
+        }
+        // Depth, for anything but a flat colour: the background shifts as the phone tilts and
+        // as the pages scroll. Pictures and new clips keep real pixels past the frame for it.
+        if (kind != dev.kb896.aiusage.data.BackdropKind.COLOR) {
+            SettingsRows.toggle(rows, "Tilt parallax", config.parallaxTilt) { on ->
+                saveBackdrop { it.copy(parallaxTilt = on) }
+            }
+            SettingsRows.toggle(rows, "Scroll parallax", config.parallaxScroll) { on ->
+                saveBackdrop { it.copy(parallaxScroll = on) }
+            }
+            if ((config.parallaxTilt || config.parallaxScroll) && kind == dev.kb896.aiusage.data.BackdropKind.VIDEO &&
+                config.video.margin <= 0f
+            ) SettingsRows.note(rows, "This clip was cut without a margin, so parallax enlarges it slightly. Edit video, then Use it, to keep it sharp.")
         }
         dev.kb896.aiusage.ui.glass.Unclip.tree(rows)
     }

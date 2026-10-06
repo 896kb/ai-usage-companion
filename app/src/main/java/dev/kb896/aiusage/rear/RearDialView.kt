@@ -60,6 +60,7 @@ class RearDialView(context: Context) : View(context) {
                 value.effectiveBackdrop != old.effectiveBackdrop || value.video.playable != old.video.playable ||
                 value.video.easeInWallMs != old.video.easeInWallMs || value.video.easeOutWallMs != old.video.easeOutWallMs
             syncVideo(fresh = changed, changed = changed)
+            syncTilt()
             // Switching the feature OFF has to act now, not at the next thing the player
             // says. The row and the record are only ever created by a broadcast, so
             // without this they sat there — correctly drawn, from a config that no longer
@@ -954,6 +955,7 @@ class RearDialView(context: Context) : View(context) {
             }
             invalidate()
             syncVideo(fresh = !value)
+            syncTilt()
         }
     private var aodReturnPage = PAGE_READOUT
     /** Until when a clock figure is rolling over; the always-on freeze waits for it. */
@@ -1182,6 +1184,7 @@ class RearDialView(context: Context) : View(context) {
             // while the panel was dark has to be caught up in the first frame after it.
             if (value) invalidate()
             syncVideo(fresh = value)
+            syncTilt()
         }
 
     /**
@@ -1241,6 +1244,7 @@ class RearDialView(context: Context) : View(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         syncVideo()
+        syncTilt()
         postDelayed(redrawTick, REDRAW_INTERVAL_MS)
         // The charger going in. ACTION_POWER_CONNECTED rather than watching
         // ACTION_BATTERY_CHANGED for a status flip: the former fires once on the event,
@@ -1315,6 +1319,8 @@ class RearDialView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         video.sleep()
+        context.getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(tiltListener)
+        tiltListening = false
         removeCallbacks(redrawTick)
         runCatching { context.unregisterReceiver(powerReceiver) }
         runCatching {
@@ -2548,6 +2554,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // AMBIENT is the one exception, and it is a deliberate risk: see AMBIENT_ALPHA.
         // Recorded here, before the ground or the scene opens a recording of its own.
+        updateParallax()
         tickSilk()
         weatherReady = prepareWeather()
 
@@ -10920,6 +10927,7 @@ class RearDialView(context: Context) : View(context) {
         }
     }
     private val silkPaint = Paint()
+    private val silkShift = android.graphics.Matrix()
     private var silkTime = 0f
     private var silkLastMs = 0L
 
@@ -10939,6 +10947,8 @@ class RearDialView(context: Context) : View(context) {
         if (moving && silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f
         silkLastMs = if (moving) frameNowMs else 0L
         silk.setFloatUniform("time", silkTime)
+        silkShift.setTranslate(parallaxDx, parallaxDy)
+        silk.setLocalMatrix(silkShift)
         if (moving) animating = true
     }
 
@@ -10965,6 +10975,7 @@ class RearDialView(context: Context) : View(context) {
         if (shown == windowShown) return
         windowShown = shown
         syncVideo(fresh = shown)
+        syncTilt()
     }
 
     /**
@@ -11033,6 +11044,9 @@ class RearDialView(context: Context) : View(context) {
         if (fade >= 0.999f) return
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         val now = SystemClock.uptimeMillis()
+        videoRegion(videoDest)
+        canvas.save()
+        canvas.clipRect(panelRect)
         // A slowed run: the frame fading in over the one before it. A restart: the frame it
         // stopped on, fading out over the new run.
         val blend = video.blend(now)
@@ -11052,16 +11066,105 @@ class RearDialView(context: Context) : View(context) {
         } else null
         if (previous != null) {
             videoPaint.alpha = full.toInt()
-            canvas.drawBitmap(previous, null, panelRect, videoPaint)
+            canvas.drawBitmap(previous, null, videoDest, videoPaint)
         }
         videoPaint.alpha = (full * if (previous != null) blend else 1f).toInt()
-        canvas.drawBitmap(frame, null, panelRect, videoPaint)
+        canvas.drawBitmap(frame, null, videoDest, videoPaint)
         if (from != null && left > 0f) {
             videoPaint.alpha = (full * left).toInt()
-            canvas.drawBitmap(from, null, panelRect, videoPaint)
+            canvas.drawBitmap(from, null, videoDest, videoPaint)
         }
         if (layered) canvas.restore()
+        canvas.restore()
         if (stacked) animating = true
+    }
+
+    private val videoDest = RectF()
+
+    /**
+     * Where the video is drawn: the panel, or past it by the clip's own margin of footage —
+     * or, for a clip cut without one, enlarged by the parallax margin while parallax is on —
+     * and moved by the parallax.
+     */
+    private fun videoRegion(out: RectF): RectF {
+        val m = config.video.margin.takeIf { it > 0f } ?: if (parallaxOn) Parallax.MARGIN else 0f
+        return backdropRegion(m, out)
+    }
+
+    // ---- parallax ----
+
+    /** The phone's tilt, from the gravity sensor, while it is read. See syncTilt. */
+    private val tilt = TiltTracker()
+    private var parallaxDx = 0f
+    private var parallaxDy = 0f
+
+    private val parallaxOn: Boolean
+        get() = (config.parallaxTilt || config.parallaxScroll) &&
+            config.effectiveBackdrop != dev.kb896.aiusage.data.BackdropKind.COLOR
+
+    /**
+     * This frame's shift of the background, in panel units: away from the tilt, as a
+     * picture behind glass moves, and up as the pages scroll down — by less than the pages
+     * do, within the margin.
+     */
+    private fun updateParallax() {
+        if (!parallaxOn) { parallaxDx = 0f; parallaxDy = 0f; return }
+        val tx = if (config.parallaxTilt) tilt.x else 0f
+        val ty = if (config.parallaxTilt) tilt.y else 0f
+        val sy = if (config.parallaxScroll) Parallax.scroll(pager.offset, Panel.HEIGHT.toFloat(), pager.pages) else 0f
+        val (x, y) = Parallax.combine(tx, ty, sy)
+        parallaxDx = -Parallax.px(x, Panel.WIDTH.toFloat())
+        parallaxDy = -Parallax.px(y, Panel.HEIGHT.toFloat())
+    }
+
+    /** The panel, [margin] bigger on every side, moved by this frame's parallax. */
+    private fun backdropRegion(margin: Float, out: RectF): RectF {
+        val w = Panel.WIDTH.toFloat()
+        val h = Panel.HEIGHT.toFloat()
+        out.set(-margin * w, -margin * h, w + margin * w, h + margin * h)
+        out.offset(parallaxDx, parallaxDy)
+        return out
+    }
+
+    private var tiltListening = false
+    private var tiltAtNs = 0L
+    private val tiltListener = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val g = kotlin.math.sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2])
+            if (g < 1f) return
+            val dtMs = if (tiltAtNs == 0L) 16L else ((e.timestamp - tiltAtNs) / 1_000_000L).coerceIn(1L, 200L)
+            tiltAtNs = e.timestamp
+            // The back is landscape: its across is the phone's long side (y), its up and down
+            // the short side (x). A tip is how far gravity has swung along each.
+            val beforeX = tilt.x
+            val beforeY = tilt.y
+            tilt.update(
+                roll = kotlin.math.asin((e.values[1] / g).coerceIn(-1f, 1f)),
+                pitch = kotlin.math.asin((e.values[0] / g).coerceIn(-1f, 1f)),
+                dtMs = dtMs,
+            )
+            if (kotlin.math.abs(tilt.x - beforeX) > 0.002f || kotlin.math.abs(tilt.y - beforeY) > 0.002f) invalidate()
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) = Unit
+    }
+
+    /**
+     * Reads the tilt only while it can be seen to move something: tilt parallax on, a
+     * background that moves, the panel on screen, awake and not always-on.
+     */
+    private fun syncTilt() {
+        val want = config.parallaxTilt && parallaxOn && isAttachedToWindow && displayAwake && windowShown && !aod
+        if (want == tiltListening) return
+        val sensors = context.getSystemService(android.hardware.SensorManager::class.java) ?: return
+        if (want) {
+            val gravity = sensors.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY) ?: return
+            tilt.reset()
+            tiltAtNs = 0L
+            sensors.registerListener(tiltListener, gravity, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+        } else {
+            sensors.unregisterListener(tiltListener)
+        }
+        tiltListening = want
     }
 
     /**
@@ -11072,18 +11175,36 @@ class RearDialView(context: Context) : View(context) {
     private fun liveGround(): android.graphics.Shader? = when (config.effectiveBackdrop) {
         dev.kb896.aiusage.data.BackdropKind.SHADER -> silk
         dev.kb896.aiusage.data.BackdropKind.VIDEO -> videoGround()
+        // A picture that moves with the parallax is a live ground too: a cached one would be rebuilt every frame.
+        dev.kb896.aiusage.data.BackdropKind.IMAGE -> if (parallaxOn) imageGround() else null
         else -> null
+    }
+
+    private fun imageGround(): android.graphics.Shader? {
+        val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return null
+        val dest = ArtPlacement.destination(
+            backdropRegion(Parallax.MARGIN, imageRegion), bitmap.width, bitmap.height,
+            config.backdrop.panX, config.backdrop.panY, config.backdrop.zoom,
+        )
+        return pictureGround(bitmap, dest, config.backdrop.opacity)
     }
 
     /** The frame over the ground colour at the video's opacity, as one shader for the weather. */
     private fun videoGround(): android.graphics.Shader? {
         val frame = video.shown ?: return null
-        val sx = Panel.WIDTH / frame.width.toFloat()
-        val sy = Panel.HEIGHT / frame.height.toFloat()
-        val picture = android.graphics.BitmapShader(frame,
+        return pictureGround(frame, videoRegion(videoDest), config.video.opacity)
+    }
+
+    /** A picture drawn into [dest] over the ground colour at [opacity], as one shader for the weather. */
+    private fun pictureGround(bitmap: android.graphics.Bitmap, dest: RectF, opacity: Float): android.graphics.Shader {
+        val picture = android.graphics.BitmapShader(bitmap,
             android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP,
-        ).apply { setLocalMatrix(android.graphics.Matrix().apply { setScale(sx, sy) }) }
-        val alpha = (255 * config.video.opacity.coerceIn(0f, 1f)).toInt() shl 24
+        ).apply {
+            setLocalMatrix(android.graphics.Matrix().apply {
+                setRectToRect(RectF(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat()), dest, android.graphics.Matrix.ScaleToFit.FILL)
+            })
+        }
+        val alpha = (255 * opacity.coerceIn(0f, 1f)).toInt() shl 24
         val thinned = android.graphics.ComposeShader(
             picture, solid(alpha), android.graphics.PorterDuff.Mode.DST_IN,
         )
@@ -11098,8 +11219,9 @@ class RearDialView(context: Context) : View(context) {
     private fun drawImageBackdrop(canvas: Canvas) {
         val bitmap = backdropCache.of(config.backdrop.imagePath) ?: return
         panelRect.set(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        // Placed in the panel — or, with parallax, in the panel and its margin, moved.
         val dest = ArtPlacement.destination(
-            panelRect, bitmap.width, bitmap.height,
+            backdropRegion(if (parallaxOn) Parallax.MARGIN else 0f, imageRegion), bitmap.width, bitmap.height,
             config.backdrop.panX, config.backdrop.panY, config.backdrop.zoom,
         )
         // always-on: the backdrop fades to black over a second and stays there. The picture
@@ -11127,6 +11249,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private val panelRect = android.graphics.RectF()
+    private val imageRegion = android.graphics.RectF()
 
     /**
      * Draws [bitmap] inside [region], panned and zoomed, and CLIPPED to it.

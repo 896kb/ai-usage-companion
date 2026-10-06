@@ -46,7 +46,11 @@ class ClipExport(private val context: Context) {
         onProgress: (Int) -> Unit, onDone: (File, File?, List<Float>) -> Unit, onError: (String) -> Unit,
     ) {
         cancelled = false
-        val (w, h) = RearSize.pixels(context)
+        // The rear display's pixels and the parallax margin around them, in real footage.
+        val (w, h) = RearSize.pixels(context).let { (dw, dh) ->
+            val grow = 1f + 2f * dev.kb896.aiusage.rear.Parallax.MARGIN
+            even((dw * grow).toInt()) to even((dh * grow).toInt())
+        }
         val out = VideoFiles.newClip(context).also { output = it }
         val item = EditedMediaItem.Builder(
             MediaItem.Builder().setUri(source).setClippingConfiguration(
@@ -140,6 +144,8 @@ class ClipExport(private val context: Context) {
             r.release()
         }
     }.getOrDefault(emptyList())
+
+    private fun even(v: Int) = v - v % 2
 
     private companion object {
         const val PROGRESS_MS = 100L

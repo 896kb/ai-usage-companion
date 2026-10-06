@@ -43,12 +43,19 @@ object ArtImport {
     private const val MAX_EDGE = 1024
 
     /**
+     * A background's longest edge: the whole panel and, with parallax, a margin past it that
+     * is moved into view — kept from real pixels rather than enlarged, so twice the artwork's.
+     */
+    private const val BACKGROUND_EDGE = 2048
+
+    /**
      * @return the absolute path of the stored copy, or null if the image could not be
      *   read or decoded. Null must leave any existing art alone: a failed pick should not
      *   also destroy what was already there.
      */
     fun store(context: Context, uri: Uri, slot: Slot = Slot.ART): String? {
-        val bitmap = decodeScaled(context, uri) ?: return null
+        val edge = if (slot == Slot.ART) MAX_EDGE else BACKGROUND_EDGE
+        val bitmap = decodeScaled(context, uri, edge) ?: return null
         val file = File(context.filesDir, slot.file)
         return try {
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -90,7 +97,7 @@ object ArtImport {
      * allocates the full-size bitmap at all, and an exact fit is not worth a second
      * scaling pass for artwork this small on screen.
      */
-    private fun decodeScaled(context: Context, uri: Uri): Bitmap? {
+    private fun decodeScaled(context: Context, uri: Uri, maxEdge: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         try {
             context.contentResolver.openInputStream(uri).use {
@@ -102,7 +109,7 @@ object ArtImport {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_EDGE) sample *= 2
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxEdge) sample *= 2
 
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         return try {

@@ -50,4 +50,19 @@ class BackdropConfigTest {
         assertEquals(700, VideoConfig(easeIn = false, easeInMs = 700).easeInWallMs)
         assertEquals(0, VideoConfig(easeOut = true, easeOutMs = 0).easeOutWallMs)
     }
+
+    @Test fun `parallax is off until asked for, and a clip cut before it has no margin`() {
+        val c = PanelConfig.decode("""{"title":"X"}""")
+        assertEquals(false, c.parallaxTilt)
+        assertEquals(false, c.parallaxScroll)
+        assertEquals(0f, c.video.margin, 0f)
+    }
+
+    @Test fun `parallax and a clip's margin survive a round trip`() {
+        val c = PanelConfig(parallaxTilt = true, parallaxScroll = true, video = VideoConfig(margin = 0.06f))
+        val back = PanelConfig.decode(PanelConfig.encode(c))
+        assertEquals(true, back.parallaxTilt)
+        assertEquals(true, back.parallaxScroll)
+        assertEquals(0.06f, back.video.margin, 0f)
+    }
 }

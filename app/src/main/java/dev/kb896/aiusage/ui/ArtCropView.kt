@@ -79,23 +79,37 @@ class ArtCropView @JvmOverloads constructor(
     var regionCorner: Float = 0f
         set(value) { field = value; invalidate() }
 
+    /**
+     * The parallax margin past the frame on each side, as a share of it (Parallax.MARGIN when
+     * parallax is on, else 0): the picture is placed to cover it too, and it is shown, lighter
+     * than the outside, as the part that moves into view.
+     */
+    var margin: Float = 0f
+        set(value) { field = value; invalidate() }
+
+    /** The frame's width, narrower when a margin has to fit around it. */
+    private fun frameWidth() = width * 0.86f / (1f + 2f * margin)
+
     /** The frame, centred in this view, at the back's shape when it has one. */
     private fun region(): RectF {
-        val w = width * 0.86f
+        val w = frameWidth()
         val h = w / (displayAspect ?: regionAspect)
         val left = (width - w) / 2f
         val top = (height - h) / 2f
         return RectF(left, top, left + w, top + h)
     }
 
-    /** Where the picture is placed: the frame's width at the panel's own shape. */
-    private fun placement(): RectF {
-        val w = width * 0.86f
+    /** The frame's width at the panel's own shape: what the picture is placed against. */
+    private fun placementInner(): RectF {
+        val w = frameWidth()
         val h = w / regionAspect
         val left = (width - w) / 2f
         val top = (height - h) / 2f
         return RectF(left, top, left + w, top + h)
     }
+
+    /** Where the picture is placed: that, and the margin around it. */
+    private fun placement(): RectF = placementInner().apply { inset(-width() * margin, -height() * margin) }
 
     @Suppress("ClickableViewAccessibility")   // a crop frame has no click semantics
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -118,7 +132,7 @@ class ArtCropView @JvmOverloads constructor(
         // Placed in the panel's shape, then stretched into the frame's as the back stretches it.
         val placed = placement()
         val dest = ArtPlacement.destination(placed, bmp.width, bmp.height, panX, panY, zoom)
-        val sy = box.height() / placed.height()
+        val sy = box.height() / placementInner().height()
         dest.top = box.centerY() + (dest.top - placed.centerY()) * sy
         dest.bottom = box.centerY() + (dest.bottom - placed.centerY()) * sy
         val r = box.width() * regionCorner
@@ -134,10 +148,19 @@ class ArtCropView @JvmOverloads constructor(
         paint.alpha = 255
         framePath.reset()
         framePath.addRoundRect(box, r, r, android.graphics.Path.Direction.CW)
+        // Outside the picture's reach: dark. The margin parallax moves into: half as dark.
+        val band = RectF(box).apply { inset(-width() * margin, -height() * margin) }
         canvas.save()
-        canvas.clipOutPath(framePath)
+        canvas.clipOutRect(band)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
         canvas.restore()
+        if (margin > 0f) {
+            canvas.save()
+            canvas.clipRect(band)
+            canvas.clipOutPath(framePath)
+            canvas.drawRect(band, marginShade)
+            canvas.restore()
+        }
         canvas.drawRoundRect(box, r, r, frame)
         canvas.restore()
     }
@@ -155,6 +178,7 @@ class ArtCropView @JvmOverloads constructor(
         set(value) { field = value; invalidate() }
 
     private val groundPaint = Paint()
+    private val marginShade = Paint().apply { color = 0x58000000 }
     private val framePath = android.graphics.Path()
 
     companion object {
