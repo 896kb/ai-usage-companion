@@ -135,11 +135,28 @@ object PanelType {
 
         fun variation(weight: Int): String? = if (variable) "'wght' $weight" else null
 
-        /** Cleared as well as set: a face without an axis must take a previous one's off. */
-        fun set(paint: Paint, weight: Int) {
-            paint.typeface = typeface(weight)
-            paint.fontVariationSettings = variation(weight)
-        }
+        /** Cleared as well as set: a face without an axis must take a previous one's off. See [weigh]. */
+        fun set(paint: Paint, weight: Int) = weigh(paint, typeface(weight), variation(weight))
+    }
+
+    /**
+     * [face] at [axes] on [paint] — the axes CLEARED FIRST. Setting a typeface drops the
+     * weight a paint had applied, but the paint still remembers the settings string, and
+     * setting the same string again is taken as already done: the face went back to its
+     * file's own default, Outfit's Thin. Switching font, or restyling a view, thinned the
+     * text. Cleared, the string is always new, and always applied.
+     */
+    fun weigh(paint: Paint, face: Typeface, axes: String?) {
+        paint.fontVariationSettings = null
+        paint.typeface = face
+        paint.fontVariationSettings = axes
+    }
+
+    /** As [weigh], for a view: a TextView keeps the same memory on its own paint. */
+    fun weigh(view: android.widget.TextView, face: Typeface, axes: String?) {
+        view.fontVariationSettings = null
+        view.typeface = face
+        view.fontVariationSettings = axes
     }
 
     /** The panel's weights: body, the masthead's, the charging figure's, a track's name. */

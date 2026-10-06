@@ -43,8 +43,7 @@ object FontPicker {
         val faced = mutableListOf<Pair<TextView, PanelType.Face>>()
 
         fun dress(row: TextView, face: PanelType.Face) {
-            row.typeface = face.typeface(PanelType.MEDIA)
-            row.fontVariationSettings = face.variation(PanelType.MEDIA)
+            PanelType.weigh(row, face.typeface(PanelType.MEDIA), face.variation(PanelType.MEDIA))
         }
 
         fun row(name: String, font: PanelFont?, face: PanelType.Face, at: Int = box.childCount): TextView {

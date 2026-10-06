@@ -227,10 +227,9 @@ class MainActivity : ComponentActivity() {
         fun applyFont(view: View) {
             when (view) {
                 is TextView -> {
-                    view.typeface = face
                     // Cleared as well as set, or a view keeps a weight request for a face
-                    // that has no axes to answer it.
-                    view.fontVariationSettings = axes
+                    // that has no axes to answer it. See PanelType.weigh.
+                    dev.kb896.aiusage.rear.PanelType.weigh(view, face, axes)
                 }
                 is ViewGroup -> for (i in 0 until view.childCount) applyFont(view.getChildAt(i))
             }
@@ -327,7 +326,11 @@ class MainActivity : ComponentActivity() {
                 text = androidx.compose.ui.graphics.Color(0xFFF2F2F2.toInt()),
                 accent = androidx.compose.ui.graphics.Color(dev.kb896.aiusage.ui.glass.Ink.accent(lum)),
                 surface = androidx.compose.ui.graphics.Color(0xFF121212.toInt()),
-                face = androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Font(R.font.outfit)),
+                // SemiBold, as the rest of the front: Outfit's file is light by itself.
+                // (A resource font's weight is turned into its weight axis by Compose itself.)
+                face = androidx.compose.ui.text.font.FontFamily(
+                    androidx.compose.ui.text.font.Font(R.font.outfit, weight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                ),
             )
         }
         showTab(tab)

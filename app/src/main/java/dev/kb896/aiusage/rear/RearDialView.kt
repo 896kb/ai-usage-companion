@@ -779,8 +779,7 @@ class RearDialView(context: Context) : View(context) {
         // The masthead is heavier than the body: under glass it is a lens shaped like the
         // letters, and a lens needs a stroke wide enough to have an inside.
         face.set(title, PanelType.TITLE)
-        tipText.typeface = label.typeface
-        tipText.fontVariationSettings = label.fontVariationSettings
+        face.set(tipText, PanelType.BODY)
         label.textSize = typed(18f)
         heading.textSize = typed(22.5f)
         value.textSize = typed(21f)

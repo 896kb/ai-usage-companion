@@ -35,7 +35,6 @@ object UiType {
 
     /** The front's face on [view], with its axes — set, or cleared when the face has none. */
     fun dress(view: android.widget.TextView) {
-        view.typeface = of(view.context)
-        view.fontVariationSettings = variation(view.context)
+        PanelType.weigh(view, of(view.context), variation(view.context))
     }
 }
