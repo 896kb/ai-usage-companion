@@ -11135,12 +11135,13 @@ class RearDialView(context: Context) : View(context) {
             val dtMs = if (tiltAtNs == 0L) 16L else ((e.timestamp - tiltAtNs) / 1_000_000L).coerceIn(1L, 200L)
             tiltAtNs = e.timestamp
             // The back is landscape: its across is the phone's long side (y), its up and down
-            // the short side (x). A tip is how far gravity has swung along each.
+            // the short side (x). A tip is how far gravity has swung along each — negated on
+            // both, since the back faces away from the sensor's frame (checked by hand).
             val beforeX = tilt.x
             val beforeY = tilt.y
             tilt.update(
-                roll = kotlin.math.asin((e.values[1] / g).coerceIn(-1f, 1f)),
-                pitch = kotlin.math.asin((e.values[0] / g).coerceIn(-1f, 1f)),
+                roll = -kotlin.math.asin((e.values[1] / g).coerceIn(-1f, 1f)),
+                pitch = -kotlin.math.asin((e.values[0] / g).coerceIn(-1f, 1f)),
                 dtMs = dtMs,
             )
             if (kotlin.math.abs(tilt.x - beforeX) > 0.002f || kotlin.math.abs(tilt.y - beforeY) > 0.002f) invalidate()
