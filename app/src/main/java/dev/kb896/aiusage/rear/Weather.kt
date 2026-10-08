@@ -151,6 +151,12 @@ object Weather {
         const float SNOW_FALL = 0.22;
         const float SNOW_WEIGHT = 1.25;
 
+        // SQUARE UNITS: the panel's height is 1 and its width whatever that makes it. The
+        // water was laid out in uv — 0 to 1 both ways — on a panel 904 by 572, so every
+        // round thing in it came out half as wide again as it was tall: drops, flakes,
+        // the haze. Anything with a shape is laid out in these instead.
+        float2 square(float2 uv) { return float2(uv.x * size.x / size.y, uv.y); }
+
         float hash1(float2 p) {
             return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
         }
@@ -198,7 +204,7 @@ object Weather {
         // pop in fast, hold, and fade — and every third one barely shows at all, because a
         // window is not evenly wet.
         float clinging(float2 uv, float t) {
-            float2 g = uv * 21.0;
+            float2 g = square(uv) * 21.0;
             float2 id = floor(g);
             float2 f = fract(g) - 0.5;
             float3 n = hash3(id.x * 107.45 + id.y * 3543.654);
@@ -207,7 +213,7 @@ object Weather {
             // a drop is either there or it is not. Cut off pixel by pixel instead, a
             // drop would have an edge, an edge is a slope, and a slope catches the
             // light — as a bright ring drawn round the lens.
-            float2 c = ((id + 0.5 + at) / 21.0) * size;
+            float2 c = ((id + 0.5 + at) / 21.0) * size.y;
             float keep = smoothstep(-4.0, 4.0,
                     length(c - float2(lensA.x, size.y - lensA.y)) - lensA.z - 10.0)
                 * smoothstep(-4.0, 4.0,
@@ -374,7 +380,10 @@ object Weather {
             // below, and water — and a drop that has taken half a dozen others with it
             // should be bigger than one that just set off. A third again, by the bottom.
             float grow = 1.0 + 0.35 * clamp(1.0 - y, 0.0, 1.0);
-            float d = length((st - float2(x, y)) * float2(1.0, 6.0));
+            // ROUND IN PIXELS. A cell is CELL_W by CELL_H, so a unit down is that much
+            // longer than a unit across; the reference's 6 was its own cell's proportion,
+            // and here it squashed every head half as wide again as it was tall.
+            float d = length((st - float2(x, y)) * float2(1.0, CELL_H / CELL_W));
             float head = smoothstep(0.2 * grow, 0.0, d) * vis;
 
             // The trail narrows behind the drop and only exists above it.
@@ -521,9 +530,10 @@ object Weather {
                 // gradient of the coverage field, taken by sampling it a step to each side.
                 // It is three evaluations rather than one, and it is what makes the drops
                 // read as rounded rather than as holes.
-                float e = 1.0 / max(size.x, 1.0);
-                float cx = water(wuv + float2(e, 0.0), t).x;
-                float cy = water(wuv + float2(0.0, e), t).x;
+                // One pixel each way — not one uv step, which is a pixel across and two
+                // thirds of one down, and tilted every slope.
+                float cx = water(wuv + float2(1.0 / max(size.x, 1.0), 0.0), t).x;
+                float cy = water(wuv + float2(0.0, 1.0 / max(size.y, 1.0)), t).x;
                 // The y gradient is measured in flipped space, so it is negated on the way
                 // out — or the drops would bend light upward while falling down.
                 float2 nrm = float2(cx - c.x, -(cy - c.x));
@@ -562,7 +572,7 @@ object Weather {
             } else {
                 for (float i = 0.0; i < 14.0; i += 1.0) {
                     float layer = 1.0 + i * 0.5 / (SNOW_SIZE * 2.0);
-                    float2 sc = uv * layer * SNOW_SCALE;
+                    float2 sc = square(uv) * layer * SNOW_SCALE;
                     float2 mv = float2(
                         sc.y * (SNOW_SPREAD * fract(i * 7.238917) - SNOW_SPREAD * 0.5)
                             - SNOW_WIND * time * 0.5,
@@ -615,7 +625,7 @@ object Weather {
             float clear = water(wuv, time * 0.22).z * glass(pos);
             // Mottled, because breath does not settle evenly and a flat wash reads as a
             // filter over the panel rather than as something on the glass.
-            float haze = 0.55 * vnoise(uv * 9.0) + 0.45 * vnoise(uv * 23.0);
+            float haze = 0.55 * vnoise(square(uv) * 9.0) + 0.45 * vnoise(square(uv) * 23.0);
             float a = FOG * (0.55 + 0.75 * haze) * (1.0 - clear) * amount;
             a = clamp(a, 0.0, 1.0);
             return half4(half3(0.88, 0.92, 0.96) * half(a), half(a));
