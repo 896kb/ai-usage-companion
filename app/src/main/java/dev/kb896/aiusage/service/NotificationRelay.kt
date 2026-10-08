@@ -29,6 +29,15 @@ import dev.kb896.aiusage.rear.RearActivity
  */
 class NotificationRelay : NotificationListenerService() {
 
+    // What RelayWatch reads to know whether the relay needs binding again.
+    override fun onListenerConnected() {
+        RelayWatch.connected = true
+    }
+
+    override fun onListenerDisconnected() {
+        RelayWatch.connected = false
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val config = ConfigStore(this).load()
         if (!config.showNotifications) return

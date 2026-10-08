@@ -243,6 +243,7 @@ class UsagePollService : Service() {
             while (isActive) {
                 delay(WATCHDOG_INTERVAL_MS)
                 safeSupervise()
+                RelayWatch.check(this@UsagePollService)
             }
         }
     }
