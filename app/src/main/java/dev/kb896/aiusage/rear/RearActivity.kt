@@ -368,6 +368,15 @@ class RearActivity : Activity() {
         dial.onUnlocked = {
             guardedAfterWake = false
             if (inAod && !unlockingBySpent) exitAod()
+            // Swiped while the spent lock was letting the display go (the hand-back clears
+            // awaitingDoze before it unlocks, so this is a finger): somebody is looking at
+            // it — keep it, and call the hand-back off.
+            if (awaitingDoze) {
+                window.decorView.removeCallbacks(restorePanel)
+                awaitingDoze = false
+                holdScreen(true)
+                armSleep()
+            }
         }
         // Something worth seeing arrived. Take the display back — it may be part-way
         // through being let go after an earlier lock ran out — and call off the hand-back
@@ -849,7 +858,8 @@ class RearActivity : Activity() {
     private fun armSleep() {
         window.decorView.removeCallbacks(sleepPanel)
         if (keepAwake) {
-            if (!holding) holdScreen(true)
+            // Not while a spent lock is letting the display go — see KeepAwakeHold.
+            if (KeepAwakeHold.retake(keepAwake, holding, awaitingDoze)) holdScreen(true)
             return
         }
         window.decorView.postDelayed(sleepPanel, AWAKE_MS)
@@ -868,7 +878,7 @@ class RearActivity : Activity() {
      * restore happen, which is correct — the lock has expired, and watching it hand back
      * is better than being shown a slider that is no longer guarding anything.
      */
-    private val restorePanel = Runnable { dial.unlock() }
+    private val restorePanel = Runnable { awaitingDoze = false; dial.unlock() }
 
     private fun onLockSpent() {
         guardedAfterWake = false
