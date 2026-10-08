@@ -582,7 +582,7 @@ class RearDialView(context: Context) : View(context) {
             .filter { it.isNotEmpty() }
             .forEach { row ->
                 val f = row.split(FIELD_SEP)
-                if (f.size >= 6) out.addLast(Notice(f[0], f[1], f[2], f[3], f[4], f[5]))
+                if (f.size >= 6) out.addLast(Notice(f[0], f[1], f[2], f[3], f[4], f[5], f.getOrElse(6) { "" }))
             }
         out
     }
@@ -592,7 +592,7 @@ class RearDialView(context: Context) : View(context) {
         panelPrefs.edit().putString(
             KEY_HISTORY,
             history.joinToString(RECORD_SEP) {
-                listOf(it.app, it.pkg, it.title, it.text, it.moreTitle, it.moreText)
+                listOf(it.app, it.pkg, it.title, it.text, it.moreTitle, it.moreText, it.key)
                     .joinToString(FIELD_SEP) { f -> f.replace(FIELD_SEP, " ").replace(RECORD_SEP, " ") }
             },
         ).apply()
@@ -606,6 +606,8 @@ class RearDialView(context: Context) : View(context) {
         /** The next notification in the same group — see NotificationRelay.cascade. */
         val moreTitle: String = "",
         val moreText: String = "",
+        /** The front's notification this came from (StatusBarNotification.key); empty if unknown. */
+        val key: String = "",
     ) {
         val hasMore get() = moreTitle.isNotBlank() || moreText.isNotBlank()
     }
@@ -1671,7 +1673,7 @@ class RearDialView(context: Context) : View(context) {
             drawAodSliderVeil(canvas)
             // Same rule as the glass path's: the page below already has it. See the
             // GROUP_NOTICE guard.
-            if (noticing < 0.5f) {
+            if (!listInView()) {
                 drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             }
             drawCharge(canvas)
@@ -1716,8 +1718,10 @@ class RearDialView(context: Context) : View(context) {
         // NOT WHILE THE PAGE THAT HOLDS THEM IS UP. The strip and the carousel are the
         // same notification drawn twice — the strip slides one in over the top of a page
         // whose whole job is showing it, and the newest card in the carousel IS that
-        // notification. Two of it is not emphasis, it is a mistake.
-        if (noticeSlideHeld > 0.001f && noticing < 0.5f) active.add(GROUP_NOTICE)
+        // notification. Two of it is not emphasis, it is a mistake. With the list pushed up
+        // out of sight, though, the Info page shows nothing of it, and the strip comes in
+        // there as on any other page.
+        if (noticeSlideHeld > 0.001f && !listInView()) active.add(GROUP_NOTICE)
         if (chargeAt != 0L) active.add(GROUP_CHARGE)
         if (active.isEmpty()) return
 
@@ -2960,6 +2964,8 @@ class RearDialView(context: Context) : View(context) {
         // with no readout page the clock page is page 0 and the media page is next, so
         // the notices fraction runs the other way from the same offset
         noticing = (if (gone) 1f - paged / Panel.HEIGHT else (readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
+        // Pulled-down notifications are a step of the Info page: off it, they are hidden again.
+        if (noticing <= 0.001f) hideNoticesOffPage()
 
         pagingNow = paging
         // The transport records where it rests against this, so it has to be the offset
@@ -3271,7 +3277,13 @@ class RearDialView(context: Context) : View(context) {
         // Faded on the lock's own drum rather than cut, so they leave as the slider
         // arrives instead of blinking out in front of it.
         val unlocked = 1f - lockSwap(frameNowMs)
-        if (onlyAccount == null && config.showCamera && !hidden && !gone && unlocked > 0.004f) {
+        // On both the readout and the clock page, a button is ONE button moving between its
+        // two places, its colour blending, as the pages turn — see drawSharedButtons.
+        val sharedCamera = onlyAccount == null && !gone && config.showCamera && config.showCameraInfo
+        val sharedClose = onlyAccount == null && !gone && config.showClose && config.showCloseInfo
+        if (sharedCamera) {
+            // drawn after both pages
+        } else if (onlyAccount == null && config.showCamera && !hidden && !gone && unlocked > 0.004f) {
             fading(canvas, cameraFadeBounds(), unlocked) {
                 drawCamera(canvas, dx, dy + readoutPush - (paged - readoutAt), alpha = unlocked)
             }
@@ -3283,7 +3295,9 @@ class RearDialView(context: Context) : View(context) {
         // permanent control — but it closes the readout, and on a page that is not the
         // readout it is a button for somewhere else. The way back from the media page is
         // the swipe that got you there.
-        if (onlyAccount == null && config.showClose && !hidden && !gone && unlocked > 0.004f) {
+        if (sharedClose) {
+            // drawn after both pages
+        } else if (onlyAccount == null && config.showClose && !hidden && !gone && unlocked > 0.004f) {
             fading(canvas, closeFadeBounds(), unlocked) {
                 drawClose(canvas, dx, dy + readoutPush - (paged - readoutAt), alpha = unlocked)
             }
@@ -3347,15 +3361,15 @@ class RearDialView(context: Context) : View(context) {
             // dragging should.
             canvas.translate(dx, dy - (1f - noticing) * Panel.HEIGHT)
             drawNoticePage(canvas)
-            if (gone) {
-                // With no readout, what lived in its corners lives on the clock page, the
-                // one page always there — and out of the notification card's way: the
-                // clock, date and battery row hangs in the bottom-right corner (its glass
-                // rounded to the screen's corner there, as it is at the top on the
-                // readout), the camera sits in the bay the two rings leave between them,
-                // and the controller in the bottom-left corner, under the bay. All three
-                // ride the page as it slides, their touch targets follow, and all three
-                // fade with always-on — not only the buttons with the slider's swap.
+            run {
+                // The clock page's own camera and controller, by their own switches
+                // (PanelConfig.showCameraInfo, showCloseInfo) — with a readout or without:
+                // each page has its own, so either, both or neither show them. Out of the
+                // notification card's way: the camera keeps the readout's corner, bottom
+                // right, and the controller sits in the bottom-left corner, under the bay
+                // the two rings leave. Both ride the page as it slides, their touch targets
+                // follow — drawn after the readout's, so the page in view owns them — and
+                // both fade with always-on, not only with the slider's swap.
                 val pageDy = dy - (1f - noticing) * Panel.HEIGHT
                 val awake = 1f - aodFade(frameNowMs)
                 val present = unlocked * awake
@@ -3364,7 +3378,9 @@ class RearDialView(context: Context) : View(context) {
                 val camRight = RING_BAY_X + camW / 2f
                 val camBottom = gapY + CAMERA_H / 2f
                 val closeCy = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
-                if (config.showCamera && awake > 0.004f) {
+                if (sharedCamera) {
+                    // drawn after both pages
+                } else if (config.showCameraInfo && awake > 0.004f) {
                     // The camera keeps the readout's own corner, bottom right — the corner the
                     // unlock slider comes into. It gives way the way the slider arrives: down
                     // and out as the slider comes in, back up as it leaves, by the slider's
@@ -3374,20 +3390,26 @@ class RearDialView(context: Context) : View(context) {
                     canvas.save()
                     canvas.translate(0f, drop)
                     fading(canvas, cameraFadeBounds(), awake) {
-                        drawCamera(canvas, dx, pageDy - drop, alpha = awake)
+                        drawCamera(canvas, dx, pageDy - drop, alpha = awake, tint = config.cameraInfoTint, key = "camera:info")
                     }
                     canvas.restore()
                 } else cameraButton = null
-                if (config.showClose && present > 0.004f) {
+                if (sharedClose) {
+                    // drawn after both pages
+                } else if (config.showCloseInfo && present > 0.004f) {
                     fading(canvas, android.graphics.RectF(
                         RING_BAY_X - CLOSE_R - FADE_PAD, closeCy - CLOSE_R - FADE_PAD,
                         RING_BAY_X + CLOSE_R + FADE_PAD, closeCy + CLOSE_R + FADE_PAD,
                     ), present) {
-                        drawClose(canvas, dx, pageDy, PointF(RING_BAY_X, closeCy), alpha = present)
+                        drawClose(canvas, dx, pageDy, PointF(RING_BAY_X, closeCy), alpha = present, tint = config.closeInfoTint, key = "close:info")
                     }
                 } else closeButton = null
             }
             canvas.restore()
+        }
+        if (!hidden && (sharedCamera || sharedClose)) {
+            drawSharedButtons(canvas, dx, dy, sharedCamera, sharedClose, unlocked,
+                readoutPush - (paged - readoutAt).coerceAtLeast(0f))
         }
         canvas.restore()   // the readout clip
 
@@ -3417,7 +3439,7 @@ class RearDialView(context: Context) : View(context) {
         // The mascot is outside the readout's clip because it belongs to the other side
         // of the ripple. The BUTTON is not — it is part of the readout and is swept away
         // with it, drawn up with drawCamera above.
-        if (onlyAccount == null && config.showClose) {
+        if (onlyAccount == null && (config.showClose || config.showCloseInfo)) {
             // The mascot is clipped to the EXACT COMPLEMENT of the readout, so one
             // circle carries both: as the ripple eats the panel it uncovers the mascot
             // already walking underneath, and reversing it covers the mascot back up.
@@ -4526,7 +4548,7 @@ class RearDialView(context: Context) : View(context) {
         val onScrub = !ambient && !onMute && !onVolume &&
             (media?.durationMs ?: 0L) > 0L && near(scrubBar, event.x, event.y)
         val hit = onCamera || onMedia != null || onVolume || onScrub || onMute ||
-            (config.showClose && onClose)
+            ((config.showClose || config.showCloseInfo) && onClose)
 
         return when (event.actionMasked) {
             // Claim the gesture on the way down if it started on a target, so a slight
@@ -4554,17 +4576,17 @@ class RearDialView(context: Context) : View(context) {
                 // on the page is still turning the page, which is how you get back down
                 // to the readout. Noted on the way down because that is when the finger
                 // chose, not when it has moved far enough to say so.
-                // The cards' place: a sideways swipe there puts them away or brings them
-                // back; up and down turns them — while they are there to turn.
-                onStash = noticing >= 0.999f && shownHistory().isNotEmpty() &&
-                    event.y < wheelGrabBottom()
-                onWheel = onStash && !noticesStashed
+                // The Info page with notifications on it: a swipe down pulls them into view
+                // and, off the cards, a swipe up puts them back (NoticeReveal). On the cards,
+                // up and down turns them and a swipe right sends one away.
+                onReveal = noticing >= 0.999f
+                onWheel = onReveal && noticesShown && event.y < wheelGrabBottom() && shownHistory().isNotEmpty()
                 wheelDownAt = noticeWheelAt
                 // The wheel claims the gesture by itself. It used to ride on the pager's
                 // claim, and with no readout there is no other page — the clock page is
                 // the only one, the pager is off, and a finger on the notifications was
                 // let go on the way down: they could not be scrolled at all.
-                hit || pager.enabled() || onVolume || onScrub || onWheel || onStash
+                hit || pager.enabled() || onVolume || onScrub || onWheel || onReveal
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 val dxTravel = Math.abs(event.x - downX)
@@ -4576,7 +4598,9 @@ class RearDialView(context: Context) : View(context) {
                     drag = when {
                         !sideways && onVolume -> Drag.VOLUME
                         sideways && onScrub -> Drag.SCRUB
-                        sideways && onStash -> Drag.STASH
+                        sideways && onWheel && event.x > downX && demoNow() == null -> Drag.DISMISS
+                        !sideways && onReveal && !noticesShown && event.y > downY -> Drag.REVEAL
+                        !sideways && onReveal && noticesShown && !onWheel && event.y < downY -> Drag.REVEAL
                         else -> Drag.PAGE
                     }
                     // NO auto-unmute here any more. It used to fire on the first move,
@@ -4585,6 +4609,9 @@ class RearDialView(context: Context) : View(context) {
                     // effect was that the volume control could do exactly one thing while
                     // muted, which was cancel the mute. A drag now moves the ghost and
                     // leaves the silence alone; see dragVolume.
+                    if (drag == Drag.DISMISS) {
+                        dismissIndex = Math.round(noticeWheelAt).coerceIn(0, shownHistory().size - 1)
+                    }
                 }
                 when (drag) {
                     Drag.VOLUME -> {
@@ -4623,8 +4650,13 @@ class RearDialView(context: Context) : View(context) {
                         }
                         true
                     }
-                    Drag.STASH -> {
-                        stashDx = event.x - downX
+                    Drag.REVEAL -> {
+                        revealDy = event.y - downY
+                        invalidate()
+                        true
+                    }
+                    Drag.DISMISS -> {
+                        dismissDx = event.x - downX
                         invalidate()
                         true
                     }
@@ -4633,7 +4665,8 @@ class RearDialView(context: Context) : View(context) {
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
                 // The system taking the gesture away is not a decision to commit to it.
-                if (drag == Drag.STASH) letGoOfStash(commit = false)
+                if (drag == Drag.REVEAL) letGoOfReveal(commit = false)
+                if (drag == Drag.DISMISS) letGoOfDismiss(commit = false)
                 endDrag(commit = false)
                 pager.onUp(android.os.SystemClock.uptimeMillis())
                 invalidate()
@@ -4645,10 +4678,11 @@ class RearDialView(context: Context) : View(context) {
                     endDrag(commit = dragInBounds)
                     return true
                 }
-                if (drag == Drag.STASH) {
+                if (drag == Drag.REVEAL || drag == Drag.DISMISS) {
+                    val was = drag
                     drag = Drag.UNDECIDED
                     onWheel = false
-                    letGoOfStash(commit = true)
+                    if (was == Drag.REVEAL) letGoOfReveal(commit = true) else letGoOfDismiss(commit = true)
                     pager.onUp(android.os.SystemClock.uptimeMillis())
                     return true
                 }
@@ -4790,7 +4824,69 @@ class RearDialView(context: Context) : View(context) {
         CLOSE_CX + CLOSE_R + FADE_PAD, CLOSE_CY + CLOSE_R + FADE_PAD,
     )
 
-    private fun drawCamera(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null, alpha: Float = 1f) {
+    /**
+     * The camera and the controller when both the readout and the clock page show them: one
+     * button each, travelling from its place on one page to its place on the other as the
+     * pages turn ([noticing]), its colour and its fade blending between the two pages' — not
+     * two buttons scrolling away with their pages. [readoutDy] is where the readout stands
+     * (the notice's push, and how far it has paged down towards the media page, which it
+     * still scrolls away with).
+     */
+    private fun drawSharedButtons(
+        canvas: Canvas, dx: Float, dy: Float, camera: Boolean, close: Boolean, unlocked: Float, readoutDy: Float,
+    ) {
+        val t = noticing
+        val awake = 1f - aodFade(frameNowMs)
+        canvas.save()
+        canvas.translate(dx, dy)
+        if (camera) {
+            val alpha = unlocked + (awake - unlocked) * t
+            if (alpha > 0.004f) {
+                // Both pages keep it in the readout's corner: on the clock page it steps down
+                // out of the slider's way as the slider arrives (see drawNoticePage's caller).
+                val drop = lockSwap(frameNowMs) * (markRegion().height() + LOCK_BAND_SLOP)
+                val shift = readoutDy + (drop - readoutDy) * t
+                val h = CAMERA_H
+                val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
+                val margin = Panel.HEIGHT - (centreY + h / 2f)
+                val at = PointF(Panel.WIDTH - margin, centreY + h / 2f + shift)
+                val ink = RampColor.lerp(colorFor("camera", config.cameraTint), colorFor("camera:info", config.cameraInfoTint), t)
+                fading(canvas, cameraFadeBounds().apply { offset(0f, shift) }, alpha) {
+                    drawCamera(canvas, dx, dy, at, alpha = alpha, ink = ink)
+                }
+            } else cameraButton = null
+        }
+        if (close) {
+            val present = unlocked * awake
+            val alpha = unlocked + (present - unlocked) * t
+            if (alpha > 0.004f) {
+                // The readout's top-left, by the masthead; the clock page's bottom-left,
+                // under the bay the rings leave.
+                val fromX = CLOSE_CX
+                val fromY = (if (firstCardTop > 0f) firstCardTop / 2f else CLOSE_CY) + readoutDy
+                val toX = RING_BAY_X
+                val toY = Panel.HEIGHT - CORNER_MARGIN - CLOSE_R
+                val e = Tween.easeInOut(t)
+                val at = PointF(fromX + (toX - fromX) * e, fromY + (toY - fromY) * e)
+                val ink = RampColor.lerp(colorFor("close", config.closeColor), colorFor("close:info", config.closeInfoTint), t)
+                fading(canvas, android.graphics.RectF(
+                    at.x - CLOSE_R - FADE_PAD, at.y - CLOSE_R - FADE_PAD,
+                    at.x + CLOSE_R + FADE_PAD, at.y + CLOSE_R + FADE_PAD,
+                ), alpha) {
+                    drawClose(canvas, dx, dy, at, alpha = alpha, ink = ink)
+                }
+            } else closeButton = null
+        }
+        canvas.restore()
+    }
+
+    private fun drawCamera(
+        canvas: Canvas, dx: Float, dy: Float, at: PointF? = null, alpha: Float = 1f,
+        /** The page's own colour, and the name it eases under — see PanelConfig.showCameraInfo. */
+        tint: Int = config.cameraTint, key: String = "camera",
+        /** A colour already worked out — the shared button's blend — taken as it is. */
+        ink: Int? = null,
+    ) {
         val h = CAMERA_H
         val w = h * Glyphs.aspect(PanelIcons.CAMERA, config.theme)
         val centreY = Panel.HEIGHT - MARK_BOTTOM - MARK_H / 2f
@@ -4807,7 +4903,7 @@ class RearDialView(context: Context) : View(context) {
         glassButton(
             canvas, right - w / 2f, bottom - h / 2f, h, discH = MediaLayout.GLYPH_H, alpha = alpha,
         ) { c ->
-            extras.color = colorFor("camera", config.cameraTint)
+            extras.color = ink ?: colorFor(key, tint)
             drawIcon(c, PanelIcons.CAMERA, right - w - (h - w) / 2f, bottom - h, h)
         }
 
@@ -4857,7 +4953,13 @@ class RearDialView(context: Context) : View(context) {
      * missing material rather than as a second colour laid on top. Under GLASS it gets
      * what every other control on this panel gets — the mark, and glass over it.
      */
-    private fun drawClose(canvas: Canvas, dx: Float, dy: Float, at: PointF? = null, alpha: Float = 1f) {
+    private fun drawClose(
+        canvas: Canvas, dx: Float, dy: Float, at: PointF? = null, alpha: Float = 1f,
+        /** The page's own colour, and the name it eases under — see PanelConfig.showCloseInfo. */
+        tint: Int = config.closeColor, key: String = "close",
+        /** A colour already worked out — the shared button's blend — taken as it is. */
+        ink: Int? = null,
+    ) {
         // The glass reads as a bigger object than the filled disc did, so it IS one — a
         // pane with a lit rim needs room around the mark, or it looks like a lens clamped
         // onto it rather than a button the mark is sitting on. The target grows with it:
@@ -4888,16 +4990,16 @@ class RearDialView(context: Context) : View(context) {
         if (config.theme.isGlass) {
             // The disc sized so its glass lands exactly where the filled one used to,
             // which is also where the touch target still is.
-            extras.color = colorFor("close", config.closeColor)
+            extras.color = ink ?: colorFor(key, tint)
             glassButton(canvas, closeCx, closeCy, gh, discH = hit / DISC_RADIUS, alpha = alpha) { c ->
-                extras.color = colorFor("close", config.closeColor)
+                extras.color = (ink ?: colorFor(key, tint))
                 drawIcon(c, PanelIcons.GAMEPAD, gx, gy, gh)
             }
             return
         }
 
         closePaint.style = Paint.Style.FILL
-        closePaint.color = colorFor("close", config.closeColor)
+        closePaint.color = ink ?: colorFor(key, tint)
         canvas.drawCircle(closeCx, closeCy, CLOSE_R, closePaint)
 
         // The controller in the panel's own background, so the disc reads as missing
@@ -4988,9 +5090,10 @@ class RearDialView(context: Context) : View(context) {
         text: String,
         moreTitle: String = "",
         moreText: String = "",
+        key: String = "",
     ) {
         val now = SystemClock.elapsedRealtime()
-        val next = Notice(app, pkg, title, text, moreTitle, moreText)
+        val next = Notice(app, pkg, title, text, moreTitle, moreText, key)
 
         // KEPT BEFORE IT IS JUDGED, and the two decisions are genuinely different.
         //
@@ -5003,7 +5106,17 @@ class RearDialView(context: Context) : View(context) {
         // Duplicates are the one thing not kept. Apps re-post the same notification for
         // their own reasons — a progress update, a re-rank — and ten copies of one
         // message is not ten notifications.
+        // ONE CARD PER NOTIFICATION. An app re-posting one it already has — an update, a
+        // message added to a thread — replaces its card rather than adding a second, so
+        // the list is the front's and clearing it on the front clears one card here.
+        if (key.isNotEmpty() && history.firstOrNull() != next) {
+            val old = history.indexOfFirst { it.key == key }
+            if (old >= 0) removeHistoryAt(old, fromBack = false)
+        }
         if (history.firstOrNull() != next) {
+            // The first card into an empty list takes the place of "No notifications":
+            // that slides up and out as the card slides down in (drawNoticeWheel).
+            if (history.isEmpty()) emptySwapAt = SystemClock.uptimeMillis()
             history.addFirst(next)
             while (history.size > HISTORY_MAX) history.removeLast()
             saveHistory()
@@ -5625,7 +5738,7 @@ class RearDialView(context: Context) : View(context) {
      * Decided at the moment the slop is crossed and then not revisited, because a gesture
      * that changes its mind halfway does both things badly.
      */
-    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, STASH }
+    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, REVEAL, DISMISS }
 
     private var drag = Drag.UNDECIDED
     private var downX = 0f
@@ -6780,6 +6893,30 @@ class RearDialView(context: Context) : View(context) {
 
         label.alpha = 255
         heading.alpha = 255
+    }
+
+    private val emptyGround = Paint()
+    private var emptyGroundFor = -1f
+
+    /** The empty list: a band from black at the top to clear, and "No notifications", at [alpha]. */
+    private fun drawNoticesEmpty(canvas: Canvas, alpha: Float) {
+        if (alpha <= 0.004f) return
+        val h = NOTICE_H
+        if (emptyGroundFor != h) {
+            emptyGroundFor = h
+            emptyGround.shader = android.graphics.LinearGradient(
+                0f, 0f, 0f, h, intArrayOf(EMPTY_GREY, EMPTY_GREY and 0x00FFFFFF), null,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        emptyGround.alpha = (255 * alpha).toInt().coerceIn(0, 255)
+        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), h, emptyGround)
+        label.color = colorFor("notice", config.notificationTint)
+        label.alpha = (255 * 0.6f * alpha).toInt().coerceIn(0, 255)
+        label.textAlign = Paint.Align.CENTER
+        canvas.drawText("No notifications", MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat()), h * 0.5f, label)
+        label.textAlign = Paint.Align.LEFT
+        label.alpha = 255
     }
 
     /** [text] cut to whatever fits [width], with an ellipsis when it had to be cut. */
@@ -8531,7 +8668,8 @@ class RearDialView(context: Context) : View(context) {
         // while the page is on screen. It costs nothing off it — see displayAwake, which
         // stops the request reaching a display that would drop it anyway.
         animating = true
-        val ink = colorFor("clock", config.clockTint)
+        // The clock page's own colours, apart from the usage page's corner row.
+        val ink = colorFor("clock:info", config.infoClockTint)
         val cx = MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat())
         // NO FADE ON ANYTHING HERE. The page arrives by sliding down from above it — see
         // the translate at the call site — and something that is both moving into place
@@ -8596,15 +8734,13 @@ class RearDialView(context: Context) : View(context) {
         var x = cx - span / 2f
         if (aod) armMinuteTick()
 
-        // always-on, if asked: the battery level above the clock, arriving with the mode,
-        // and the charging glyph beside it while a charger is in
-        // In always-on on request; and always when there is no readout, whose corner row
-        // carried the battery — the clock page already says the date and the time.
+        // The battery level above the clock, and the charging glyph beside it while a
+        // charger is in: by the page's Battery switch, and always-on's — cross-fading as
+        // the date's do. Until the page's is set, it shows only with no readout, whose
+        // corner row would have carried it (PanelConfig.infoBatteryOn).
         val noReadout = onlyAccount == null && readoutGone
-        val batteryAlpha = maxOf(
-            if (config.aodBattery) aodFade(frameNowMs) else 0f,
-            if (noReadout && config.showBattery) 1f else 0f,
-        )
+        val batteryOn = if (config.infoBatteryOn(noReadout)) 1f else 0f
+        val batteryAlpha = batteryOn + ((if (config.aodBattery) 1f else 0f) - batteryOn) * aodFade(frameNowMs)
         if (batteryAlpha > 0.001f) {
             val pct = batteryPercent()
             if (pct >= 0) {
@@ -8614,7 +8750,7 @@ class RearDialView(context: Context) : View(context) {
                 extras.textAlign = Paint.Align.CENTER
                 // The battery's own colour, not the clock's it sits over — the corner row's
                 // battery has always used it, and the switch for it says "Battery".
-                val battery = colorFor("battery", config.batteryTint)
+                val battery = colorFor("battery:info", config.infoBatteryTint)
                 extras.color = (battery and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
                 canvas.drawText(figure, cx, top, extras)
                 val ih = typed(DATE_SIZE)
@@ -8636,9 +8772,19 @@ class RearDialView(context: Context) : View(context) {
         // and incoming numerals are drawn one cell apart, so a figure rolls out of the
         // top as the next rolls in underneath — the same movement as the painted version,
         // made of the same glass as everything else on the panel.
-        val glassClock = config.theme.isGlass &&
-            deferOver(canvas) { c -> drawGlassClock(c, figures, cx, span, slot, colon, ink, secondsScale) }
-        if (!glassClock) {
+        // The page's Time switch, and always-on's Clock: cross-fading between them as the
+        // mode comes and goes, as the date and weather lines do (PanelConfig.infoClockOn,
+        // aodClock).
+        val clockOn = if (config.infoClockOn) 1f else 0f
+        val clockKeep = clockOn + ((if (config.aodClock) 1f else 0f) - clockOn) * aodFade(frameNowMs)
+        val glassClock = clockKeep > 0.004f && config.theme.isGlass &&
+            deferOver(canvas) { c ->
+                val layer = if (clockKeep < 0.996f) c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * clockKeep).toInt()) else -1
+                drawGlassClock(c, figures, cx, span, slot, colon, ink, secondsScale)
+                if (layer >= 0) c.restoreToCount(layer)
+            }
+        if (!glassClock && clockKeep > 0.004f) {
+            val layer = if (clockKeep < 0.996f) canvas.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * clockKeep).toInt()) else -1
             for ((i, ch) in figures.withIndex()) {
                 val full = if (ch == ':') colon else slot
                 val w = if (i >= 5) full * secondsScale else full
@@ -8666,6 +8812,7 @@ class RearDialView(context: Context) : View(context) {
                 if (i >= 5) canvas.restore()
                 x += w
             }
+            if (layer >= 0) canvas.restoreToCount(layer)
         }
 
         // ---- the date, spelled out ---------------------------------------------------
@@ -8677,8 +8824,8 @@ class RearDialView(context: Context) : View(context) {
         // weather line its own switch, and in always-on another — both cross-fading with
         // always-on, so neither pops. The weather on the glass is not this line's.
         val aodNow = aodFade(frameNowMs)
-        val dateKeep = (if (config.showDate) 1f else 0f) +
-            ((if (config.aodDate) 1f else 0f) - (if (config.showDate) 1f else 0f)) * aodNow
+        val dateOn = if (config.infoDateOn) 1f else 0f
+        val dateKeep = dateOn + ((if (config.aodDate) 1f else 0f) - dateOn) * aodNow
         val weatherOn = if (config.showWeatherLine) 1f else 0f
         val weatherKeep = weatherOn + ((if (config.aodWeather) 1f else 0f) - weatherOn) * aodNow
         if (dateKeep > 0.004f) {
@@ -8694,7 +8841,7 @@ class RearDialView(context: Context) : View(context) {
             extras = extrasDate
             extras.textAlign = Paint.Align.LEFT
             extras.textSize = typed(DATE_SIZE)
-            val dateInk = colorFor("date", config.dateTint)
+            val dateInk = colorFor("date:info", config.infoDateTint)
             val dateW = extras.measureText(date)
             val dateLeft = cx - dateW / 2f
             if (config.theme.isGlass) {
@@ -8833,7 +8980,8 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawNoticeWheel(canvas: Canvas) {
         val shown = shownHistory()
-        if (shown.isEmpty()) return
+        // Nothing in the list, and nothing pulled down: nothing to draw.
+        if (shown.isEmpty() && leavingCard == null && !noticesShown && revealTo == 0f && drag != Drag.REVEAL) return
         canvas.save()
         // THE DRIFT COMES BACK OFF. Everything on this page rides the burn-in offset with
         // the rest of the canvas side, which is right for type floating in the middle of a
@@ -8845,10 +8993,27 @@ class RearDialView(context: Context) : View(context) {
         // The strip does not drift either — it is drawn in the overlay pass, outside every
         // translate — so this is the same decision, not a new one.
         canvas.translate(-dxNow, -dyNow)
-        // Put away to the right, or on its way there or back. See NoticeStash.
-        val stashed = stashOffset()
-        if (stashed >= Panel.WIDTH - 0.5f) { canvas.restore(); return }
-        canvas.translate(stashed, 0f)
+        // Hidden above the page until pulled down, or on its way. See NoticeReveal.
+        val down = revealOffset()
+        if (down <= 0.5f) { canvas.restore(); return }
+        canvas.translate(0f, down - revealHeight())
+        val swiped = dismissOffset()
+        val swap = emptySwap()
+        // The first card arriving: "No notifications" goes up and out as it comes down.
+        if (swap != null && shown.isNotEmpty()) {
+            canvas.save()
+            canvas.translate(0f, -NOTICE_H * swap)
+            drawNoticesEmpty(canvas, 1f - swap)
+            canvas.restore()
+        }
+        // EMPTY, it says so: a band fading from black to nothing, "No notifications" on
+        // it — coming in under the last card as that one slides off.
+        if (shown.isEmpty()) {
+            val leaving = leavingOffset()
+            val show = if (leaving == null) 1f else (leaving / Panel.WIDTH).coerceIn(0f, 1f)
+            drawNoticesEmpty(canvas, show)
+            if (leaving == null) { canvas.restore(); return }
+        }
         // THE STRIP'S OWN RECT, not a second one that looks similar. A notification seen
         // arriving on the readout and the same one found again up here is one object seen
         // twice, so it sits exactly where it sat: same left edge, same margin, same
@@ -8901,8 +9066,17 @@ class RearDialView(context: Context) : View(context) {
         // is whole and in front, and its neighbours sit half a card behind it, a little
         // smaller and a little faded, which is what says there is more in both directions
         // without having to draw a scrollbar to say it.
-        for (i in shown.indices.sortedByDescending { Math.abs(it - at) }) {
-            val d = i - at
+        // The wheel's cards where they stand — each with its own glide, and the one under
+        // the finger off to the right — and the card swiped away, sliding off on its own.
+        class Card(val notice: Notice, val d: Float, val x: Float)
+        val cards = shown.mapIndexed { i, n -> Card(n, i - at + glideOf(n), if (i == dismissIndex) swiped else 0f) }
+            .toMutableList()
+        leavingOffset()?.let { x -> leavingCard?.let { cards += Card(it, leavingD, x) } }
+        // The first card into an empty list comes down from above as the band leaves.
+        val cardsSave = if (swap != null) canvas.save() else -1
+        if (swap != null) canvas.translate(0f, -(1f - swap) * (NOTICE_H + margin))
+        for (card in cards.sortedByDescending { Math.abs(it.d) }) {
+            val d = card.d
             if (Math.abs(d) > CAROUSEL_REACH) continue
             // TWO STRETCHES, because a neighbour and a departure want different things.
             //
@@ -8947,6 +9121,8 @@ class RearDialView(context: Context) : View(context) {
                     cy + dy - hh, noticeWheelRect.right, cy + dy + hh,
                 )
             }
+            // The card being swiped away rides the finger right, contents and all.
+            cardRect.offset(card.x, 0f)
             val cr = r * scale
             val layer = fade < 0.999f
             // Restored to this count below: the alpha layer is a save of its own, and
@@ -8993,11 +9169,24 @@ class RearDialView(context: Context) : View(context) {
             canvas.clipRect(cardRect)
             canvas.translate(cardRect.left - noticeWheelRect.left, dy)
             if (scale < 0.999f) canvas.scale(scale, scale, cx, cy)
-            drawNoticeRow(canvas, shown[i], noticeWheelRect.top)
+            drawNoticeRow(canvas, card.notice, noticeWheelRect.top)
             canvas.restore()
             canvas.restoreToCount(cardSave)
         }
+        if (cardsSave >= 0) canvas.restoreToCount(cardsSave)
         canvas.restore()
+    }
+
+    /** When the first card came into an empty list; see [emptySwap]. */
+    private var emptySwapAt = 0L
+
+    /** How far through that swap — the band up and out, the card down and in — or null when none is running. */
+    private fun emptySwap(): Float? {
+        if (emptySwapAt == 0L) return null
+        val t = ((frameNowMs - emptySwapAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        if (t >= 1f) { emptySwapAt = 0L; return null }
+        animating = true
+        return Tween.easeInOut(t)
     }
 
     /**
@@ -9031,42 +9220,212 @@ class RearDialView(context: Context) : View(context) {
     /** Where the wheel stood when the finger landed, so the drag is relative to it. */
     private var wheelDownAt = 0f
 
-    // ---- the cards put away ----
+    // ---- the cards pulled into view, and one sent away ----
 
-    /** The finger landed on the cards' place: a sideways swipe there puts them away or brings them back. */
-    private var onStash = false
-    private var stashDx = 0f
-    private var stashFrom = 0f
-    private var stashTo = 0f
-    private var stashAt = 0L
+    /** The finger landed on the Info page with cards to show: see NoticeReveal. */
+    private var onReveal = false
+    private var revealDy = 0f
+    private var revealFrom = 0f
+    private var revealTo = 0f
+    private var revealAt = 0L
 
-    /** Put away by a swipe to the right, and kept so across restarts. */
-    private var noticesStashed: Boolean = false
-        get() { if (!stashLoaded) { field = panelPrefs.getBoolean(KEY_NOTICES_STASHED, false); stashLoaded = true; stashFrom = if (field) Panel.WIDTH.toFloat() else 0f; stashTo = stashFrom }; return field }
-        set(value) { field = value; stashLoaded = true; panelPrefs.edit().putBoolean(KEY_NOTICES_STASHED, value).apply() }
-    private var stashLoaded = false
+    /**
+     * Pulled down into view by a swipe on the Info page. Not kept: it is one more step of
+     * the page, so the page opens with them hidden, and leaving it hides them again.
+     */
+    private var noticesShown = false
 
-    /** How far right the cards are now: under a finger, settling, or at rest. */
-    private fun stashOffset(): Float {
-        val w = Panel.WIDTH.toFloat()
-        val stashed = noticesStashed
-        if (drag == Drag.STASH) return NoticeStash.offset(stashed, stashDx, w)
-        val t = ((frameNowMs - stashAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+    /** How far the cards travel: from above the page down to where they rest, over the clock's cell. */
+    private fun revealHeight(): Float = wheelGrabBottom()
+
+    /** How far down the cards are now: under a finger, settling, or at rest. */
+    private fun revealOffset(): Float {
+        val h = revealHeight()
+        if (drag == Drag.REVEAL) return NoticeReveal.offset(noticesShown, revealDy, h)
+        val t = ((frameNowMs - revealAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
         if (t < 1f) animating = true
-        return stashFrom + (stashTo - stashFrom) * Tween.easeInOut(t)
+        return revealFrom + (revealTo - revealFrom) * Tween.easeInOut(t)
     }
 
-    /** The finger let go: away, back, or springing to where it was, from wherever it is. */
-    private fun letGoOfStash(commit: Boolean) {
+    /** The finger let go: into view, back up, or springing to where it was. */
+    private fun letGoOfReveal(commit: Boolean) {
+        val h = revealHeight()
+        val now = NoticeReveal.offset(noticesShown, revealDy, h)
+        if (commit) noticesShown = NoticeReveal.release(noticesShown, revealDy, h)
+        revealFrom = now
+        revealTo = if (noticesShown) h else 0f
+        revealAt = SystemClock.uptimeMillis()
+        revealDy = 0f
+        invalidate()
+    }
+
+    /** The Info page is up with its list pulled down: the strip would show its newest card twice. */
+    private fun listInView(): Boolean = noticing >= 0.5f && noticesShown
+
+    /** Off the Info page, they are hidden again — out of sight, so at once. */
+    private fun hideNoticesOffPage() {
+        if (!noticesShown && revealTo == 0f) return
+        noticesShown = false
+        revealFrom = 0f; revealTo = 0f; revealAt = 0L
+    }
+
+    /** The card being swiped right, and how far; once let go past the line, when it left. */
+    private var dismissIndex = -1
+    private var dismissDx = 0f
+    private var dismissFrom = 0f
+    private var dismissAt = 0L
+
+    /** Told the front's key of a card swiped away on the back — to clear it on the front too. */
+    var onNoticeDismissed: ((String) -> Unit)? = null
+
+    /** How far right the swiped card is: under the finger, leaving, or springing back. */
+    private fun dismissOffset(): Float {
         val w = Panel.WIDTH.toFloat()
-        val was = noticesStashed
-        val now = NoticeStash.offset(was, stashDx, w)
-        val stash = if (commit) NoticeStash.release(was, stashDx, w) else was
-        if (stash != was) noticesStashed = stash
-        stashFrom = now
-        stashTo = if (stash) w else 0f
-        stashAt = SystemClock.uptimeMillis()
-        stashDx = 0f
+        if (drag == Drag.DISMISS) return NoticeReveal.dismissOffset(dismissDx, w)
+        if (dismissIndex < 0) return 0f
+        // Let go short of the line: it springs back.
+        val t = ((frameNowMs - dismissAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        if (t >= 1f) { dismissIndex = -1; return 0f }
+        animating = true
+        return dismissFrom * (1f - Tween.easeInOut(t))
+    }
+
+    /**
+     * Let go past the line: the card is out of the list AT ONCE, so the cards around it
+     * close the gap while it is still sliding off — one movement, not two in a row — and
+     * it is drawn on its own as it goes ([leavingCard]).
+     */
+    private fun letGoOfDismiss(commit: Boolean) {
+        val w = Panel.WIDTH.toFloat()
+        val now = SystemClock.uptimeMillis()
+        val x = NoticeReveal.dismissOffset(dismissDx, w)
+        dismissDx = 0f
+        if (commit && NoticeReveal.dismissed(x, w) && dismissIndex in history.indices) {
+            leavingCard = history[dismissIndex]
+            leavingD = dismissIndex - noticeWheelAt
+            leavingFrom = x
+            leavingAt = now
+            val index = dismissIndex
+            dismissIndex = -1
+            removeHistoryAt(index, fromBack = true)
+        } else {
+            dismissFrom = x
+            dismissAt = now
+        }
+        invalidate()
+    }
+
+    /** The card swiped away, sliding off on its own: where it stood on the wheel, and from how far right, since when. */
+    private var leavingCard: Notice? = null
+    private var leavingD = 0f
+    private var leavingFrom = 0f
+    private var leavingAt = 0L
+
+    /** How far right the leaving card is now; null once it is gone. */
+    private fun leavingOffset(): Float? {
+        leavingCard ?: return null
+        val t = ((frameNowMs - leavingAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        if (t >= 1f) { leavingCard = null; return null }
+        animating = true
+        return leavingFrom + (Panel.WIDTH - leavingFrom) * Tween.easeInOut(t)
+    }
+
+    /**
+     * Take one card out of the list. The wheel stays where it is, so the next card slides
+     * into the gap; [fromBack] — swiped here — tells the front, which clears it there when
+     * "Match the front notifications" is on.
+     */
+    private fun removeHistoryAt(index: Int, fromBack: Boolean) {
+        if (index !in history.indices) return
+        val before = history.toList()
+        val atBefore = noticeWheelAt
+        val focus = Math.round(noticeWheelAt)
+        val gone = history.removeAt(index)
+        saveHistory()
+        forgetOnStrip(gone)
+        // Emptied, the list stays where it is and says so — see drawNoticesEmpty.
+        // The card in view stays in view: one gone from above it takes the wheel up a slot
+        // with it; the last one gone, the wheel is on the one before.
+        noticeWheelAt = when {
+            history.isEmpty() -> 0f
+            index < focus -> noticeWheelAt - 1f
+            else -> noticeWheelAt.coerceAtMost((history.size - 1).toFloat())
+        }
+        wheelSettling = false
+        holdPlaces(before, atBefore)
+        if (fromBack && gone.key.isNotEmpty()) onNoticeDismissed?.invoke(gone.key)
+        invalidate()
+    }
+
+    /**
+     * NOTHING JUMPS when the list changes under the wheel. Each card keeps where it was
+     * drawn and glides to its new place over a page's settle — its own glide, so a second
+     * change while the first is still running (a card cleared on the front just after one
+     * was swiped here) adds to it rather than cutting it short. Called after the change,
+     * with the list and the wheel as they were.
+     */
+    private fun holdPlaces(before: List<Notice>, atBefore: Float) {
+        val now = SystemClock.uptimeMillis()
+        history.forEachIndexed { i, n ->
+            val was = before.indexOfFirst { it === n }
+            if (was < 0) return@forEachIndexed
+            val r = (was - atBefore) - (i - noticeWheelAt)
+            if (Math.abs(r) > 0.001f) cardGlides[n] = (glideOf(n) + r) to now
+        }
+    }
+
+    /** Each card's glide: how far from its place it started, in cards, and when. */
+    private val cardGlides = java.util.IdentityHashMap<Notice, Pair<Float, Long>>()
+
+    /** How far card [n] still stands from its place. */
+    private fun glideOf(n: Notice): Float {
+        val (from, at) = cardGlides[n] ?: return 0f
+        val t = ((frameNowMs - at) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        if (t >= 1f) { cardGlides.remove(n); return 0f }
+        animating = true
+        return from * (1f - Tween.easeInOut(t))
+    }
+
+    /**
+     * A card gone from the list is gone from the strip too. The strip holds its own copy of
+     * the newest notifications for their few seconds, so a card swiped away while it was
+     * still up came back on the strip the moment the list was out of the way. Waiting ones
+     * are dropped; the one up slides away now.
+     */
+    private fun forgetOnStrip(n: Notice) {
+        fun same(o: Notice) = o === n || o == n || (n.key.isNotEmpty() && o.key == n.key)
+        pending.removeAll { same(it) }
+        notice?.let { if (same(it)) noticeAt = SystemClock.elapsedRealtime() - NOTICE_MS - 1 }
+        invalidate()
+    }
+
+    /** A notification left the front (Match the front notifications): its card goes too. */
+    fun removeNotice(key: String) {
+        if (key.isEmpty()) return
+        pending.removeAll { it.key == key }
+        notice?.let { if (it.key == key) noticeAt = SystemClock.elapsedRealtime() - NOTICE_MS - 1 }
+        val i = history.indexOfFirst { it.key == key }
+        if (i >= 0) removeHistoryAt(i, fromBack = false)
+    }
+
+    /** What is on the front now (Match the front notifications): cards whose notification left go. */
+    fun keepNotices(active: Set<String>) {
+        pending.removeAll { it.key.isNotEmpty() && it.key !in active }
+        val keep = dev.kb896.aiusage.data.NoticeMatch.keep(history.map { it.key }, active)
+        if (keep.all { it }) return
+        val before = history.toList()
+        val atBefore = noticeWheelAt
+        val focused = before.getOrNull(Math.round(noticeWheelAt))
+        val kept = history.filterIndexed { i, _ -> keep[i] }
+        history.filterIndexed { i, _ -> !keep[i] }.forEach(::forgetOnStrip)
+        history.clear(); history.addAll(kept)
+        saveHistory()
+        // The card in view stays in view if it stayed; otherwise the wheel is where it was.
+        val still = kept.indexOfFirst { it === focused }
+        noticeWheelAt = (if (still >= 0) still.toFloat() else noticeWheelAt)
+            .coerceIn(0f, (history.size - 1).coerceAtLeast(0).toFloat())
+        wheelSettling = false
+        holdPlaces(before, atBefore)
         invalidate()
     }
 
@@ -12442,7 +12801,6 @@ class RearDialView(context: Context) : View(context) {
         private const val KEY_PAGE = "page"
         private const val KEY_HISTORY = "notices"
         /** The Info page's notifications, put away by a swipe to the right. */
-        private const val KEY_NOTICES_STASHED = "notices_stashed"
         private const val FIELD_SEP = "\u0001"
         private const val RECORD_SEP = "\u0002"
 
@@ -12568,6 +12926,8 @@ class RearDialView(context: Context) : View(context) {
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f
+        /** The empty list's band at its top: black, a little see-through. */
+        private const val EMPTY_GREY = 0x99000000.toInt()
         /**
          * The cards' left edge: clear of the cutout, not flush against it.
          *

@@ -32,10 +32,78 @@ class NotificationRelay : NotificationListenerService() {
     // What RelayWatch reads to know whether the relay needs binding again.
     override fun onListenerConnected() {
         RelayWatch.connected = true
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, matching,
+            android.content.IntentFilter().apply {
+                addAction(RearActivity.ACTION_DISMISS_NOTIFICATION)
+                addAction(RearActivity.ACTION_NOTIFICATIONS_SYNC)
+            },
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        matchingRegistered = true
+        // Debug builds only: `adb shell am broadcast -a dev.kb896.aiusage.DEBUG_UNBIND -p <pkg>`
+        // drops the binding with access still granted — the state HyperOS left the release
+        // in — so RelayWatch's rebind can be watched doing its job.
+        if (dev.kb896.aiusage.BuildConfig.DEBUG && !debugRegistered) {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, debugUnbind, android.content.IntentFilter(DEBUG_UNBIND),
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+            )
+            debugRegistered = true
+        }
+        // Whatever left the front while the relay was not bound, the back finds out now.
+        sendActive()
+    }
+
+    private var debugRegistered = false
+    private val debugUnbind = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            Log.i(TAG, "debug: unbinding the relay, access left granted")
+            requestUnbind()
+        }
     }
 
     override fun onListenerDisconnected() {
         RelayWatch.connected = false
+        if (matchingRegistered) runCatching { unregisterReceiver(matching) }
+        matchingRegistered = false
+    }
+
+    // ---- matching the front (PanelConfig.matchFrontNotifications) ----
+
+    private var matchingRegistered = false
+
+    private val matching = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            if (!ConfigStore(this@NotificationRelay).load().matchFrontNotifications) return
+            when (intent.action) {
+                // Swiped away on the back: cleared on the front.
+                RearActivity.ACTION_DISMISS_NOTIFICATION ->
+                    intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_KEY)?.takeIf { it.isNotEmpty() }?.let { key ->
+                        runCatching { cancelNotification(key) }.onFailure { Log.w(TAG, "dismiss failed: ${it.message}") }
+                    }
+                RearActivity.ACTION_NOTIFICATIONS_SYNC -> sendActive()
+            }
+        }
+    }
+
+    /** What is on the front now, every key, so the back drops what has left. */
+    private fun sendActive() {
+        if (!ConfigStore(this).load().matchFrontNotifications) return
+        val keys = runCatching { activeNotifications }.getOrNull()?.map { it.key } ?: return
+        sendBroadcast(
+            Intent(RearActivity.ACTION_NOTIFICATIONS_ACTIVE).setPackage(packageName)
+                .putExtra(RearActivity.EXTRA_NOTIFICATION_KEYS, keys.toTypedArray()),
+        )
+    }
+
+    /** Gone from the front — swiped, tapped, cleared, withdrawn: gone from the back too. */
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        if (!ConfigStore(this).load().matchFrontNotifications) return
+        sendBroadcast(
+            Intent(RearActivity.ACTION_NOTIFICATION_REMOVED).setPackage(packageName)
+                .putExtra(RearActivity.EXTRA_NOTIFICATION_KEY, sbn.key),
+        )
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -153,6 +221,8 @@ class NotificationRelay : NotificationListenerService() {
                 // drawable; putting a Bitmap through a broadcast would copy it across
                 // the process boundary on every notification for no gain.
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_PKG, sbn.packageName)
+                // Which front notification this is, so its card can follow it there.
+                .putExtra(RearActivity.EXTRA_NOTIFICATION_KEY, sbn.key)
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_TITLE, title.orEmpty())
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_TEXT, body.orEmpty())
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_MORE_TITLE, next?.first.orEmpty())
@@ -229,6 +299,8 @@ class NotificationRelay : NotificationListenerService() {
         const val WAKE_SETTLE_MS = 200L
 
         const val TAG = "AiUsageNotif"
+
+        const val DEBUG_UNBIND = "dev.kb896.aiusage.DEBUG_UNBIND"
 
         /**
          * How long an identical notification is treated as the same one.

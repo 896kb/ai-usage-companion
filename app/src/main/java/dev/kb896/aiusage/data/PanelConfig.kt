@@ -367,6 +367,16 @@ data class PanelConfig(
     val showClose: Boolean = false,
     val closeColor: Int = Panel.Palette.WORK,
     /**
+     * [showCamera] and [showClose] are the USAGE page's (the readout's corners); these are
+     * the INFO page's — the clock page — each page its own, so either, both or neither
+     * shows them. Off by default. The colours are the info page's own, falling back to
+     * the usage page's (see [cameraInfoTint], [closeInfoTint]).
+     */
+    val showCameraInfo: Boolean = false,
+    val showCloseInfo: Boolean = false,
+    val cameraInfoColor: Int? = null,
+    val closeInfoColor: Int? = null,
+    /**
      * The masthead's colour. Separate from the accounts' accents because it names the
      * panel rather than any account on it.
      */
@@ -458,6 +468,15 @@ data class PanelConfig(
      * Advanced switch turns it back on for the next time.
      */
     val cameraTip: Boolean = true,
+    /**
+     * "Match the front notifications": a notification that leaves the front leaves the
+     * back's list too, the list is brought in line with the front whenever the relay
+     * connects, and a card swiped away on the back is cleared on the front. Off, the back
+     * keeps its own list, as it always did.
+     */
+    val matchFrontNotifications: Boolean = false,
+    /** In always-on, the clock on the clock page; off, it fades out with the mode. */
+    val aodClock: Boolean = true,
     /** In always-on, the date line on the clock page (outside it, the Date switch decides). */
     val aodDate: Boolean = true,
     /** The weather line on the clock page — the reading and the place. Off leaves only the weather on the glass. */
@@ -541,8 +560,21 @@ data class PanelConfig(
      */
     val showLyrics: Boolean = false,
 
+    /** The usage page's corner row: its time, battery (and [showDate]), each with a colour. */
     val showClock: Boolean = false,
     val showBattery: Boolean = false,
+    /**
+     * The clock page's own big clock, date line and battery over the clock — apart from the
+     * corner row's switches above, which they once shared. Null until set, and then they
+     * behave as the shared switches did: see [infoClockOn], [infoDateOn], [infoBatteryOn].
+     * Their colours fall back to the corner row's ([infoClockTint] and the rest).
+     */
+    val infoClock: Boolean? = null,
+    val infoDate: Boolean? = null,
+    val infoBattery: Boolean? = null,
+    val infoClockColor: Int? = null,
+    val infoDateColor: Int? = null,
+    val infoBatteryColor: Int? = null,
     /** Colour for both extras. Defaults to the panel's green rather than DIM: they are
      *  small and sit alone in a corner, and dim made them read as disabled. */
     val extrasColor: Int = Panel.Palette.WORK,
@@ -581,9 +613,20 @@ data class PanelConfig(
     val effectiveRingLayout: RingLayout get() = if (ringLayout == RingLayout()) RingLayout.forDevice() else ringLayout
     val batteryTint: Int get() = batteryColor ?: extrasColor
     val dateTint: Int get() = dateColor ?: extrasColor
-    val weatherTint: Int get() = weatherColor ?: dateTint
+    val weatherTint: Int get() = weatherColor ?: infoDateTint
+    val infoClockTint: Int get() = infoClockColor ?: clockTint
+    val infoDateTint: Int get() = infoDateColor ?: dateTint
+    val infoBatteryTint: Int get() = infoBatteryColor ?: batteryTint
+    /** The clock page's big clock: always there until switched off. */
+    val infoClockOn: Boolean get() = infoClock ?: true
+    /** The clock page's date line: the Date switch's until set. */
+    val infoDateOn: Boolean get() = infoDate ?: showDate
+    /** The battery over the big clock: until set, only with no readout and the Battery switch on. */
+    fun infoBatteryOn(noReadout: Boolean): Boolean = infoBattery ?: (noReadout && showBattery)
     val tableTint: Int get() = tableColor ?: clockTint
     val cameraTint: Int get() = cameraColor ?: extrasColor
+    val cameraInfoTint: Int get() = cameraInfoColor ?: cameraTint
+    val closeInfoTint: Int get() = closeInfoColor ?: closeColor
     val notificationTint: Int get() = notificationColor ?: extrasColor
     val mediaTint: Int get() = mediaColor ?: extrasColor
     val mediaPlaybackTint: Int get() = mediaPlaybackColor ?: mediaTint
@@ -611,8 +654,8 @@ data class PanelConfig(
         val all = buildList {
             add(background)
             add(titleColor); add(closeColor); add(extrasColor)
-            add(clockTint); add(batteryTint); add(dateTint); add(weatherTint); add(tableTint)
-            add(cameraTint); add(notificationTint); add(notificationGround); add(mediaTint)
+            add(clockTint); add(batteryTint); add(dateTint); add(infoClockTint); add(infoDateTint); add(infoBatteryTint); add(weatherTint); add(tableTint)
+            add(cameraTint); add(cameraInfoTint); add(closeInfoTint); add(notificationTint); add(notificationGround); add(mediaTint)
             addAll(rampColors)
             accounts.forEachIndexed { i, a ->
                 add(a.accent ?: if (i == 0) Panel.Palette.PERSONAL else Panel.Palette.WORK)

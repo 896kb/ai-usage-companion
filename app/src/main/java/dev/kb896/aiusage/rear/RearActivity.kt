@@ -55,6 +55,21 @@ class RearActivity : Activity() {
         const val EXTRA_NOTIFICATION_TEXT = "text"
         const val EXTRA_NOTIFICATION_MORE_TITLE = "moreTitle"
         const val EXTRA_NOTIFICATION_MORE_TEXT = "moreText"
+        /** The front's notification key (StatusBarNotification.key), for matching the front. */
+        const val EXTRA_NOTIFICATION_KEY = "key"
+        /**
+         * "Match the front notifications" (PanelConfig.matchFrontNotifications). To the panel:
+         * one left the front ([ACTION_NOTIFICATION_REMOVED], with its key), or what is on the
+         * front now ([ACTION_NOTIFICATIONS_ACTIVE], every key). To the relay: a card swiped away
+         * on the back ([ACTION_DISMISS_NOTIFICATION], with its key), and a request to say what is
+         * on the front ([ACTION_NOTIFICATIONS_SYNC]) — the panel's process starting, the switch
+         * turned on.
+         */
+        const val ACTION_NOTIFICATION_REMOVED = "dev.kb896.aiusage.NOTIFICATION_REMOVED"
+        const val ACTION_NOTIFICATIONS_ACTIVE = "dev.kb896.aiusage.NOTIFICATIONS_ACTIVE"
+        const val EXTRA_NOTIFICATION_KEYS = "keys"
+        const val ACTION_DISMISS_NOTIFICATION = "dev.kb896.aiusage.DISMISS_NOTIFICATION"
+        const val ACTION_NOTIFICATIONS_SYNC = "dev.kb896.aiusage.NOTIFICATIONS_SYNC"
 
         /**
          * What is playing, on its way to the panel.
@@ -264,7 +279,12 @@ class RearActivity : Activity() {
                     intent.getStringExtra(EXTRA_NOTIFICATION_TEXT).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TITLE).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TEXT).orEmpty(),
+                    intent.getStringExtra(EXTRA_NOTIFICATION_KEY).orEmpty(),
                 ) }
+                ACTION_NOTIFICATION_REMOVED -> dial.removeNotice(intent.getStringExtra(EXTRA_NOTIFICATION_KEY).orEmpty())
+                ACTION_NOTIFICATIONS_ACTIVE -> dial.keepNotices(
+                    intent.getStringArrayExtra(EXTRA_NOTIFICATION_KEYS)?.toSet() ?: emptySet(),
+                )
                 ACTION_MEDIA -> dial.showMedia(
                     intent.getBooleanExtra(EXTRA_MEDIA_ACTIVE, false),
                     intent.getStringExtra(EXTRA_MEDIA_TITLE).orEmpty(),
@@ -365,6 +385,10 @@ class RearActivity : Activity() {
             )
         }
         dial.onLockExpired = { onLockSpent() }
+        // A card swiped away here: the relay clears it on the front if matching is on.
+        dial.onNoticeDismissed = { key ->
+            sendBroadcast(Intent(ACTION_DISMISS_NOTIFICATION).setPackage(packageName).putExtra(EXTRA_NOTIFICATION_KEY, key))
+        }
         dial.onUnlocked = {
             guardedAfterWake = false
             if (inAod && !unlockingBySpent) exitAod()
@@ -411,11 +435,15 @@ class RearActivity : Activity() {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
                 addAction(ACTION_MIRROR_SYNC)
+                addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
 
             },
             ContextCompat.RECEIVER_EXPORTED,
         )
         render(intent?.getStringExtra(EXTRA_STATE).orEmpty())
+        // This process may be new, and the front may have changed while it was gone: ask
+        // the relay what is there now (it answers only when matching is on).
+        sendBroadcast(Intent(ACTION_NOTIFICATIONS_SYNC).setPackage(packageName))
     }
 
     private fun render(payload: String) {

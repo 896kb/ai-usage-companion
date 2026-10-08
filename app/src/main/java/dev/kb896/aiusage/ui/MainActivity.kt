@@ -1111,18 +1111,49 @@ class MainActivity : ComponentActivity() {
                 },
             ) { openAccount(index) }
         }
-
-        // "Time" rather than "Show the clock": the switch already says what it does, and
-        // the word "show" in a row that is visibly a show/hide control is filler.
+        // The readout's own buttons: its corners. The Info tab has its own pair for the
+        // clock page — each page decides, so both, either or neither show them.
         SettingsRows.toggleWithColor(
-            clockRows, "Time", config.showClock, config.clockTint,
+            container, "Camera", config.showCamera, config.cameraTint,
+            onChange = { on -> write { it.copy(showCamera = on) } },
+            onPick = { c -> write { it.copy(cameraColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            container, "Game", config.showClose, config.closeColor,
+            onChange = { on -> write { it.copy(showClose = on) } },
+            onPick = { c -> write { it.copy(closeColor = c) } },
+        )
+        // The readout's corner row — battery, time, date from the top — its own, apart
+        // from the clock page's on the Info tab.
+        SettingsRows.toggleWithColor(
+            container, "Battery", config.showBattery, config.batteryTint,
+            onChange = { on -> write { it.copy(showBattery = on) } },
+            onPick = { c -> write { it.copy(batteryColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            container, "Time", config.showClock, config.clockTint,
             onChange = { on -> write { it.copy(showClock = on) } },
             onPick = { c -> write { it.copy(clockColor = c) } },
         )
         SettingsRows.toggleWithColor(
-            clockRows, "Date", config.showDate, config.dateTint,
+            container, "Date", config.showDate, config.dateTint,
             onChange = { on -> write { it.copy(showDate = on) } },
             onPick = { c -> write { it.copy(dateColor = c) } },
+        )
+
+        // "Time" rather than "Show the clock": the switch already says what it does, and
+        // the word "show" in a row that is visibly a show/hide control is filler.
+        // The clock page's own — the big clock, the date line, the battery over the clock —
+        // apart from the Usage tab's, which are the readout's corner row (PanelConfig.infoClock).
+        SettingsRows.toggleWithColor(
+            clockRows, "Time", config.infoClockOn, config.infoClockTint,
+            onChange = { on -> write { it.copy(infoClock = on) } },
+            onPick = { c -> write { it.copy(infoClockColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            clockRows, "Date", config.infoDateOn, config.infoDateTint,
+            onChange = { on -> write { it.copy(infoDate = on) } },
+            onPick = { c -> write { it.copy(infoDateColor = c) } },
         )
         // No switch: the line shows whenever there is a reading, and the Weather rows
         // below decide that. Only the colour is a choice, so only a swatch is offered.
@@ -1135,10 +1166,14 @@ class MainActivity : ComponentActivity() {
         )
         // The lights round the margin when the phone lies on its face — see table
         // mode in the README. They follow the clock's colour unless told otherwise.
+        // As the back decides it: no connected account is no readout.
+        val noReadout = Account.entries.none { a ->
+            graph.repository.state.value.statuses.firstOrNull { it.account == a }?.connected ?: true
+        }
         SettingsRows.toggleWithColor(
-            clockRows, "Battery", config.showBattery, config.batteryTint,
-            onChange = { on -> write { it.copy(showBattery = on) } },
-            onPick = { c -> write { it.copy(batteryColor = c) } },
+            clockRows, "Battery", config.infoBatteryOn(noReadout), config.infoBatteryTint,
+            onChange = { on -> write { it.copy(infoBattery = on) } },
+            onPick = { c -> write { it.copy(infoBatteryColor = c) } },
         )
         // The only control the panel has. Off by default — everything else on that
         // surface is something to look at, and a readout that reacts to being touched is
@@ -1146,10 +1181,16 @@ class MainActivity : ComponentActivity() {
         // The same row as Time, Date and Battery, and named for what they are rather
         // than described. "Camera button on the panel" was a sentence where the others
         // were labels, which made two controls of the same kind look like two kinds.
+        // The clock page's camera and game: its own, not the readout's (see the Usage tab).
         SettingsRows.toggleWithColor(
-            generalRows, "Camera", config.showCamera, config.cameraTint,
-            onChange = { on -> write { it.copy(showCamera = on) } },
-            onPick = { c -> write { it.copy(cameraColor = c) } },
+            clockRows, "Camera", config.showCameraInfo, config.cameraInfoTint,
+            onChange = { on -> write { it.copy(showCameraInfo = on) } },
+            onPick = { c -> write { it.copy(cameraInfoColor = c) } },
+        )
+        SettingsRows.toggleWithColor(
+            clockRows, "Game", config.showCloseInfo, config.closeInfoTint,
+            onChange = { on -> write { it.copy(showCloseInfo = on) } },
+            onPick = { c -> write { it.copy(closeInfoColor = c) } },
         )
         SettingsRows.toggle(generalRows, "Notifications", config.showNotifications) { on ->
             write { it.copy(showNotifications = on) }
@@ -1166,6 +1207,14 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 generalRows, "  ↳ include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
+            // The back's list follows the front's: cleared there, gone here; swiped away
+            // here, cleared there. Turned on, the relay is asked what is there now.
+            SettingsRows.toggle(
+                generalRows, "  ↳ match the front notifications", config.matchFrontNotifications,
+            ) { on ->
+                write { it.copy(matchFrontNotifications = on) }
+                if (on) sendBroadcast(Intent(RearActivity.ACTION_NOTIFICATIONS_SYNC).setPackage(packageName))
+            }
             // Named rows, not a swatch beside the switch: a colour next to "Notifications"
             // left it to be guessed what it coloured.
             SettingsRows.colorRow(
@@ -1189,7 +1238,10 @@ class MainActivity : ComponentActivity() {
         ) { on -> write { it.copy(alwaysOn = on) }; buildSettingsRows() }
         if (config.alwaysOn) {
             SettingsRows.toggle(
-                aodRows, "  ↳ battery level above the clock", config.aodBattery,
+                aodRows, "  ↳ clock", config.aodClock,
+            ) { on -> write { it.copy(aodClock = on) } }
+            SettingsRows.toggle(
+                aodRows, "  ↳ battery", config.aodBattery,
             ) { on -> write { it.copy(aodBattery = on) } }
             SettingsRows.toggle(
                 aodRows, "  ↳ date", config.aodDate,
@@ -1348,11 +1400,6 @@ class MainActivity : ComponentActivity() {
                 "  ↳ needs notification access — see ONBOARDING",
             )
         }
-        SettingsRows.toggleWithColor(
-            generalRows, "Game", config.showClose, config.closeColor,
-            onChange = { on -> write { it.copy(showClose = on) } },
-            onPick = { c -> write { it.copy(closeColor = c) } },
-        )
 
         // No colour grid here any more. Every panel colour now sits on the row of the
         // thing it paints — a grid made sense while they were a set chosen against each
