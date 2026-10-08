@@ -410,34 +410,27 @@ class MainActivity : ComponentActivity() {
         val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)
         val prev = shownTab
         shownTab = i
+        // An account page open over Usage leaves with the tab, as Usage would.
+        val fromAccount = accountPage?.takeIf { accountIndex != null }
+        if (fromAccount != null) leaveAccount()
         for (id in sections) findViewById<View>(id).animate().cancel()
-        if (prev < 0 || prev == i) {
+        if (fromAccount != null && prev >= 0 && prev != i) {
+            for ((k, id) in sections.withIndex()) if (k != i) findViewById<View>(id).apply {
+                translationX = 0f
+                visibility = View.GONE
+            }
+            slideSections(findViewById(sections[i]), fromAccount, if (i > prev) 1f else -1f)
+        } else if (prev < 0 || prev == i) {
             for ((k, id) in sections.withIndex()) findViewById<View>(id).apply {
                 translationX = 0f
                 visibility = if (k == i) View.VISIBLE else View.GONE
             }
         } else {
-            val incoming = findViewById<View>(sections[i])
-            val outgoing = findViewById<View>(sections[prev])
             for ((k, id) in sections.withIndex()) if (k != i && k != prev) findViewById<View>(id).apply {
                 translationX = 0f
                 visibility = View.GONE
             }
-            // THE WHOLE SCREEN'S WIDTH, not the column's: the column sits inside the side
-            // margins, and sliding by its width alone stopped each section with a margin's
-            // worth still on screen before it vanished. The scroller is the screen's width.
-            val w = findViewById<View>(R.id.root_scroll).width.toFloat()
-                .takeIf { it > 0f } ?: resources.displayMetrics.widthPixels.toFloat()
-            val dir = if (i > prev) 1f else -1f
-            val ease = android.view.animation.DecelerateInterpolator(2f)
-            incoming.translationX = dir * w
-            incoming.visibility = View.VISIBLE
-            incoming.animate().translationX(0f).setDuration(TAB_SLIDE_MS).setInterpolator(ease).start()
-            outgoing.translationX = 0f
-            outgoing.visibility = View.VISIBLE
-            outgoing.animate().translationX(-dir * w).setDuration(TAB_SLIDE_MS).setInterpolator(ease)
-                .withEndAction { outgoing.visibility = View.GONE; outgoing.translationX = 0f }
-                .start()
+            slideSections(findViewById(sections[i]), findViewById(sections[prev]), if (i > prev) 1f else -1f)
         }
         val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
         when (i) {
@@ -450,6 +443,83 @@ class MainActivity : ComponentActivity() {
             else -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
         }
         inkHeadings()
+    }
+
+    /**
+     * One section slides in from the side [dir] points to while the other leaves the other
+     * way, both on screen together in tab_pages — a tab change, or an account page opening
+     * over Usage and closing again.
+     */
+    private fun slideSections(incoming: View, outgoing: View, dir: Float) {
+        incoming.animate().cancel()
+        outgoing.animate().cancel()
+        // THE WHOLE SCREEN'S WIDTH, not the column's: the column sits inside the side
+        // margins, and sliding by its width alone stopped each section with a margin's
+        // worth still on screen before it vanished. The scroller is the screen's width.
+        val w = findViewById<View>(R.id.root_scroll).width.toFloat()
+            .takeIf { it > 0f } ?: resources.displayMetrics.widthPixels.toFloat()
+        val ease = android.view.animation.DecelerateInterpolator(2f)
+        incoming.translationX = dir * w
+        incoming.visibility = View.VISIBLE
+        incoming.animate().translationX(0f).setDuration(TAB_SLIDE_MS).setInterpolator(ease).start()
+        outgoing.translationX = 0f
+        outgoing.visibility = View.VISIBLE
+        outgoing.animate().translationX(-dir * w).setDuration(TAB_SLIDE_MS).setInterpolator(ease)
+            .withEndAction { outgoing.visibility = View.GONE; outgoing.translationX = 0f }
+            .start()
+    }
+
+    // ---- an account's page, over the Usage tab ----
+
+    /** The account page's column in tab_pages, made on first use; the account open, or null. */
+    private var accountPage: LinearLayout? = null
+    private var accountIndex: Int? = null
+    private var accountBack: androidx.activity.OnBackPressedCallback? = null
+
+    /**
+     * Everything about one account, in place of the Usage tab's settings and under the same
+     * preview — see AccountSettingsSheet. Back, or another tab, leaves it.
+     */
+    private fun openAccount(index: Int) {
+        val page = accountPage ?: LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }.also {
+            findViewById<android.widget.FrameLayout>(R.id.tab_pages).addView(it,
+                android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            accountPage = it
+        }
+        accountIndex = index
+        AccountSettingsSheet.fill(this, page, index,
+            onChange = { edited ->
+                graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited, WeatherPoll.latest))
+                refreshPreview()
+            },
+            onBack = { closeAccount() },
+        )
+        slideSections(page, findViewById(R.id.tab_usage), 1f)
+        findViewById<android.widget.ScrollView>(R.id.root_scroll).scrollTo(0, 0)
+        accountBack?.remove()
+        accountBack = object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = closeAccount()
+        }.also { onBackPressedDispatcher.addCallback(this, it) }
+    }
+
+    /** Back to the Usage tab's settings, with what the page changed in their rows. */
+    private fun closeAccount() {
+        val page = accountPage ?: return
+        if (accountIndex == null) return
+        leaveAccount()
+        buildSettingsRows()
+        slideSections(findViewById(R.id.tab_usage), page, -1f)
+        findViewById<android.widget.ScrollView>(R.id.root_scroll).scrollTo(0, 0)
+    }
+
+    private fun leaveAccount() {
+        accountIndex = null
+        accountBack?.remove()
+        accountBack = null
+        AccountSettingsSheet.release(this)
     }
 
     private fun inkHeadings() {
@@ -1039,14 +1109,7 @@ class MainActivity : ComponentActivity() {
                     }
                     buildSettingsRows()
                 },
-            ) {
-                AccountSettingsSheet.show(this, findViewById(R.id.root_host), index,
-                    graph.repository.state.value) { edited ->
-                    graph.bridge.update(StatePayload.encode(graph.repository.state.value, edited, WeatherPoll.latest))
-                    refreshPreview()
-                    buildSettingsRows()
-                }
-            }
+            ) { openAccount(index) }
         }
 
         // "Time" rather than "Show the clock": the switch already says what it does, and

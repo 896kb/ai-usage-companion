@@ -331,6 +331,11 @@ data class PanelConfig(
     val rampColors: List<Int> = Panel.RAMP_STOPS.map { it.second },
     val rings: List<RingSpec> = listOf(RingSpec(), RingSpec()),
     /**
+     * The second ring's settings while one connected account has both — see RingOwners.
+     * Its own, not the second account's, and kept while a second account has its ring back.
+     */
+    val pairedRing: RingSpec = RingSpec(metric = RingMetric.UTILIZATION),
+    /**
      * The order accounts appear in, top to bottom, as indices into Account.entries.
      *
      * Stored as an order rather than by reordering the accounts list itself, because

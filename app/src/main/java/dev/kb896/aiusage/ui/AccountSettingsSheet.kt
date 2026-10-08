@@ -2,137 +2,94 @@ package dev.kb896.aiusage.ui
 
 import android.app.Activity
 import android.content.Context
-import android.view.Gravity
-import android.view.animation.DecelerateInterpolator
-import android.widget.FrameLayout
 import android.view.ViewGroup
 import dev.kb896.aiusage.R
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.auth.TokenStatus
 import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.ProfileStore
-import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.RingMetric
+import dev.kb896.aiusage.data.RingOwners
+import dev.kb896.aiusage.data.RingSpec
 import dev.kb896.aiusage.data.RingWindow
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import dev.kb896.aiusage.rear.MascotRenderer
 
+
 /**
- * Everything about ONE account, with a preview of just that account.
+ * Everything about ONE account, as a page of the main screen.
  *
- * A sub-screen rather than another section on the main one. Two accounts already made
- * that screen a long scroll, and the panel is meant to grow past two — an eighth account
- * should be an eighth row on the main screen, not eight more screens' worth of scrolling
- * before you reach the artwork settings.
+ * It opens in place of the Usage tab's settings, under the main screen's own pinned
+ * preview — sliding in as a tab does, and back out on Back. It had a screen of its own
+ * over the main one, with a preview of just this account, and that duplicated in worse
+ * form everything the main screen already does: the silk, the blur band under the
+ * preview, the glass, the preview itself (which showed one ring when the account had
+ * both). Here the preview is the panel as it is.
  *
- * The preview is pinned at the top and shows this account's ring and rows, cropped out of
- * a real panel, so a colour can be judged where it will actually be seen.
+ * A page rather than another section on the Usage tab: the panel is meant to grow past
+ * two accounts, and an eighth account should be an eighth row there, not eight more
+ * screens' worth of scrolling before you reach the artwork settings.
  */
 object AccountSettingsSheet {
 
-    /**
-     * Slides in over the settings rather than opening a dialog.
-     *
-     * A dialog floats a second card over a screen that is already a card, and dismisses
-     * by tapping outside — which, on a screen made of colour swatches, is a tap away from
-     * losing your place by accident. Sliding in from the right says "this is a level
-     * down, and back returns you", which is what it is.
-     *
-     * @param host the activity's root, which this covers and then uncovers
-     */
-    /** Receivers registered by the open sheet, unregistered when it closes. */
+    /** Receivers registered by the open page, unregistered when it closes. */
     private val sheetReceivers = mutableListOf<android.content.BroadcastReceiver>()
 
-    /** Collectors running for the open sheet, cancelled when it closes. */
+    /** Collectors running for the open page, cancelled when it closes. */
     private val sheetJobs = mutableListOf<kotlinx.coroutines.Job>()
 
-    fun show(
+    /**
+     * Fill [content] with the account's sections: a Back button, then a card per section.
+     * [release] when the page closes.
+     */
+    fun fill(
         context: Context,
-        host: ViewGroup,
+        content: LinearLayout,
         index: Int,
-        state: DashboardState,
         onChange: (PanelConfig) -> Unit,
+        onBack: () -> Unit,
     ) {
+        release(context)
         val account = Account.entries.getOrNull(index) ?: return
         val store = ConfigStore(context)
+        val match = ViewGroup.LayoutParams.MATCH_PARENT
+        val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+        val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context)
 
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            // The sheet is added to root_host and covers the same bounds as the
-            // activity's root, so the wallpaper Backdrop already built for that root
-            // lines up here too — this just paints it a second time rather than
-            // rebuilding it.
-            if (dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context))
-                background = dev.kb896.aiusage.ui.glass.BackdropDrawable()
-            else setBackgroundColor(Panel.Palette.BG)
+        /** A section: a card with its title at the top, as the tabs' cards have. */
+        fun card(title: String): LinearLayout = dev.kb896.aiusage.ui.glass.GlassCard(context).also { c ->
+            c.addView(android.widget.TextView(context).apply {
+                text = title
+                dev.kb896.aiusage.ui.glass.CardTitle.style(this)
+            })
+            content.addView(c, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(context, 4) })
         }
-
-        val preview = AccountPreviewView(context).apply {
-            this.account = account
-            this.state = state
-            this.config = store.load()
-        }
-        root.addView(preview, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        // The preview follows the polls, exactly as the whole-panel preview on the screen
-        // behind it does. It was handed a DashboardState once, at open, and then showed
-        // it for as long as the sheet stayed up — so a sign-in landed, the panel on the
-        // back filled in, and this preview went on showing the empty bars the account had
-        // before it was connected. Nothing new is fetched for this: it is the same flow
-        // the rest of the app already listens to.
-        //
-        // Only the preview's state. Rebuilding the rows on a poll would throw away the
-        // scroll position and whatever control was mid-edit, and nothing in them depends
-        // on a reading — connecting and disconnecting call build() themselves.
-        (context as? androidx.activity.ComponentActivity)?.let { activity ->
-            sheetJobs += activity.lifecycleScope.launch {
-                dev.kb896.aiusage.service.Graph.of(context).repository.state.collect { fresh ->
-                    preview.state = fresh
-                }
-            }
-        }
-
-        // A card under GLASS — the sheet's one section, over the wallpaper root now
-        // paints. Under ORIGINAL it is the same inert LinearLayout it always was. Under
-        // GLASS the card sets its own 16dp padding in init, before this apply block
-        // runs; the setPadding below still overrides it with the sheet's 20/12 inset,
-        // which is fine — that inset is what this screen has always used.
-        val rows = dev.kb896.aiusage.ui.glass.GlassCard(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(context, 20), dp(context, 12), dp(context, 20), dp(context, 12))
-        }
-        // Weighted, so it takes the space left after the preview and the back row and
-        // scrolls inside it. Without the weight a ScrollView wraps its content, grows
-        // past the screen, and never scrolls — the rows below the fold are unreachable
-        // and it looks like a bug because it is one.
-        val scroller = ScrollView(context).apply { addView(rows) }
-        // The card scrolls under a still wallpaper, so its ink and its pane both have to
-        // redraw as it moves — the same tracking the main settings screen registers on
-        // its own ScrollView.
-        if (dev.kb896.aiusage.ui.glass.UiTheme.isGlass(context))
-            dev.kb896.aiusage.ui.glass.Backdrop.track(scroller)
-        root.addView(scroller,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         // Rebuilt after every edit, because a change to the label renames the rows below
         // it and a change to a ring renames its own. Reconciling in place would be more
         // code than rebuilding a list this short.
         fun build() {
-            rows.removeAllViews()
+            content.removeAllViews()
+            // A way back at the top, its own width — the system Back does the same.
+            val back = (if (glass) dev.kb896.aiusage.ui.glass.GlassButton(context) else android.widget.Button(context)).apply {
+                text = "‹  Back"
+                textSize = 14f
+                setTextColor(Panel.Palette.FG)
+                typeface = UiType.of(context)
+                setOnClickListener { onBack() }
+            }
+            content.addView(back, LinearLayout.LayoutParams(wrap, wrap))
             val config = store.load()
             val style = config.styleFor(index)
 
             fun write(edit: (PanelConfig) -> PanelConfig) {
                 val next = edit(store.load())
                 store.save(next)
-                preview.config = next
                 onChange(next)
             }
 
@@ -143,18 +100,18 @@ object AccountSettingsSheet {
             // account already connected, where all three were noise around the one thing
             // a signed-in user might want: to sign out.
             val record = dev.kb896.aiusage.service.Graph.of(context).store.load(account)
-
-            rows.addView(android.widget.TextView(context).apply {
+            val connection = card("Connection")
+            connection.addView(android.widget.TextView(context).apply {
                 text = TokenStatus.describe(record)
                 textSize = 12f
                 setTextColor(
                     if (TokenStatus.healthy(record)) Panel.Palette.WORK else Panel.Palette.CRIT)
                 typeface = UiType.of(context)
-                setPadding(0, dp(context, 4), 0, dp(context, 4))
+                setPadding(0, dp(context, 8), 0, 0)
             })
 
             if (record != null) {
-                SettingsRows.navigation(rows, "SIGN OUT") {
+                SettingsRows.navigation(connection, "SIGN OUT") {
                     // Confirmed, because it is not undoable by tapping again: signing back
                     // in means a browser round trip, or finding the credential JSON a
                     // second time.
@@ -179,15 +136,17 @@ object AccountSettingsSheet {
                     )
                 }
             } else {
-                SettingsRows.navigation(rows, "CONNECT THIS ACCOUNT") {
+                SettingsRows.navigation(connection, "CONNECT THIS ACCOUNT") {
                     chooseConnection(context, account) { build() }
                 }
             }
 
+            // ---- name and colours ----------------------------------------------
+            val looks = card("Name & colours")
             // Capped at what the heading can draw beside its plan tag — see TitleLimits.
             val nameMax = TitleLimits.accountName(context)
             SettingsRows.textField(
-                rows, "NAME  (max $nameMax)", style.label ?: account.label, nameMax,
+                looks, "Name  (max $nameMax)", style.label ?: account.label, nameMax,
             ) { typed ->
                 write { it.copy(accounts = it.withStyle(index) { s ->
                     s.copy(label = typed.ifBlank { null }) }) }
@@ -202,10 +161,9 @@ object AccountSettingsSheet {
                 accentColor = style.mascotAccent
                     ?: if (index == 1) MascotRenderer.ACCENT_WORK else MascotRenderer.ACCENT_ORANGE
             }
-            rows.addView(mascots, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            looks.addView(mascots, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(context, 8) })
 
-            SettingsRows.colorGrid(rows, listOf(
+            SettingsRows.colorGrid(looks, listOf(
                 SettingsRows.Swatch("ACCENT", style.accent ?: account.accent) { c ->
                     write { it.copy(accounts = it.withStyle(index) { s -> s.copy(accent = c) }) }
                 },
@@ -223,19 +181,22 @@ object AccountSettingsSheet {
                 },
             ))
 
-            SettingsRows.toggle(rows, "Show the mascot", style.showMascot) { on ->
+            SettingsRows.toggle(looks, "Show the mascot", style.showMascot) { on ->
                 write { it.copy(accounts = it.withStyle(index) { s -> s.copy(showMascot = on) }) }
             }
 
+            // ---- bars ------------------------------------------------------------
+            //
             // Which rows this account shows. Per account because the accounts are not
             // alike: a scoped weekly limit matters on the account that uses that model
             // and is noise on the other.
+            val bars = card("Bars")
             val allKinds = listOf("session" to "5-hour", "weekly_all" to "7-day all",
                 "weekly_scoped" to "7-day scoped")
             val shown = config.barsFor(index)
             allKinds.forEach { (wire, name) ->
                 val isOn = wire in shown
-                SettingsRows.toggle(rows, "Show the $name bar", isOn) { on ->
+                SettingsRows.toggle(bars, "Show the $name bar", isOn) { on ->
                     // The last bar cannot be switched off. An account with no bars is a
                     // heading and a mascot standing on nothing, which on the panel is
                     // indistinguishable from an account whose data failed to load.
@@ -255,27 +216,42 @@ object AccountSettingsSheet {
                 }
             }
 
-            // The rings pointed at THIS account. A ring belongs to whichever account it
-            // reports on, not to the slot it occupies, so this list is a filter rather
-            // than an index — and an account with no ring simply shows no ring settings.
+            // ---- rings -----------------------------------------------------------
+            //
+            // The ring in this account's position: ring N belongs to the Nth account in
+            // display order. Alone — the one connected account — it has the second ring too,
+            // with settings of its own (RingOwners); None there leaves it empty.
             val windowNames = listOf("5-hour", "7-day all", "7-day scoped")
             // Positional against RingMetric.entries, so this list and that enum have
             // to stay in the same order.
             val metricNames = listOf("Time to reset", "Utilisation", "None")
-            // The ring in this account's position. Ring N belongs to the Nth account in
-            // display order, so the account's place in that order is which ring is its.
-            val position = config.orderedAccounts(Account.entries.size).indexOf(index)
-            config.rings.forEachIndexed { ringIndex, ring ->
-                if (ringIndex != position) return@forEachIndexed
-                SettingsRows.choice(rows, "RING WINDOW", windowNames,
-                    RingWindow.entries.indexOf(ring.window)) { pos ->
-                    write { it.copy(rings = it.withRing(ringIndex) { r ->
-                        r.copy(window = RingWindow.entries[pos]) }) }
+            val order = config.orderedAccounts(Account.entries.size)
+            val position = order.indexOf(index)
+            val live = dev.kb896.aiusage.service.Graph.of(context).repository.state.value
+            val canPair = RingOwners.canPair(index, order) { i ->
+                live.statuses.firstOrNull { it.account.ordinal == i }?.connected ?: true
+            }
+            val paired = canPair
+            val rings = card("Rings")
+            fun ringRows(name: String, spec: RingSpec, fresh: () -> RingSpec, put: (PanelConfig, RingSpec) -> PanelConfig) {
+                SettingsRows.choice(rings, "$name window", windowNames, RingWindow.entries.indexOf(spec.window)) { pos ->
+                    write { cfg -> put(cfg, fresh().copy(window = RingWindow.entries[pos])) }
                 }
-                SettingsRows.choice(rows, "RING SHOWS", metricNames,
-                    RingMetric.entries.indexOf(ring.metric)) { pos ->
-                    write { it.copy(rings = it.withRing(ringIndex) { r ->
-                        r.copy(metric = RingMetric.entries[pos]) }) }
+                SettingsRows.choice(rings, "$name shows", metricNames, RingMetric.entries.indexOf(spec.metric)) { pos ->
+                    write { cfg -> put(cfg, fresh().copy(metric = RingMetric.entries[pos])) }
+                }
+            }
+            if (position >= 0) {
+                // Read fresh on each pick, so the other half of the ring's spec is the
+                // current one rather than the one this build saw.
+                ringRows(if (paired) "Ring 1" else "Ring", config.rings.getOrElse(position) { RingSpec() },
+                    { store.load().rings.getOrElse(position) { RingSpec() } }) { cfg, spec ->
+                    cfg.copy(rings = cfg.withRing(position) { spec })
+                }
+            }
+            if (paired) {
+                ringRows("Ring 2", config.pairedRing, { store.load().pairedRing }) { cfg, spec ->
+                    cfg.copy(pairedRing = spec)
                 }
             }
 
@@ -297,21 +273,14 @@ object AccountSettingsSheet {
             val (holder, email, org) = ProfileStore(context).identity(account)
             val tier = ProfileStore(context).tier(account)
             val facts = listOf(
-                "NAME" to holder,
-                "EMAIL" to email,
-                "ORGANISATION" to org,
-                "PLAN" to tier,
+                "Name" to holder,
+                "Email" to email,
+                "Organisation" to org,
+                "Plan" to tier,
             ).filter { it.second != null }
 
             if (facts.isNotEmpty()) {
-                rows.addView(android.widget.TextView(context).apply {
-                    text = "ACCOUNT"
-                    textSize = 11f
-                    setTextColor(Panel.Palette.DIM)
-                    typeface = UiType.of(context)
-                    setPadding(0, dp(context, 18), 0, dp(context, 2))
-                })
-
+                val details = card("Account details")
                 val values = mutableListOf<android.widget.TextView>()
                 for ((label, value) in facts) {
                     val row = LinearLayout(context).apply {
@@ -319,27 +288,23 @@ object AccountSettingsSheet {
                     }
                     row.addView(android.widget.TextView(context).apply {
                         text = label
-                        textSize = 12f
+                        textSize = 13f
                         setTextColor(Panel.Palette.DIM)
                         typeface = UiType.of(context)
-                        layoutParams = LinearLayout.LayoutParams(dp(context, 108),
-                            ViewGroup.LayoutParams.WRAP_CONTENT)
+                        layoutParams = LinearLayout.LayoutParams(dp(context, 108), wrap)
                     })
-                    val shown = android.widget.TextView(context).apply {
+                    val shownValue = android.widget.TextView(context).apply {
                         // The plan is a bracket, not an identity — it is on the panel
                         // already, so masking it here would be theatre.
-                        text = if (label == "PLAN" || Unlock.isUnlocked()) value else MASK
-                        textSize = 12f
+                        text = if (label == "Plan" || Unlock.isUnlocked()) value else MASK
+                        textSize = 13f
                         setTextColor(Panel.Palette.FG)
                         typeface = UiType.of(context)
                         tag = value
                     }
-                    if (label != "PLAN") values += shown
-                    row.addView(shown)
-                    rows.addView(row, LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    ).apply { topMargin = dp(context, 4) })
+                    if (label != "Plan") values += shownValue
+                    row.addView(shownValue)
+                    details.addView(row, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(context, 8) })
                 }
 
                 if (values.isNotEmpty()) {
@@ -360,10 +325,10 @@ object AccountSettingsSheet {
                         toggle.text = "REVEAL  ›"
                     }
 
-                    toggle = SettingsRows.navigationButton(rows,
+                    toggle = SettingsRows.navigationButton(details,
                         if (Unlock.isUnlocked()) "HIDE" else "REVEAL") {
                         if (Unlock.isUnlocked()) {
-                            rows.removeCallbacks(hideNow)
+                            details.removeCallbacks(hideNow)
                             hideNow.run()
                         } else {
                             val activity = context as? Activity ?: return@navigationButton
@@ -374,18 +339,22 @@ object AccountSettingsSheet {
                                     // Auto-hide, for the case none of the other triggers
                                     // catch: no lock, no hide, no navigation — a phone
                                     // simply put down with the details on screen.
-                                    rows.removeCallbacks(hideNow)
-                                    rows.postDelayed(hideNow, Unlock.WINDOW_MS)
+                                    details.removeCallbacks(hideNow)
+                                    details.postDelayed(hideNow, Unlock.WINDOW_MS)
                                 }
                             }
                         }
+                    }
+                    // Its own width, not the card's: one action, not a row.
+                    toggle.layoutParams = (toggle.layoutParams as LinearLayout.LayoutParams).apply {
+                        width = wrap; topMargin = dp(context, 14)
                     }
 
                     // Already unlocked when the sheet was rebuilt — a colour edit
                     // rebuilds these rows — so the countdown continues from what is left
                     // of the window rather than starting again.
                     if (Unlock.isUnlocked()) {
-                        rows.postDelayed(hideNow, Unlock.remainingMs())
+                        details.postDelayed(hideNow, Unlock.remainingMs())
                     }
 
                     // The screen going dark with a name on it, waiting to be read by
@@ -398,71 +367,37 @@ object AccountSettingsSheet {
                 }
             }
             // Glass grows when pressed and rims sit on edges: the rebuilt rows must not clip it.
-            dev.kb896.aiusage.ui.glass.Unclip.tree(rows)
+            dev.kb896.aiusage.ui.glass.Unclip.tree(content)
         }
+
         build()
 
-        val sheet = FrameLayout(context).apply {
-            setBackgroundColor(Panel.Palette.BG)
-            // Swallows touches, so the settings underneath cannot be tapped through the
-            // sheet while it is open.
-            isClickable = true
-            addView(root, FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        }
-
-        // A TextView, not a Button: the platform's button background is a filled slab
-        // that reads as the loudest thing on a screen whose whole job is showing colours.
-        // Back is a way out, not the point of the screen.
-        val back = android.widget.TextView(context).apply {
-            text = "‹  BACK"
-            textSize = 14f
-            setTextColor(Panel.Palette.DIM)
-            typeface = UiType.of(context)
-            setPadding(dp(context, 20), dp(context, 14), dp(context, 20), dp(context, 10))
-            isClickable = true
-        }
-        root.addView(back, 0, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        host.addView(sheet, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-            Gravity.TOP))
-
-        // Insets are handled once for the whole activity — see applySystemBarInsets.
-
-        sheet.post {
-            sheet.translationX = sheet.width.toFloat()
-            sheet.animate().translationX(0f).setDuration(SLIDE_MS)
-                .setInterpolator(DecelerateInterpolator()).start()
-        }
-
-        // Leaving the screen re-locks. The unlock is for looking at one account now, not
-        // for the rest of the session.
-        fun dismiss() {
-            Unlock.lock()
-            // Leaking a receiver per sheet open would eventually crash the process.
-            sheetReceivers.forEach { runCatching { context.unregisterReceiver(it) } }
-            sheetReceivers.clear()
-            // Same for the collector: the activity's scope outlives the sheet, so it
-            // would otherwise keep pushing states into a preview that has been removed —
-            // once per sheet ever opened.
-            sheetJobs.forEach { it.cancel() }
-            sheetJobs.clear()
-            sheet.animate().translationX(sheet.width.toFloat()).setDuration(SLIDE_MS)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction { host.removeView(sheet) }
-                .start()
-        }
-        back.setOnClickListener { dismiss() }
-        // The system back gesture closes the sheet before it closes the screen.
-        (context as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher
-            ?.addCallback(context, object : androidx.activity.OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    remove()
-                    dismiss()
+        // Rebuilt when an account connects or goes: that changes which rings this one has
+        // (RingOwners), and a sign-in lands with the poll after it, not with the sign-in's
+        // own callback — so the second ring's rows only appeared on reopening.
+        (context as? androidx.activity.ComponentActivity)?.let { activity ->
+            var connectedSet: List<Boolean>? = null
+            sheetJobs += activity.lifecycleScope.launch {
+                dev.kb896.aiusage.service.Graph.of(context).repository.state.collect { fresh ->
+                    val now = Account.entries.map { a -> fresh.statuses.firstOrNull { it.account == a }?.connected ?: true }
+                    if (connectedSet != null && now != connectedSet) build()
+                    connectedSet = now
                 }
-            })
+            }
+        }
+    }
+
+    /** The page is closing: re-lock, and drop what it registered. */
+    fun release(context: Context) {
+        // Leaving the page re-locks. The unlock is for looking at one account now, not for
+        // the rest of the session.
+        Unlock.lock()
+        // Leaking a receiver per open would eventually crash the process.
+        sheetReceivers.forEach { runCatching { context.unregisterReceiver(it) } }
+        sheetReceivers.clear()
+        // Same for the collectors: the activity's scope outlives the page.
+        sheetJobs.forEach { it.cancel() }
+        sheetJobs.clear()
     }
 
     /**
@@ -565,10 +500,6 @@ object AccountSettingsSheet {
 
     /** Long enough to read as redacted rather than as a value that happens to be short. */
     private const val MASK = "••••••••"
-
-    /** Matches the panel's own 1.8s easing family, shortened: a screen transition that
-     *  took as long as a bar's would feel broken. */
-    private const val SLIDE_MS = 220L
 
     private fun dp(context: Context, value: Int) =
         (value * context.resources.displayMetrics.density).toInt()

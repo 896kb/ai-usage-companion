@@ -15,6 +15,7 @@ import dev.kb896.aiusage.data.Account
 import dev.kb896.aiusage.data.AccountStatus
 import dev.kb896.aiusage.data.MascotMood
 import dev.kb896.aiusage.data.DashboardState
+import dev.kb896.aiusage.data.RingOwners
 import dev.kb896.aiusage.data.RingSpec
 import dev.kb896.aiusage.data.RingWindow
 import dev.kb896.aiusage.data.RingMetric
@@ -3205,19 +3206,30 @@ class RearDialView(context: Context) : View(context) {
             else ease("media:mutedfrom", ghostRaw, VOLUME_EASE_MS, linear = true),
         )
 
-        if (!hidden) order.forEachIndexed { position, accountIndex ->
-            val account = Account.entries.getOrNull(accountIndex) ?: return@forEachIndexed
+        // Who each ring reports on: the account in its position, or one account alone on
+        // both rings — see RingOwners.
+        val owners = RingOwners.assign(
+            order, { i -> Account.entries.getOrNull(i)?.let { connected(it) } ?: false },
+            config.rings, config.pairedRing,
+        )
+        val previewRings = onlyAccount?.let { only -> owners.count { it.account == only.ordinal } } ?: 0
+        if (!hidden) owners.forEachIndexed { position, owner ->
+            val account = Account.entries.getOrNull(owner.account) ?: return@forEachIndexed
             if (onlyAccount != null && account != onlyAccount) return@forEachIndexed
             // A previewed account takes the first ring position whatever its place in
-            // the order: the preview shows that account's panel, not its slot.
-            val at = if (onlyAccount != null) 0 else position
+            // the order: the preview shows that account's panel, not its slot — unless it
+            // has both rings, which it shows where they are.
+            val at = if (onlyAccount != null && previewRings < 2) 0 else position
             val geo = positions.getOrNull(at) ?: return@forEachIndexed
             // Ring one takes the playback position, ring two the volume — both as
             // gauges rather than full circles, with their gaps facing each other. See
             // MediaPage.PLAYBACK_ARC_START and VOLUME_ARC_START.
             val isVolume = at == 1
             drawRing(
-                canvas, geo, config.rings.getOrElse(position) { RingSpec() }, account, breath,
+                canvas, geo, owner.spec, account,
+                // The account's second ring eases on its own, not in step with its first.
+                key = if (owners.take(position).any { it.account == owner.account }) account.name + ":2" else account.name,
+                breath = breath,
                 blend = paging,
                 mediaFraction = mediaFractions.getOrElse(at) { 0f },
                 mediaColor = if (isVolume) volumeRingTint else playbackRingTint,
@@ -3884,6 +3896,8 @@ class RearDialView(context: Context) : View(context) {
         g: RingGeometry,
         spec: RingSpec,
         account: Account,
+        /** Its animations' name: the account's, or its second ring's when it has both. */
+        key: String = account.name,
         breath: Float = 0f,
         blend: Float = 0f,
         mediaFraction: Float = 0f,
@@ -3931,12 +3945,15 @@ class RearDialView(context: Context) : View(context) {
         // makes — it unwinds to empty and dims away as it goes. The same Tween at the
         // same 1800ms, started by the same config change, so the sweep and the fade
         // land together rather than reading as two events.
-        val presence = animateTo("ring:" + account.name + ":presence",
+        val presence = animateTo("ring:" + key + ":presence",
             if (spec.metric == RingMetric.NONE) 0f else 1f)
         // The media page has its own reason for this ring to exist, so a ring switched
         // off for usage comes back as the page turns.
         val visible = maxOf(presence, blend)
-        if (visible <= 0f) return
+        // Under GLASS a ring set to None keeps its band — the glass round the lens is the
+        // lens's frame, there whatever the ring reports — empty, its thumb gone with the
+        // reading. Elsewhere None is no ring at all.
+        if (visible <= 0f && !config.theme.isGlass) return
 
         // NO UNFILLED RING, on either page. The grey circle behind the arc was there to
         // say how much of a whole the reading was, and on a panel drawn around two camera
@@ -3999,7 +4016,7 @@ class RearDialView(context: Context) : View(context) {
         // window and the metric into the key meant every change to what a ring reports
         // built a fresh tween and snapped — including the change to NONE, where the
         // unwind is the whole point.
-        val shown = animateTo("ring:" + account.name, target).coerceIn(0f, 1f) *
+        val shown = animateTo("ring:" + key, target).coerceIn(0f, 1f) *
             (1f - Tween.easeInOut(ringsFade(frameNowMs)))
         val usageColor = when {
             status != null && status.health != Health.OK -> Panel.Palette.DIM
@@ -4038,7 +4055,7 @@ class RearDialView(context: Context) : View(context) {
                 val pad = arc.strokeWidth * 2f
                 fading(canvas, android.graphics.RectF(scratch.left - pad, scratch.top - pad,
                     scratch.right + pad, scratch.bottom + pad), 1f - plain) {
-                    drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc, thumbHeld)
+                    drawGlassRing(canvas, scratch, startAngle, fullSweep, fraction, arc, thumbHeld, present = visible)
                 }
             }
             if (plain > 0.004f) {
@@ -4076,6 +4093,8 @@ class RearDialView(context: Context) : View(context) {
         fraction: Float,
         paint: Paint,
         held: Float,
+        /** How much of the reading there is to show: the thumb shrinks away with it (None). */
+        present: Float = 1f,
     ) {
         val reading = paint.color
         val alpha = paint.alpha
@@ -4128,9 +4147,9 @@ class RearDialView(context: Context) : View(context) {
         val r = (oval.width() / 2f)
         val cx = oval.centerX() + (Math.cos(angle) * r).toFloat()
         val cy = oval.centerY() + (Math.sin(angle) * r).toFloat()
-        val tr = stroke * RING_THUMB * grow / 2f
+        val tr = stroke * RING_THUMB * grow / 2f * present.coerceIn(0f, 1f)
         discRect.set(cx - tr, cy - tr, cx + tr, cy + tr)
-        if (!drawGlassPane(
+        if (tr >= 0.5f && !drawGlassPane(
                 canvas, discRect, tr, Glass.THUMB_TINT,
                 source = layer ?: sceneNode, held = true,
             )
