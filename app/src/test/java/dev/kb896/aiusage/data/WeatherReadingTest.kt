@@ -34,7 +34,7 @@ class WeatherReadingTest {
         assertEquals("rain", Condition.DRIZZLE.glass)
         assertEquals("rain", Condition.RAIN.glass)
         assertEquals("rain", Condition.SHOWERS.glass)
-        assertEquals("rain", Condition.THUNDER.glass)
+        assertEquals("storm", Condition.THUNDER.glass)
         assertEquals("snow", Condition.SNOW.glass)
     }
 

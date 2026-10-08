@@ -37,8 +37,8 @@ enum class Condition(val word: String, val iconName: String, val glass: String) 
     RAIN("Rain", "RAIN", "rain"),
     SHOWERS("Showers", "RAIN", "rain"),
     SNOW("Snow", "SNOW", "snow"),
-    // A storm is rain on the glass; the icon is the only thing that says thunder.
-    THUNDER("Thunderstorm", "THUNDER", "rain");
+    // A storm is rain on the glass, with lightning.
+    THUNDER("Thunderstorm", "THUNDER", "storm");
 
     companion object {
         fun of(code: Int, isDay: Boolean): Condition = when (code) {

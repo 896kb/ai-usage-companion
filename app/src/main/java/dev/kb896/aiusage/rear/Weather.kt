@@ -24,6 +24,8 @@ object Weather {
 
     const val OFF = "off"
     const val RAIN = "rain"
+    /** Rain with lightning: the rain, and now and then the glass lit by a strike (Lightning). */
+    const val STORM = "storm"
     const val SNOW = "snow"
 
     /** Not a mode the shader knows: the setting that means "whatever it is doing outside". */
@@ -36,7 +38,7 @@ object Weather {
      */
     fun effective(setting: String, reading: dev.kb896.aiusage.data.WeatherReading?, nowMs: Long): String =
         when (setting) {
-            RAIN, SNOW -> setting
+            RAIN, STORM, SNOW -> setting
             AUTO -> reading?.takeIf { it.isFresh(nowMs) }?.condition?.glass ?: OFF
             else -> OFF
         }
@@ -93,6 +95,8 @@ object Weather {
         uniform float time;
         uniform float mode;
         uniform float amount;
+        // Storm only: the lightning — 0 none, 1 doubled, a little below 0 darker (Lightning).
+        uniform float flash;
         // THE CAMERAS. Centre and radius in panel pixels, y counted from the top, one
         // per lens. The water goes round them — see deflect — and nothing is lit or
         // bent on top of them.
@@ -136,6 +140,21 @@ object Weather {
         // Eight across and one and a half down, as the grid used to be written.
         const float CELL_W = 113.0;
         const float CELL_H = 381.3;
+        // A running drop's head, its trail's half-width and the beads it leaves, in cells
+        // across: about thirty, twenty and fourteen pixels on the near layer.
+        const float HEAD_R = 0.12;
+        const float TRAIL_W = 0.09;
+        const float BEAD_R = 0.06;
+        // The still drops: cells down the panel (about 52 pixels each), and each drop's
+        // radius in cells — about 13 to 18 pixels across as they show.
+        const float STILL_CELLS = 11.0;
+        const float STILL_MIN = 0.165;
+        const float STILL_MAX = 0.23;
+        // How many of the cells have a drop in them.
+        const float STILL_CHANCE = 0.4;
+        // How fast a still drop dries, in lives per unit of the water's clock (which runs
+        // at 0.22 a second): about eight seconds from landing to gone.
+        const float STILL_RATE = 0.55;
         // How much further out than the lens a running drop is steered, centre to rim.
         // A drop's own radius is about twenty-three in pixels, so this puts its inner
         // edge on the lens's edge — riding the ring that is drawn there.
@@ -199,28 +218,46 @@ object Weather {
             return smoothstep(0.0, rise, t) * smoothstep(1.0, rise, t);
         }
 
-        // THE ONES THAT DO NOT GO ANYWHERE. Most of what is on a window is not moving: it
-        // landed, it is sitting there, and it will dry or be taken by a passing drop. They
-        // pop in fast, hold, and fade — and every third one barely shows at all, because a
-        // window is not evenly wet.
-        float clinging(float2 uv, float t) {
-            float2 g = square(uv) * 21.0;
+        // One grid of them: [shift] moves it by a fraction of a cell, [salt] makes it a
+        // different scatter, so two grids lie over each other without lining up.
+        float clingingGrid(float2 uv, float t, float2 shift, float salt) {
+            float2 g = square(uv) * STILL_CELLS + shift;
             float2 id = floor(g);
             float2 f = fract(g) - 0.5;
-            float3 n = hash3(id.x * 107.45 + id.y * 3543.654);
-            float2 at = (n.xy - 0.5) * 0.7;
+            float3 n = hash3(id.x * 107.45 + id.y * 3543.654 + salt);
+            // Each its own size, between STILL_MIN and STILL_MAX of a cell — the running
+            // drops' size, not specks — and anywhere in its cell that still holds it whole.
+            float rad = mix(STILL_MIN, STILL_MAX, fract(n.z * 37.0));
+            float2 at = (n.xy - 0.5) * 2.0 * (0.48 - rad);
             // NOT ON THE CAMERAS, decided once per drop from where its centre lands, so
             // a drop is either there or it is not. Cut off pixel by pixel instead, a
             // drop would have an edge, an edge is a slope, and a slope catches the
             // light — as a bright ring drawn round the lens.
-            float2 c = ((id + 0.5 + at) / 21.0) * size.y;
+            float2 c = ((id + 0.5 + at - shift) / STILL_CELLS) * size.y;
             float keep = smoothstep(-4.0, 4.0,
                     length(c - float2(lensA.x, size.y - lensA.y)) - lensA.z - 10.0)
                 * smoothstep(-4.0, 4.0,
                     length(c - float2(lensB.x, size.y - lensB.y)) - lensB.z - 10.0);
             float d = length(f - at);
-            return smoothstep(0.15, 0.0, d) * fract(n.z * 10.0)
-                * life(0.06, fract(t + n.z)) * keep;
+            // Not every cell has one: two full grids were a window crowded with beads.
+            float there = step(fract(n.x * 53.0 + n.y * 17.0), STILL_CHANCE);
+            // LANDS WHOLE, THEN DRIES INWARD, as Rain 2's did: at the start of its life a
+            // drop is there at full size in an instant, and over the rest of it the bead
+            // shrinks to its middle and is gone — then the next one lands. Each on its own
+            // clock.
+            float age = fract(t * STILL_RATE + n.z);
+            float r = rad * (1.0 - age);
+            // Some fainter than others — a window is not evenly wet — but none a speck.
+            return there * smoothstep(r, 0.0, d) * mix(0.7, 1.0, fract(n.z * 10.0)) * keep;
+        }
+
+        // THE ONES THAT DO NOT GO ANYWHERE. Most of what is on a window is not moving: it
+        // landed, it is sitting there, and it will dry or be taken by a passing drop. Two grids of them, half a cell apart: a drop as big
+        // as the running ones needs a big cell to sit in whole, and one grid of big cells
+        // is a sparse window.
+        float clinging(float2 uv, float t) {
+            return max(clingingGrid(uv, t, float2(0.0, 0.0), 0.0),
+                clingingGrid(uv, t, float2(0.5, 0.5), 911.0));
         }
 
         // HOW FAR SIDEWAYS THIS PIXEL'S COLUMN HAS SLID to get past a lens. In pixels,
@@ -384,7 +421,9 @@ object Weather {
             // longer than a unit across; the reference's 6 was its own cell's proportion,
             // and here it squashed every head half as wide again as it was tall.
             float d = length((st - float2(x, y)) * float2(1.0, CELL_H / CELL_W));
-            float head = smoothstep(0.2 * grow, 0.0, d) * vis;
+            // HEAD_R of a cell: the near layer's heads were 0.2, sixty pixels across fully
+            // grown, which read as a blob rather than a drop once they were round.
+            float head = smoothstep(HEAD_R * grow, 0.0, d) * vis;
 
             // The trail narrows behind the drop and only exists above it.
             float r = sqrt(smoothstep(1.0, y, st.y));
@@ -392,7 +431,7 @@ object Weather {
             // Wider and wetter than it was. The trail is the part that lingers after the
             // drop has gone, so it is most of what a wet window actually looks like, and
             // it was drawn as though it were an afterthought of the drop.
-            float trail = smoothstep(0.15 * r, 0.08 * r * r, cd)
+            float trail = smoothstep(TRAIL_W * r, TRAIL_W * 0.53 * r * r, cd)
                 * smoothstep(-0.02, 0.02, st.y - y) * r * r * vis * 1.35;
 
             // THE PATTERN IT LEAVES. Water breaks up behind a runner into a chain of small
@@ -408,7 +447,9 @@ object Weather {
             // The spacing is the drop's own now, and sparser: fewer beads, further apart,
             // and no two runners leaving them at the same heights.
             float by = fract(p.y / size.y * s * (5.0 + m.x * 6.0) + m.z) + (st.y - 0.5);
-            float beads = smoothstep(0.11, 0.0, length(st - float2(x, by)))
+            // Round, as the heads are: in cell units a bead was three and a half times as
+            // tall as it was wide — a smear eighty pixels long down the trail.
+            float beads = smoothstep(BEAD_R, 0.0, length((st - float2(x, by)) * float2(1.0, CELL_H / CELL_W)))
                 * r * smoothstep(-0.02, 0.02, st.y - y) * 0.7;
 
             // IT STAYS WET BEHIND THEM. A drop leaves a path and the path takes a while
@@ -559,6 +600,8 @@ object Weather {
                 // And no two regions of the glass are lit quite alike.
                 float vary = 0.55 + hash1(floor(uv * 7.0)) * 0.9;
                 lit = (spec * 1.15 * vary + c.x * 0.05) * amount;
+                // Lightning catches every drop at once.
+                lit *= 1.0 + 2.0 * max(flash, 0.0);
                 clear = c.z;
                 // THE FAR SIDE GOES DARK. A steep edge throws light away from the eye, and
                 // a drop with a bright side and no dark side is a sticker.
@@ -595,6 +638,9 @@ object Weather {
 
             half4 col = ground.eval(pos + off * amount);
             half3 rgb = col.rgb * half(1.0 - dim) + half3(lit, lit, lit) * col.a;
+            // The flash MULTIPLIES the light behind the glass: what is bright flares, what
+            // is dark stays dark — and between its flickers it dips a little below.
+            rgb *= half(1.0 + flash);
 
             // No fog here any more; it is drawn in front of the panes instead. See MIST.
             return half4(rgb, col.a);
@@ -626,7 +672,7 @@ object Weather {
             // Mottled, because breath does not settle evenly and a flat wash reads as a
             // filter over the panel rather than as something on the glass.
             float haze = 0.55 * vnoise(square(uv) * 9.0) + 0.45 * vnoise(square(uv) * 23.0);
-            float a = FOG * (0.55 + 0.75 * haze) * (1.0 - clear) * amount;
+            float a = FOG * (0.55 + 0.75 * haze) * (1.0 - clear) * amount * (1.0 + max(flash, 0.0));
             a = clamp(a, 0.0, 1.0);
             return half4(half3(0.88, 0.92, 0.96) * half(a), half(a));
         }

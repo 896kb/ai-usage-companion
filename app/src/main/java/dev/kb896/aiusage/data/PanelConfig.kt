@@ -405,7 +405,7 @@ data class PanelConfig(
     val showDate: Boolean = false,
 
     /**
-     * Weather on the panel's glass: [Weather.OFF], [Weather.RAIN] or [Weather.SNOW].
+     * Weather on the panel's glass: [Weather.OFF], [Weather.RAIN], [Weather.STORM] or [Weather.SNOW].
      *
      * A STRING RATHER THAN A BOOLEAN PAIR, because it is one choice with three answers
      * and two switches would let somebody ask for rain and snow at once. Stored as the
