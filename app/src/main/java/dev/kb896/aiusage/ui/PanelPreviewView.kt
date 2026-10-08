@@ -132,8 +132,11 @@ class PanelPreviewView @JvmOverloads constructor(
     }
 
     private fun shown(m: RearDialView.Mirror): RearDialView.Mirror = when {
-        aodShown -> m.copy(aod = true, locked = true)
-        pageShown != null -> m.copy(page = pageShown!!, aod = false, locked = false)
+        // The rings closed as always-on closes them on the back, and open on a page —
+        // the back's own state said "open" while it was awake, so the Always-on tab
+        // showed a filled ring the back never shows there.
+        aodShown -> m.copy(aod = true, locked = true, ringsClosed = true)
+        pageShown != null -> m.copy(page = pageShown!!, aod = false, locked = false, ringsClosed = false)
         else -> m
     }
 
