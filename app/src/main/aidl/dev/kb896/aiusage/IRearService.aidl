@@ -82,6 +82,18 @@ interface IRearService {
     boolean restoreXiaomiRearApp() = 10;
     /** What the system says about the rear display, for a bug report. See RearUserService. */
     String rearReport() = 11;
+    // The rear display's own brightness, HyperOS's system sub_display_screen_brightness
+    // (1 to 255); -1 when it cannot be read. Setting it also puts its mode on manual.
+    int rearBrightness() = 12;
+    void setRearBrightness(int value) = 13;
+    // Whether HyperOS sets the rear brightness from the rear light sensor
+    // (secure sub_display_screen_brightness_mode 1), and switching it.
+    boolean rearAutoBrightness() = 14;
+    void setRearAutoBrightness(boolean on) = 15;
+    // The control centre's switches, as "bluetooth,data,wifi" each 1 or 0; and switching
+    // one ("bluetooth", "data" or "wifi").
+    String quickStates() = 16;
+    void setQuick(String which, boolean on) = 17;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
 
 }

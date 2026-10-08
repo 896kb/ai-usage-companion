@@ -1258,11 +1258,12 @@ class MainActivity : ComponentActivity() {
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
         SettingsRows.choice(
-            generalRows, "Weather", listOf("None", "Auto", "Rain", "Snow"),
+            generalRows, "Weather", listOf("None", "Auto", "Rain", "Storm", "Snow"),
             when (config.weather) {
                 Weather.AUTO -> 1
                 Weather.RAIN -> 2
-                Weather.SNOW -> 3
+                Weather.STORM -> 3
+                Weather.SNOW -> 4
                 else -> 0
             },
         ) { i ->
@@ -1271,7 +1272,8 @@ class MainActivity : ComponentActivity() {
                     weather = when (i) {
                         1 -> Weather.AUTO
                         2 -> Weather.RAIN
-                        3 -> Weather.SNOW
+                        3 -> Weather.STORM
+                        4 -> Weather.SNOW
                         else -> Weather.OFF
                     },
                 )

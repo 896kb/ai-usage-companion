@@ -51,6 +51,67 @@ class UsagePollService : Service() {
      *  transition from a repeated reading — see ensurePlaced(). */
     private var watchdogState: Watchdog.State? = null
 
+    /** The control centre's brightness, written off the main thread, newest value only. */
+    private val brightnessWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val latestBrightness = java.util.concurrent.atomic.AtomicInteger(-1)
+
+    /**
+     * HyperOS's rear brightness and its mode, watched: automatic changes the level on its
+     * own, and the control centre's cell should move when the screen does — not when it
+     * next asks. A change is read through Shizuku and sent on; a burst of them while
+     * automatic settles is one read, whatever arrived while it was pending.
+     */
+    private val brightnessPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val brightnessWatch = object : android.database.ContentObserver(
+        android.os.Handler(android.os.Looper.getMainLooper()),
+    ) {
+        override fun onChange(selfChange: Boolean) {
+            if (!brightnessPending.compareAndSet(false, true)) return
+            brightnessWorker.execute {
+                brightnessPending.set(false)
+                sendRearBrightness()
+            }
+        }
+    }
+
+    /** Silent, Bluetooth, mobile data and Wi-Fi, to the panel. On brightnessWorker. */
+    private fun sendQuickStates() {
+        val audio = getSystemService(android.media.AudioManager::class.java)
+        val silent = audio.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL
+        val rest = Graph.of(this).bridge.quickStates()
+        sendBroadcast(
+            Intent(RearActivity.ACTION_QUICK_STATES).setPackage(packageName)
+                .putExtra(RearActivity.EXTRA_QUICK_STATES, booleanArrayOf(silent, rest?.get(0) ?: false, rest?.get(1) ?: false, rest?.get(2) ?: false))
+                .putExtra(RearActivity.EXTRA_QUICK_REACHABLE, rest != null),
+        )
+    }
+
+    /** The switches, watched as the brightness is: a change anywhere reaches the tiles at once. */
+    private val quickPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val quickWatch = object : android.database.ContentObserver(
+        android.os.Handler(android.os.Looper.getMainLooper()),
+    ) {
+        override fun onChange(selfChange: Boolean) {
+            if (!quickPending.compareAndSet(false, true)) return
+            brightnessWorker.execute {
+                quickPending.set(false)
+                sendQuickStates()
+            }
+        }
+    }
+
+    /** The rear brightness and whether it is automatic, to the panel. On brightnessWorker. */
+    private fun sendRearBrightness() {
+        val bridge = Graph.of(this).bridge
+        val value = bridge.rearBrightness() ?: -1
+        val auto = bridge.rearAutoBrightness() ?: false
+        sendBroadcast(
+            Intent(RearActivity.ACTION_REAR_BRIGHTNESS).setPackage(packageName)
+                .putExtra(RearActivity.EXTRA_BRIGHTNESS, value)
+                .putExtra(RearActivity.EXTRA_AUTO_BRIGHTNESS, auto),
+        )
+    }
+
     private val limitNotifier by lazy { LimitNotifier(this) }
 
     /** Last panel power state this listener acted on — see onDisplayChanged. */
@@ -147,6 +208,17 @@ class UsagePollService : Service() {
         // startup. ACTION_STRANDED is ours, so this filter is no longer system-only.
         // NOT_EXPORTED still receives it — RearActivity is a different process but the
         // same UID.
+        runCatching {
+            contentResolver.registerContentObserver(
+                android.provider.Settings.System.getUriFor("sub_display_screen_brightness"), false, brightnessWatch,
+            )
+            contentResolver.registerContentObserver(
+                android.provider.Settings.Secure.getUriFor("sub_display_screen_brightness_mode"), false, brightnessWatch,
+            )
+            for (key in listOf("bluetooth_on", "wifi_on", "mode_ringer", "mobile_data", "mobile_data0", "mobile_data1", "mobile_data2", "mobile_data3")) {
+                contentResolver.registerContentObserver(android.provider.Settings.Global.getUriFor(key), false, quickWatch)
+            }
+        }
         ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -166,6 +238,13 @@ class UsagePollService : Service() {
             addAction(RearActivity.ACTION_MEDIA_COMMAND)
             // The panel telling us it has let its display go, or taken it back.
             addAction(RearActivity.ACTION_DOZING)
+            // The control centre's brightness: read it, set it — through Shizuku, here.
+            addAction(RearActivity.ACTION_GET_REAR_BRIGHTNESS)
+            addAction(RearActivity.ACTION_SET_REAR_BRIGHTNESS)
+            addAction(RearActivity.ACTION_SET_REAR_AUTO_BRIGHTNESS)
+            // And its switches: silent, Bluetooth, mobile data, Wi-Fi.
+            addAction(RearActivity.ACTION_GET_QUICK)
+            addAction(RearActivity.ACTION_SET_QUICK)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         // Held by this service rather than by NotificationRelay, even though the relay is
@@ -323,6 +402,56 @@ class UsagePollService : Service() {
             // service, which this process holds the binding for.
             // THE PANEL IS ASLEEP ON PURPOSE — or awake again. Neither supervisor can
             // work this out for itself; see IRearService.setDozing.
+            if (intent?.action == RearActivity.ACTION_GET_REAR_BRIGHTNESS) {
+                brightnessWorker.execute {
+                    sendRearBrightness()
+                }
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_GET_QUICK) {
+                brightnessWorker.execute { sendQuickStates() }
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_SET_QUICK) {
+                val which = intent.getStringExtra(RearActivity.EXTRA_QUICK).orEmpty()
+                val on = intent.getBooleanExtra(RearActivity.EXTRA_QUICK_ON, false)
+                brightnessWorker.execute {
+                    if (which == "silent") {
+                        // The ringer is the app's to set: notification access brings Do Not
+                        // Disturb access with it, which is what silencing needs.
+                        val audio = getSystemService(android.media.AudioManager::class.java)
+                        runCatching {
+                            audio.ringerMode = if (on) android.media.AudioManager.RINGER_MODE_SILENT
+                                else android.media.AudioManager.RINGER_MODE_NORMAL
+                        }.onFailure { android.util.Log.w("AiUsagePoll", "ringer: ${it.message}") }
+                    } else {
+                        Graph.of(this@UsagePollService).bridge.setQuick(which, on)
+                    }
+                    // The watchers report the change; this covers a switch with none to watch.
+                    sendQuickStates()
+                }
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_SET_REAR_AUTO_BRIGHTNESS) {
+                val on = intent.getBooleanExtra(RearActivity.EXTRA_AUTO_BRIGHTNESS, false)
+                brightnessWorker.execute {
+                    Graph.of(this@UsagePollService).bridge.setRearAutoBrightness(on)
+                    // The level automatic picks reaches the panel through brightnessWatch,
+                    // the moment HyperOS writes it.
+                    sendRearBrightness()
+                }
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_SET_REAR_BRIGHTNESS) {
+                // A drag sends a stream of these; only the latest is worth writing, so
+                // the worker writes whatever is newest when it gets to it.
+                latestBrightness.set(intent.getIntExtra(RearActivity.EXTRA_BRIGHTNESS, -1))
+                brightnessWorker.execute {
+                    val v = latestBrightness.getAndSet(-1)
+                    if (v in 1..255) Graph.of(this@UsagePollService).bridge.setRearBrightness(v)
+                }
+                return
+            }
             if (intent?.action == RearActivity.ACTION_DOZING) {
                 val dozing = intent.getBooleanExtra(RearActivity.EXTRA_DOZING, false)
                 Graph.of(this@UsagePollService).bridge.setDozing(dozing)
@@ -642,6 +771,8 @@ class UsagePollService : Service() {
         media?.stop()
         media = null
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+        runCatching { contentResolver.unregisterContentObserver(brightnessWatch) }
+        runCatching { contentResolver.unregisterContentObserver(quickWatch) }
         scope.cancel()
         super.onDestroy()
     }

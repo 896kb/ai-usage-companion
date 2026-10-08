@@ -196,6 +196,58 @@ class ShizukuBridge(private val context: Context) {
         }
     }
 
+    /** The rear display's brightness, 1 to 255; null when the service does not answer. */
+    fun rearBrightness(): Int? {
+        val svc = awaitService() ?: return null
+        return try {
+            svc.rearBrightness().takeIf { it in 1..255 }
+        } catch (e: Exception) {
+            Log.e(TAG, "rear brightness read failed", e); service = null; null
+        }
+    }
+
+    /** Set the rear display's brightness, 1 to 255; false when the service does not answer. */
+    fun setRearBrightness(value: Int): Boolean {
+        val svc = awaitService() ?: return false
+        return try {
+            svc.setRearBrightness(value); true
+        } catch (e: Exception) {
+            Log.e(TAG, "rear brightness write failed", e); service = null; false
+        }
+    }
+
+    /** Whether the rear brightness is automatic; null when the service does not answer. */
+    fun rearAutoBrightness(): Boolean? {
+        val svc = awaitService() ?: return null
+        return try { svc.rearAutoBrightness() } catch (e: Exception) {
+            Log.e(TAG, "rear auto brightness read failed", e); service = null; null
+        }
+    }
+
+    fun setRearAutoBrightness(on: Boolean): Boolean {
+        val svc = awaitService() ?: return false
+        return try { svc.setRearAutoBrightness(on); true } catch (e: Exception) {
+            Log.e(TAG, "rear auto brightness write failed", e); service = null; false
+        }
+    }
+
+    /** Bluetooth, mobile data and Wi-Fi, on or off; null when the service does not answer. */
+    fun quickStates(): BooleanArray? {
+        val svc = awaitService() ?: return null
+        return try {
+            svc.quickStates().split(",").map { it.trim() == "1" }.takeIf { it.size == 3 }?.toBooleanArray()
+        } catch (e: Exception) {
+            Log.e(TAG, "quick states failed", e); service = null; null
+        }
+    }
+
+    fun setQuick(which: String, on: Boolean): Boolean {
+        val svc = awaitService() ?: return false
+        return try { svc.setQuick(which, on); true } catch (e: Exception) {
+            Log.e(TAG, "quick $which failed", e); service = null; false
+        }
+    }
+
     fun isPanelAlive(): Boolean {
         val svc = service ?: return false
         return try { svc.isAlive() } catch (e: Exception) { Log.e(TAG, "isAlive failed", e); service = null; false }

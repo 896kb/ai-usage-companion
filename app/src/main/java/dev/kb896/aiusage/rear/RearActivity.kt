@@ -182,6 +182,32 @@ class RearActivity : Activity() {
          * composite identically. See IRearService.setDozing.
          */
         const val ACTION_DOZING = "dev.kb896.aiusage.DOZING"
+        /**
+         * The control centre's brightness (ControlCenter): the panel asks for it
+         * ([ACTION_GET_REAR_BRIGHTNESS]) and sets it ([ACTION_SET_REAR_BRIGHTNESS], with
+         * [EXTRA_BRIGHTNESS] 1 to 255); the app process, which holds Shizuku, answers with
+         * [ACTION_REAR_BRIGHTNESS] — -1 when it cannot be read.
+         */
+        const val ACTION_GET_REAR_BRIGHTNESS = "dev.kb896.aiusage.GET_REAR_BRIGHTNESS"
+        const val ACTION_SET_REAR_BRIGHTNESS = "dev.kb896.aiusage.SET_REAR_BRIGHTNESS"
+        const val ACTION_REAR_BRIGHTNESS = "dev.kb896.aiusage.REAR_BRIGHTNESS"
+        const val EXTRA_BRIGHTNESS = "brightness"
+        /** Automatic rear brightness: its state in [ACTION_REAR_BRIGHTNESS], and switching it. */
+        const val EXTRA_AUTO_BRIGHTNESS = "autoBrightness"
+        const val ACTION_SET_REAR_AUTO_BRIGHTNESS = "dev.kb896.aiusage.SET_REAR_AUTO_BRIGHTNESS"
+        /**
+         * The control centre's switches — silent, Bluetooth, mobile data, Wi-Fi. Asked for
+         * ([ACTION_GET_QUICK]), set ([ACTION_SET_QUICK] with [EXTRA_QUICK] and [EXTRA_QUICK_ON]),
+         * and told ([ACTION_QUICK_STATES]: [EXTRA_QUICK_STATES] in that order, and
+         * [EXTRA_QUICK_REACHABLE], false when Shizuku cannot be reached for the last three).
+         */
+        const val ACTION_GET_QUICK = "dev.kb896.aiusage.GET_QUICK"
+        const val ACTION_SET_QUICK = "dev.kb896.aiusage.SET_QUICK"
+        const val ACTION_QUICK_STATES = "dev.kb896.aiusage.QUICK_STATES"
+        const val EXTRA_QUICK = "quick"
+        const val EXTRA_QUICK_ON = "quickOn"
+        const val EXTRA_QUICK_STATES = "quickStates"
+        const val EXTRA_QUICK_REACHABLE = "quickReachable"
         /** What the front screen's preview mirrors — see RearDialView.Mirror. */
         const val ACTION_MIRROR = "dev.kb896.aiusage.MIRROR"
         const val ACTION_MIRROR_SYNC = "dev.kb896.aiusage.MIRROR_SYNC"
@@ -281,6 +307,14 @@ class RearActivity : Activity() {
                     intent.getStringExtra(EXTRA_NOTIFICATION_MORE_TEXT).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_KEY).orEmpty(),
                 ) }
+                ACTION_REAR_BRIGHTNESS -> dial.rearBrightness(
+                    intent.getIntExtra(EXTRA_BRIGHTNESS, -1),
+                    intent.getBooleanExtra(EXTRA_AUTO_BRIGHTNESS, false),
+                )
+                ACTION_QUICK_STATES -> dial.quickStates(
+                    intent.getBooleanArrayExtra(EXTRA_QUICK_STATES) ?: BooleanArray(4),
+                    intent.getBooleanExtra(EXTRA_QUICK_REACHABLE, false),
+                )
                 ACTION_NOTIFICATION_REMOVED -> dial.removeNotice(intent.getStringExtra(EXTRA_NOTIFICATION_KEY).orEmpty())
                 ACTION_NOTIFICATIONS_ACTIVE -> dial.keepNotices(
                     intent.getStringArrayExtra(EXTRA_NOTIFICATION_KEYS)?.toSet() ?: emptySet(),
@@ -385,6 +419,20 @@ class RearActivity : Activity() {
             )
         }
         dial.onLockExpired = { onLockSpent() }
+        // The control centre: opening asks for the brightness, the cell sets it.
+        dial.onControlCenterOpening = {
+            sendBroadcast(Intent(ACTION_GET_REAR_BRIGHTNESS).setPackage(packageName))
+            sendBroadcast(Intent(ACTION_GET_QUICK).setPackage(packageName))
+        }
+        dial.onQuick = { which, on ->
+            sendBroadcast(Intent(ACTION_SET_QUICK).setPackage(packageName).putExtra(EXTRA_QUICK, which).putExtra(EXTRA_QUICK_ON, on))
+        }
+        dial.onBrightness = { value ->
+            sendBroadcast(Intent(ACTION_SET_REAR_BRIGHTNESS).setPackage(packageName).putExtra(EXTRA_BRIGHTNESS, value))
+        }
+        dial.onAutoBrightness = { on ->
+            sendBroadcast(Intent(ACTION_SET_REAR_AUTO_BRIGHTNESS).setPackage(packageName).putExtra(EXTRA_AUTO_BRIGHTNESS, on))
+        }
         // A card swiped away here: the relay clears it on the front if matching is on.
         dial.onNoticeDismissed = { key ->
             sendBroadcast(Intent(ACTION_DISMISS_NOTIFICATION).setPackage(packageName).putExtra(EXTRA_NOTIFICATION_KEY, key))
@@ -436,6 +484,8 @@ class RearActivity : Activity() {
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
                 addAction(ACTION_MIRROR_SYNC)
                 addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
+                addAction(ACTION_REAR_BRIGHTNESS)
+                addAction(ACTION_QUICK_STATES)
 
             },
             ContextCompat.RECEIVER_EXPORTED,

@@ -472,6 +472,41 @@ class RearUserService : IRearService.Stub {
      */
     override fun rearReport(): String = exec(REPORT)
 
+    override fun rearBrightness(): Int =
+        exec("settings get system sub_display_screen_brightness").trim().toIntOrNull() ?: -1
+
+    override fun rearAutoBrightness(): Boolean =
+        exec("settings get secure sub_display_screen_brightness_mode").trim() == "1"
+
+    override fun setRearAutoBrightness(on: Boolean) {
+        exec("settings put secure sub_display_screen_brightness_mode ${if (on) 1 else 0}")
+    }
+
+    override fun quickStates(): String {
+        val bt = exec("settings get global bluetooth_on").trim().let { it != "0" && it.isNotEmpty() && it != "null" }
+        val wifi = exec("settings get global wifi_on").trim().let { it != "0" && it.isNotEmpty() && it != "null" }
+        // Per SIM (mobile_data0, mobile_data1 …): on if any is.
+        val data = exec("settings list global | grep -E '^mobile_data[0-9]+=1' | head -1").isNotBlank()
+        fun b(v: Boolean) = if (v) "1" else "0"
+        return "${b(bt)},${b(data)},${b(wifi)}"
+    }
+
+    override fun setQuick(which: String, on: Boolean) {
+        val cmd = when (which) {
+            "bluetooth" -> "cmd bluetooth_manager ${if (on) "enable" else "disable"}"
+            "wifi" -> "cmd wifi set-wifi-enabled ${if (on) "enabled" else "disabled"}"
+            "data" -> "svc data ${if (on) "enable" else "disable"}"
+            else -> return
+        }
+        Log.i(TAG, "quick $which -> $on: ${exec(cmd)}")
+    }
+
+    override fun setRearBrightness(value: Int) {
+        val v = value.coerceIn(1, 255)
+        // Manual first, or an automatic mode would take the value straight back.
+        exec("[ \"$(settings get secure sub_display_screen_brightness_mode)\" = 0 ] || settings put secure sub_display_screen_brightness_mode 0; settings put system sub_display_screen_brightness $v")
+    }
+
     override fun removeXiaomiRearApp(): Boolean {
         val out = exec("pm uninstall -k --user 0 ${Panel.XIAOMI_REAR_APP}")
         Log.i(TAG, "remove ${Panel.XIAOMI_REAR_APP}: $out")

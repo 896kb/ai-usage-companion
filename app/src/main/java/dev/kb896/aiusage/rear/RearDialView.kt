@@ -960,6 +960,7 @@ class RearDialView(context: Context) : View(context) {
             field = value
             val now = SystemClock.uptimeMillis()
             if (value) {
+                closeControlCenterNow() // nothing stays open into always-on
                 aodSince = now; aodWallAt = System.currentTimeMillis(); aodRealAt = SystemClock.elapsedRealtime()
                 aodReturnPage = pager.page
                 pager.goTo(PAGE_NOTICES, now, AOD_FADE_MS.toFloat()) // the clock page is the always-on page, reached with the fade
@@ -1435,6 +1436,40 @@ class RearDialView(context: Context) : View(context) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         lab?.let { drawLab(canvas, it); return }
+        // THE CONTROL CENTRE, over the panel blurred behind it. The panel is recorded into
+        // a node of its own and drawn through a blur that deepens as the centre comes down;
+        // a canvas that cannot hold a node (a software one) gets the centre without the blur.
+        val cc = controlCenterProgress()
+        if (cc > 0.001f) {
+            val recorder = canvas as? android.graphics.RecordingCanvas
+            if (recorder != null && width > 0 && height > 0) {
+                ccNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
+                val inner = ccNode.beginRecording(Panel.WIDTH, Panel.HEIGHT)
+                try {
+                    drawPanelPicture(inner)
+                } finally {
+                    ccNode.endRecording()
+                }
+                val blur = CC_BLUR * cc
+                ccNode.setRenderEffect(
+                    if (blur > 0.5f) android.graphics.RenderEffect.createBlurEffect(
+                        blur, blur, android.graphics.Shader.TileMode.CLAMP,
+                    ) else null,
+                )
+                recorder.drawRenderNode(ccNode)
+            } else {
+                drawPanelPicture(canvas)
+            }
+            ccDim.color = ((CC_DIM * cc * 255).toInt().coerceIn(0, 255)) shl 24
+            canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), ccDim)
+            drawControlCenter(canvas, cc, blurred = recorder != null)
+            return
+        }
+        drawPanelPicture(canvas)
+    }
+
+    /** The panel itself, everything but the control centre. */
+    private fun drawPanelPicture(canvas: Canvas) {
         pendingButtons.clear()
         pendingRings.clear()
         pendingOver.clear()
@@ -1484,8 +1519,10 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun drawMist(canvas: Canvas, keep: Float = 1f) {
-        if (weatherMode() != Weather.RAIN || width <= 0 || height <= 0 || keep <= 0.001f) return
+        val mode = weatherMode()
+        if ((mode != Weather.RAIN && mode != Weather.STORM) || width <= 0 || height <= 0 || keep <= 0.001f) return
         val shader = Weather.mist
+        shader.setFloatUniform("flash", stormFlash())
         shader.setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         shader.setFloatUniform("mode", 0f)
         shader.setFloatUniform("amount", Weather.AMOUNT)
@@ -1501,6 +1538,10 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** The storm's lightning now, or nothing in any other weather. See Lightning. */
+    private fun stormFlash(): Float =
+        if (weatherMode() == Weather.STORM) Lightning.flash(System.currentTimeMillis()) else 0f
 
     /** The panel behind the panes, so they have something to bend. */
     private val sceneNode = android.graphics.RenderNode("panel")
@@ -3500,18 +3541,27 @@ class RearDialView(context: Context) : View(context) {
 
     /** When the cell arrived, and what it is filling to. */
     private var chargeAt = 0L
-    private var chargeStepAt = 0L
-    private var chargeTenth = -1
 
-    /** Which way the liquid currently thinks is down, in radians. See drawCharge. */
-    private var chargeDown = 0f
+    /**
+     * One glass of liquid's moving parts: its surface, its discharges, which way it thinks
+     * is down (in radians — see drawLiquidCell), when it last stepped and the tenth of the
+     * level it last knocked at.
+     */
+    private class LiquidCell {
+        val surface = LiquidSurface()
+        val surge = ChargeSurge()
+        var down = 0f
+        var stepAt = 0L
+        var tenth = -1
+        fun reset() { stepAt = 0L; tenth = -1; surface.calm(); surge.clear() }
+    }
+
+    private val chargeCell = LiquidCell()
 
     /** The level the liquid is filling to, and the figure drawn over it. */
     private var chargeLevel = 0f
     private var chargePercent = 0
 
-    private val surface = LiquidSurface()
-    private val surge = ChargeSurge()
 
     /** A colour pushed toward white, keeping its hue. RGB only; the caller sets alpha. */
     private fun lighten(color: Int, amount: Float): Int {
@@ -3543,10 +3593,7 @@ class RearDialView(context: Context) : View(context) {
         chargePercent = percent
         chargeLevel = percent / 100f
         chargeAt = SystemClock.elapsedRealtime()
-        chargeStepAt = 0L
-        chargeTenth = -1
-        surface.calm()
-        surge.clear()
+        chargeCell.reset()
         invalidate()
     }
 
@@ -3563,8 +3610,7 @@ class RearDialView(context: Context) : View(context) {
         val elapsed = (SystemClock.elapsedRealtime() - chargeAt).toFloat()
         if (ChargeOverlay.done(elapsed)) {
             chargeAt = 0L
-            surface.calm()
-            surge.clear()
+            chargeCell.reset()
             return
         }
         animating = true
@@ -3575,6 +3621,48 @@ class RearDialView(context: Context) : View(context) {
         val right = Panel.WIDTH + off - ChargeOverlay.MARGIN - ChargeOverlay.RIGHT_INSET
         val top = ChargeOverlay.MARGIN
         val bottom = Panel.HEIGHT - ChargeOverlay.MARGIN
+        drawLiquidCell(
+            canvas, chargeCell, left, top, right, bottom,
+            fill = ChargeOverlay.fill(elapsed, chargeLevel),
+            tint = colorFor("charge", config.batteryTint),
+            surgeAt = elapsed,
+            grow = ChargeOverlay.figureScale(elapsed),
+        )
+    }
+
+    /**
+     * A glass of liquid, as the charging cell is built — and the control centre's brightness.
+     *
+     * [cell] carries the liquid's moving parts; [fill] is the level, 0 to 1; [tint] the
+     * liquid's colour; [surgeAt] the discharges' clock (the charging cell's elapsed time),
+     * none without one; [grow] how far the figure is grown in, beside the glass on its
+     * left — or on its right when [figureOnRight]. [figure] defaults to the level in percent.
+     */
+    private fun drawLiquidCell(
+        canvas: Canvas,
+        cell: LiquidCell,
+        left: Float, top: Float, right: Float, bottom: Float,
+        fill: Float,
+        tint: Int,
+        surgeAt: Float? = null,
+        grow: Float = 0f,
+        figureOnRight: Boolean = false,
+        figureTint: Int = tint,
+        figure: String = Math.round(fill * 100f).toString() + "%",
+        /**
+         * Something drawn inside the glass with the liquid, clipped to the glass: given the
+         * liquid's body, so it can be drawn one way above the surface and another below.
+         */
+        inside: ((Canvas, android.graphics.Path) -> Unit)? = null,
+        /** How solid the liquid and the glass's outline are (the outline: ORIGINAL only). */
+        liquidAlpha: Int = CHARGE_LIQUID_ALPHA,
+        rimAlpha: Int = CHARGE_RIM_ALPHA,
+        /**
+         * Shapes the figure may cross, each with how far its colour should turn over there
+         * (0 not at all, 1 inverted): the control centre's tiles, filled as far as they are on.
+         */
+        figureOver: List<Pair<android.graphics.Path, Float>> = emptyList(),
+    ) {
         // THE SCREEN'S OWN RADIUS, carried inward.
         //
         // The cell is inset from the panel's edges by MARGIN, and a shape inset inside a
@@ -3586,7 +3674,6 @@ class RearDialView(context: Context) : View(context) {
         // something square, and a glass with sharp corners reads as a box.
         val r = (cornerRadius() - ChargeOverlay.MARGIN)
             .coerceIn(ChargeOverlay.MIN_CORNER, (right - left) / 2f)
-        val tint = colorFor("charge", config.batteryTint)
 
         val glass = android.graphics.Path().apply {
             addRoundRect(left, top, right, bottom, r, r, android.graphics.Path.Direction.CW)
@@ -3647,11 +3734,11 @@ class RearDialView(context: Context) : View(context) {
         // well a heap of circles is packed the eye keeps finding the lumps — because a
         // still liquid in a glass does not have any.
         //
-        // What it has is a surface. One smooth line that ripples when disturbed and
+        // What it has is a cell.surface. One smooth line that ripples when disturbed and
         // settles flat when left alone, which is a height field: see LiquidSurface.
         val now = SystemClock.elapsedRealtime()
-        val dt = if (chargeStepAt == 0L) 0f else (now - chargeStepAt) / 1000f
-        chargeStepAt = now
+        val dt = if (cell.stepAt == 0L) 0f else (now - cell.stepAt) / 1000f
+        cell.stepAt = now
 
         val (rawX, rawY) = ChargeOverlay.gravity(gravityPanelX(), gravityPanelY())
         // THE DRAWN DOWN LAGS THE MEASURED ONE, on purpose.
@@ -3662,20 +3749,19 @@ class RearDialView(context: Context) : View(context) {
         // surface tilts through every angle in between, which is the liquid going round
         // the glass rather than reappearing somewhere else.
         val want = Math.atan2(rawX.toDouble(), rawY.toDouble()).toFloat()
-        chargeDown =
-            if (chargeStepAt == 0L || dt <= 0f) want
-            else ChargeOverlay.turnToward(chargeDown, want, dt, ChargeOverlay.TURN_RATE)
-        val downX = Math.sin(chargeDown.toDouble()).toFloat()
-        val downY = Math.cos(chargeDown.toDouble()).toFloat()
-        surface.step(dt, downX, downY)
+        cell.down =
+            if (cell.stepAt == 0L || dt <= 0f) want
+            else ChargeOverlay.turnToward(cell.down, want, dt, ChargeOverlay.TURN_RATE)
+        val downX = Math.sin(cell.down.toDouble()).toFloat()
+        val downY = Math.cos(cell.down.toDouble()).toFloat()
+        cell.surface.step(dt, downX, downY)
 
-        val fill = ChargeOverlay.fill(elapsed, chargeLevel)
         // A knock as the level passes each tenth, so the arriving liquid disturbs the
         // surface instead of the level sliding up under a sheet of glass.
         val tenth = (fill * 10f).toInt()
-        if (tenth != chargeTenth) {
-            chargeTenth = tenth
-            surface.splash(0.35f + 0.3f * ((tenth * 7) % 10) / 10f, ChargeOverlay.SPLASH)
+        if (tenth != cell.tenth) {
+            cell.tenth = tenth
+            cell.surface.splash(0.35f + 0.3f * ((tenth * 7) % 10) / 10f, ChargeOverlay.SPLASH)
         }
 
         canvas.save()
@@ -3698,9 +3784,9 @@ class RearDialView(context: Context) : View(context) {
         val level = (0.5f - fill) * depth
 
         val body = android.graphics.Path()
-        for (i in 0 until surface.size) {
-            val u = (i / (surface.size - 1f) - 0.5f) * span
-            val d = level + surface.heightAt(i)
+        for (i in 0 until cell.surface.size) {
+            val u = (i / (cell.surface.size - 1f) - 0.5f) * span
+            val d = level + cell.surface.heightAt(i)
             val px = cx + acrossX * u + downX * d
             val py = cy + acrossY * u + downY * d
             if (i == 0) body.moveTo(px, py) else body.lineTo(px, py)
@@ -3720,8 +3806,9 @@ class RearDialView(context: Context) : View(context) {
 
         noticePaint.style = Paint.Style.FILL
         noticePaint.shader = null
-        noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_LIQUID_ALPHA shl 24)
+        noticePaint.color = (tint and 0x00FFFFFF) or (liquidAlpha shl 24)
         canvas.drawPath(body, noticePaint)
+        inside?.invoke(canvas, body)
 
         // The meniscus. A liquid's surface catches the light, and a brighter line along
         // it is most of what separates "filled shape" from "something with a top".
@@ -3736,9 +3823,9 @@ class RearDialView(context: Context) : View(context) {
             noticePaint.strokeWidth = CHARGE_SURFACE
             noticePaint.color = (tint and 0x00FFFFFF) or (CHARGE_MENISCUS shl 24)
             val skin = android.graphics.Path()
-            for (i in 0 until surface.size) {
-                val u = (i / (surface.size - 1f) - 0.5f) * span
-                val d = level + surface.heightAt(i)
+            for (i in 0 until cell.surface.size) {
+                val u = (i / (cell.surface.size - 1f) - 0.5f) * span
+                val d = level + cell.surface.heightAt(i)
                 val px = cx + acrossX * u + downX * d
                 val py = cy + acrossY * u + downY * d
                 if (i == 0) skin.moveTo(px, py) else skin.lineTo(px, py)
@@ -3757,12 +3844,12 @@ class RearDialView(context: Context) : View(context) {
         // CLIPPED TO THE LIQUID, which is the whole of why it works. The glow stops
         // exactly where the liquid does, so it lights the stuff rather than being painted
         // over it — and above the surface there is nothing to light, correctly.
-        surge.update(elapsed, fill)
-        if (surge.size > 0) {
+        if (surgeAt != null) cell.surge.update(surgeAt, fill)
+        if (surgeAt != null && cell.surge.size > 0) {
             canvas.save()
             canvas.clipPath(body)
-            surge.forEach { flash ->
-                val b = surge.brightness(flash, elapsed)
+            cell.surge.forEach { flash ->
+                val b = cell.surge.brightness(flash, surgeAt)
                 if (b <= 0.01f) return@forEach
                 // Placed in the LIQUID's frame — across the surface and down into the
                 // depth — so a flash stays where it is in the water while the water turns.
@@ -3821,7 +3908,7 @@ class RearDialView(context: Context) : View(context) {
         if (!paned) {
             vinylPaint.style = Paint.Style.STROKE
             vinylPaint.strokeWidth = CHARGE_RIM
-            vinylPaint.color = (tint and 0x00FFFFFF) or (CHARGE_RIM_ALPHA shl 24)
+            vinylPaint.color = (tint and 0x00FFFFFF) or (rimAlpha shl 24)
             canvas.drawRoundRect(left, top, right, bottom, r, r, vinylPaint)
             vinylPaint.style = Paint.Style.FILL
         }
@@ -3838,8 +3925,11 @@ class RearDialView(context: Context) : View(context) {
         //
         // The height comes from the surface's own midpoint, so it follows the liquid
         // exactly — including when the phone is turned and the level tilts.
-        val text = Math.round(fill * 100f).toString() + "%"
-        val figureRight = left - ChargeOverlay.FIGURE_GAP
+        val text = figure
+        // Beside the glass: on its left for the charging cell, which sits at the right
+        // edge; on its right for the control centre's, which sits at the left. Named for
+        // the charging cell's side; it is the edge the figure is anchored by either way.
+        val figureRight = if (figureOnRight) right + ChargeOverlay.FIGURE_GAP else left - ChargeOverlay.FIGURE_GAP
         // Clamped to the cell's own span. An empty cell puts the surface at the very top
         // and a full one at the very bottom, and a figure centred on either would hang
         // half off the panel — which is where the reading matters most.
@@ -3851,8 +3941,8 @@ class RearDialView(context: Context) : View(context) {
         val figurePaint = if (glassFigure) chargeFigure else extras
         figurePaint.textSize = (right - left) * ChargeOverlay.TEXT_SIZE
         val was = figurePaint.textAlign
-        figurePaint.textAlign = Paint.Align.RIGHT
-        figurePaint.color = tint
+        figurePaint.textAlign = if (figureOnRight) Paint.Align.LEFT else Paint.Align.RIGHT
+        figurePaint.color = figureTint
 
         // MADE OF GLASS, if there is a panel behind it to bend. Type is nearly all edge,
         // so it takes a distance field of its own rather than the rounded-rect arithmetic
@@ -3860,17 +3950,36 @@ class RearDialView(context: Context) : View(context) {
         // GROWN FROM THE CELL'S EDGE, which is where it is anchored anyway: the figure's
         // right edge is a fixed gap from the cell, and the cell's own slide is already in
         // that number, so scaling about that point makes the two arrive as one object.
-        val grow = ChargeOverlay.figureScale(elapsed)
         if (grow > 0.01f) {
-            canvas.save()
-            canvas.scale(grow, grow, figureRight, figureY)
-            if (!glassFigure || !drawSdfText(canvas, text, figurePaint, figureRight, figureY)) {
-                val m = figurePaint.fontMetrics
-                canvas.drawText(
-                    text, figureRight, figureY - (m.ascent + m.descent) / 2f, figurePaint,
-                )
+            fun drawFigure(color: Int) {
+                figurePaint.color = color
+                canvas.save()
+                canvas.scale(grow, grow, figureRight, figureY)
+                // The glass figure is placed by its right edge whichever side it is on.
+                val sdfRight = if (figureOnRight) figureRight + figurePaint.measureText(text) else figureRight
+                if (!glassFigure || !drawSdfText(canvas, text, figurePaint, sdfRight, figureY)) {
+                    val m = figurePaint.fontMetrics
+                    canvas.drawText(
+                        text, figureRight, figureY - (m.ascent + m.descent) / 2f, figurePaint,
+                    )
+                }
+                canvas.restore()
             }
+            // Clear of everything: as it is. Over a shape: turned over as far as that shape
+            // asks — its colour inverted, its opacity kept — so it stays legible on a filled
+            // tile of its own colour and unchanged on an empty one.
+            canvas.save()
+            figureOver.forEach { (shape, _) -> canvas.clipOutPath(shape) }
+            drawFigure(figureTint)
             canvas.restore()
+            figureOver.forEach { (shape, turn) ->
+                canvas.save()
+                canvas.clipPath(shape)
+                val inverted = (figureTint and 0xFF000000.toInt()) or (figureTint.inv() and 0x00FFFFFF)
+                val rgb = RampColor.lerp(figureTint, inverted, turn.coerceIn(0f, 1f)) and 0x00FFFFFF
+                drawFigure((figureTint and 0xFF000000.toInt()) or rgb)
+                canvas.restore()
+            }
         }
         figurePaint.textAlign = was
         extras.textSize = typed(18f)
@@ -4513,6 +4622,8 @@ class RearDialView(context: Context) : View(context) {
             displayAwake = true
         }
         if (!interactive) return false
+        // The control centre, when it is open or being pulled: it has the whole surface.
+        if (controlCenterTouch(event)) return true
         // LOCKED MEANS LOCKED. Every other target on this panel is skipped entirely —
         // not tested and rejected, never reached — so there is no path by which a
         // pocket can press play, change the volume or turn the page. The slider is the
@@ -4570,6 +4681,8 @@ class RearDialView(context: Context) : View(context) {
                 // All three are armed on the way down; which one gets the gesture is
                 // decided on the first move that clears the slop.
                 pager.onDown(event.y, android.os.SystemClock.uptimeMillis())
+                gestureVx = 0f; gestureVy = 0f
+                gestureLastX = event.x; gestureLastY = event.y; gestureLastAt = android.os.SystemClock.uptimeMillis()
                 // WHERE THE WHEEL OWNS THE AXIS. A wheel and a pager both want a vertical
                 // drag, and on this page they are inches apart — so the card decides. A
                 // finger that lands on the notifications is scrolling them; anywhere else
@@ -4589,6 +4702,7 @@ class RearDialView(context: Context) : View(context) {
                 hit || pager.enabled() || onVolume || onScrub || onWheel || onReveal
             }
             android.view.MotionEvent.ACTION_MOVE -> {
+                trackGesture(event.x, event.y)
                 val dxTravel = Math.abs(event.x - downX)
                 val dyTravel = Math.abs(event.y - downY)
                 if (drag == Drag.UNDECIDED && maxOf(dxTravel, dyTravel) >= DRAG_SLOP) {
@@ -4661,6 +4775,8 @@ class RearDialView(context: Context) : View(context) {
                         true
                     }
                     Drag.UNDECIDED -> hit
+                    // The control centre's: handled before this, never reached here.
+                    Drag.CC, Drag.BRIGHT -> true
                 }
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
@@ -4696,8 +4812,19 @@ class RearDialView(context: Context) : View(context) {
                     // whole of the snap.
                     onWheel = false
                     wheelFrom = noticeWheelAt
-                    wheelTo = Math.round(noticeWheelAt).toFloat()
-                        .coerceIn(0f, (shownHistory().size - 1).toFloat())
+                    // In cards a millisecond: a drag up moves on through them.
+                    val (_, vy) = releaseVelocity()
+                    val v = -vy / NOTICE_H
+                    // A flick goes on to the next card that way, whatever the distance.
+                    val ahead = when {
+                        v > WHEEL_FLING -> Math.floor(noticeWheelAt.toDouble()).toFloat() + 1f
+                        v < -WHEEL_FLING -> Math.ceil(noticeWheelAt.toDouble()).toFloat() - 1f
+                        else -> Math.round(noticeWheelAt).toFloat()
+                    }
+                    wheelTo = ahead.coerceIn(0f, (shownHistory().size - 1).toFloat())
+                    val toward = if (wheelTo > wheelFrom) v else -v
+                    wheelCarried = toward > 0f
+                    wheelMs = Glide.ms(Math.abs(wheelTo - wheelFrom), if (wheelCarried) toward else 0f, GLIDE_MIN_MS, PAGE_SETTLE_MS)
                     wheelSettleAt = frameNowMs
                     wheelSettling = wheelTo != wheelFrom
                     pager.onUp(android.os.SystemClock.uptimeMillis())
@@ -5128,6 +5255,9 @@ class RearDialView(context: Context) : View(context) {
             arrival.settleTo?.let { to ->
                 wheelFrom = noticeWheelAt
                 wheelTo = to
+                // No finger behind this one: the ordinary ease, the ordinary time.
+                wheelCarried = false
+                wheelMs = PAGE_SETTLE_MS
                 wheelSettleAt = SystemClock.uptimeMillis()
                 wheelSettling = true
             }
@@ -5738,7 +5868,7 @@ class RearDialView(context: Context) : View(context) {
      * Decided at the moment the slop is crossed and then not revisited, because a gesture
      * that changes its mind halfway does both things badly.
      */
-    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, REVEAL, DISMISS }
+    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, REVEAL, DISMISS, CC, BRIGHT }
 
     private var drag = Drag.UNDECIDED
     private var downX = 0f
@@ -6031,6 +6161,8 @@ class RearDialView(context: Context) : View(context) {
      * and comes back every time somebody messages you.
      */
     fun lock() {
+        // Nothing stays open over a lock.
+        closeControlCenterNow()
         // THE REAL CLOCK, NOT THE FRAME CLOCK. frameNowMs is the last frame the panel
         // DREW, and a panel that has been dozing has not drawn for as long as it slept —
         // so stamping the lock with it dated the lock minutes into the past, the grace
@@ -9050,8 +9182,8 @@ class RearDialView(context: Context) : View(context) {
         // pages since it was written; this borrows the same duration so a wheel and a page
         // let go of a finger the same way.
         if (wheelSettling) {
-            val t = ((frameNowMs - wheelSettleAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
-            noticeWheelAt = wheelFrom + (wheelTo - wheelFrom) * Tween.easeInOut(t)
+            val t = ((frameNowMs - wheelSettleAt) / wheelMs).coerceIn(0f, 1f)
+            noticeWheelAt = wheelFrom + (wheelTo - wheelFrom) * Glide.curve(t, wheelCarried)
             if (t >= 1f) {
                 wheelSettling = false
                 noticeWheelAt = wheelTo
@@ -9217,8 +9349,541 @@ class RearDialView(context: Context) : View(context) {
     private var wheelTo = 0f
     private var wheelSettleAt = 0L
 
+    /** How long the wheel's settle takes, and whether it carries on from a finger. See Glide. */
+    private var wheelMs = PAGE_SETTLE_MS
+    private var wheelCarried = false
+
     /** Where the wheel stood when the finger landed, so the drag is relative to it. */
     private var wheelDownAt = 0f
+
+    // ---- the control centre ----
+
+    /** Open, or settling there; the drag's travel while a finger has it. See ControlCenter. */
+    private var ccOpen = false
+    private var ccDy = 0f
+    private var ccFrom = 0f
+    private var ccTo = 0f
+    private var ccAt = 0L
+    /** Whether this gesture belongs to the control centre, and whether it began on the cell. */
+    private var ccGesture = false
+    private var ccOnCell = false
+    private val ccNode = android.graphics.RenderNode("control-centre")
+    private val ccDim = Paint()
+
+    /** The brightness cell: its liquid, its level (0 to 1, -1 until read), whether it can be set. */
+    private val brightCell = LiquidCell()
+    private var brightLevel = -1f
+    private var brightUnavailable = false
+    private var brightFrom = 0f
+    private var brightChangedAt = 0L
+    private var brightSentAt = 0L
+    private var brightGrowFrom = 0f
+    private var brightGrowTo = 0f
+    private var brightGrowAt = 0L
+
+    /** Told when the control centre starts to come down: the brightness is read then. */
+    var onControlCenterOpening: (() -> Unit)? = null
+
+    /** Told the brightness to set, 1 to 255, as the cell is dragged and when it is let go. */
+    var onBrightness: ((Int) -> Unit)? = null
+
+    /** Whether HyperOS sets the brightness itself from the rear light sensor. */
+    private var brightAuto = false
+        set(value) {
+            if (field == value) return
+            autoFrom = autoShownNow(); field = value; autoAt = SystemClock.uptimeMillis()
+        }
+    private var autoFrom = 0f
+    private var autoAt = 0L
+
+    /** The button's colour, 0 off to 1 on, easing between the two over a quarter second. */
+    private fun autoShownNow(): Float {
+        val to = if (brightAuto) 1f else 0f
+        if (autoAt == 0L) return to
+        val t = ((SystemClock.uptimeMillis() - autoAt) / AUTO_FADE_MS).coerceIn(0f, 1f)
+        if (t < 1f) animating = true
+        return autoFrom + (to - autoFrom) * Tween.easeInOut(t)
+    }
+
+    /**
+     * The level the cell shows: the finger's while it drags; otherwise easing to the last
+     * one read, so a new reading — automatic switched on, picking its own — is a pour, not a jump.
+     */
+    private var shownFrom = -1f
+    private var shownAt = 0L
+    private fun brightShown(): Float {
+        val to = brightLevel.coerceAtLeast(ControlCenter.MIN_LEVEL)
+        if (drag == Drag.BRIGHT || shownFrom < 0f) { shownFrom = to; shownAt = 0L; return to }
+        if (shownAt == 0L) return to
+        val t = ((frameNowMs - shownAt) / BRIGHT_POUR_MS).coerceIn(0f, 1f)
+        if (t >= 1f) { shownFrom = to; shownAt = 0L; return to }
+        animating = true
+        return shownFrom + (to - shownFrom) * Tween.easeInOut(t)
+    }
+    private var ccOnButton = false
+
+    // ---- the control centre's switches: silent, Bluetooth, mobile data, Wi-Fi ----
+
+    /** On or off, as last told, and whether the last three can be switched (Shizuku). */
+    private val quickOn = BooleanArray(4)
+    private var quickReachable = false
+    /** Each tile's colour, eased: from, and since when. */
+    private val quickFrom = FloatArray(4)
+    private val quickAt = LongArray(4)
+    private var ccOnTile = -1
+
+    /** Told to switch one: "silent", "bluetooth", "data" or "wifi". */
+    var onQuick: ((String, Boolean) -> Unit)? = null
+
+    /** What the switches are now: silent, Bluetooth, mobile data, Wi-Fi. */
+    fun quickStates(states: BooleanArray, reachable: Boolean) {
+        quickReachable = reachable
+        for (i in 0 until 4) setQuickOn(i, states.getOrElse(i) { false })
+        invalidate()
+    }
+
+    private fun setQuickOn(i: Int, on: Boolean) {
+        if (quickOn[i] == on) return
+        quickFrom[i] = quickShown(i)
+        quickOn[i] = on
+        quickAt[i] = SystemClock.uptimeMillis()
+    }
+
+    /** Tile [i]'s colour, 0 off to 1 on, easing over the button's quarter second. */
+    private fun quickShown(i: Int): Float {
+        val to = if (quickOn[i]) 1f else 0f
+        if (quickAt[i] == 0L) return to
+        val t = ((SystemClock.uptimeMillis() - quickAt[i]) / AUTO_FADE_MS).coerceIn(0f, 1f)
+        if (t < 1f) animating = true
+        return quickFrom[i] + (to - quickFrom[i]) * Tween.easeInOut(t)
+    }
+
+    /**
+     * The four tiles, two by two in the room right of the brightness: one gap between them,
+     * the same to the brightness, the panel's top, right and bottom. Rounded rectangles —
+     * except where a tile meets the screen's own corner, top right and bottom right, which
+     * follow the screen's curve carried inward.
+     */
+    private fun quickTileRect(i: Int, progress: Float): RectF {
+        val g = ChargeOverlay.MARGIN
+        val left = Panel.CUTOUT_RIGHT + ChargeOverlay.MARGIN + ChargeOverlay.width(Panel.WIDTH.toFloat()) + g
+        val right = Panel.WIDTH - g
+        val w = (right - left - g) / 2f
+        val h = (Panel.HEIGHT - 3f * g) / 2f
+        val col = i % 2
+        val row = i / 2
+        val shift = ccShift(progress)
+        val x = left + col * (w + g)
+        val y = g + row * (h + g) + shift
+        return grown(RectF(x, y, x + w, y + h), progress)
+    }
+
+    private fun quickTileShape(i: Int, rect: RectF): android.graphics.Path {
+        val base = minOf(rect.width(), rect.height()) * TILE_CORNER
+        val screen = (cornerRadius() - ChargeOverlay.MARGIN).coerceAtLeast(base)
+        // top-left, top-right, bottom-right, bottom-left — x and y for each.
+        val tr = if (i == 1) screen else base
+        val br = if (i == 3) screen else base
+        return android.graphics.Path().apply {
+            addRoundRect(rect, floatArrayOf(base, base, tr, tr, br, br, base, base), android.graphics.Path.Direction.CW)
+        }
+    }
+
+    private val quickIcons = arrayOf(PanelIcons.SILENT, PanelIcons.BLUETOOTH, PanelIcons.MOBILE_DATA, PanelIcons.WIFI)
+    private val quickNames = arrayOf("silent", "bluetooth", "data", "wifi")
+
+    private fun drawQuickTiles(canvas: Canvas, progress: Float) {
+        for (i in 0 until 4) {
+            val rect = quickTileRect(i, progress)
+            val shape = quickTileShape(i, rect)
+            // Silent is the app's own; the others need Shizuku, and are faint without it.
+            val usable = i == 0 || quickReachable
+            val on = if (usable) quickShown(i) else 0f
+            drawCcButton(canvas, rect, minOf(rect.width(), rect.height()) * TILE_CORNER, shape, on) { c, color ->
+                extras.color = if (usable) color else (color and 0x00FFFFFF) or (0x40 shl 24)
+                val h = minOf(rect.width(), rect.height()) * 0.34f
+                drawIcon(c, quickIcons[i], rect.centerX() - h / 2f, rect.centerY() - h / 2f, h, smooth = config.theme.isGlass)
+            }
+        }
+    }
+
+    /** Told to switch automatic brightness on or off: the round button under the cell. */
+    var onAutoBrightness: ((Boolean) -> Unit)? = null
+
+    /** The rear display's brightness, as read: 1 to 255, or -1 when it cannot be; and whether it is automatic. */
+    fun rearBrightness(value: Int, auto: Boolean = brightAuto) {
+        if (drag != Drag.BRIGHT) brightAuto = auto
+        if (value in 1..255) {
+            if (drag != Drag.BRIGHT) {
+                // From wherever the cell is showing now, to the new reading.
+                val now = if (brightLevel < 0f) -1f else brightShown()
+                brightLevel = ControlCenter.level(value)
+                if (now >= 0f && Math.abs(now - brightLevel) > 0.005f) { shownFrom = now; shownAt = SystemClock.uptimeMillis() }
+            }
+            brightUnavailable = false
+        } else {
+            brightUnavailable = true
+            if (brightLevel < 0f) brightLevel = 0.5f
+        }
+        invalidate()
+    }
+
+    /** How far down it is now: under a finger, settling, or at rest. */
+    private fun controlCenterProgress(): Float {
+        if (drag == Drag.CC) return ControlCenter.progress(ccOpen, ccDy)
+        if (ccAt == 0L) return ccTo
+        val t = ((frameNowMs - ccAt) / ccSettleMs.toFloat()).coerceIn(0f, 1f)
+        if (t < 1f) animating = true
+        // EASED OUT: it leaves at the finger's speed and slows into place — see settleMs.
+        val e = 1f - (1f - t) * (1f - t)
+        return ccFrom + (ccTo - ccFrom) * e
+    }
+
+    /** The finger's speed down the panel, in panel units a millisecond, while it drags. */
+    private var ccVelocity = 0f
+    private var ccLastY = 0f
+    private var ccLastAt = 0L
+    private var ccSettleMs = ControlCenter.SETTLE_MAX_MS
+
+    /** Go [open] from [from], carrying on at [velocity] (down positive) if it was moving that way. */
+    private fun settleControlCenter(open: Boolean, from: Float, velocity: Float = 0f) {
+        ccOpen = open
+        ccFrom = from
+        ccTo = if (open) 1f else 0f
+        val toward = if (open) velocity else -velocity
+        ccSettleMs = ControlCenter.settleMs(Math.abs(ccTo - from) * ControlCenter.TRAVEL, toward)
+        ccAt = SystemClock.uptimeMillis()
+        invalidate()
+    }
+
+    /** Shut at once: a lock, always-on. */
+    private fun closeControlCenterNow() {
+        if (!ccOpen && ccTo == 0f && drag != Drag.CC && drag != Drag.BRIGHT) return
+        ccOpen = false; ccFrom = 0f; ccTo = 0f; ccAt = 0L
+        if (drag == Drag.CC || drag == Drag.BRIGHT) drag = Drag.UNDECIDED
+        ccGesture = false
+        invalidate()
+    }
+
+    /**
+     * The brightness cell where it stands, slid down by [progress]: the charging cell's
+     * width, short of the bottom by the round button under it.
+     */
+    private fun brightCellRect(progress: Float): RectF {
+        val w = ChargeOverlay.width(Panel.WIDTH.toFloat())
+        val left = Panel.CUTOUT_RIGHT + ChargeOverlay.MARGIN
+        val shift = ccShift(progress)
+        val bottom = Panel.HEIGHT - ChargeOverlay.MARGIN - w - CC_BUTTON_GAP
+        return grown(RectF(left, ChargeOverlay.MARGIN + shift, left + w, bottom + shift), progress)
+    }
+
+    /** The automatic-brightness button under the cell: a disc as wide as the cell. */
+    private fun autoButtonRect(progress: Float): RectF {
+        val w = ChargeOverlay.width(Panel.WIDTH.toFloat())
+        val left = Panel.CUTOUT_RIGHT + ChargeOverlay.MARGIN
+        val top = Panel.HEIGHT - ChargeOverlay.MARGIN - w + ccShift(progress)
+        return grown(RectF(left, top, left + w, top + w), progress)
+    }
+
+    /**
+     * [r] grown into its place about its own middle: from CC_GROW_FROM of its size as the
+     * contents start to arrive, to its whole size when they have.
+     */
+    private fun grown(r: RectF, progress: Float): RectF {
+        val g = CC_GROW_FROM + (1f - CC_GROW_FROM) * ccArrival(progress)
+        if (g >= 0.9999f) return r
+        val dx = r.width() * (1f - g) / 2f
+        val dy = r.height() * (1f - g) / 2f
+        return RectF(r.left + dx, r.top + dy, r.right - dx, r.bottom - dy)
+    }
+
+    /**
+     * The control centre's share of the touches: a pull from the edge, a drag up to close,
+     * a drag on the brightness cell. False when it is none of its business.
+     */
+    private fun controlCenterTouch(event: android.view.MotionEvent): Boolean {
+        val now = SystemClock.uptimeMillis()
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                val shown = controlCenterProgress() > 0.01f
+                ccGesture = shown ||
+                    (!locked && !aod && onlyAccount == null && ControlCenter.startsPull(event.x, event.y))
+                if (!ccGesture) return false
+                if (!shown) onControlCenterOpening?.invoke()
+                downX = event.x; downY = event.y
+                drag = Drag.UNDECIDED
+                ccVelocity = 0f; ccLastY = event.y; ccLastAt = now
+                ccOnCell = shown && brightCellRect(1f).contains(event.x, event.y)
+                ccOnButton = shown && autoButtonRect(1f).contains(event.x, event.y)
+                ccOnTile = if (shown) (0 until 4).firstOrNull { quickTileRect(it, 1f).contains(event.x, event.y) } ?: -1 else -1
+                // From wherever a settle had got to.
+                if (shown && ccAt != 0L) { ccOpen = controlCenterProgress() > 0.5f; ccAt = 0L; ccTo = if (ccOpen) 1f else 0f }
+                return true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                if (!ccGesture) return false
+                val dx = event.x - downX
+                val dy = event.y - downY
+                if (drag == Drag.UNDECIDED && maxOf(Math.abs(dx), Math.abs(dy)) >= DRAG_SLOP) {
+                    drag = if (ccOnCell && Math.abs(dy) > Math.abs(dx)) Drag.BRIGHT else Drag.CC
+                    if (drag == Drag.BRIGHT) {
+                        brightFrom = brightLevel.coerceAtLeast(ControlCenter.MIN_LEVEL)
+                        // Set by hand: no longer automatic (the service puts it on manual).
+                        brightAuto = false
+                    }
+                }
+                when (drag) {
+                    Drag.CC -> {
+                        ccDy = dy
+                        // Its speed, smoothed a little, for carrying on after the finger lets go.
+                        val ms = (now - ccLastAt).coerceAtLeast(1L)
+                        if (ccLastAt != 0L) ccVelocity = 0.6f * ((event.y - ccLastY) / ms) + 0.4f * ccVelocity
+                        ccLastY = event.y; ccLastAt = now
+                        invalidate()
+                    }
+                    Drag.BRIGHT -> {
+                        if (!brightUnavailable) {
+                            brightLevel = ControlCenter.drag(brightFrom, dy)
+                            if (now - brightSentAt >= BRIGHT_SEND_MS) {
+                                brightSentAt = now
+                                onBrightness?.invoke(ControlCenter.setting(brightLevel))
+                            }
+                        }
+                        brightChangedAt = now
+                        invalidate()
+                    }
+                    else -> Unit
+                }
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                if (!ccGesture) return false
+                when (drag) {
+                    Drag.CC -> {
+                        val at = ControlCenter.progress(ccOpen, ccDy)
+                        // Let go: past halfway it goes. Taken away (a cancel): it stays as it was.
+                        // A finger that stopped before lifting is not flicking.
+                        val v = if (now - ccLastAt > 80L) 0f else ccVelocity
+                        val open = if (event.actionMasked == android.view.MotionEvent.ACTION_UP) ControlCenter.release(ccOpen, ccDy, v) else ccOpen
+                        drag = Drag.UNDECIDED
+                        ccDy = 0f
+                        settleControlCenter(open, at, v)
+                    }
+                    Drag.BRIGHT -> {
+                        drag = Drag.UNDECIDED
+                        if (!brightUnavailable) onBrightness?.invoke(ControlCenter.setting(brightLevel))
+                        brightChangedAt = now
+                        invalidate()
+                    }
+                    else -> {
+                        // A tap: on the cell it shows the figure; a pull that never moved
+                        // springs back shut.
+                        drag = Drag.UNDECIDED
+                        if (!ccOpen) settleControlCenter(false, controlCenterProgress())
+                        if (ccOnCell) { brightChangedAt = now; invalidate() }
+                        // A tile: its switch, turned now on the panel and then in the phone.
+                        val tile = ccOnTile
+                        if (tile >= 0 && (tile == 0 || quickReachable) && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                            val to = !quickOn[tile]
+                            setQuickOn(tile, to)
+                            onQuick?.invoke(quickNames[tile], to)
+                            invalidate()
+                        }
+                        // The round button: automatic brightness, on or off.
+                        if (ccOnButton && !brightUnavailable && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                            brightAuto = !brightAuto
+                            onAutoBrightness?.invoke(brightAuto)
+                            invalidate()
+                        }
+                    }
+                }
+                ccGesture = false
+                return true
+            }
+        }
+        return ccGesture
+    }
+
+    private val sunPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /**
+     * The automatic-brightness button: a round glass pane with an A on it, bright when
+     * automatic is on and faint when off. Under ORIGINAL a disc, filled when on and only
+     * outlined when off. Drawn here rather than through glassButton, whose glass waits for
+     * a pass of the frame the control centre comes after.
+     */
+    private fun drawAutoButton(canvas: Canvas, rect: RectF) {
+        val r = rect.width() / 2f
+        val shape = android.graphics.Path().apply { addCircle(rect.centerX(), rect.centerY(), r, android.graphics.Path.Direction.CW) }
+        val on = if (brightUnavailable) 0f else autoShownNow()
+        drawCcButton(canvas, rect, r, shape, on) { c, color ->
+            val wasAlign = extras.textAlign
+            val wasSize = extras.textSize
+            extras.textAlign = Paint.Align.CENTER
+            extras.textSize = r * 0.9f
+            extras.color = color
+            val m = extras.fontMetrics
+            c.drawText("A", rect.centerX(), rect.centerY() - (m.ascent + m.descent) / 2f, extras)
+            extras.textAlign = wasAlign
+            extras.textSize = wasSize
+        }
+    }
+
+    /**
+     * One of the control centre's buttons, [on] 0 to 1 (eased). Under GLASS a pane, a white
+     * tint coming in with "on" and its mark from faint to white. Under ORIGINAL a white
+     * outline, and with "on" a white fill coming in and its mark turning to the background's
+     * colour to stand out of it. [mark] draws the mark in the colour it is given.
+     */
+    private fun drawCcButton(
+        canvas: Canvas, rect: RectF, radius: Float, shape: android.graphics.Path, on: Float,
+        mark: (Canvas, Int) -> Unit,
+    ) {
+        val white = 0x00FFFFFF
+        val glassy = config.theme.isGlass && drawGlassPane(canvas, rect, radius, clearReactive(rect), shape = shape)
+        if (glassy) {
+            sunPaint.style = Paint.Style.FILL
+            sunPaint.color = white or ((CHARGE_LIQUID_ALPHA * on).toInt() shl 24)
+            canvas.drawPath(shape, sunPaint)
+            val alpha = Math.round(0x59 + (0xFF - 0x59) * on)
+            mark(canvas, white or (alpha shl 24))
+            return
+        }
+        sunPaint.style = Paint.Style.FILL
+        sunPaint.color = white or ((0xFF * on).toInt().coerceIn(0, 255) shl 24)
+        canvas.drawPath(shape, sunPaint)
+        sunPaint.style = Paint.Style.STROKE
+        sunPaint.strokeWidth = CHARGE_RIM
+        sunPaint.color = 0xFFFFFFFF.toInt()
+        canvas.drawPath(shape, sunPaint)
+        sunPaint.style = Paint.Style.FILL
+        val bg = colorFor("bg", config.background or (0xFF shl 24))
+        mark(canvas, RampColor.lerp(0xFFFFFFFF.toInt(), bg, on))
+    }
+
+    /**
+     * A sun [size] across at ([cx], [cy]): a disc and eight rays, turned [turn] of the way
+     * round, the rays as long as [shine] says — stubs at the dimmest, full at the brightest.
+     */
+    private fun drawSun(canvas: Canvas, cx: Float, cy: Float, size: Float, turn: Float, shine: Float, color: Int) {
+        sunPaint.color = color
+        sunPaint.style = Paint.Style.FILL
+        canvas.drawCircle(cx, cy, size * 0.2f, sunPaint)
+        sunPaint.style = Paint.Style.STROKE
+        sunPaint.strokeWidth = size * 0.08f
+        sunPaint.strokeCap = Paint.Cap.ROUND
+        val inner = size * 0.3f
+        val outer = inner + size * (0.04f + 0.18f * shine.coerceIn(0f, 1f))
+        canvas.save()
+        canvas.rotate(turn * 360f, cx, cy)
+        for (i in 0 until 8) {
+            canvas.drawLine(cx, cy - inner, cx, cy - outer, sunPaint)
+            canvas.rotate(45f, cx, cy)
+        }
+        canvas.restore()
+        sunPaint.style = Paint.Style.FILL
+    }
+
+    /** How far the brightness figure is grown in: in while it changes, out two seconds after. */
+    private fun brightFigureGrow(): Float {
+        val want = if (ControlCenter.figureShown(frameNowMs, brightChangedAt)) 1f else 0f
+        val now = frameNowMs
+        val t0 = ((now - brightGrowAt) / ChargeOverlay.SLIDE_MS).coerceIn(0f, 1f)
+        val current = brightGrowFrom + (brightGrowTo - brightGrowFrom) * Tween.easeInOut(t0)
+        if (want != brightGrowTo) { brightGrowFrom = current; brightGrowTo = want; brightGrowAt = now }
+        val t = ((now - brightGrowAt) / ChargeOverlay.SLIDE_MS).coerceIn(0f, 1f)
+        if (t < 1f || want > 0f) animating = true
+        return brightGrowFrom + (brightGrowTo - brightGrowFrom) * Tween.easeInOut(t)
+    }
+
+    /**
+     * The control centre at [progress]: for now the brightness, as a glass of liquid at the
+     * left of the usable area — the charging cell's glass, white liquid — with its figure on
+     * its right while it is being changed.
+     */
+    /**
+     * How far the contents have arrived, 0 to 1, at a pull of [progress]: nothing until
+     * halfway, then EASED OUT over the rest — quick to show, settling gently — so a push
+     * back up plays the same curve in reverse.
+     */
+    private fun ccArrival(progress: Float): Float {
+        val c = ((progress - CC_FADE_FROM) / (1f - CC_FADE_FROM)).coerceIn(0f, 1f)
+        return 1f - (1f - c) * (1f - c) * (1f - c)
+    }
+
+    /**
+     * How far above its place the control centre's contents are: from a quarter of the
+     * panel — half of the half of the pull they are shown for — to nothing as they arrive.
+     */
+    private fun ccShift(progress: Float): Float = -(1f - ccArrival(progress)) * Panel.HEIGHT * CC_SLIDE * (1f - CC_FADE_FROM)
+
+    private fun drawControlCenter(canvas: Canvas, progress: Float, blurred: Boolean) {
+        animating = true // the liquid moves, and the figure's two seconds need a clock
+        // NOTHING UNTIL HALFWAY, then arriving over the rest — fading in, sliding down and
+        // growing into place, all on one eased curve: a pull that is still deciding shows
+        // only the blur, and the controls come as it commits.
+        val arrival = ccArrival(progress)
+        if (arrival <= 0.004f) return
+        val layer = if (arrival < 0.996f) canvas.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * arrival).toInt()) else -1
+        // Each piece grows about its own middle — see grown — not the lot from one point.
+        try {
+            drawControlCenterContents(canvas, progress, blurred)
+        } finally {
+            if (layer >= 0) canvas.restoreToCount(layer)
+        }
+    }
+
+    private fun drawControlCenterContents(canvas: Canvas, progress: Float, blurred: Boolean) {
+        val rect = brightCellRect(progress)
+        val level = brightShown()
+        val was = paneBackdrop
+        // The glass bends the blurred panel it stands on, not the sharp one under the blur.
+        if (blurred) paneBackdrop = ccNode
+        try {
+            // The switches first, so the brightness figure grows out OVER them.
+            drawAutoButton(canvas, autoButtonRect(progress))
+            drawQuickTiles(canvas, progress)
+            drawLiquidCell(
+                canvas, brightCell, rect.left, rect.top, rect.right, rect.bottom,
+                fill = level,
+                // White liquid, as the charging cell's is see-through, and the figure in
+                // the very colour the liquid shows.
+                tint = 0xFFFFFFFF.toInt(),
+                grow = brightFigureGrow(),
+                figureOnRight = true,
+                // Under ORIGINAL, white outright — liquid, outline, figure; nothing there is
+                // see-through. Under GLASS the liquid is a tint in the glass, and the figure
+                // wears the colour it shows.
+                figureTint = if (config.theme.isGlass) (0x00FFFFFF) or (CHARGE_LIQUID_ALPHA shl 24) else 0xFFFFFFFF.toInt(),
+                liquidAlpha = if (config.theme.isGlass) CHARGE_LIQUID_ALPHA else 0xFF,
+                rimAlpha = if (config.theme.isGlass) CHARGE_RIM_ALPHA else 0xFF,
+                // Where it crosses a tile, its colour turns over as far as the tile is on.
+                figureOver = (0 until 4).map { i ->
+                    val r = quickTileRect(i, progress)
+                    quickTileShape(i, r) to (if (i == 0 || quickReachable) quickShown(i) else 0f)
+                },
+                figure = if (brightUnavailable) "Needs Shizuku" else Math.round(level * 100f).toString() + "%",
+                // THE SUN, in the glass near its foot: half a turn from dimmest to brightest,
+                // its rays lengthening with the level — light above the liquid, and where the
+                // liquid covers it, inverted, so it reads through the water as well as over it.
+                inside = { c, body ->
+                    val size = rect.width() * 0.62f
+                    val cx = rect.centerX()
+                    val cy = rect.bottom - rect.width() * 0.62f
+                    c.save()
+                    c.clipOutPath(body)
+                    drawSun(c, cx, cy, size, level * 0.5f, level, 0xE6FFFFFF.toInt())
+                    c.restore()
+                    c.save()
+                    c.clipPath(body)
+                    drawSun(c, cx, cy, size, level * 0.5f, level, 0xCC000000.toInt())
+                    c.restore()
+                },
+            )
+        } finally {
+            paneBackdrop = was
+        }
+    }
 
     // ---- the cards pulled into view, and one sent away ----
 
@@ -9242,22 +9907,51 @@ class RearDialView(context: Context) : View(context) {
     private fun revealOffset(): Float {
         val h = revealHeight()
         if (drag == Drag.REVEAL) return NoticeReveal.offset(noticesShown, revealDy, h)
-        val t = ((frameNowMs - revealAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        val t = ((frameNowMs - revealAt) / revealMs).coerceIn(0f, 1f)
         if (t < 1f) animating = true
-        return revealFrom + (revealTo - revealFrom) * Tween.easeInOut(t)
+        return revealFrom + (revealTo - revealFrom) * Glide.curve(t, revealCarried)
     }
 
-    /** The finger let go: into view, back up, or springing to where it was. */
+    /** How long the reveal's settle takes, and whether it carries on from a finger. See Glide. */
+    private var revealMs = PAGE_SETTLE_MS
+    private var revealCarried = false
+
+    /** The finger let go: into view, back up, or springing to where it was — at its speed. */
     private fun letGoOfReveal(commit: Boolean) {
         val h = revealHeight()
         val now = NoticeReveal.offset(noticesShown, revealDy, h)
-        if (commit) noticesShown = NoticeReveal.release(noticesShown, revealDy, h)
+        val (_, vy) = releaseVelocity()
+        if (commit) noticesShown = NoticeReveal.release(noticesShown, revealDy, h, vy)
         revealFrom = now
         revealTo = if (noticesShown) h else 0f
+        val toward = if (revealTo > now) vy else -vy
+        revealCarried = commit && toward > 0f
+        revealMs = Glide.ms(Math.abs(revealTo - now), if (revealCarried) toward else 0f, GLIDE_MIN_MS, PAGE_SETTLE_MS)
         revealAt = SystemClock.uptimeMillis()
         revealDy = 0f
         invalidate()
     }
+
+    // ---- the finger's speed, for whatever carries on after it lets go ----
+
+    private var gestureVx = 0f
+    private var gestureVy = 0f
+    private var gestureLastX = 0f
+    private var gestureLastY = 0f
+    private var gestureLastAt = 0L
+
+    /** Smoothed a little: a raw last-two-points speed on a 120 Hz digitiser is mostly noise. */
+    private fun trackGesture(x: Float, y: Float) {
+        val now = SystemClock.uptimeMillis()
+        val ms = (now - gestureLastAt).coerceAtLeast(1L)
+        gestureVx = 0.6f * ((x - gestureLastX) / ms) + 0.4f * gestureVx
+        gestureVy = 0.6f * ((y - gestureLastY) / ms) + 0.4f * gestureVy
+        gestureLastX = x; gestureLastY = y; gestureLastAt = now
+    }
+
+    /** The finger's speed as it lifted, units a millisecond — none if it had stopped first. */
+    private fun releaseVelocity(): Pair<Float, Float> =
+        if (SystemClock.uptimeMillis() - gestureLastAt > 80L) 0f to 0f else gestureVx to gestureVy
 
     /** The Info page is up with its list pulled down: the strip would show its newest card twice. */
     private fun listInView(): Boolean = noticing >= 0.5f && noticesShown
@@ -9305,6 +9999,10 @@ class RearDialView(context: Context) : View(context) {
             leavingD = dismissIndex - noticeWheelAt
             leavingFrom = x
             leavingAt = now
+            // Off the edge at the finger's speed, not stopping first.
+            val (vx, _) = releaseVelocity()
+            leavingCarried = vx > 0f
+            leavingMs = Glide.ms(w - x, vx, GLIDE_MIN_MS, PAGE_SETTLE_MS)
             val index = dismissIndex
             dismissIndex = -1
             removeHistoryAt(index, fromBack = true)
@@ -9320,14 +10018,16 @@ class RearDialView(context: Context) : View(context) {
     private var leavingD = 0f
     private var leavingFrom = 0f
     private var leavingAt = 0L
+    private var leavingMs = PAGE_SETTLE_MS
+    private var leavingCarried = false
 
     /** How far right the leaving card is now; null once it is gone. */
     private fun leavingOffset(): Float? {
         leavingCard ?: return null
-        val t = ((frameNowMs - leavingAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
+        val t = ((frameNowMs - leavingAt) / leavingMs).coerceIn(0f, 1f)
         if (t >= 1f) { leavingCard = null; return null }
         animating = true
-        return leavingFrom + (Panel.WIDTH - leavingFrom) * Tween.easeInOut(t)
+        return leavingFrom + (Panel.WIDTH - leavingFrom) * Glide.curve(t, leavingCarried)
     }
 
     /**
@@ -11463,6 +12163,7 @@ class RearDialView(context: Context) : View(context) {
         shader.setInputShader("ground", live ?: groundShader!!)
         shader.setFloatUniform("size", width.toFloat(), height.toFloat())
         shader.setFloatUniform("mode", if (weatherMode() == Weather.SNOW) 1f else 0f)
+        shader.setFloatUniform("flash", stormFlash())
         shader.setFloatUniform("amount", Weather.AMOUNT)
         setLenses(shader)
         shader.setFloatUniform(
@@ -12832,6 +13533,27 @@ class RearDialView(context: Context) : View(context) {
 
         /** How far a finger travels before the panel decides what the gesture is. */
         private const val DRAG_SLOP = 16f
+        /** The control centre's blur at full, in panel units, and its dim. */
+        private const val CC_BLUR = 22f
+        private const val CC_DIM = 0.25f
+        /** How often a brightness drag writes the setting, at most. */
+        private const val BRIGHT_SEND_MS = 50L
+        /** Between the brightness cell and the round button under it. */
+        private const val CC_BUTTON_GAP = 14f
+        /** The shortest a settle carried on from a finger may take. */
+        private const val GLIDE_MIN_MS = 80f
+        /** A flick through the cards, in cards a millisecond. */
+        private const val WHEEL_FLING = 0.004f
+        /** How long a new brightness reading takes to pour in, and the button's colour to change. */
+        private const val BRIGHT_POUR_MS = 600f
+        private const val AUTO_FADE_MS = 250f
+        /** A tile's corner, as a share of its shorter side: rounded, never a circle. */
+        private const val TILE_CORNER = 0.22f
+        /** The contents slide this share of the pull's travel, and fade in from this far into it. */
+        private const val CC_SLIDE = 0.5f
+        private const val CC_FADE_FROM = 0.5f
+        /** The size the contents grow from into their place. */
+        private const val CC_GROW_FROM = 0.85f
 
         /** The stroke through a muted speaker. */
         /** The waves beside the cone, as fractions of the glyph's height. */
