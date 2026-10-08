@@ -149,7 +149,13 @@ ramp would say the opposite of what a full ring means.
 
 A ring can be pointed at a different window, switched to show **utilisation** instead —
 in which case it *is* a gauge, and takes the ramp like a bar — or set to show **nothing**,
-which empties it and fades it away. A bare lens surround is a legitimate look.
+which empties it. A bare lens surround is a legitimate look; under GLASS the band of glass
+round the lens stays, empty.
+
+**One account alone takes both rings.** With a single account connected, the second ring
+reports on it too, with settings of its own (5-hour utilisation to start — so one ring can
+count down to the reset while the other fills with use). A second account connecting takes
+its ring back, and the second ring's settings wait for when the first is alone again.
 
 **The bars are utilisation**, one row per window:
 
@@ -169,8 +175,8 @@ punched past 100% and settled back would be reporting a number the data never he
 ## Two things the panel can be made of
 
 A theme here is not a palette swap. It changes the face, the icon set and the material,
-and everything on the panel follows it — including the settings screen, so the app you set
-it from looks like the panel you are setting.
+and everything on the panel follows it. (The settings app is glass whichever you pick — see
+[The settings app](#the-settings-app).)
 
 **ORIGINAL** is the panel as it started: Departure Mono, glyphs traced out of a terminal
 font into pixel rectangles, flat fills, hard edges. Everything is drawn as rows of
@@ -216,41 +222,63 @@ right across most of the panel and wrong at the ends: over black there is nothin
 through them and the disc disappears; over a bright photograph they are a hole with a rim.
 They are given a tint *only* where clear glass stops working, and none in the middle.
 
-### The settings screen is glass too
+### Glass settings
 
-Under GLASS the app you set the panel from is made of the same thing the panel is. Behind
-the settings is one baked-in colour, a slate blue-grey, as a soft top-to-bottom gradient —
-a flat colour gives a lens nothing to bend. It used to be the picture you chose for the
-panel's background, centre-cropped onto the front, and that read as a cheap clone of the
-panel rather than a surface of its own. Every section sits on it as a card of glass, drawn
-by the same vendored shaders with the same luminance grid deciding whether its text is
-black or white — on the slate, white.
+Under the Glass / Original choice, **GLASS SETTINGS** opens a lab: your background, a strip
+of black, grey and white under it, a fixed piece of glass on each of the three, and one more
+you can drag anywhere — drawn exactly as the back draws its glass. Three settings, and every
+pane on the back follows them live, the rings round the cameras included:
+
+- **Luminance reactivity** — *None*, *Global* (all the glass answers the whole background's
+  brightness at once) or *Shard* (each pane answers what is right behind it, which is the
+  behaviour described above).
+- **Tint** and **tint intensity** — a colour the glass leans toward, and how far.
+
+### The settings app
+
+The app you set the panel from is always glass, whichever theme the back wears — the theme
+is the back's. Behind it is a moving silk, green (#49701D) at 45°, that the glass bends as it
+moves; the dialogs are frosted glass over a blur of the screen behind them, the switches are
+the liquid-glass toggles from AndroidLiquidGlass's catalog, colours are glass dots, and the
+accent is #E7FF00.
+
+It is laid out around a **bottom bar** — General, Info, Usage, Media and Always-on, Kyant's
+liquid-glass tabs themselves — and each tab shows its own settings and has the preview show
+the page they are for: Info the clock page, Usage the readout, Media the media page,
+Always-on the dim always-on page. Changing tab slides the settings across, the way pages
+turn. The app's icon and name sit above the preview, and the settings scroll up behind it
+through a band that blurs and fades them, instead of stopping at an edge.
+
 The toggles, the choices, the buttons, the sliders, the colour chips and the dialogs are
 ports of the components in AndroidLiquidGlass's catalog app, rebuilt as Views because the
 catalog is Compose and this app is not. The dropdowns became segmented controls, which is
 what the catalog has for a choice.
 
-**ORIGINAL does not change by a pixel.** Every glass control that is declared in the layout
-is an inert twin of the platform widget it replaced until the theme says otherwise, and
-that is tested rather than promised: a suite of tests inflates the layout under ORIGINAL
-and checks that not one of them added a margin, a padding, a background or a drawing.
+**The font is yours too** (General → Font): Outfit, Departure Mono, any font installed on the
+phone, or a font file you import — long-press an imported one to remove it.
 
-Every pane samples the wallpaper, not what is actually beneath it — a toggle inside a card
-sees the picture, not the card. That is deliberate. Nothing reads the screen back, ever:
-the wallpaper is one bitmap built once at the window's size, and its sixteen-by-sixteen
-luminance grid is what every control asks. A still screen costs nothing, because a View
-only redraws when it is invalidated. Scrolling redraws every visible pane over a new slice
-of the picture, so the glass reads as sliding across it; to make that affordable, a card
-refracts only its rim band — the shader passes straight through everywhere else and the
-wallpaper is already painted behind — and a toggle at rest, which is an opaque white pill,
-draws nothing under itself. Measured on the phone with a finger on it, a scroll went from
-a median of 18ms a frame to 14ms after the rim change, which is still more than a 120Hz
-screen allows; the two fixes after that are not measured yet.
+## Backgrounds
 
-Two things to know. The stored background is capped at 1024px on its long edge, which is
-right for the panel and an upscale on the front, so the wallpaper there is softer than the
-panel's — recorded, not fixed. And changing the theme rebuilds the settings screen rather
-than restyling it, because the controls differ in kind.
+The back stands on one of four (General → Background), and switching between them deletes
+nothing — your picture and your video stay, with their settings, ready to switch back to:
+
+- **Color** — a flat ground.
+- **Image** — a photograph, dragged and pinched into the back's own shape in an editor framed
+  at the back's real proportions and corners, with an opacity and the colour behind it.
+- **Video** — a clip you frame the same way, trim on a strip of thumbnails whose handles scrub
+  it, give an opacity and a colour behind, and confirm. The app cuts its own small clip at the
+  back's exact size (HDR turned to normal colour), with a reversed copy beside it for playing
+  backwards, and shows the progress; Cancel leaves everything as it was. Four ways to play:
+  **Linear** (once, on unlock, holding its last frame), **Yoyo** (forward as the panel opens,
+  back to the start when it sleeps), **Loop** and **Ping-pong**. **Ease in** and **Ease out**
+  (0 to 2.5 s) speed it up from slow and slow it into every stop — a run's ends, and every
+  sleep, dim, always-on and wake — with slowed frames blended so slow motion stays smooth. A
+  looping video carries on where it was when the back wakes, even after the screen was off.
+- **Shader** — the silk the settings app stands on. Coming soon; picking it says so.
+
+**Tilt parallax** and **scroll parallax** move a picture, video or shader a little as you tilt
+the phone and as you swipe between pages. Pictures are kept at twice the resolution and clips
+are cut with a margin of real footage, so the movement never enlarges them.
 
 ## A CRT screen, if you want one
 
@@ -312,8 +340,11 @@ Separate warnings fire at half of a limit, then at 90% and every 2% after that.
 
 ## The buttons on the panel
 
-Both are off by default and both are toggles. The panel is otherwise a readout, and a
-surface that reacts to being touched is a surprise unless it was asked for.
+Both are switches, and both live **per page**: the Usage tab has a Camera and a Game for the
+readout's corners, the Info tab its own pair for the clock page, each with its own colour —
+so they show on either page, both, or neither. On both pages a button is one button: as you
+swipe between the two it travels from its place on one to its place on the other, its colour
+blending, instead of scrolling away with the page.
 
 The rear display has **its own touchscreen** — a second digitizer at 904x572 — so a tap
 on the back is a real tap, not a gesture forwarded from the front.
@@ -324,6 +355,10 @@ Opens the system camera on the rear display, which is what turns the main lenses
 selfie camera with a viewfinder you can see. The component and flags are MIUI's own, read
 off a live trace of doing it by hand; the camera app then brings up its own companion UI
 on the front by itself.
+
+**It closes from the back, too**: tap the empty grey band at the camera's left. The first
+time you open it, a tip says so — it opens out of the camera button with the game's ripple,
+over your own background, and lights the place to tap in the accent colour.
 
 Closing the camera returns to the panel. Not an assumption — panel, camera on top, back,
 panel again, measured. It also stops the camera: closing used to take its viewfinder off
@@ -424,6 +459,8 @@ the frame is one even glow, an AGSL shader like the glass. It stays, still, for 
 as the phone lies there, and fades when it is picked up. Gravity tells the panel it is flat; the rear proximity sensor tells it whether
 that is a table or a pocket.
 
+**Locking the front puts the back into always-on**, when it is on, instead of out.
+
 **Always-on display** is the third way to rest. Instead of going dark, the panel settles
 into a dim, frozen page: nothing animates, the backdrop fades to black over a second, and
 the display stays held. A double tap on it raises the unlock slider at once; the swipe
@@ -434,7 +471,8 @@ clear, so it stays. Any wake — a notification, the charger, a double tap — l
 always-on, with the notification's card and slider on top as usual.
 
 Thirty seconds after the last touch the rear display goes dark, unless **Keep panel awake**
-is on. Dark is not dimmed: while it sleeps the panel draws nothing, fetches no reading, and
+is on. Even then, a notification that woke a sleeping back lets it sleep again if nobody
+swipes the slider — a message at three in the morning does not keep it lit until seven. Dark is not dimmed: while it sleeps the panel draws nothing, fetches no reading, and
 asks for no lyric sheet. The poll loop does not check a flag every few seconds and go back
 to sleep — it parks on the panel's own signal and is not scheduled at all until the panel
 says it is visible, so a phone in a pocket overnight costs exactly zero requests and zero
@@ -444,6 +482,37 @@ times a minute asks for nothing extra.
 
 Before this the frame loop was measured at 72% of a core, drawing into a display that
 threw every frame away. A notification or a charger still wakes it, as above.
+
+## The control centre
+
+**Pull down from the very top edge of the back**, over the left half of the screen — just right
+of the cameras — on any page. The panel behind blurs and dims as it comes, and follows the
+finger: past halfway, or with a flick, it opens; short of that it springs back. Drag up
+anywhere to close it. Its contents arrive only once the pull is halfway, each piece fading in,
+sliding down and growing about its own middle on one eased curve. It does not open under the
+slider lock or in always-on, and closes itself if either begins.
+
+- **Brightness** — the charging cell's glass and liquid, at the left, filled to HyperOS's own
+  rear brightness (system `sub_display_screen_brightness`, 1% to 100%). Drag up and down on it
+  to set it. While you do, the percentage grows in beside it, the way the charging figure does,
+  and shrinks away two seconds after you stop; a sun inside the glass turns with the level, its
+  rays lengthening as the back brightens, and inverted where the liquid covers it. A new
+  reading pours in rather than jumping.
+- **A**, under it — HyperOS's automatic rear brightness, from the rear light sensor. The liquid
+  follows the level automatic picks as it picks it: the app watches the setting rather than
+  asking after it. Setting the brightness by hand switches automatic off.
+- **Silent, Bluetooth, mobile data, Wi-Fi** — four tiles to the right, two by two, one gap
+  between them and to everything around them, their outer corners following the screen's own.
+  Silent is the ringer, which the app sets itself (notification access brings Do Not Disturb
+  access with it); the other three go through Shizuku and are faint without it. They follow the
+  phone's own switches as they change.
+
+Under GLASS every piece is a pane bending the blurred panel; under ORIGINAL the liquid, the
+outlines and the figure are solid white, and a switch that is on fills white.
+
+**Every swipe on the back carries on at the finger's speed** when it lets go — the control
+centre, the pages, the notifications' pull, a flicked card, the card list — rather than
+stopping and setting off again, and a flick decides on its own.
 
 ## Media controls
 
@@ -1060,6 +1129,11 @@ readout's own clock and date use. Under ORIGINAL they are the original traced gl
 Under the date, whenever there is a reading to show, is the weather — see [what it is
 actually doing outside](#what-it-is-actually-doing-outside).
 
+**The notifications are hidden until you pull them down**: on this page a swipe down brings
+them in from above, a swipe up off the cards puts them back, and the next swipe up goes to the
+readout — one more step of the page, not a page of their own. Leaving the page hides them
+again. While they are hidden, a new notification shows on the strip here as on any other page.
+
 Under the clock are the **last ten notifications**, on a wheel. The current one is whole
 and in front; its neighbours sit half a card behind it, smaller and faded, and the wheel
 settles on a card the way the pager settles on a page. The ten are kept, so the message
@@ -1067,6 +1141,17 @@ that woke the panel at three in the morning is still there when you look at it a
 the display lit for it and went dark again, but the notification did not leave with it.
 Under ORIGINAL the cards are the original opaque ones; under GLASS they are the same
 glass cards the strip uses, and each reads the panel behind its own place on the wheel.
+
+**Swipe a card right to dismiss it.** It slides off at the speed it was flicked while the
+cards around it glide into the gap, and it is gone from the strip too if it was still up there.
+An empty list says *No notifications* on a band fading from black, which slides away as the
+first card arrives.
+
+**Match the front notifications** (General → Notifications): each card remembers which
+notification it came from, so one cleared on the front — swiped, tapped, cleared, withdrawn by
+its app — leaves the back too, one dismissed on the back is cleared on the front, and whenever
+the relay connects the back drops whatever has left the front in the meantime. An app updating
+a notification replaces its card instead of adding a second.
 
 The small line under a notification is its group's summary — WhatsApp's "3 messages from
 2 chats" — not an older notification pretending to be related. The record sinks to the
@@ -1112,7 +1197,7 @@ averaged into a flat colour, which is coloured type rather than tinted glass.
 
 ## Weather on the glass
 
-A setting, **None, Auto, Rain or Snow**, draws weather on the ground behind everything —
+A setting, **None, Auto, Rain, Storm or Snow**, draws weather on the ground behind everything —
 on the colour or the picture, and in front of nothing, so the readout stays readable and
 the cards bend the weather along with whatever else is behind them.
 
@@ -1130,6 +1215,16 @@ in a cell narrower than the lens; so the panel is folded along the line through 
 centres by the rim's width at each row, the columns part around it, and a straight fall
 comes out on the screen as a curve that hugs the ring. The trail and the wiped path follow,
 because they are drawn along the same route.
+
+Drops and flakes are laid out in square units — the panel's height is one — so they are round;
+laid out on the panel's own 0-to-1 in both directions, every one came out half as wide again
+as it was tall. Still drops land whole at their own size and dry inward to nothing.
+
+**Storm is the rain with lightning**: about every seven seconds, never on a beat, a strike that
+*multiplies* the light — what is bright flares, what is dark stays dark — with a fast,
+wandering flicker that dips a little below the ordinary light between its flashes, the drops
+and the mist flaring with it. After the look of rocksdanister's *Rain* wallpaper, in this
+app's own maths. **Auto** draws Storm for a thunderstorm.
 
 **Snow is dry.** A flake sits on the glass rather than wetting it, so it bends nothing —
 snow that refracted looked like rain that had forgotten how to fall. It is adapted from
@@ -1225,27 +1320,29 @@ drift from what the back of the phone is doing.
 | | |
 |---|---|
 | **Titles** | The masthead — `CLAUDE USAGE` by default — and every account name. All free text; the masthead is a label, not a brand mark. Each is capped at what it can actually draw, measured off the real font rather than guessed, and each field says its own limit. |
-| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the weather line, the battery, the camera and game buttons, the notification strip and its ground. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
-| **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. |
+| **Colours** | Every element carries its own, on the row of the thing it paints rather than in a grid somewhere else: the masthead, the background, the clock, the date, the weather line, the battery, the camera and game buttons (per page), the notification text (and, under ORIGINAL, its ground), and on the media page the playback ring, the volume ring, the buttons, the title, the artist and the lyrics. Plus a per-account **accent** driving that account's ring, heading, row labels and plan tag together, each mascot's body and hardware colour separately, and the ramp stops from mild to spent. (The ghost is the one exception — see above.) |
+| **Layout** | Which bar rows each account shows and in what order, whether it shows a mascot at all, and what each ring reports — which window, and whether it shows time-to-reset, utilisation, or nothing. One account alone has both rings, each with its own. |
 | **Account order** | Reorder the accounts and the rings follow them: ring one belongs to whichever account is first, so there is nothing to keep in step by hand. |
 | **Bottom artwork** | Replace the built-in mark with your own image, dragged and pinched into position within its region — you choose the crop, against a frame at the region's real shape. |
-| **Background picture** | A photograph behind the whole readout, cropped the same way the artwork is. Under GLASS it is also the best thing that has ever been behind a pane — the lenses had almost nothing but flat black to bend until it arrived. |
-| **Extras** | A clock, a date and a battery readout, stacked in the corner with pixel-traced glyphs, each its own toggle and its own colour. |
-| **Background** | One section, three columns: a colour, a picture, and a bin that is live only when there is a picture to empty. They are exclusive — choosing a colour clears the image, because the picture is drawn *over* the ground and would otherwise go on covering whatever you picked. There is no switch for the ground itself: a panel with no ground is the one state that hands the display back to the system's own launcher. |
-| **Theme** | ORIGINAL or GLASS — the face, the glyphs, the material, and the settings screen with it. First in the list, because it is the one setting that changes what every other setting looks like. |
-| **Weather** | None, Auto, Rain or Snow, on the ground behind everything. Auto draws whatever is actually falling where the reading is for, and nothing at all when the sky is dry or there is no reading. |
+| **Background** | Color, Image, Video or Shader — see [Backgrounds](#backgrounds) — with tilt and scroll parallax. |
+| **Time, date, battery** | Twice over: the Info tab's for the clock page (the big clock, the date line, the battery over the clock), the Usage tab's for the readout's corner row — each its own switch and colour. |
+| **Camera, game** | Per page, on the Info and Usage tabs — see [The buttons on the panel](#the-buttons-on-the-panel). |
+| **Theme** | ORIGINAL or GLASS — the face, the glyphs and the material of the back. First in the list, because it is the one setting that changes what every other setting looks like. Under GLASS, **Glass settings** tunes the glass. |
+| **Font** | Outfit, Departure Mono, a font on the phone, or an imported file. |
+| **Notifications** | On or off, the message text, its colours, and **match the front notifications**. |
+| **Weather** | None, Auto, Rain, Storm or Snow, on the ground behind everything. Auto draws whatever is actually falling where the reading is for, and nothing at all when the sky is dry or there is no reading. |
 | **Weather line** | The reading itself, under the date on the page above the readout. A swatch and no switch: the line is there whenever there is a reading, and the two rows below decide whether there is one. It takes the date's colour until it is given one of its own. |
 | **Place** | Where the weather is for. Typed once and resolved once, and the note under the field shows what the geocoder made of it — or `Not found`. |
 | **Use the phone's location** | The reading follows the phone instead, on coarse location that is asked for only when you turn this on. Refuse the prompt and the switch goes back off. |
 | **Keep panel awake** | Off by default: the panel goes dark thirty seconds after you stop touching it and does no work while it is dark. On, it stays lit. |
 | **Always-on display** | Off by default. On, the panel rests dim and frozen instead of dark, raises the slider on a double tap, and sleeps only in a pocket — see [And when nobody is looking](#and-when-nobody-is-looking). |
-| **↳ battery level above the clock** | In always-on only: the battery percentage above the clock, in the clock's ink. |
+| **↳ clock, battery, date, weather line** | Always-on's own: each shown or hidden there, crossing over from the clock page's as always-on comes and goes. |
 | **Accounts** | One or two, each with its own name, colours, and choice of browser sign-in or pasted token. |
 
-Each account gets **its own settings screen**, reached from a row on the main one and
-sliding in over it, with a preview showing just that account's ring and rows. Two
-accounts already made a single screen a long scroll, and the panel is meant to grow past
-two.
+Each account gets **its own page of settings**, reached from its row on the Usage tab: it
+slides in where the tab's settings were, under the same preview, as glass cards — Connection,
+Name & colours, Bars, Rings, Account details — with Back (or the system back) to leave. Two
+accounts already made a single screen a long scroll, and the panel is meant to grow past two.
 
 Colours are chosen on a **saturation/brightness square with a hue strip**, or typed as
 hex, or taken from the panel's own palette. Every colour change eases in over 1.8s
