@@ -137,4 +137,32 @@ class PanelPagerTest {
         // take the full page duration to travel twenty units.
         assertEquals(0f, near.advance(200L), 0.01f)
     }
+
+    /**
+     * Let go mid-swipe, the page carries on at the finger's speed — it does not stop and
+     * start again. A finger moving at 1 unit a millisecond, released 300 units short: the
+     * first 16 ms of the settle cover about 16 units, not the near-nothing an ease-in gives.
+     */
+    @Test fun `a release carries on at the finger's speed`() {
+        val p = pager()
+        p.onDown(500f, 0L)
+        var y = 500f
+        var t = 0L
+        while (y > 230f) { y -= 16f; t += 16L; p.onMove(y, t) }
+        p.onUp(t)
+        val start = p.advance(t)
+        val step = p.advance(t + 16L) - start
+        assertTrue("moved $step in the first frame", step > 10f)
+        assertEquals(span, p.advance(t + 10_000L), 0.01f)
+    }
+
+    /** A finger that stopped before lifting carries nothing on. */
+    @Test fun `a finger that stopped before lifting does not fling`() {
+        val p = pager()
+        p.onDown(500f, 0L)
+        p.onMove(420f, 16L)
+        p.onMove(400f, 32L)
+        p.onUp(400L)
+        assertEquals(0f, p.advance(10_000L), 0.01f)
+    }
 }

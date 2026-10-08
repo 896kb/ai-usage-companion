@@ -13,11 +13,19 @@ object NoticeReveal {
     fun offset(shown: Boolean, dy: Float, height: Float): Float =
         ((if (shown) height else 0f) + dy).coerceIn(0f, height)
 
-    /** Whether they are in view after a drag of [dy]. */
-    fun release(shown: Boolean, dy: Float, height: Float): Boolean = when {
+    /**
+     * Whether they are in view after a drag of [dy]; a flick ([velocity], units a
+     * millisecond, down positive) goes the way it was flicked whatever the distance.
+     */
+    fun release(shown: Boolean, dy: Float, height: Float, velocity: Float = 0f): Boolean = when {
+        velocity > FLING -> true
+        velocity < -FLING -> false
         !shown -> dy > height * GO
         else -> dy > -height * GO
     }
+
+    /** A flick, in units a millisecond. */
+    const val FLING = 0.6f
 
     fun dismissOffset(dx: Float, width: Float): Float = dx.coerceIn(0f, width)
 

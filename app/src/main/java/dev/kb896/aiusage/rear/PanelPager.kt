@@ -114,6 +114,9 @@ internal class PanelPager(
     fun onUp(nowMs: Long) {
         if (!dragging) return
         dragging = false
+        // A finger that stopped before it lifted is not moving any more, whatever its last
+        // samples said.
+        if (nowMs - lastMs > STALE_MS) velocity = 0f
         val at = offset / span
         val settled = Math.round(downOffset / span)
         // A flick decides on its own, whatever distance it covered. This is what makes a
@@ -127,7 +130,12 @@ internal class PanelPager(
             settled - at > COMMIT -> settled - 1
             else -> settled
         }
-        moveTo(target.coerceIn(0, pages - 1).toFloat() * span, nowMs)
+        val dest = target.coerceIn(0, pages - 1).toFloat() * span
+        moveTo(dest, nowMs)
+        // CARRYING ON, not starting over: heading where the finger was already going, the
+        // settle leaves at the finger's speed and slows into place (see advance).
+        val toward = if (dest > offset) velocity else -velocity
+        carry = if (toward > 0f) toward else 0f
     }
 
     /** Go to a page directly, with the same easing a release uses. */
@@ -157,7 +165,11 @@ internal class PanelPager(
     /** A fixed length for the move under way, 0 for the usual per-page pace. */
     private var overMs = 0f
 
+    /** The finger's speed toward the target when it let go, units a millisecond; 0 for none. */
+    private var carry = 0f
+
     private fun moveTo(target: Float, nowMs: Long, fixedMs: Float = 0f) {
+        carry = 0f
         from = offset
         to = target
         startMs = nowMs
@@ -175,14 +187,22 @@ internal class PanelPager(
     fun advance(nowMs: Long): Float {
         if (dragging || !settling) return offset
         val distance = Math.abs(to - from) / span
-        val duration = if (overMs > 0f) overMs else (settleMs * distance).coerceAtLeast(MIN_SETTLE_MS)
+        // Carried on from a finger: eased OUT, which starts at twice its average speed, so
+        // a duration of twice the distance over the finger's speed starts it at that speed.
+        val carried = carry > 0f && overMs <= 0f
+        val duration = when {
+            overMs > 0f -> overMs
+            carried -> (2f * Math.abs(to - from) / carry).coerceIn(MIN_SETTLE_MS, maxOf(MIN_SETTLE_MS, settleMs * distance))
+            else -> (settleMs * distance).coerceAtLeast(MIN_SETTLE_MS)
+        }
         val t = (nowMs - startMs) / duration
         if (t >= 1f) {
             offset = to
             settling = false
             return offset
         }
-        offset = from + (to - from) * Tween.easeInOut(t.coerceIn(0f, 1f))
+        val u = t.coerceIn(0f, 1f)
+        offset = from + (to - from) * (if (carried) 1f - (1f - u) * (1f - u) else Tween.easeInOut(u))
         return offset
     }
 
@@ -201,6 +221,8 @@ internal class PanelPager(
         const val COMMIT = 0.33f
 
         const val VELOCITY_BLEND = 0.4f
+        /** A finger still this long before lifting has stopped. */
+        const val STALE_MS = 80L
         const val MIN_SETTLE_MS = 90f
     }
 }

@@ -43,4 +43,9 @@ class NoticeRevealTest {
         assertEquals(80f, NoticeReveal.dismissOffset(dx = 80f, width = w), 0f)
         assertEquals(0f, NoticeReveal.dismissOffset(dx = -80f, width = w), 0f)
     }
+
+    @Test fun `a flick decides whatever the distance`() {
+        assertTrue(NoticeReveal.release(shown = false, dy = 10f, height = h, velocity = 1f))
+        assertFalse(NoticeReveal.release(shown = true, dy = -10f, height = h, velocity = -1f))
+    }
 }
