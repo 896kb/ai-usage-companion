@@ -1,5 +1,7 @@
 # Claude usage, on the back of the phone
 
+**English** · [简体中文](README.zh-CN.md)
+
 Your Claude Code rate limits, live on the rear display of the Xiaomi 17 Pro and Pro Max — so
 you can see how much of your window is left without unlocking anything, opening anything, or
 asking.
@@ -1300,12 +1302,12 @@ one and a second behind it. A fetch that fails keeps the last reading, because a
 beats a blank line — but only so far: anything older than **two hours** is dropped rather
 than shown, by the line and by Auto both. A two-hour-old sky is a guess dressed as a fact.
 
-**Auto**, the fourth answer on the Weather row, hands the choice to the real weather: rain,
-drizzle, showers and thunderstorms bring the rain, snow brings the snow, and everything else
-leaves the pane dry. With no reading, or one that has aged out, it draws nothing — a guess
-about the sky is worse than a dry pane. It is the only one of the four that can turn itself
-off, which is the whole of the difference: None, Rain and Snow are decisions about the
-panel, and Auto is a decision about the weather.
+**Auto**, the second answer on the Weather row, hands the choice to the real weather: rain,
+drizzle and showers bring the rain, a thunderstorm brings the storm, snow brings the snow, and
+everything else leaves the pane dry. With no reading, or one that has aged out, it draws
+nothing — a guess about the sky is worse than a dry pane. It is the only one of the five that
+can turn itself off, which is the whole of the difference: None, Rain, Storm and Snow are
+decisions about the panel, and Auto is a decision about the weather.
 
 In a debug build the demo carries a reading of its own — a fixed 12° of rain for `Somewhere`
 — so the line and the rain are both in the filmed loop with no network behind them.
