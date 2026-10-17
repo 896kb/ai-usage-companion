@@ -510,7 +510,19 @@ class RearUserService : IRearService.Stub {
     override fun removeXiaomiRearApp(): Boolean {
         val out = exec("pm uninstall -k --user 0 ${Panel.XIAOMI_REAR_APP}")
         Log.i(TAG, "remove ${Panel.XIAOMI_REAR_APP}: $out")
-        return out.contains("Success")
+        if (out.contains("Success")) return true
+        // HyperOS 4 (Android 17) refuses that from shell: "only root can delete system app
+        // for a particular user", and `pm disable-user` is refused too ("Cannot disable
+        // system packages"). Suspending is still allowed, and a suspended rear-screen app
+        // cannot bring its launcher up — measured: the lit rear display then shows nothing
+        // of Xiaomi's but its two invisible gesture strips. Its launcher may already be up,
+        // and suspension does not take down what is running, so it is stopped as well.
+        // restoreXiaomiRearApp() already lifts a suspension.
+        val suspended = exec("pm suspend --user 0 ${Panel.XIAOMI_REAR_APP}")
+        Log.i(TAG, "suspend ${Panel.XIAOMI_REAR_APP}: $suspended")
+        if (!suspended.contains("suspended state: true")) return false
+        exec("am force-stop ${Panel.XIAOMI_REAR_APP}")
+        return true
     }
 
     override fun restoreXiaomiRearApp(): Boolean {

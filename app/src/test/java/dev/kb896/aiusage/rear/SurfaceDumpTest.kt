@@ -68,6 +68,47 @@ class SurfaceDumpTest {
         assertEquals(Where.NOWHERE, SurfaceDump.where(dump) { it == maxRear })
     }
 
+    // Android 17 (HyperOS 4) heads a section "Display <id> HWC layers (top to bottom):"
+    // and no longer says whether the display is active; an unlit display's section is
+    // empty. Layer names gained a "VRI-" prefix. Shapes from the 17 Pro on OS4.0.4.0.
+    private fun section17(id: String, vararg layers: String) = buildString {
+        appendLine("Display $id HWC layers (top to bottom):")
+        appendLine(rule)
+        appendLine(" Layer name")
+        appendLine("           Z |  Window Type |  Layer Class | Comp Type |  Transform |   Disp Frame (LTRB)")
+        appendLine(rule)
+        for (layer in layers) {
+            appendLine(" $layer")
+            appendLine("          17 |            1 |            0 |     DEVICE |          0 |    0    0  904  572")
+            appendLine(rule)
+        }
+        appendLine()
+    }
+
+    private val panel17 = "VRI-dev.kb896.aiusage/dev.kb896.aiusage.rear.RearActivity#3105"
+    private val gestures17 = arrayOf("VRI-SubScreenGestureHome#525", "VRI-SubScreenGestureBack#524")
+    private val settings17 = "VRI-com.android.settings/com.android.settings.MainSettings#3097"
+
+    @Test fun `android 17 - the panel on the rear display is on the rear`() {
+        val dump = section17(proMain, settings17) + section17(proRear, *gestures17, panel17)
+        assertEquals(Where.REAR, SurfaceDump.where(dump) { it == proRear })
+    }
+
+    @Test fun `android 17 - the panel on the front display is on the main`() {
+        val dump = section17(proMain, panel17, settings17) + section17(proRear)
+        assertEquals(Where.MAIN, SurfaceDump.where(dump) { it == proRear })
+    }
+
+    @Test fun `android 17 - a lit rear display without the panel has it displaced`() {
+        val dump = section17(proMain, settings17) + section17(proRear, *gestures17)
+        assertEquals(Where.DISPLACED, SurfaceDump.where(dump) { it == proRear })
+    }
+
+    @Test fun `android 17 - an unlit rear display, listing nothing, is the panel asleep`() {
+        val dump = section17(proMain, settings17) + section17(proRear)
+        assertEquals(Where.NOWHERE, SurfaceDump.where(dump) { it == proRear })
+    }
+
     @Test fun `a dump with no HWC sections is nowhere`() {
         assertEquals(Where.NOWHERE, SurfaceDump.where("") { it == maxRear })
         assertEquals(Where.NOWHERE, SurfaceDump.where("SurfaceFlinger is busy") { it == maxRear })

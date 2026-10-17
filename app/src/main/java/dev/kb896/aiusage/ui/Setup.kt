@@ -59,9 +59,15 @@ object Setup {
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 
     /**
-     * Whether HyperOS's rear-screen app is installed for this user: true if it is, false
-     * if it has been hidden with `pm uninstall --user 0`, null if this phone has no such
-     * app at all — in which case there is nothing to offer.
+     * Whether HyperOS's rear-screen app is in the panel's way for this user: true if it is
+     * installed and free to run, false if it has been hidden with `pm uninstall --user 0`
+     * or suspended, null if this phone has no such app at all — in which case there is
+     * nothing to offer.
+     *
+     * Suspended counts as out of the way because on HyperOS 4 (Android 17) that is all
+     * shell may do: uninstalling a system app for one user is refused there ("only root
+     * can delete system app for a particular user"), and so is disabling it. A suspended
+     * rear-screen app cannot bring its launcher up, which is the whole point.
      */
     fun xiaomiRearAppInstalled(context: Context): Boolean? {
         val pm = context.packageManager
@@ -71,7 +77,9 @@ object Setup {
         }.isSuccess
         if (!onPhone) return null
         @Suppress("DEPRECATION")
-        return runCatching { pm.getApplicationInfo(Panel.XIAOMI_REAR_APP, 0) }.isSuccess
+        val info = runCatching { pm.getApplicationInfo(Panel.XIAOMI_REAR_APP, 0) }.getOrNull()
+            ?: return false
+        return info.flags and android.content.pm.ApplicationInfo.FLAG_SUSPENDED == 0
     }
 
     fun steps(context: Context, shizukuGranted: Boolean, shizukuRunning: Boolean): List<Step> =
@@ -195,7 +203,8 @@ object Setup {
         allDone(steps(context, status.granted, status.running)) && !shownByXiaomi(context)
 
     /**
-     * Whether Xiaomi's rear-screen app is in the way: installed, on a phone that has it.
+     * Whether Xiaomi's rear-screen app is in the way: installed and not suspended, on a
+     * phone that has it.
      * The panel cannot stay on the back against it, so this is the show/hide switch —
      * "Show on the back" removes it, "Hide" brings it back and the panel goes.
      */

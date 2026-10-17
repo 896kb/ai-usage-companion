@@ -51,7 +51,19 @@ object SurfaceDump {
         NOWHERE,
     }
 
-    private val header = Regex("""Display (\d+) \((active|inactive)\) HWC layers:""")
+    /**
+     * A section's header, in either of the two shapes seen on this phone:
+     *
+     *     Display <id> (active) HWC layers:            HyperOS 3, Android 16
+     *     Display <id> HWC layers (top to bottom):     HyperOS 4, Android 17
+     *
+     * The second no longer says whether the display is active. There, an unlit display's
+     * section lists nothing at all, so a section that lists anything is taken as lit —
+     * measured on the 17 Pro on OS4.0.4.0, rear display off and on.
+     */
+    private val header = Regex(
+        """Display (\d+) (?:\((active|inactive)\) HWC layers:|HWC layers \(top to bottom\):)""",
+    )
 
     /**
      * A layer name line in a HWC section: a window name ending in `#<id>`.
@@ -70,7 +82,7 @@ object SurfaceDump {
      * is not the rear one — see the comment on the return.
      */
     fun where(dump: String, isRear: (physicalId: String) -> Boolean): Where {
-        if (!dump.contains("HWC layers:")) return Where.NOWHERE
+        if (!dump.contains("HWC layers")) return Where.NOWHERE
 
         val matches = header.findAll(dump).toList()
         if (matches.isEmpty()) return Where.NOWHERE
@@ -90,8 +102,12 @@ object SurfaceDump {
             val section = dump.substring(start, end)
             val rear = isRear(m.groupValues[1])
             if (rear) {
-                if (m.groupValues[2] == "active") rearActive = true
-                if (layerName.containsMatchIn(section)) rearBusy = true
+                val busy = layerName.containsMatchIn(section)
+                if (busy) rearBusy = true
+                // No word on it in the newer header: listing anything is being lit.
+                if (m.groupValues[2] == "active" || (m.groupValues[2].isEmpty() && busy)) {
+                    rearActive = true
+                }
             }
             if (!section.contains("RearActivity")) continue
             if (rear) onRear = true else onMain = true

@@ -41,4 +41,19 @@ class SetupXiaomiRearAppTest {
         assertTrue(Setup.shownByXiaomi(context))
         assertEquals(false, Setup.panelAllowed(context, dev.kb896.aiusage.rear.ShizukuBridge.Status(running = true, granted = true, rearDisplayId = 1)))
     }
+
+    @Test
+    fun `a suspended app is out of the way, so the panel may go on the back`() {
+        // HyperOS 4 (Android 17) lets shell only suspend a system app, not uninstall it
+        // for one user — so suspended is the state the panel gets there.
+        shadowOf(context.packageManager).installPackage(PackageInfo().apply {
+            packageName = Panel.XIAOMI_REAR_APP
+            applicationInfo = ApplicationInfo().apply {
+                packageName = Panel.XIAOMI_REAR_APP
+                flags = ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_SUSPENDED
+            }
+        })
+        assertEquals(false, Setup.xiaomiRearAppInstalled(context))
+        assertEquals(false, Setup.shownByXiaomi(context))
+    }
 }
