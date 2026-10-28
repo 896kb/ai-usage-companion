@@ -14,8 +14,11 @@ package dev.kb896.aiusage.rear
 object SurfacePlace {
 
     private val stackLine = Regex("""^\s*LayerStack=(\d+)\s*$""")
-    private val layerLine = Regex("""^\s*Layer \[\d+] (.*)$""")
-    private val boundsLine = Regex("""^\s*bounds=\{(-?\d+),(-?\d+),(-?\d+),(-?\d+)}""")
+    // Every ] and } escaped: Android's regex is ICU's, which refuses a bare } (the JVM's, in the
+    // tests, does not) — this object then failed to initialise on the phone, and every check
+    // with it threw ("before the reveal: null").
+    private val layerLine = Regex("""^\s*Layer \[\d+\] (.*)$""")
+    private val boundsLine = Regex("""^\s*bounds=\{(-?\d+),(-?\d+),(-?\d+),(-?\d+)\}""")
 
     /** The left edge of [pkg]'s widest window composed on [layerStack], or null when none is read. */
     fun left(dump: String, layerStack: Int, pkg: String): Int? {
