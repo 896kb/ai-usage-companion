@@ -936,9 +936,11 @@ class RearUserService : IRearService.Stub {
             // The rear as it is, over everything (GuestCover), before anything on it moves:
             // the old guest's leaving, the density's change and the new app's first frames
             // happen under it. Not on a rear asleep, nor for the same app again. The frame
-            // is in the picture, so the live one goes; it comes back after the reveal.
+            // (one guest to the next) is left out of the picture, and the live one stays up
+            // over it the whole way; where it could not be left out, it is in the picture,
+            // and the live one fades out as it goes and back in after the reveal.
             val cover = if (first && arriving && !dozing) coverRear(displayId) else null
-            if (cover != null) frame.hide()
+            if (cover != null && !cover.frameLeftOut) frame.hide()
             if (first && old != null) moveToDisplay(old.task, 0)
             guest = Guest(pkg, task, onTop = false)
             // Before the move, so it lands laid out once at its own DPI (see syncDensity).
@@ -953,7 +955,8 @@ class RearUserService : IRearService.Stub {
             // buttons from the first frame (they used to come in when it was placed).
             guest = Guest(pkg, task, onTop = true, landed = true)
             syncSheetGuest()
-            // Covered: revealed once it has drawn, and the frame with it — never before it.
+            // Covered: revealed once it has drawn, and the frame faded in after it (still up
+            // from the guest before, it stays) — never before the app.
             if (cover != null) {
                 reveal(cover, pkg, task, displayId)
                 if (guest?.let { it.task == task && it.onTop } == true) frame.show()
@@ -987,8 +990,9 @@ class RearUserService : IRearService.Stub {
      */
     private fun coverRear(displayId: Int): GuestCover? {
         val at = android.os.SystemClock.uptimeMillis()
-        return GuestCover.up(coverStack, displayId) { screencapRear() }
-            ?.also { Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms") }
+        return GuestCover.up(coverStack, displayId, frame.currentLayer) { screencapRear() }
+            ?.also { Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms" +
+                if (it.frameLeftOut) ", the frame left out" else "") }
     }
 
     /** The rear by the `screencap` command, for a cover where the in-process capture is missing; null if it cannot be had. */
