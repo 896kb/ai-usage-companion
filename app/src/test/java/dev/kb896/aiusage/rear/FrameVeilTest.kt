@@ -55,4 +55,23 @@ class FrameVeilTest {
         v.sheet(0f)
         assertEquals(0.6f, v.veil(), 0f)
     }
+
+    @Test fun `the control centre over a guest hides it as the sheet does, whichever is further open`() {
+        val v = FrameVeil()
+        v.controlCenter(0.6f); assertEquals(0.6f, v.veil(), 0f)
+        v.sheet(0.2f); assertEquals(0.6f, v.veil(), 0f)
+        // One shutting does not bring the frame back while the other is still open.
+        v.sheet(0f); v.controlCenter(1f); assertEquals(1f, v.veil(), 0f)
+        v.controlCenter(0f); assertEquals(0f, v.veil(), 0f)
+    }
+
+    @Test fun `a frame hidden while the control centre is open stays down as it shuts`() {
+        val v = FrameVeil()
+        v.controlCenter(1f)
+        v.hidden()
+        v.controlCenter(0f)
+        assertEquals(1f, v.veil(), 0f)
+        v.shown()
+        assertEquals(0f, v.veil(), 0f)
+    }
 }

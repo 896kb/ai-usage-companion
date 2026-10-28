@@ -12,22 +12,32 @@ package dev.kb896.aiusage.rear
  * shuts; a frame then [hidden] keeps it until it is [shown] again; a choice that left it up
  * is [release]d at once.
  *
- * [sheet] is written by the sheet's render thread (volatile, no lock); the rest is
- * PortalFrame's, under its lock. [alpha] is the frame layer's alpha.
+ * THE CONTROL CENTRE over a guest hides it the same way ([controlCenter]), as far as it is
+ * pulled down; the two are never open together, and the veil is whichever is further open.
+ *
+ * [sheet] and [controlCenter] are written by their render threads (volatile, no lock); the
+ * rest is PortalFrame's, under its lock. [alpha] is the frame layer's alpha.
  */
 class FrameVeil {
 
     @Volatile private var open = 0f
+    @Volatile private var centre = 0f
     private var latched = 0f
 
     /** How far the sheet is open now, 0 to 1. Any thread. */
     fun sheet(progress: Float) { open = progress.coerceIn(0f, 1f) }
 
+    /** How far the control centre over a guest is open now, 0 to 1. Any thread. */
+    fun controlCenter(progress: Float) { centre = progress.coerceIn(0f, 1f) }
+
+    /** Whichever of the two is further open. */
+    private fun opened(): Float = maxOf(open, centre)
+
     /** A choice is on its way: the veil goes no lower until it is done. */
-    fun hold() { latched = maxOf(latched, open) }
+    fun hold() { latched = maxOf(latched, opened()) }
 
     /** The frame is fading out: the veil goes no lower while it does. */
-    fun hidden() { latched = maxOf(latched, open) }
+    fun hidden() { latched = maxOf(latched, opened()) }
 
     /** The frame is wanted again: only the sheet hides it. */
     fun shown() { latched = 0f }
@@ -36,7 +46,7 @@ class FrameVeil {
     fun release(stillShown: Boolean) { if (stillShown) latched = 0f }
 
     /** How much of the frame the sheet hides now. */
-    fun veil(): Float = maxOf(open, latched)
+    fun veil(): Float = maxOf(opened(), latched)
 
     companion object {
         /** The frame layer's alpha: [full] (PortalFrame.ALPHA) times its fade's [level], less what the sheet hides. */

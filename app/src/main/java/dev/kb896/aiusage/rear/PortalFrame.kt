@@ -99,6 +99,9 @@ class PortalFrame(private val layerStack: Int) {
     /** How far the portal sheet is open, 0 to 1 (PortalSheet.progress). Any thread; no lock, no wakeup. */
     fun sheetOpen(progress: Float) = veil.sheet(progress)
 
+    /** How far the control centre over a guest is open, 0 to 1 (FrameVeil.controlCenter). Any thread; no lock. */
+    fun controlCenterOpen(progress: Float) = veil.controlCenter(progress)
+
     /** A sheet button's choice is coming: the frame stays as hidden as the sheet has it while the sheet shuts (FrameVeil.hold). */
     @Synchronized
     fun holdVeil() = veil.hold()
