@@ -59,14 +59,34 @@ class DensityStartTest {
     }
 
     @Test fun `a garbled marker is ignored`() {
-        for (m in listOf("", "abc", "300", "300,", ",380", "300,abc", "300,380,1")) {
+        for (m in listOf("", "abc", "300", "300,", ",380", "300,abc", "300,380,1", "+300,-", "300+,-", "300++310,-")) {
             assertEquals(m, DensityDump.Start(300, false), DensityDump.start(300, m))
         }
     }
 
     @Test fun `the marker round-trips`() {
-        assertEquals(DensityDump.Marker(300, 380), DensityDump.parseMarker(DensityDump.marker(300, 380)))
-        assertEquals(DensityDump.Marker(300, null), DensityDump.parseMarker(DensityDump.marker(300, null)))
+        assertEquals(DensityDump.Marker(setOf(300), 380), DensityDump.parseMarker(DensityDump.marker(300, 380)))
+        assertEquals(DensityDump.Marker(setOf(300), null), DensityDump.parseMarker(DensityDump.marker(300, null)))
         assertEquals("300,-", DensityDump.marker(300, null))
+    }
+
+    @Test fun `a change between ours lists both`() {
+        assertEquals("300+310,380", DensityDump.marker(310, 380, from = 300))
+        assertEquals("310,380", DensityDump.marker(310, 380, from = 310))
+        assertEquals("310,380", DensityDump.marker(310, 380, from = null))
+        assertEquals(DensityDump.Marker(setOf(300, 310), 380), DensityDump.parseMarker("300+310,380"))
+    }
+
+    @Test fun `killed mid-change - the old override is still ours`() {
+        assertEquals(DensityDump.Start(380, true), DensityDump.start(300, "300+310,380"))
+    }
+
+    @Test fun `killed mid-change - the new override is ours`() {
+        assertEquals(DensityDump.Start(380, true), DensityDump.start(310, "300+310,380"))
+        assertEquals(DensityDump.Start(null, true), DensityDump.start(310, "300+310,-"))
+    }
+
+    @Test fun `mid-change marker but somebody else's override is the baseline`() {
+        assertEquals(DensityDump.Start(420, false), DensityDump.start(420, "300+310,380"))
     }
 }

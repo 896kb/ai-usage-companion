@@ -11,7 +11,7 @@ class RearDensityTest {
         assertNull(RearDensity.target(null, true, dpi))
     }
 
-    @Test fun `a guest behind the panel means the display default`() {
+    @Test fun `a guest no longer live means the display default`() {
         assertNull(RearDensity.target("a.app", false, dpi))
     }
 
@@ -19,7 +19,7 @@ class RearDensityTest {
         assertNull(RearDensity.target("c.app", true, dpi))
     }
 
-    @Test fun `the guest on top gets its own clamped density`() {
+    @Test fun `a live guest gets its own clamped density`() {
         assertEquals(320, RearDensity.target("a.app", true, dpi))
         assertEquals(600, RearDensity.target("b.app", true, dpi))
     }

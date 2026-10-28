@@ -644,12 +644,21 @@ class RearUserService : IRearService.Stub {
      * on display 1. For that, a marker `<applied>,<baseline or ->` goes into the global
      * setting [DENSITY_MARKER] BEFORE each override of ours and is deleted once the
      * baseline is back; the next service's first read calls the override it finds ours
-     * only if it equals the marker's applied value ([DensityDump.start]), and then restores
-     * the marker's baseline instead of keeping ours as the display's own.
+     * only if the marker lists it ([DensityDump.start]), and then restores the marker's
+     * baseline instead of keeping ours as the display's own. A change from one of ours to
+     * another lists both (`300+310,380`) until it has taken.
+     *
+     * A command that was refused (non-zero exit, an error printed) is known not to have
+     * happened, and the marker is put back. One that was interrupted or never started may
+     * or may not have happened: the marker is left as written — it covers both outcomes —
+     * and [densityKnown] goes false, so the next call reads `wm density` again before it
+     * trusts [currentDensity].
      */
     private val densityLock = Any()
     /** Whether display 1's density has been read yet (once per service). Under [densityLock]. */
     private var densityRead = false
+    /** False after a command whose outcome is unknown: [currentDensity] is re-read first. Under [densityLock]. */
+    private var densityKnown = true
     /** Display 1's own override as first found (null = none): what comes back. Under [densityLock]. */
     private var baselineDensity: Int? = null
     /** The override on display 1 now, as far as this service knows. Under [densityLock]. */
@@ -676,66 +685,86 @@ class RearUserService : IRearService.Stub {
     /**
      * Under [densityLock]. [guestDpi] null = the baseline. Nothing is changed until the
      * first read has worked: without it the baseline is unknown, and guessing it is how an
-     * override that is not ours gets wiped. A refused or failed command leaves
+     * override that is not ours gets wiped. A command that did not take leaves
      * [currentDensity] as it was, so the next call retries.
      */
     private fun applyDensity(guestDpi: Int?, why: String) {
         if (!readDensity()) return
-        val wanted = guestDpi ?: baselineDensity
-        if (wanted == currentDensity) return
-        val ours = wanted != null && wanted != baselineDensity
-        // The marker first: a service killed between the two then finds a marker that does
-        // not match the override, and keeps that override as the display's own — right.
-        if (ours && execChecked("settings put global $DENSITY_MARKER ${DensityDump.marker(wanted!!, baselineDensity)}") == null) {
-            densityRefused(wanted, why, "the marker could not be written")
-            return
+        if (!densityKnown) {
+            val d = (execChecked("wm density -d ${Panel.DISPLAY_ID}") as? Run.Ok)?.let { DensityDump.parse(it.out) }
+            if (d?.physical == null) return
+            currentDensity = d.override
+            densityKnown = true
+            Log.i(TAG, "density: display ${Panel.DISPLAY_ID} re-read after an unfinished change — ${d.override ?: "no override"}")
         }
-        val out = execChecked(
+        val wanted = guestDpi ?: baselineDensity
+        val cur = currentDensity
+        if (wanted == cur) return
+        val ours = wanted != null && wanted != baselineDensity
+        val curOurs = cur != null && cur != baselineDensity
+        // The marker first: a service killed between the two finds an override the marker
+        // lists either way. From one of ours to another it lists both, until this takes.
+        if (ours) {
+            val put = execChecked("settings put global $DENSITY_MARKER ${DensityDump.marker(wanted!!, baselineDensity, from = if (curOurs) cur else null)}")
+            if (put !is Run.Ok) { densityFailed(put, wanted, why, "the marker"); return }
+        }
+        val run = execChecked(
             if (wanted != null) "wm density $wanted -d ${Panel.DISPLAY_ID}"
             else "wm density reset -d ${Panel.DISPLAY_ID}"
         )
-        if (out == null || out.contains("Exception", ignoreCase = true) || out.contains("Error", ignoreCase = true)) {
-            densityRefused(wanted, why, out?.take(200) ?: "the command failed")
-            // The marker back to what is really there.
-            val cur = currentDensity
-            if (ours) execChecked(
-                if (cur != null && cur != baselineDensity) "settings put global $DENSITY_MARKER ${DensityDump.marker(cur, baselineDensity)}"
+        if (run !is Run.Ok) {
+            densityFailed(run, wanted, why, "the change")
+            // Refused, so known not to have happened: the marker back to what is really
+            // there. Unknown, it stays as written — it covers both outcomes.
+            if (run is Run.Refused && ours) execChecked(
+                if (curOurs) "settings put global $DENSITY_MARKER ${DensityDump.marker(cur!!, baselineDensity)}"
                 else "settings delete global $DENSITY_MARKER"
             )
             return
         }
         currentDensity = wanted
         refusedDensity = null
-        // After the restore, never before: killed in between, the marker still matches.
+        // After the change, never before: killed in between, the marker still covers it.
         if (!ours) execChecked("settings delete global $DENSITY_MARKER")
+        else if (curOurs) execChecked("settings put global $DENSITY_MARKER ${DensityDump.marker(wanted!!, baselineDensity)}")
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} at " +
             (if (ours) "$wanted dpi" else "its own ${wanted ?: physicalDensity} dpi") + " — $why")
     }
 
-    private fun densityRefused(wanted: Int?, why: String, detail: String) {
+    /** A step that did not take: logged once per target; an unknown outcome is re-read next time. */
+    private fun densityFailed(run: Run, wanted: Int?, why: String, step: String) {
+        if (run is Run.Unknown) densityKnown = false
         val key = wanted?.toString() ?: "reset"
         if (refusedDensity == key) return
         refusedDensity = key
-        Log.w(TAG, "density: $key refused — $why: $detail")
+        val detail = when (run) {
+            is Run.Refused -> "refused: ${run.out.take(200)}"
+            else -> "did not finish (interrupted or never started) — re-read next time"
+        }
+        Log.w(TAG, "density: $key — $step $detail — $why")
     }
 
     /** The first read: display 1's override and our marker, once. Under [densityLock]. */
     private fun readDensity(): Boolean {
         if (densityRead) return true
         val dump = execChecked("wm density -d ${Panel.DISPLAY_ID}")
-        val d = dump?.let { DensityDump.parse(it) }
-        if (d?.physical == null) {
-            if (refusedDensity != "read") { refusedDensity = "read"; Log.w(TAG, "density: display ${Panel.DISPLAY_ID} unreadable — leaving it alone: $dump") }
+        val d = (dump as? Run.Ok)?.let { DensityDump.parse(it.out) }
+        val marker = if (d?.physical != null) execChecked("settings get global $DENSITY_MARKER") as? Run.Ok else null
+        if (d?.physical == null || marker == null) {
+            if (refusedDensity != "read") {
+                refusedDensity = "read"
+                Log.w(TAG, "density: display ${Panel.DISPLAY_ID} unreadable — leaving it alone: $dump")
+            }
             return false
         }
-        val marker = execChecked("settings get global $DENSITY_MARKER") ?: return false
-        val start = DensityDump.start(d.override, marker)
+        val start = DensityDump.start(d.override, marker.out)
         densityRead = true
+        densityKnown = true
         refusedDensity = null
         physicalDensity = d.physical
         baselineDensity = start.baseline
         currentDensity = d.override
-        if (!start.ours && DensityDump.parseMarker(marker) != null) execChecked("settings delete global $DENSITY_MARKER")
+        if (!start.ours && DensityDump.parseMarker(marker.out) != null) execChecked("settings delete global $DENSITY_MARKER")
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} is ${d.physical} dpi" +
             (d.override?.let { if (start.ours) ", still at our $it from a service that died — restoring" else ", its own override $it kept" } ?: ""))
         return true
@@ -1279,18 +1308,30 @@ class RearUserService : IRearService.Stub {
         return !failed
     }
 
-    /**
-     * [exec] for where a failure must not pass for success: null when the command could not
-     * run, was interrupted, or exited non-zero.
-     */
-    private fun execChecked(cmd: String): String? = try {
+    /** What a checked command came to. */
+    private sealed interface Run {
+        /** Ran, exit 0, no error printed. */
+        data class Ok(val out: String) : Run
+        /** Ran and said no: non-zero exit, or an error / exception printed. Known not to have happened. */
+        data class Refused(val out: String) : Run
+        /** Interrupted, or never started: it may or may not have happened. */
+        data object Unknown : Run
+    }
+
+    /** [exec] for where a failure must not pass for success, and refused must not pass for unknown. */
+    private fun execChecked(cmd: String): Run = try {
         val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
-        val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }
-        if (p.waitFor() == 0) out.trim() else { Log.w(TAG, "exit ${p.exitValue()}: $cmd: ${out.trim().take(200)}"); null }
+        val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }.trim()
+        val code = p.waitFor()
+        if (code != 0 || out.contains("Exception", ignoreCase = true) || out.contains("Error", ignoreCase = true)) {
+            Log.w(TAG, "exit $code: $cmd: ${out.take(200)}")
+            Run.Refused(out)
+        } else Run.Ok(out)
     } catch (e: InterruptedException) {
-        Thread.currentThread().interrupt(); null
+        // Kept, as in exec(), so the keep-alive's next sleep sees it and ends.
+        Thread.currentThread().interrupt(); Run.Unknown
     } catch (e: Exception) {
-        Log.e(TAG, "exec failed: $cmd", e); null
+        Log.e(TAG, "exec failed: $cmd", e); Run.Unknown
     }
 
     private fun exec(cmd: String): String = try {

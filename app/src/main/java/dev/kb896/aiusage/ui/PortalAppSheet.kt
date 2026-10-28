@@ -42,7 +42,7 @@ object PortalAppSheet {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(activity, 20), dp(activity, 4), dp(activity, 20), 0)
         }
-        SettingsRows.note(column, "Density of the back while ${label.trim()} is on top. Other times it keeps its own.")
+        SettingsRows.note(column, "Density of the back while ${label.trim()} is open there. Other times it keeps its own.")
         SettingsRows.slider(
             column,
             max = (RearDensity.MAX - RearDensity.MIN) / RearDensity.STEP,
