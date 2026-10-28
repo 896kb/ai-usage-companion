@@ -562,6 +562,30 @@
 
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/tab_portal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_portal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/portal_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        </LinearLayout>
+
         </FrameLayout>
 
         </LinearLayout>

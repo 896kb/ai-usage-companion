@@ -309,6 +309,8 @@ class MainActivity : ComponentActivity() {
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_usage, "Usage"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_media, "Media"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_aod, "Always-on"),
+            // Last, so the saved indices of the tabs before it stay where they were.
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_portal, "Portal"),
         )
         bar.setContent {
             dev.kb896.aiusage.ui.liquid.SettingsTabBar(
@@ -408,7 +410,7 @@ class MainActivity : ComponentActivity() {
      * showing just appears. A change mid-slide finishes the slide in flight at once.
      */
     private fun showTab(i: Int) {
-        val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod)
+        val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod, R.id.tab_portal)
         val prev = shownTab
         shownTab = i
         // An account page open over Usage leaves with the tab, as Usage would.
@@ -438,6 +440,7 @@ class MainActivity : ComponentActivity() {
             TAB_INFO -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
             TAB_MEDIA -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_MEDIA, aod = false)
             TAB_AOD -> preview.show(null, aod = true)
+            TAB_PORTAL -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
             TAB_USAGE -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_READOUT, aod = false)
             // General is about the whole panel: its top page, the clock's — as the Info tab
             // shows it, rather than whatever the back is doing (always-on, as often as not).
@@ -996,12 +999,14 @@ class MainActivity : ComponentActivity() {
         val clockRows = findViewById<LinearLayout>(R.id.clock_rows)
         val mediaRows = findViewById<LinearLayout>(R.id.media_rows)
         val aodRows = findViewById<LinearLayout>(R.id.aod_rows)
+        val portalRows = findViewById<LinearLayout>(R.id.portal_rows)
         container.removeAllViews()
         advanced.removeAllViews()
         generalRows.removeAllViews()
         clockRows.removeAllViews()
         mediaRows.removeAllViews()
         aodRows.removeAllViews()
+        portalRows.removeAllViews()
         // A newer release, found by the two-hourly check: a row at the top with its notes,
         // there until this build is that version. The notification says it once; this
         // says it every time the screen is opened. See UpdateCheck.
@@ -1321,8 +1326,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         // APP PORTAL: other apps on the back, opened from a pull up from the bottom edge.
-        SettingsRows.note(generalRows, "App Portal — pull up from the bottom of the back to open apps there")
-        SettingsRows.navigation(generalRows, "Apps in the portal (${config.portalApps.size})") {
+        SettingsRows.note(portalRows, "Pull up from the bottom of the back to open apps there. A swipe in from the right edge is the app's Back.")
+        SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") {
             AppPicker.show(this, config.portalApps) { pinned ->
                 write { it.copy(portalApps = pinned) }
                 buildSettingsRows()
@@ -1333,7 +1338,7 @@ class MainActivity : ComponentActivity() {
             val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
                 .getOrDefault(pkg)
             SettingsRows.reorderable(
-                generalRows, "  $label", canMoveUp = i > 0,
+                portalRows, "  $label", canMoveUp = i > 0,
                 onMoveUp = { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) }; buildSettingsRows() },
                 onClick = {
                     Modal.show(
@@ -1348,7 +1353,7 @@ class MainActivity : ComponentActivity() {
                 },
             )
         }
-        SettingsRows.colorRow(generalRows, "Portal frame colour", config.portalFrameColor) { c ->
+        SettingsRows.colorRow(portalRows, "Portal frame colour", config.portalFrameColor) { c ->
             write { it.copy(portalFrameColor = c) }
         }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
@@ -2253,6 +2258,7 @@ class MainActivity : ComponentActivity() {
         private const val TAB_USAGE = 2
         private const val TAB_MEDIA = 3
         private const val TAB_AOD = 4
+        private const val TAB_PORTAL = 5
         /** How long a change of tab slides its sections. */
         private const val TAB_SLIDE_MS = 320L
 

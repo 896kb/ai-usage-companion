@@ -95,7 +95,7 @@ fun SettingsTabBar(
             scale = SCALE,
             modifier = Modifier
                 .padding(bottom = 10.dp)
-                .fillMaxWidth(SCALE),
+                .fillMaxWidth(if (tabs.size > 5) SCALE + 0.16f else SCALE), // six tabs need the room: "Always-on" must not clip
         ) {
             tabs.forEachIndexed { i, tab ->
                 LiquidBottomTab(onClick = { onSelect(i) }) {
