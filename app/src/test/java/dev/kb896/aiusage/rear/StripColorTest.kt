@@ -47,4 +47,20 @@ class StripColorTest {
         assertEquals(black, e.at(black, 1_000 + StripColor.EASE_MS))
         assertTrue(e.settled(1_000 + StripColor.EASE_MS))
     }
+    @Test fun `samples come quickly until the colour has held a few times, then slowly`() {
+        val p = StripColor.Pace()
+        assertEquals(StripColor.FAST_MS, p.next(changed = true))
+        repeat(StripColor.STABLE - 1) { assertEquals(StripColor.FAST_MS, p.next(changed = false)) }
+        assertEquals(StripColor.SLOW_MS, p.next(changed = false))
+        assertEquals(StripColor.SLOW_MS, p.next(changed = false))
+        // A new colour: quick again.
+        assertEquals(StripColor.FAST_MS, p.next(changed = true))
+    }
+
+    @Test fun `a touch or a new guest makes it quick again`() {
+        val p = StripColor.Pace()
+        repeat(StripColor.STABLE + 2) { p.next(changed = false) }
+        p.poke()
+        assertEquals(StripColor.FAST_MS, p.next(changed = false))
+    }
 }

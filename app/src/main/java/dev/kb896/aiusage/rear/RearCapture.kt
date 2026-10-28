@@ -33,13 +33,40 @@ internal object RearCapture {
 
     /**
      * IWindowManager.captureDisplay([displayId], args leaving [leaveOut] out and cropped to
-     * [crop], a synchronous listener), by reflection: null when the window manager answers
+     * [crop] (and scaled by [scaleY] down its height: fewer rows to make and read), a
+     * synchronous listener), by reflection: null when the window manager answers
      * with no picture; throws when the calls are not there or are refused. Args that cannot
      * be built, or a capture refused with them (a layer released meanwhile cannot be sent),
      * are dropped for the default ones — then the layers are in the picture, [Shot.leftOut]
      * false, and a crop is lost too: the caller checks the buffer's size.
      */
-    fun capture(displayId: Int, leaveOut: List<SurfaceControl>, crop: Rect? = null): Shot? {
+    fun capture(displayId: Int, leaveOut: List<SurfaceControl>, crop: Rect? = null, scaleY: Float = 1f): Shot? = try {
+        captureOnce(displayId, leaveOut, crop, scaleY)
+    } catch (e: Throwable) {
+        // The first capture in this process failed on the phone with "ApplicationSharedMemory
+        // not initialized" (Android 16's shared-memory caches, never set up in app_process);
+        // the ones after it worked. So once more, at once.
+        val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+        if (cause is IllegalStateException && cause.message?.contains("ApplicationSharedMemory") == true) {
+            Log.i(TAG, "rear capture: ${cause.message} — once more")
+            captureOnce(displayId, leaveOut, crop, scaleY)
+        } else throw e
+    }
+
+    /**
+     * One throwaway capture, a pixel's worth, so the first that matters (a guest's cover) is
+     * neither the one that trips over the process's first-use failure nor a screencap's
+     * 387 ms. Once per process; quiet.
+     */
+    fun warm(displayId: Int) {
+        if (warmed) return
+        warmed = true
+        runCatching { capture(displayId, emptyList(), Rect(0, 0, 1, 1))?.buffer?.close() }
+            .onFailure { Log.i(TAG, "rear capture: warm-up failed (${(it.cause ?: it).message})") }
+    }
+    @Volatile private var warmed = false
+
+    private fun captureOnce(displayId: Int, leaveOut: List<SurfaceControl>, crop: Rect?, scaleY: Float): Shot? {
         val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)
             ?: return null
         val iwm = Class.forName("android.view.IWindowManager")
@@ -53,8 +80,8 @@ internal object RearCapture {
                 call = iwm.getMethod("captureDisplay", Int::class.javaPrimitiveType, argsType, listenerType)
                 makeListener = Class.forName(name).getMethod("createSyncCaptureListener")
             } catch (e: ReflectiveOperationException) { missing = e; continue }
-            val args = if (leaveOut.isEmpty() && crop == null) null else
-                runCatching { args(name, leaveOut, crop) }
+            val args = if (leaveOut.isEmpty() && crop == null && scaleY == 1f) null else
+                runCatching { args(name, leaveOut, crop, scaleY) }
                     .onFailure { once("no capture args (${(it.cause ?: it).message}); our layers stay in the picture") }
                     .getOrNull()
             var listener = makeListener.invoke(null) ?: return null
@@ -79,7 +106,7 @@ internal object RearCapture {
     }
 
     /** [name]'s CaptureArgs leaving [layers] out and cropped to [crop] (CaptureArgs.Builder), by reflection. */
-    private fun args(name: String, layers: List<SurfaceControl>, crop: Rect?): Any {
+    private fun args(name: String, layers: List<SurfaceControl>, crop: Rect?, scaleY: Float): Any {
         val builder = Class.forName("$name\$CaptureArgs\$Builder").getDeclaredConstructor().newInstance()
         val cls = builder.javaClass
         if (layers.isNotEmpty()) {
@@ -87,6 +114,10 @@ internal object RearCapture {
                 .apply { isAccessible = true }.invoke(builder, layers.toTypedArray())
         }
         if (crop != null) cls.getMethod("setSourceCrop", Rect::class.java).apply { isAccessible = true }.invoke(builder, crop)
+        if (scaleY != 1f) {
+            cls.getMethod("setFrameScale", Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+                .apply { isAccessible = true }.invoke(builder, 1f, scaleY)
+        }
         return cls.getMethod("build").apply { isAccessible = true }.invoke(builder)
             ?: throw IllegalStateException("no CaptureArgs")
     }

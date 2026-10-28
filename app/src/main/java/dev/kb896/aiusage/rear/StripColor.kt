@@ -34,6 +34,27 @@ object StripColor {
 
     private fun median(v: IntArray): Int { v.sort(); return v[v.size / 2] }
 
+    /** Between samples while the colour is new or the rear is being used. */
+    const val FAST_MS = 500L
+    /** Between samples once it has held [STABLE] samples running. */
+    const val SLOW_MS = 2_000L
+    const val STABLE = 3
+
+    /**
+     * How long until the next sample: [FAST_MS] after a change, a touch or a new guest
+     * ([poke]); [SLOW_MS] once [STABLE] samples running have changed nothing. A sample is a
+     * capture of its own (8–22 ms measured on the phone), so a page left still is not read
+     * four times a second.
+     */
+    class Pace {
+        private var unchanged = 0
+        fun next(changed: Boolean): Long {
+            if (changed) unchanged = 0 else unchanged++
+            return if (unchanged >= STABLE) SLOW_MS else FAST_MS
+        }
+        fun poke() { unchanged = 0 }
+    }
+
     /** The strip's colour on its way to the latest pick: eased over [EASE_MS], the first taken as it is. */
     class Ease {
         private var from = 0

@@ -11,7 +11,7 @@ import dev.kb896.aiusage.Panel
  * strip — a stale app, our panel — does not show there. In the guest's own background
  * colour where it has one, black where not (StripColor), read off the guest's leftmost
  * columns by [sample]: once as it is shown (the caller samples before the reveal, so it
- * arrives right), then every [SAMPLE_MS] while it is up, the rear lit ([dark] false) and
+ * arrives right), then at StripColor.Pace's pace while it is up, the rear lit ([dark] false) and
  * the sheet shut. A new colour eases in over StripColor.EASE_MS.
  *
  * Over every app, under the guest's cover ([ShellLayer.Z_STRIP]); trusted and so
@@ -40,7 +40,7 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
     /** Fades in, at [color] if given (else the last one), and samples on from there. */
     @Synchronized
     fun show(color: Int?) {
-        color?.let { target = it }
+        color?.let { target = it; poke() }
         fade.show(now())
         if (thread?.isAlive == true) return
         if (failedAt != 0L && System.nanoTime() - failedAt < RETRY_NS) return
@@ -51,6 +51,10 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
     /** Fades out; gone once faded. */
     @Synchronized
     fun hide() = fade.hide(now())
+
+    /** Something on the rear may have changed (a touch, a new guest): sample quickly again (StripColor.Pace). Any thread. */
+    fun poke() { poked = true }
+    @Volatile private var poked = false
 
     /** How far the sheet is open: while it is open at all, no samples. Any thread. */
     fun sheetOpen(progress: Float) { sheet = progress }
@@ -78,19 +82,23 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
             val ease = StripColor.Ease()
             var drawn: Int? = null
             var alpha = -1f
-            var nextSample = now() + SAMPLE_MS
+            val pace = StripColor.Pace()
+            var nextSample = now() + StripColor.FAST_MS
             var samples = 0
             while (!Thread.currentThread().isInterrupted) {
                 val level = level(myGen) ?: break
                 val now = now()
+                // A poke brings the next sample forward to a quick one.
+                if (poked) { poked = false; pace.poke(); nextSample = minOf(nextSample, now + StripColor.FAST_MS) }
                 if (now >= nextSample && wanted() && !dark && sheet <= 0f) {
                     val began = System.nanoTime()
+                    val was = target
                     sample()?.let { target = it }
                     val took = (System.nanoTime() - began) / 1_000
                     // A few measured, then one now and then: the capture's cost, for the rate.
                     if (samples < 3 || samples % 120 == 0) Log.i(TAG, "camera strip: sampled in $took µs")
                     samples++
-                    nextSample = now() + SAMPLE_MS
+                    nextSample = now() + pace.next(changed = target != was)
                 }
                 val color = ease.at(target, now)
                 if (color != drawn) {
@@ -127,12 +135,6 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
         private const val FRAME_MS = 16L
         /** Never asleep longer than this, so a hide or a show is seen within it. */
         private const val IDLE_MS = 100L
-        /**
-         * Between samples of the guest's edge. One is a captureDisplay cropped to 6 × 572
-         * px and a read of those pixels — logged, see [run]; a guess to be tuned by what
-         * the log measures on the phone.
-         */
-        const val SAMPLE_MS = 500L
         private const val RETRY_NS = 30_000_000_000L
 
         private fun now() = android.os.SystemClock.uptimeMillis()

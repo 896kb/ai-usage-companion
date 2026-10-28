@@ -980,12 +980,13 @@ class RearUserService : IRearService.Stub {
             syncDensity("$pkg is landing")
             moveToDisplay(task, displayId)
             // After the move, never before: shaped on the front, it lands at x 0–608.
-            shapeGuest(task, pkg, "it landed")
+            shapeGuest(task, pkg, "it landed", verify = false)
             wake(displayId)
             val movedAt = android.os.SystemClock.uptimeMillis()
             // Uncovered, the frame comes up as the app lands, not after the survive wait;
             // show() is idempotent, so guestPlaced() below does not start a second one.
-            if (cover == null) chromeShow()
+            // Uncovered, as it draws: checked where it is drawn, then the chrome.
+            if (cover == null) { awaitDrawn(pkg, task, displayId); ensurePlaced(task, pkg, "it landed"); chromeShow() }
             // Landed: the sheet's guest from now, so a pull during the survive wait has its
             // buttons from the first frame (they used to come in when it was placed).
             guest = Guest(pkg, task, onTop = true, landed = true)
@@ -993,7 +994,8 @@ class RearUserService : IRearService.Stub {
             // Covered: revealed once it has drawn, and the frame faded in after it (still up
             // from the guest before, it stays) — never before the app.
             if (cover != null) {
-                reveal(cover, pkg, task, displayId) { stripFor(pkg) }
+                // Before the reveal: where it is drawn checked (and put right), the strip coloured.
+                reveal(cover, pkg, task, displayId) { ensurePlaced(task, pkg, "it landed"); stripFor(pkg) }
                 if (guest?.let { it.task == task && it.onTop } == true) chromeShow()
             }
             // A task gone within two seconds of the move was a trampoline the move
@@ -1044,7 +1046,7 @@ class RearUserService : IRearService.Stub {
      * resize` — which only a multi-window task takes, as a launch makes it. Only ever on the
      * rear: shaped on the front first, it lands at x 0–608 (measured). Under [placing].
      */
-    private fun shapeGuest(task: Int, pkg: String, why: String) {
+    private fun shapeGuest(task: Int, pkg: String, why: String, verify: Boolean = true) {
         val shape = shapeOf(pkg)
         val b = shape.bounds
         val rect = android.graphics.Rect(b.left, b.top, b.right, b.bottom)
@@ -1052,6 +1054,47 @@ class RearUserService : IRearService.Stub {
             exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}"); "am task resize"
         }
         Log.i(TAG, "portal: $pkg (task $task) ${if (shape.confined) "kept right of the cameras" else "on the whole rear"}, by $how — $why")
+        if (verify) {
+            Thread.sleep(PLACE_SETTLE_MS)
+            ensurePlaced(task, pkg, why)
+        }
+    }
+
+    /**
+     * [pkg]'s window really drawn where its shape says (SurfacePlace): read off SurfaceFlinger
+     * ([dump] if one is in hand, else asked), and while it is not — the task's bounds right,
+     * its surface still at x 0, seen on the phone — nudged with `am task resize`, then (if
+     * that was not enough) to a pixel off and back, and read again; [PLACE_TRIES] at most.
+     * An app not composed on the rear (behind the panel, not drawn yet) is left as it is.
+     * Under [placing].
+     */
+    private fun ensurePlaced(task: Int, pkg: String, why: String, dump: String? = null) {
+        val shape = shapeOf(pkg)
+        val b = shape.bounds
+        var sf = dump ?: exec("dumpsys SurfaceFlinger")
+        for (i in 0 until PLACE_TRIES) {
+            val left = SurfacePlace.left(sf, coverStack, pkg)
+            if (!SurfacePlace.misplaced(left, shape)) {
+                if (i > 0) Log.i(TAG, "portal: $pkg drawn at x $left after ${i} nudge(s) — $why")
+                return
+            }
+            Log.w(TAG, "portal: $pkg drawn at x $left, its shape at ${b.left} — nudging (${i + 1}) — $why")
+            if (i > 0) exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
+            exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
+            Thread.sleep(PLACE_SETTLE_MS)
+            sf = exec("dumpsys SurfaceFlinger")
+        }
+        val left = SurfacePlace.left(sf, coverStack, pkg)
+        if (SurfacePlace.misplaced(left, shape)) Log.w(TAG, "portal: $pkg still drawn at x $left after $PLACE_TRIES nudges — $why")
+    }
+
+    /** Until [pkg]'s [task] has drawn on [displayId] at its shape's size, or GuestReveal.MAX_WAIT_MS. */
+    private fun awaitDrawn(pkg: String, task: Int, displayId: Int) {
+        val until = android.os.SystemClock.uptimeMillis() + GuestReveal.MAX_WAIT_MS
+        while (android.os.SystemClock.uptimeMillis() < until) {
+            if (drawnOn(pkg, task, displayId, shapeOf(pkg).bounds)) return
+            Thread.sleep(DRAWN_POLL_MS)
+        }
     }
 
     /**
@@ -1088,7 +1131,8 @@ class RearUserService : IRearService.Stub {
     private fun stripColor(): Int = runCatching {
         val leaveOut = listOfNotNull(frame.currentLayer, strip.currentLayer, coverLayer)
         val crop = android.graphics.Rect(Panel.CUTOUT_RIGHT, 0, Panel.CUTOUT_RIGHT + STRIP_SAMPLE_W, Panel.HEIGHT)
-        val shot = RearCapture.capture(rearDisplay(), leaveOut, crop) ?: return@runCatching BLACK
+        // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
+        val shot = RearCapture.capture(rearDisplay(), leaveOut, crop, scaleY = STRIP_SAMPLE_SCALE) ?: return@runCatching BLACK
         try {
             if (shot.secure) return@runCatching BLACK
             val hw = android.graphics.Bitmap.wrapHardwareBuffer(shot.buffer, shot.space) ?: return@runCatching BLACK
@@ -1361,6 +1405,8 @@ class RearUserService : IRearService.Stub {
         Thread {
             // The font and the layer stack, off every binder thread and before the first pull.
             sheetOrNull()
+            // And the capture, once, so the first cover is taken in this process, not by screencap.
+            RearCapture.warm(rearDisplay())
             val touches = RearTouches(maxX, maxY)
             val startedAt = android.os.SystemClock.uptimeMillis()
             var events = 0
@@ -1571,6 +1617,8 @@ class RearUserService : IRearService.Stub {
             val actions = from.feed(e)
             for (a in actions) if (sheetAction(a, e.atMs)) back = true
             if (e is RearTouches.Down) {
+                // Something may change on the guest: its edge is read again soon.
+                strip.poke()
                 touchDownX = e.x
                 touchDownY = e.y
                 touchDownAt = e.atMs
@@ -2002,7 +2050,7 @@ class RearUserService : IRearService.Stub {
             PortalAction.Step.UNHIDE -> synchronized(placing) {
                 val g = guest ?: return
                 // The frame after the reveal, not before the guest is seen.
-                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { stripFor(g.pkg) }) {
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { ensurePlaced(g.task, g.pkg, "Resume"); stripFor(g.pkg) }) {
                     unhide("Resume", showFrame = false)
                 }
                 if (back) {
@@ -2012,7 +2060,7 @@ class RearUserService : IRearService.Stub {
             }
             PortalAction.Step.PANEL_STEPS_BACK -> synchronized(placing) {
                 val g = guest ?: return
-                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { stripFor(g.pkg) }) changed@{
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { ensurePlaced(g.task, g.pkg, "Resume"); stripFor(g.pkg) }) changed@{
                     // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
                     // the guest is on top without leaving the rear, locked or not.
                     exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
@@ -2042,7 +2090,7 @@ class RearUserService : IRearService.Stub {
                         Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
                         moveToDisplay(g.task, 0)
                         if (!moveToDisplay(g.task, rearDisplay())) return@changed false
-                        shapeGuest(g.task, g.pkg, "back from the front")
+                        shapeGuest(g.task, g.pkg, "back from the front", verify = false)
                     } else if (top != g.pkg) {
                         Log.i(TAG, "portal: after the step back the rear's top is ${top ?: "unknown"} — trusting it")
                     }
@@ -2096,7 +2144,8 @@ class RearUserService : IRearService.Stub {
     private fun unhide(why: String, showFrame: Boolean = true): Boolean {
         val g = guest?.takeIf { it.hiddenOnFront } ?: return false
         if (!moveToDisplay(g.task, rearDisplay())) return false
-        shapeGuest(g.task, g.pkg, "back from the front")
+        // Covered (no frame yet), its reveal checks where it is drawn; uncovered, here.
+        shapeGuest(g.task, g.pkg, "back from the front", verify = showFrame)
         guestOnTopAgain(g, "back from the front: $why", showFrame)
         return true
     }
@@ -2471,8 +2520,10 @@ class RearUserService : IRearService.Stub {
                         // known: SurfaceFlinger shortens long layer names with [...], and a
                         // shortened one is matched back to whichever of these it starts.
                         val known = listOfNotNull(g.pkg, PKG, taskTop)
+                        // One dump for both: what is on top, and where the guest is drawn.
+                        val sf = exec("dumpsys SurfaceFlinger")
                         val top = SurfaceDump.topPackage(
-                            exec("dumpsys SurfaceFlinger"),
+                            sf,
                             isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
                             known = known,
                         ).let { if (it != null && it == taskTop) g.pkg else it }
@@ -2497,9 +2548,14 @@ class RearUserService : IRearService.Stub {
                                 // refused command is due a retry).
                                 syncDensity("${g.pkg} is on top")
                                 // Its bounds drifted from its shape (a relayout, the app's own
-                                // doing): shaped again, under the lock, if it is still the guest.
-                                if (GuestShape.drifted(entry?.bounds, shapeOf(g.pkg))) synchronized(placing) {
+                                // doing): shaped again. Or the task's bounds are right and its
+                                // surface is not (seen: drawn at x 0): put right where it is
+                                // drawn. Under the lock, if it is still the guest.
+                                val shape = shapeOf(g.pkg)
+                                if (GuestShape.drifted(entry?.bounds, shape)) synchronized(placing) {
                                     if (guest?.task == g.task) shapeGuest(g.task, g.pkg, "its bounds drifted to ${entry?.bounds}")
+                                } else if (SurfacePlace.misplaced(SurfacePlace.left(sf, coverStack, g.pkg), shape)) synchronized(placing) {
+                                    if (guest?.task == g.task) ensurePlaced(g.task, g.pkg, "the keep-alive saw it drawn out of place", sf)
                                 }
                                 if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                                 continue
@@ -2822,8 +2878,13 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val GUEST_SETTLE_LIMIT_MS = 6_000L
         /** Between looks for an arriving guest's first draw: each look is a dumpsys of its own (~100 ms). */
         private const val DRAWN_POLL_MS = 20L
+        /** A shaped guest's surface is read this long after a resize, for where it is drawn. */
+        private const val PLACE_SETTLE_MS = 80L
+        /** Nudges of a guest drawn out of place, at most, before it is left as it is (logged). */
+        private const val PLACE_TRIES = 3
         /** The guest's columns read for the camera strip's colour, from its left edge. */
         private const val STRIP_SAMPLE_W = 6
+        private const val STRIP_SAMPLE_SCALE = 0.25f
         private const val BLACK = 0xFF000000.toInt()
         /** The sheet's settle, a frame at a time. */
         private const val SHEET_FRAME_MS = 16L
