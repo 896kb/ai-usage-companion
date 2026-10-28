@@ -646,6 +646,7 @@ class RearUserService : IRearService.Stub {
             setPortalDpi { dpiEdits.overlay(config.portalDpi, android.os.SystemClock.uptimeMillis()) }
             sheetLook = config.theme to config.glassStyle
             shellSheet?.theme(config.theme, config.glassStyle)
+            restyleSheetFace(config.theme to config.font)
         } catch (e: Exception) {
             Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
             return
@@ -1092,6 +1093,9 @@ class RearUserService : IRearService.Stub {
     }
 
     @Volatile private var shellSheet: ShellSheet? = null
+    /** The panel's theme and chosen font as the sheet's face was last built for (under [sheetMaking]). */
+    @Volatile private var sheetType: Pair<dev.kb896.aiusage.data.PanelTheme, dev.kb896.aiusage.data.PanelFont?> =
+        dev.kb896.aiusage.data.PanelTheme.GLASS to null
     /** The font did not load: no new try before this uptime. */
     @Volatile private var sheetFontRetryAt = 0L
     private val sheetMaking = Any()
@@ -1103,15 +1107,36 @@ class RearUserService : IRearService.Stub {
         synchronized(sheetMaking) {
             shellSheet?.let { return it }
             if (android.os.SystemClock.uptimeMillis() < sheetFontRetryAt) return null
-            val font = ShellFont.load(context) { exec("pm path $PKG") }
-            if (font == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
-            val s = ShellSheet(rearLayerStack(), font)
+            val face = sheetFace(sheetType)
+            if (face == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
+            val s = ShellSheet(rearLayerStack(), face)
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
             s.dpiValues(portalDpi)
             shellSheet = s
             syncSheetGuest()
             return s
+        }
+    }
+
+    /** The panel's face for [type] (theme, chosen font) — see ShellFont.face. */
+    private fun sheetFace(type: Pair<dev.kb896.aiusage.data.PanelTheme, dev.kb896.aiusage.data.PanelFont?>) =
+        ShellFont.face(context, type.first, type.second) { exec("pm path $PKG") }
+
+    /**
+     * The panel's theme or font changed: the sheet's face follows. A sheet not made yet
+     * takes it when it is; one whose new face does not build keeps its old one, and the
+     * next payload tries again.
+     */
+    private fun restyleSheetFace(type: Pair<dev.kb896.aiusage.data.PanelTheme, dev.kb896.aiusage.data.PanelFont?>) {
+        if (type == sheetType) return
+        synchronized(sheetMaking) {
+            if (type == sheetType) return
+            val s = shellSheet
+            if (s == null) { sheetType = type; return }
+            val face = sheetFace(type) ?: return
+            sheetType = type
+            s.face(face)
         }
     }
 

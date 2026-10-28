@@ -51,6 +51,28 @@ internal object ShellFont {
     }
 
     /**
+     * The panel's face for [theme] and the chosen [font] (PanelType.face), so the sheet is
+     * set as the panel is: through our Resources once the system's fonts are loaded. A font
+     * the shell cannot read (an imported one, in our private storage) falls back to the
+     * theme's own there. Without a Context, or if that throws, Departure Mono through
+     * [load], as it was before — at its own weight and scale. Null if neither builds.
+     */
+    fun face(
+        context: Context?, theme: dev.kb896.aiusage.data.PanelTheme,
+        font: dev.kb896.aiusage.data.PanelFont?, pmPath: () -> String,
+    ): PanelType.Face? {
+        if (context != null) {
+            try {
+                systemFonts()
+                return PanelType.face(context.resources, theme, font)
+            } catch (e: Throwable) {
+                Log.w(TAG, "portal sheet: the panel's face did not build — Departure Mono: ${e.message}")
+            }
+        }
+        return load(context, pmPath)?.let { PanelType.Face(it, variable = false, weighted = false, scale = 1f) }
+    }
+
+    /**
      * Typeface's own state, which every app gets from the zygote and app_process never does:
      * without it CustomFallbackBuilder.build() throws "The Typeface is not fully initialized"
      * (measured on the 17 Pro, OS4.0.5.0). The hidden loadPreinstalledSystemFontMap() is what
@@ -59,7 +81,7 @@ internal object ShellFont {
      */
     @Volatile private var systemFontsLoaded = false
 
-    private fun systemFonts() {
+    fun systemFonts() {
         if (systemFontsLoaded) return
         synchronized(this) {
             if (systemFontsLoaded) return

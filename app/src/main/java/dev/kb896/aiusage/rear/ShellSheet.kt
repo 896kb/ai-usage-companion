@@ -11,7 +11,6 @@ import android.graphics.RectF
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
 import android.graphics.Shader
-import android.graphics.Typeface
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceControl
@@ -55,17 +54,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * one's uniforms.
  *
  * @param layerStack the rear display's layer stack (RearUserService.rearLayerStack).
- * @param typeface the panel's font, for every word on the sheet. The shell (app_process)
- *   has NO default typeface — text drawn without one aborts (gDefaultTypeface == nullptr)
- *   — and no Resources of ours, so the caller loads it from the file: the panel's font is
- *   `res/font/departure_mono.otf` in our APK (the user service runs from that APK; its
- *   path is `pm path dev.kb896.aiusage`) — copy the entry out, or have the main app hand
- *   the bytes over — and build it with `Typeface.CustomFallbackBuilder(FontFamily.Builder(
- *   Font.Builder(fileOrDirectByteBuffer).build()).build()).build()`. Font.Builder throws on
- *   a bad font, where Typeface.Builder would quietly fall back to the default that is not
- *   there; never Typeface.DEFAULT either, for the same reason.
+ * @param face the panel's face, for every word on the sheet — PanelType.face for the
+ *   panel's theme and font, so the sheet speaks as the panel does; [face] swaps it when
+ *   either changes. The shell (app_process) has NO default typeface — text drawn without
+ *   one aborts (gDefaultTypeface == nullptr) — so the caller builds it (see ShellFont.face):
+ *   the system's fonts loaded first, then through our Resources, or Departure Mono read
+ *   out of our APK when they cannot. Never Typeface.DEFAULT.
  */
-class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
+class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
 
     /** The backdrop as drawn and as measured: decoded once, read by every frame after. */
     private class Backdrop(val bitmap: Bitmap, val cells: FloatArray)
@@ -102,6 +98,7 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
     /** The apps' DPI as the shell has it now (PanelConfig.portalDpi and the back's nudges). */
     @Volatile private var dpiValues: Map<String, Int> = emptyMap()
     @Volatile private var look = Look(PanelTheme.GLASS, null)
+    @Volatile private var face: PanelType.Face = face
     private val version = AtomicInteger()
 
     /** The current screencap's id ([newShot]); a backdrop for any other is dropped. Guarded by [shotLock]. */
@@ -308,6 +305,12 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
         version.incrementAndGet()
     }
 
+    /** The panel's face, its weight and size with it (PanelType.face). Takes effect next frame. */
+    fun face(f: PanelType.Face) {
+        face = f
+        version.incrementAndGet()
+    }
+
     /** Draws [r] until it ends, then takes its layers off the rear and lets everything go. */
     private fun render(r: Run) {
         try {
@@ -367,7 +370,7 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
 
     /** One run's paints, nodes and painter, so an overlapping run shares nothing mutable of ours. */
     private inner class Renderer {
-        private val sheetPainter = PortalSheetPainter(PanelTheme.GLASS, typeface)
+        private val sheetPainter = PortalSheetPainter(PanelTheme.GLASS, face)
         private val groundNode = RenderNode("portal-sheet-backdrop")
         /** Never recorded: the glass's source when there is no ground this frame. */
         private val none = RenderNode("portal-sheet-none")
@@ -429,6 +432,7 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             dim.color = dimColor(p, ground)
             canvas.drawRect(full, dim)
             sheetPainter.theme = frameLook.theme
+            sheetPainter.face = face
             sheetPainter.draw(
                 canvas, p, bent, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, withStrip = onTop != null, pressed = pressed,

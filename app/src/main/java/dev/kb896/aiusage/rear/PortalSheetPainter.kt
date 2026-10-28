@@ -6,7 +6,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.RenderNode
-import android.graphics.Typeface
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.PanelTheme
 
@@ -14,7 +13,7 @@ import dev.kb896.aiusage.data.PanelTheme
  * Paints the App Portal's sheet — the buttons, the pinned apps' icons and names — over a
  * backdrop someone else has drawn. Needs no View, Context or Resources: the panel's view
  * uses it, and so can the shell, which draws into a surface's hardware canvas from
- * app_process. Everything comes in: the [theme], the [typeface] (app_process has no
+ * app_process. Everything comes in: the [theme], the panel's [face] (app_process has no
  * default typeface, and text drawn without one aborts), the icons as bitmaps, and the
  * node the glass bends.
  *
@@ -27,7 +26,7 @@ import dev.kb896.aiusage.data.PanelTheme
  * Not thread-safe; all painters in a process must draw one at a time (ShellSheet
  * serialises with its DRAW lock) — they share Glass's shaders (uniforms, highlight matrix).
  */
-class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
+class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
 
     /** Its own panes: its own node pool and lens cache, reset at every [draw]. */
     private val glass = GlassPainter()
@@ -49,10 +48,28 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
      * the sheet carries a soft dark shadow: it reads over a white page and a black one.
      */
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER; textSize = 20f
+        textAlign = Paint.Align.CENTER
         setShadowLayer(4f, 0f, 1.5f, SHADOW)
-        this.typeface = typeface
     }
+
+    /**
+     * The panel's face, as RearDialView sets its body text: at [PanelType.BODY] (a variable
+     * face takes it on its axis) and [TEXT_SIZE] times the face's [PanelType.Face.scale] —
+     * Outfit under GLASS, Departure Mono under ORIGINAL, or the one chosen in General.
+     */
+    var face: PanelType.Face = face
+        set(value) {
+            if (value === field) return
+            field = value
+            applyFace()
+        }
+
+    private fun applyFace() {
+        face.set(text, PanelType.BODY)
+        text.textSize = TEXT_SIZE * face.scale
+    }
+
+    init { applyFace() }
 
     private val buttonRect = RectF()
     private val buttonShape = Path()
@@ -169,5 +186,8 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
 
     private companion object {
         const val SHADOW = 0xCC000000.toInt()
+
+        /** The names' size in panel px, before the face's [PanelType.Face.scale]. */
+        const val TEXT_SIZE = 20f
     }
 }
