@@ -11,10 +11,9 @@ import android.util.Log
 import android.view.Surface
 import android.view.SurfaceControl
 import dev.kb896.aiusage.Panel
-import dev.kb896.aiusage.data.RingLayout
 
 /**
- * The portal frame: the electric border round the rear display's edge and both lenses,
+ * The portal frame: the electric border round the rear display's edge only (not the lenses),
  * over a guest app — drawn where no app window may go.
  *
  * NOT A WINDOW. HyperOS refuses windows on the rear to apps outside its list, and a
@@ -41,7 +40,7 @@ import dev.kb896.aiusage.data.RingLayout
 class PortalFrame(private val layerStack: Int) {
 
     @Volatile private var color = 0xFF28FF85.toInt()
-    @Volatile private var shapes: List<ElectricBorder.Shape> = shapesFor(RingLayout.forDevice())
+    private val shapes: List<ElectricBorder.Shape> = shapesFor()
     /** Volatile: [showing] reads it from threads that do not hold the lock. */
     @Volatile private var thread: Thread? = null
     /** Bumped by every show(); a render thread of an older generation stops. */
@@ -51,12 +50,9 @@ class PortalFrame(private val layerStack: Int) {
     /** Once per process: the firmware gives no way to make the layer a trusted overlay. */
     @Volatile private var untrustedLogged = false
 
-    /** The colour and the lens geometry, from the panel's config. Takes effect next frame. */
-    @Synchronized
-    fun style(color: Int, rings: RingLayout) {
+    /** The colour, from the panel's config. Takes effect next frame. */
+    fun style(color: Int) {
         this.color = color
-        val n = shapesFor(rings)
-        if (n != shapes) shapes = n
     }
 
     val showing get() = thread?.isAlive == true
@@ -239,14 +235,9 @@ class PortalFrame(private val layerStack: Int) {
             return null
         }
 
-        /** The edge, and a circle just outside each ring, concentric with its lens. */
-        fun shapesFor(rings: RingLayout): List<ElectricBorder.Shape> {
-            val r = rings.radius + rings.stroke / 2f + 6f
-            return listOf(
-                ElectricBorder.Shape.Rounded(INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET),
-                ElectricBorder.Shape.Circle(rings.cx.toFloat(), rings.cyFirst.toFloat(), r),
-                ElectricBorder.Shape.Circle(rings.cx.toFloat(), rings.cySecond.toFloat(), r),
-            )
-        }
+        /** The display edge only; the frame does not run round the lenses. */
+        fun shapesFor(): List<ElectricBorder.Shape> = listOf(
+            ElectricBorder.Shape.Rounded(INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET),
+        )
     }
 }

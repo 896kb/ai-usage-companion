@@ -571,12 +571,12 @@ class RearUserService : IRearService.Stub {
             ?.groupValues?.get(1)?.toIntOrNull() ?: Panel.DISPLAY_ID
     }
 
-    /** The frame follows the config's colour and lens geometry. */
+    /** The frame follows the config's colour. */
     private fun styleFrame(payload: String) {
         if (CalibrateMode.isCalibrate(payload)) return
         try {
             val config = StatePayload.decode(payload).config
-            frame.style(config.portalFrameColor, config.ringLayout)
+            frame.style(config.portalFrameColor)
         } catch (e: Exception) {
             Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
         }
