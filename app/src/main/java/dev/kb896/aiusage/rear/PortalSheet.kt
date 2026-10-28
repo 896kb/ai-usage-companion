@@ -19,13 +19,19 @@ object PortalSheet {
         val centerX get() = (left + right) / 2
         val centerY get() = (top + bottom) / 2
         fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
+        fun intersects(o: Box) = left < o.right && o.left < right && top < o.bottom && o.top < bottom
         fun rect() = RectF(left, top, right, bottom)
     }
+
+    /** The DPI row's four boxes, left to right. VALUE only shows the number. */
+    enum class DpiPart { MINUS, VALUE, PLUS, DEFAULT }
 
     sealed interface Hit {
         data class App(val index: Int) : Hit
         /** 0 Panel or Resume, 1 Front, 2 Close. */
         data class Button(val index: Int) : Hit
+        /** A box of app [app]'s DPI row (see [dpiRow]). */
+        data class Dpi(val app: Int, val part: DpiPart) : Hit
         data object Outside : Hit
     }
 
@@ -37,6 +43,13 @@ object PortalSheet {
     private const val STRIP = 64f
     private val LEFT = Panel.CUTOUT_RIGHT + 24f
     private const val TOP = 40f
+    private const val GRID_WIDTH = COLUMNS * CELL + (COLUMNS - 1) * GAP
+    /** The DPI row: −, the value, +, Default. */
+    private val DPI_WIDTHS = listOf(76f, 120f, 76f, 136f)
+    private const val DPI_HEIGHT = 52f
+    private const val DPI_GAP = 8f
+    /** The DPI row keeps this far off the panel's bottom edge (its rounded corners, the pull's band). */
+    const val DPI_MARGIN = 16f
 
     fun cells(count: Int, withStrip: Boolean): List<Box> {
         val top = TOP + if (withStrip) STRIP + GAP else 0f
@@ -57,12 +70,51 @@ object PortalSheet {
     }
 
     /**
-     * Valid only for the fully open sheet: the painter moves everything down by [slide],
-     * so callers must ignore taps until the sheet has settled open.
+     * App [app]'s DPI row — `−  <dpi>  +  Default` — as four boxes in [DpiPart] order, or
+     * null when there is no such cell. Under its cell, centred on it and held within the
+     * grid's width; above the cell instead when under it would come closer than
+     * [DPI_MARGIN] to the panel's bottom edge (the last row, with the strip). It stands over
+     * the cells next to it, which are then neither drawn nor hit ([dpiCovered]).
      */
-    fun hit(x: Float, y: Float, count: Int, withStrip: Boolean): Hit {
+    fun dpiRow(app: Int, count: Int, withStrip: Boolean): List<Box>? {
+        val cell = cells(count, withStrip).getOrNull(app) ?: return null
+        val width = DPI_WIDTHS.sum() + (DPI_WIDTHS.size - 1) * DPI_GAP
+        val gridRight = LEFT + GRID_WIDTH
+        val left = (cell.centerX - width / 2).coerceIn(LEFT, gridRight - width)
+        val below = cell.bottom + DPI_GAP
+        val top = if (below + DPI_HEIGHT <= Panel.HEIGHT - DPI_MARGIN) below else cell.top - DPI_GAP - DPI_HEIGHT
+        var l = left
+        return DPI_WIDTHS.map { w -> Box(l, top, l + w, top + DPI_HEIGHT).also { l += w + DPI_GAP } }
+    }
+
+    /** The cells app [app]'s DPI row stands over: hidden while it is open. Never its own. */
+    fun dpiCovered(app: Int, count: Int, withStrip: Boolean): Set<Int> {
+        val row = dpiRow(app, count, withStrip) ?: return emptySet()
+        val span = Box(row.first().left, row.first().top, row.last().right, row.last().bottom)
+        return cells(count, withStrip).withIndex().filter { (i, c) -> i != app && c.intersects(span) }.map { it.index }.toSet()
+    }
+
+    /** The [ShellSheet.press] index of a DPI row's button: past the strip's 0 to 2. */
+    fun dpiPress(part: DpiPart): Int = DPI_PRESS + part.ordinal
+    const val DPI_PRESS = 10
+
+    /** What the row's middle box says: the app's own DPI, or "Default" without one. */
+    fun dpiLabel(dpi: Int?): String = dpi?.toString() ?: "Default"
+
+    /**
+     * Valid only for the fully open sheet: the painter moves everything down by [slide],
+     * so callers must ignore taps until the sheet has settled open. [dpiApp] (-1 none) is
+     * the app whose DPI row is open: its boxes come first, and the cells under it are not
+     * hit; anything else on the sheet is what it always is (the caller decides that a tap
+     * there only closes the row).
+     */
+    fun hit(x: Float, y: Float, count: Int, withStrip: Boolean, dpiApp: Int = -1): Hit {
+        val covered = if (dpiApp >= 0) {
+            dpiRow(dpiApp, count, withStrip)?.forEachIndexed { i, b -> if (b.contains(x, y)) return Hit.Dpi(dpiApp, DpiPart.entries[i]) }
+            dpiCovered(dpiApp, count, withStrip)
+        } else emptySet()
         if (withStrip) buttons().forEachIndexed { i, b -> if (b.contains(x, y)) return Hit.Button(i) }
-        cells(count, withStrip).forEachIndexed { i, c -> if (c.contains(x, y)) return Hit.App(i) }
+        cells(count, withStrip).forEachIndexed { i, c -> if (i !in covered && c.contains(x, y)) return Hit.App(i) }
         return Hit.Outside
     }
 
@@ -76,5 +128,5 @@ object PortalSheet {
     fun slide(progress: Float): Float = (1f - progress) * Panel.HEIGHT * 0.4f
 
     /** The middle of the grid, across: where an empty sheet's words stand. */
-    val gridCenterX: Float get() = LEFT + (COLUMNS * CELL + (COLUMNS - 1) * GAP) / 2f
+    val gridCenterX: Float get() = LEFT + GRID_WIDTH / 2f
 }

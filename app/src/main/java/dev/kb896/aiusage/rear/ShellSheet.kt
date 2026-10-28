@@ -97,6 +97,10 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
     /** Null: no guest, so no Panel/Resume · Front · Close strip. */
     @Volatile private var guestOnTop: Boolean? = null
     @Volatile private var pressed = -1
+    /** The app whose DPI row is open; null none. */
+    @Volatile private var dpiPkg: String? = null
+    /** The apps' DPI as the shell has it now (PanelConfig.portalDpi and the back's nudges). */
+    @Volatile private var dpiValues: Map<String, Int> = emptyMap()
     @Volatile private var look = Look(PanelTheme.GLASS, null)
     private val version = AtomicInteger()
 
@@ -202,6 +206,7 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             backdrop = null
         }
         pressed = -1
+        dpiPkg = null
         progress = 0f
         version.incrementAndGet()
     }
@@ -275,9 +280,21 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
         version.incrementAndGet()
     }
 
-    /** The strip's button under a finger (0 to 2), or -1 for none. */
+    /** The strip's button under a finger (0 to 2), a DPI row's (PortalSheet.dpiPress), or -1 for none. */
     fun press(index: Int) {
         pressed = index
+        version.incrementAndGet()
+    }
+
+    /** [pkg]'s DPI row open under its icon; null closes it. A package not on the sheet shows no row. */
+    fun dpiRow(pkg: String?) {
+        dpiPkg = pkg
+        version.incrementAndGet()
+    }
+
+    /** Every app's DPI as it stands, for the open row's value (PortalSheet.dpiLabel). */
+    fun dpiValues(values: Map<String, Int>) {
+        dpiValues = values
         version.incrementAndGet()
     }
 
@@ -375,6 +392,7 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             val b = backdrop
             val a = apps
             val onTop = guestOnTop
+            val row = dpiPkg
             frameLook = look
             cells = b?.cells
             val ground = PortalPull.guestGround(p)
@@ -414,6 +432,8 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             sheetPainter.draw(
                 canvas, p, bent, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, withStrip = onTop != null, pressed = pressed,
+                dpiApp = row?.let { a.snapshot.packages.indexOf(it) } ?: -1,
+                dpiLabel = row?.let { PortalSheet.dpiLabel(dpiValues[it]) }.orEmpty(),
             )
         }
 

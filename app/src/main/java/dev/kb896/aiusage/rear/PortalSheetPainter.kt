@@ -79,12 +79,18 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
      * no root of anyone else's to agree with.
      *
      * [pressed] (0 to 2, -1 none) is a button under a finger: half lit, as a control
-     * centre tile coming on. Close is lit already.
+     * centre tile coming on. Close is lit already. From [PortalSheet.DPI_PRESS] up it is a
+     * button of the DPI row.
+     *
+     * [dpiApp] (-1 none) has its DPI row open — `-  [dpiLabel]  +  Default`, under or over
+     * its cell as PortalSheet.dpiRow places it — its cell lit as a pressed tile, and the
+     * cells the row stands over left out.
      */
     fun draw(
         canvas: Canvas, progress: Float, backdrop: RenderNode,
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, withStrip: Boolean, pressed: Int = -1,
+        dpiApp: Int = -1, dpiLabel: String = "",
     ) {
         if (progress <= 0.004f) return
         glass.beginFrame(canvas.width, canvas.height)
@@ -104,13 +110,21 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
                 PortalSheet.buttons().forEachIndexed { i, b ->
                     val r = buttonRect
                     r.set(b.left, b.top + dy, b.right, b.bottom + dy)
-                    drawButton(canvas, r, i, pressed == i, backdrop)
+                    val close = i == 2
+                    drawButton(canvas, r, if (close) 1f else if (pressed == i) 0.5f else 0f, close, backdrop)
                     canvas.drawText(ellipsize(names[i], r.width() - 12f), r.centerX(), r.centerY() + middle, text)
                 }
             }
             val shown = labels.take(PortalSheet.MAX_APPS)
             iconPaint.alpha = 255
+            val row = if (dpiApp >= 0) PortalSheet.dpiRow(dpiApp, shown.size, withStrip) else null
+            val covered = if (row != null) PortalSheet.dpiCovered(dpiApp, shown.size, withStrip) else emptySet()
             PortalSheet.cells(shown.size, withStrip).forEachIndexed { i, c ->
+                if (i in covered) return@forEachIndexed
+                if (row != null && i == dpiApp) {
+                    buttonRect.set(c.left, c.top + dy, c.right, c.bottom + dy)
+                    drawButton(canvas, buttonRect, 0.5f, false, backdrop)
+                }
                 icons.getOrNull(i)?.let { bmp ->
                     val s = 72f; val l = c.centerX - s / 2; val t = c.top + 14f + dy
                     iconRect.set(l, t, l + s, t + s)
@@ -118,18 +132,35 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
                 }
                 canvas.drawText(ellipsize(shown[i], PortalSheet.CELL - 8f), c.centerX, c.bottom - 12f + dy, text)
             }
+            row?.forEachIndexed { i, b ->
+                val part = PortalSheet.DpiPart.entries[i]
+                val r = buttonRect
+                r.set(b.left, b.top + dy, b.right, b.bottom + dy)
+                // The value is words on the blur, not a button: nothing happens on it.
+                if (part != PortalSheet.DpiPart.VALUE) {
+                    drawButton(canvas, r, if (pressed == PortalSheet.dpiPress(part)) 0.5f else 0f, false, backdrop)
+                }
+                val word = when (part) {
+                    PortalSheet.DpiPart.MINUS -> "-"
+                    PortalSheet.DpiPart.VALUE -> dpiLabel
+                    PortalSheet.DpiPart.PLUS -> "+"
+                    PortalSheet.DpiPart.DEFAULT -> "Default"
+                }
+                canvas.drawText(ellipsize(word, r.width() - 12f), r.centerX(), r.centerY() + middle, text)
+            }
         } finally {
             if (layer >= 0) canvas.restoreToCount(layer)
         }
     }
 
-    /** Button [i] (2 Close) at [rect]: the control centre's, its name drawn over it by [draw]. */
-    private fun drawButton(canvas: Canvas, rect: RectF, i: Int, pressed: Boolean, backdrop: RenderNode) {
+    /**
+     * A button at [rect], lit [on] (0 off, 0.5 pressed, 1 on): the control centre's, its
+     * name drawn over it by [draw]. [close] is Close's, filled in the critical red.
+     */
+    private fun drawButton(canvas: Canvas, rect: RectF, on: Float, close: Boolean, backdrop: RenderNode) {
         val radius = minOf(rect.width(), rect.height()) * CcButton.CORNER
         buttonShape.rewind()
         buttonShape.addRoundRect(rect, radius, radius, Path.Direction.CW)
-        val close = i == 2
-        val on = if (close) 1f else if (pressed) 0.5f else 0f
         val tint = if (close) Panel.Palette.CRIT and 0x00FFFFFF else 0x00FFFFFF
         val glassy = theme.isGlass && glass.drawPane(canvas, rect, radius, paneTint(rect), shape = buttonShape, source = backdrop, local = true)
         // No mark: the name is the button's, drawn over it in the ink.

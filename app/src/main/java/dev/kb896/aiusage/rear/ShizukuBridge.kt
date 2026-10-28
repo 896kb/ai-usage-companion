@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.IBinder
 import android.util.Log
+import dev.kb896.aiusage.IRearEvents
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
 import rikka.shizuku.Shizuku
@@ -68,6 +69,7 @@ class ShizukuBridge(private val context: Context) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
             runCatching { service?.setPanelGuarded(panelGuarded) }
+            runCatching { service?.setEvents(events) }
             pending?.let { p -> pending = null; show(p) }
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
@@ -446,6 +448,23 @@ class ShizukuBridge(private val context: Context) {
     @Volatile private var panelGuarded = false
 
     @Volatile private var dozing = false
+
+    /**
+     * An app's DPI nudged on the back: [dpi] for the package, 0 for its default. Set by
+     * Graph, which saves it in the config and pushes the payload back; run on the main
+     * thread, where the settings screen writes the config too, so the two never interleave.
+     */
+    var onPortalDpi: (pkg: String, dpi: Int) -> Unit = { _, _ -> }
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** What the shell service tells this process (IRearEvents); handed over on every (re)connect. */
+    private val events = object : IRearEvents.Stub() {
+        override fun onPortalDpi(pkg: String?, dpi: Int) {
+            if (pkg.isNullOrEmpty() || pkg.length > 255) return
+            mainHandler.post { this@ShizukuBridge.onPortalDpi(pkg, dpi) }
+        }
+    }
 
     private companion object { const val TAG = "AiUsageBridge" }
 }

@@ -3,6 +3,7 @@ package dev.kb896.aiusage.rear
 import android.content.Context
 import android.util.Log
 import dev.kb896.aiusage.BuildConfig
+import dev.kb896.aiusage.IRearEvents
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.StatePayload
@@ -55,6 +56,8 @@ class RearUserService : IRearService.Stub {
                 if (currentDensity != baselineDensity || !densityKnown) applyDensity(null, "the service is going (retry)")
             }
         }
+        // Nudges not yet handed on go now, or they are lost with us.
+        flushDpi(all = true)
         exitProcess(0)
     }
 
@@ -621,7 +624,7 @@ class RearUserService : IRearService.Stub {
         try {
             val config = StatePayload.decode(payload).config
             frame.style(config.portalFrameColor)
-            portalDpi = config.portalDpi
+            setPortalDpi { dpiEdits.overlay(config.portalDpi, android.os.SystemClock.uptimeMillis()) }
             sheetLook = config.theme to config.glassStyle
             shellSheet?.theme(config.theme, config.glassStyle)
         } catch (e: Exception) {
@@ -686,8 +689,13 @@ class RearUserService : IRearService.Stub {
     private var rereadNotBefore = 0L
     /** Display 1's physical density, for the log. */
     private var physicalDensity = DensityDump.FALLBACK
-    /** The config's per-app DPI, from the latest payload. */
+    /**
+     * The config's per-app DPI, from the latest payload, with the nudges made on the back
+     * laid over it until a payload carries them ([dpiEdits]). Written under [dpiLock].
+     */
     @Volatile private var portalDpi: Map<String, Int> = emptyMap()
+    /** Display 1's own density as the first read found it (its override, else its physical); null before. */
+    @Volatile private var densityDefault: Int? = null
 
     /**
      * Display 1 at the density the guest calls for: its own for any live guest, else the
@@ -784,6 +792,7 @@ class RearUserService : IRearService.Stub {
         refusedDensity = null
         physicalDensity = d.physical
         baselineDensity = start.baseline
+        densityDefault = start.baseline ?: d.physical
         currentDensity = d.override
         if (!start.ours && DensityDump.parseMarker(marker.out) != null) execChecked("settings delete global $DENSITY_MARKER")
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} is ${d.physical} dpi" +
@@ -1080,6 +1089,7 @@ class RearUserService : IRearService.Stub {
             val s = ShellSheet(rearLayerStack(), font)
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
+            s.dpiValues(portalDpi)
             shellSheet = s
             syncSheetGuest()
             return s
@@ -1166,7 +1176,7 @@ class RearUserService : IRearService.Stub {
                 stopAnim()
                 motion.hold(atMs)
                 pushProgress(atMs)
-                setPressed(if (motion.fullyOpen(atMs)) (hitAt(a.x, a.y) as? PortalSheet.Hit.Button)?.index ?: -1 else -1)
+                setPressed(if (motion.fullyOpen(atMs)) pressOf(hitAt(a.x, a.y)) else -1)
             }
             is EdgeGestures.Action.PullStart -> if (sheetUp) {
                 if (!sheetAlive()) return false
@@ -1217,6 +1227,8 @@ class RearUserService : IRearService.Stub {
         gestures.sheet = true
         afterShut = null
         pressed = -1
+        dpiPkg = null
+        s.dpiRow(null)
         s.progress(motion.progress(atMs))
         pokePanel()
         sheetClock.execute {
@@ -1285,8 +1297,20 @@ class RearUserService : IRearService.Stub {
         return false
     }
 
-    private fun hitAt(x: Float, y: Float) =
-        PortalSheet.hit(x, y, portalApps.size, withStrip = sheetGuestOnTop != null)
+    private fun hitAt(x: Float, y: Float): PortalSheet.Hit {
+        val apps = portalApps
+        return PortalSheet.hit(x, y, apps.size, withStrip = sheetGuestOnTop != null, dpiApp = dpiIndex(apps))
+    }
+
+    /** Where [dpiPkg]'s cell is in [apps], or -1. Under [sheetLock]. */
+    private fun dpiIndex(apps: PortalAppsSnapshot) = dpiPkg?.let { apps.packages.indexOf(it) } ?: -1
+
+    /** What a finger landing on [hit] shows pressed: a strip button, a DPI row's button, or nothing. */
+    private fun pressOf(hit: PortalSheet.Hit) = when (hit) {
+        is PortalSheet.Hit.Button -> hit.index
+        is PortalSheet.Hit.Dpi -> if (hit.part == PortalSheet.DpiPart.VALUE) -1 else PortalSheet.dpiPress(hit.part)
+        else -> -1
+    }
 
     private fun setPressed(i: Int) {
         if (pressed == i) return
@@ -1303,7 +1327,14 @@ class RearUserService : IRearService.Stub {
         if (!motion.fullyOpen(atMs) || !motion.heading) { motion.resume(atMs); afterMotion(atMs); return }
         val apps = portalApps
         val onTop = sheetGuestOnTop
-        when (val hit = PortalSheet.hit(x, y, apps.size, withStrip = onTop != null)) {
+        val hit = PortalSheet.hit(x, y, apps.size, withStrip = onTop != null, dpiApp = dpiIndex(apps))
+        // A DPI row open: its boxes are its own, and a tap anywhere else only closes it.
+        dpiPkg?.let { pkg ->
+            if (hit is PortalSheet.Hit.Dpi) onDpiPart(pkg, hit.part) else closeDpiRow()
+            return
+        }
+        when (hit) {
+            is PortalSheet.Hit.Dpi -> Unit
             is PortalSheet.Hit.App -> {
                 val pkg = apps.packages.getOrNull(hit.index)
                 shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
@@ -1428,8 +1459,96 @@ class RearUserService : IRearService.Stub {
     }
 
     /** TASK 9 FILLS THIS: a long-press on the app at [index] (its DPI row). */
+    // -- DPI from the back ----------------------------------------------------------------
+    //
+    // A long-press on an app in the open sheet opens its DPI row (PortalSheet.dpiRow): - and
+    // + nudge it (RearDensity.nudge, from the display's own density when it has none),
+    // Default clears it. Each tap shows at once, and applies at once if that app is the
+    // guest; the config is the app process's to write, so the value goes there through
+    // IRearEvents once the taps pause ([DpiEdits]), and comes back with the next payload.
+
+    /** The app whose DPI row is open; one at a time. Under [sheetLock]. */
+    private var dpiPkg: String? = null
+    /** Guards [dpiEdits] and the writes to [portalDpi]. A leaf, taken under [sheetLock] or alone. */
+    private val dpiLock = Any()
+    private val dpiEdits = DpiEdits()
+    /** The app process's ear (setEvents); null until it registers, or after it died. */
+    @Volatile private var events: IRearEvents? = null
+
+    override fun setEvents(events: IRearEvents?) {
+        this.events = events
+        // Nudges made while nobody listened go now.
+        if (events != null) scheduleDpiFlush()
+    }
+
+    /** Under [sheetLock]. A second long-press on another app moves the row to it. */
     private fun onSheetLongPress(index: Int) {
-        Log.i(TAG, "portal sheet: long-press on ${portalApps.packages.getOrNull(index)} (DPI from the back comes with Task 9)")
+        val pkg = portalApps.packages.getOrNull(index) ?: return
+        dpiPkg = pkg
+        setPressed(-1)
+        shellSheet?.dpiRow(pkg)
+        Log.i(TAG, "portal sheet: DPI row for $pkg (${portalDpi[pkg] ?: "default"})")
+    }
+
+    /** Under [sheetLock]. The row goes; the sheet stays. */
+    private fun closeDpiRow() {
+        dpiPkg = null
+        shellSheet?.dpiRow(null)
+    }
+
+    /** [portalDpi] set to what [make] returns (under [dpiLock]), and the sheet told. Any thread. */
+    private fun setPortalDpi(make: () -> Map<String, Int>) {
+        synchronized(dpiLock) {
+            portalDpi = make()
+            shellSheet?.dpiValues(portalDpi)
+        }
+    }
+
+    /** A tap on [part] of [pkg]'s row. Under [sheetLock], on the reader thread: nothing here waits. */
+    private fun onDpiPart(pkg: String, part: PortalSheet.DpiPart) {
+        val dpi: Int? = when (part) {
+            PortalSheet.DpiPart.VALUE -> return
+            PortalSheet.DpiPart.MINUS, PortalSheet.DpiPart.PLUS ->
+                RearDensity.nudge(portalDpi[pkg], densityDefault ?: DensityDump.FALLBACK, up = part == PortalSheet.DpiPart.PLUS)
+            PortalSheet.DpiPart.DEFAULT -> null
+        }
+        setPortalDpi {
+            dpiEdits.put(pkg, dpi, android.os.SystemClock.uptimeMillis())
+            if (dpi == null) portalDpi - pkg else portalDpi + (pkg to dpi)
+        }
+        Log.i(TAG, "portal sheet: $pkg's DPI ${dpi ?: "back to default"} from the back")
+        // Live if it is the guest. `wm density` takes a moment: off this thread, one at a
+        // time; each run reads the latest map, so a quick run of taps ends at the last one.
+        if (guest?.pkg == pkg) runCatching { densityWorker.execute { syncDensity("$pkg nudged on the back") } }
+        scheduleDpiFlush()
+    }
+
+    private val densityWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-density").apply { isDaemon = true } }
+    }
+
+    /** A [flushDpi] when the next edit falls due. Any thread. */
+    private fun scheduleDpiFlush() {
+        val at = synchronized(dpiLock) { dpiEdits.nextDueAt() } ?: return
+        val wait = (at - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0L)
+        runCatching { sheetClock.schedule({ flushDpi() }, wait, java.util.concurrent.TimeUnit.MILLISECONDS) }
+    }
+
+    /**
+     * The edits that have fallen due ([all]: every one, as the service goes) handed to the
+     * app process. With nobody listening they wait — [setEvents] sends them — and on the
+     * way out they are lost: the overlay then lets the config win after its hold.
+     */
+    private fun flushDpi(all: Boolean = false) {
+        val ev = events ?: return
+        val due = synchronized(dpiLock) { dpiEdits.due(if (all) Long.MAX_VALUE else android.os.SystemClock.uptimeMillis()) }
+        for ((pkg, dpi) in due) {
+            runCatching { ev.onPortalDpi(pkg, dpi ?: 0) }.onFailure {
+                Log.w(TAG, "portal: DPI for $pkg not handed on: ${it.message}")
+                if (it is android.os.DeadObjectException && events === ev) events = null
+            }
+        }
+        if (!all) scheduleDpiFlush()
     }
 
     /** Whatever [motion] now says, carried out. Under [sheetLock]. */
@@ -1482,6 +1601,7 @@ class RearUserService : IRearService.Stub {
         beginPending = false
         driving = false
         pressed = -1
+        dpiPkg = null
         gestures.sheet = false
         motion.reset()
         val then = afterShut

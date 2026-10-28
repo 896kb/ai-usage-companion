@@ -1,6 +1,7 @@
 package dev.kb896.aiusage;
 
 import android.os.Bundle;
+import dev.kb896.aiusage.IRearEvents;
 
 /** Runs inside Shizuku's shell-privileged process (uid 2000). */
 interface IRearService {
@@ -114,6 +115,9 @@ interface IRearService {
     // the panel (not a guest) is on top of the rear, a bottom pull opens no portal sheet.
     // From RearActivity through the app process, like setDozing; oneway, nothing waits on it.
     oneway void setPanelGuarded(boolean guarded) = 23;
+    // The app process's ear for what the back decides (IRearEvents). Re-sent by the bridge
+    // whenever the service (re)connects; oneway, nothing waits on it.
+    oneway void setEvents(IRearEvents events) = 24;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
 
 }

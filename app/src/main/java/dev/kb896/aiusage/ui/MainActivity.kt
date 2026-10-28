@@ -107,9 +107,15 @@ class MainActivity : ComponentActivity() {
     private var shownCameraTip: Boolean? = null
     private var stopWatchingConfig: (() -> Unit)? = null
 
-    private fun syncCameraTip() {
-        val shown = shownCameraTip ?: return
-        if (ConfigStore(this).load().cameraTip != shown) buildSettingsRows()
+    /** The Portal tab's DPI as last built, so a value nudged on the back shows on the front. */
+    private var shownPortalDpi: Map<String, Int>? = null
+
+    /** The config was written: the rows again if what they show of it changed. */
+    private fun syncFromConfig() {
+        val config = ConfigStore(this).load()
+        val stale = shownCameraTip?.let { it != config.cameraTip } == true ||
+            shownPortalDpi?.let { it != config.portalDpi } == true
+        if (stale) buildSettingsRows()
     }
 
     override fun onPause() {
@@ -128,8 +134,8 @@ class MainActivity : ComponentActivity() {
         val access = Setup.notificationAccess(this)
         if (rowsHadAccess != null && rowsHadAccess != access) buildSettingsRows()
         rowsHadAccess = access
-        syncCameraTip()
-        stopWatchingConfig = ConfigStore(this).listen { syncCameraTip() }
+        syncFromConfig()
+        stopWatchingConfig = ConfigStore(this).listen { syncFromConfig() }
         // Have the user service bound before any row needs it. Placement used to bind
         // it as a side effect; with placement gated on the onboarding, nothing else does.
         if (graph.bridge.status().granted) graph.bridge.bind()
@@ -1327,6 +1333,7 @@ class MainActivity : ComponentActivity() {
         }
         // APP PORTAL: other apps on the back, opened from a pull up from the bottom edge.
         SettingsRows.note(portalRows, "Pull up from the bottom of the back to open apps there. A swipe in from the right edge is the app's Back.")
+        shownPortalDpi = config.portalDpi
         SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") {
             AppPicker.show(this, config.portalApps) { pinned ->
                 write { it.copy(portalApps = pinned, portalDpi = it.portalDpi.filterKeys { k -> k in pinned }) }

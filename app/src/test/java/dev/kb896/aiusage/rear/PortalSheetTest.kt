@@ -70,4 +70,74 @@ class PortalSheetTest {
         val row = PortalSheet.cells(4, withStrip = false)
         assertEquals((row.first().left + row.last().right) / 2f, PortalSheet.gridCenterX, 0.01f)
     }
+
+    // -- the DPI row ---------------------------------------------------------------------
+
+    private fun inside(b: PortalSheet.Box) =
+        b.left >= dev.kb896.aiusage.Panel.CUTOUT_RIGHT && b.right <= dev.kb896.aiusage.Panel.WIDTH &&
+            b.top >= 0f && b.bottom <= dev.kb896.aiusage.Panel.HEIGHT - PortalSheet.DPI_MARGIN
+
+    @Test fun `every cell's DPI row is on the panel, with or without the strip`() {
+        for (strip in listOf(false, true)) for (n in 1..12) for (app in 0 until n) {
+            val row = PortalSheet.dpiRow(app, n, strip)!!
+            assertEquals(4, row.size)
+            row.forEach { assertEquals("app $app of $n, strip $strip: $it", true, inside(it)) }
+        }
+    }
+
+    @Test fun `the row stands under its cell, left to right, never over it`() {
+        val cell = PortalSheet.cells(7, withStrip = false)[1]
+        val row = PortalSheet.dpiRow(1, 7, withStrip = false)!!
+        row.forEach { assertEquals(true, it.top >= cell.bottom); assertEquals(false, it.intersects(cell)) }
+        row.zipWithNext().forEach { (a, b) -> assertEquals(true, a.right < b.left) }
+        assertEquals(true, row.first().left <= cell.centerX && row.last().right >= cell.centerX)
+    }
+
+    @Test fun `under the last row with the strip there is no room, so the row stands above its cell`() {
+        val cell = PortalSheet.cells(12, withStrip = true)[11]
+        val row = PortalSheet.dpiRow(11, 12, withStrip = true)!!
+        row.forEach { assertEquals(true, it.bottom <= cell.top) }
+    }
+
+    @Test fun `without the strip the last row's row still goes under`() {
+        val cell = PortalSheet.cells(12, withStrip = false)[8]
+        PortalSheet.dpiRow(8, 12, withStrip = false)!!.forEach { assertEquals(true, it.top >= cell.bottom) }
+    }
+
+    @Test fun `no cell, no row`() {
+        assertEquals(null, PortalSheet.dpiRow(7, 7, withStrip = false))
+        assertEquals(null, PortalSheet.dpiRow(-1, 7, withStrip = false))
+    }
+
+    @Test fun `each box of the row is its part, for that app`() {
+        val row = PortalSheet.dpiRow(5, 7, withStrip = true)!!
+        PortalSheet.DpiPart.entries.forEachIndexed { i, part ->
+            assertEquals(Hit.Dpi(5, part), PortalSheet.hit(row[i].centerX, row[i].centerY, 7, withStrip = true, dpiApp = 5))
+        }
+    }
+
+    @Test fun `the cells under the row are hidden and not hit, its own cell still is`() {
+        val covered = PortalSheet.dpiCovered(1, 7, withStrip = false)
+        assertEquals(true, covered.isNotEmpty())
+        assertEquals(false, 1 in covered)
+        val row = PortalSheet.dpiRow(1, 7, withStrip = false)!!
+        val gapX = (row[0].right + row[1].left) / 2
+        val y = row[0].centerY
+        // The gap between two boxes, over a covered cell, is nothing.
+        assertEquals(Hit.Outside, PortalSheet.hit(gapX, y, 7, withStrip = false, dpiApp = 1))
+        val own = PortalSheet.cells(7, withStrip = false)[1]
+        assertEquals(Hit.App(1), PortalSheet.hit(own.centerX, own.centerY, 7, withStrip = false, dpiApp = 1))
+    }
+
+    @Test fun `without a row open, the same place is the cell under it`() {
+        val row = PortalSheet.dpiRow(1, 7, withStrip = false)!!
+        val h = PortalSheet.hit(row[1].centerX, row[1].centerY, 7, withStrip = false)
+        assertEquals(true, h is Hit.App || h == Hit.Outside)
+        assertEquals(false, h is Hit.Dpi)
+    }
+
+    @Test fun `the row's value says the dpi or Default`() {
+        assertEquals("Default", PortalSheet.dpiLabel(null))
+        assertEquals("380", PortalSheet.dpiLabel(380))
+    }
 }

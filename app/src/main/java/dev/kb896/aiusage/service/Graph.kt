@@ -9,6 +9,9 @@ import dev.kb896.aiusage.data.UsageApi
 import dev.kb896.aiusage.data.UsageHistory
 import dev.kb896.aiusage.data.UsageRepository
 import dev.kb896.aiusage.data.WeatherApi
+import dev.kb896.aiusage.data.ConfigStore
+import dev.kb896.aiusage.data.StatePayload
+import dev.kb896.aiusage.rear.DpiEdits
 import dev.kb896.aiusage.rear.ShizukuBridge
 import okhttp3.OkHttpClient
 
@@ -31,6 +34,18 @@ class Graph private constructor(context: Context) {
     val bridge = ShizukuBridge(context.applicationContext).also { b ->
         // the onboarding decides whether the panel may be placed at all (Setup.panelAllowed)
         b.gate = { status -> dev.kb896.aiusage.ui.Setup.panelAllowed(context.applicationContext, status) }
+        // An app's DPI nudged on the back: saved as the front's own rows save it, and the
+        // payload pushed, so the shell sees its value come back (DpiEdits). Only for a
+        // pinned app — the back shows no others.
+        b.onPortalDpi = { pkg, dpi ->
+            val store = ConfigStore(context.applicationContext)
+            val config = store.load()
+            if (pkg in config.portalApps) {
+                val next = config.copy(portalDpi = DpiEdits.applied(config.portalDpi, pkg, dpi))
+                store.save(next)
+                if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
+            }
+        }
     }
 
     companion object {
