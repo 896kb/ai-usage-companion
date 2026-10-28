@@ -1098,8 +1098,9 @@ class RearUserService : IRearService.Stub {
     /**
      * [pkg]'s window really drawn where its shape says (SurfacePlace): read off SurfaceFlinger
      * ([dump] if one is in hand, else asked), and while it is not — the task's bounds right,
-     * its surface still at x 0, seen on the phone — nudged with `am task resize`, then (if
-     * that was not enough) to a pixel off and back, and read again; [PLACE_TRIES] at most.
+     * its surface still at x 0, seen on the phone — nudged by two CHANGE transitions, a pixel
+     * off and back (TaskShaper.nudge; `am task resize` where there are none), and read again;
+     * [PLACE_TRIES] at most.
      * An app not composed on the rear (behind the panel, not drawn yet) is left as it is.
      * Under [placing].
      */
@@ -1114,8 +1115,12 @@ class RearUserService : IRearService.Stub {
                 return
             }
             Log.w(TAG, "portal: $pkg drawn at x $left, its shape at ${b.left} — nudging (${i + 1}) — $why")
-            if (i > 0) exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
-            exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
+            // Two CHANGE transitions, a pixel off and back (TaskShaper.nudge): a resize alone
+            // moves the bounds and not the surface of a task the system's shell organises.
+            if (!TaskShaper.nudge(task, android.graphics.Rect(b.left, b.top, b.right, b.bottom), PLACE_SETTLE_MS)) {
+                exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
+                exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
+            }
             Thread.sleep(PLACE_SETTLE_MS)
             sf = exec("dumpsys SurfaceFlinger")
         }
@@ -3008,7 +3013,7 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         /** Between looks for an arriving guest's first draw: each look is a dumpsys of its own (~100 ms). */
         private const val DRAWN_POLL_MS = 20L
         /** A shaped guest's surface is read this long after a resize, for where it is drawn. */
-        private const val PLACE_SETTLE_MS = 80L
+        private const val PLACE_SETTLE_MS = 120L
         /** Nudges of a guest drawn out of place, at most, before it is left as it is (logged). */
         private const val PLACE_TRIES = 3
         /** The guest's columns read for the camera strip's colour, from its left edge. */
