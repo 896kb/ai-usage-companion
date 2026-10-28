@@ -268,6 +268,10 @@ class UsagePollService : Service() {
             addAction(RearActivity.ACTION_GET_QUICK)
             addAction(RearActivity.ACTION_SET_QUICK)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // This process may be new while the panel is not: the bridge starts unguarded, and the
+        // panel says its guard only when it changes. Asked for again now that ACTION_GUARDED
+        // is heard, so a pocket-locked panel stays guarded across a restart of this process.
+        sendBroadcast(Intent(RearActivity.ACTION_MIRROR_SYNC).setPackage(packageName))
 
         // Held by this service rather than by NotificationRelay, even though the relay is
         // what authorises it. A listener service is started and stopped by the system on

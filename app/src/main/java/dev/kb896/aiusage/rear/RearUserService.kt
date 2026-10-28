@@ -288,6 +288,7 @@ class RearUserService : IRearService.Stub {
         if (ok) {
             cameraLaunched = true
             cameraWasOnTop = false
+            cameraLaunchedAt = android.os.SystemClock.uptimeMillis()
             watchBandTaps(displayId)
         }
         return ok
@@ -371,6 +372,9 @@ class RearUserService : IRearService.Stub {
             val over = focused == PKG
             Log.i(TAG, "camera close: display $displayId has $focused in focus, not the camera — no Back" +
                 if (over) "; the panel is back, the watch ends" else "; still watching")
+            // The camera is over: released if it was seen up, else only forgotten — either
+            // way the back is no longer the camera's (cameraUp).
+            if (over) { if (cameraWasOnTop) closeCamera() else cameraLaunched = false }
             return !over
         }
         Log.i(TAG, "camera close: a tap in the zone — Back to display $displayId")
@@ -412,6 +416,21 @@ class RearUserService : IRearService.Stub {
      */
     @Volatile private var cameraLaunched = false
     @Volatile private var cameraWasOnTop = false
+    /** When [cameraLaunched] was set (uptime ms): a launch never seen in front is forgotten after [CAMERA_UNSEEN_MS]. */
+    @Volatile private var cameraLaunchedAt = 0L
+
+    /**
+     * The panel in front, and the camera we launched never seen ahead of it for
+     * [CAMERA_UNSEEN_MS]: opened and closed between two ticks, or closed by the strip's own
+     * Back. Nothing to release, but the flags would hold [cameraUp] — no sheet — forever.
+     */
+    private fun forgetUnseenCamera() {
+        if (!cameraLaunched || cameraWasOnTop) return
+        if (android.os.SystemClock.uptimeMillis() - cameraLaunchedAt < CAMERA_UNSEEN_MS) return
+        Log.i(TAG, "camera: launched but never seen in front, and the panel is — forgotten")
+        cameraLaunched = false
+        stopBandTaps()
+    }
 
     /**
      * `am kill` rather than `am force-stop`, and the difference matters here.
@@ -1133,12 +1152,22 @@ class RearUserService : IRearService.Stub {
     private fun sendBackOnce() {
         Thread {
             val rear = rearDisplay()
-            val focused = PortalAction.topFocusedDisplay(exec("dumpsys window | grep -m1 mTopFocusedDisplayId"))
-            val onTop = guest?.onTop == true
+            // One read for both: which display has focus, and which app has the rear's.
+            val dump = exec("dumpsys window | grep -E 'mTopFocusedDisplayId|Display: mDisplayId=|mFocusedApp='")
+            val focused = PortalAction.topFocusedDisplay(dump)
+            val g = guest
+            val onTop = g?.onTop == true
             val up = synchronized(sheetLock) { sheetUp }
             if (PortalAction.sendBack(onTop, up, focused, rear)) {
-                Log.i(TAG, "portal: Back — display ${focused ?: "?"} has focus, ours to display $rear")
-                exec("input -d $rear keyevent KEYCODE_BACK")
+                // Only to the guest: whatever else holds the rear's focus (a system dialog,
+                // the panel come back in between) gets no Back of ours.
+                val app = FocusDump.focusedPackage(dump, rear)
+                if (app != g?.pkg) {
+                    Log.i(TAG, "portal: Back — the rear's focused app is ${app ?: "unknown"}, not the guest ${g?.pkg}; none of ours")
+                } else {
+                    Log.i(TAG, "portal: Back — display ${focused ?: "?"} has focus, ours to display $rear")
+                    exec("input -d $rear keyevent KEYCODE_BACK")
+                }
             } else if (onTop && !up) {
                 Log.i(TAG, "portal: Back — the rear has focus, Xiaomi's reaches the guest; none of ours")
             }
@@ -1262,8 +1291,11 @@ class RearUserService : IRearService.Stub {
     /**
      * The camera we opened is (as far as we know) the rear's top app: launched and not yet
      * seen closed, or its band-tap watch running. No sheet over it — the back is the camera's.
+     * Bound in time either way: never longer than a band-tap watch may run ([BAND_WATCH_MS]),
+     * so a close nobody saw cannot keep the sheet away for good.
      */
-    private fun cameraUp() = bandTaps != null || cameraLaunched
+    private fun cameraUp() = (bandTaps != null || cameraLaunched) &&
+        android.os.SystemClock.uptimeMillis() - cameraLaunchedAt < BAND_WATCH_MS
 
     private val pokeWorker by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-poke").apply { isDaemon = true } }
@@ -1363,10 +1395,14 @@ class RearUserService : IRearService.Stub {
      *   [Guest.hiddenOnFront]: still the guest, behind (see [GuestGate]).
      * - Panel, front unlocked: `am start --display <rear>` of the panel, over the guest.
      * - Resume of a hidden guest: `move-stack <guest> <rear>` and a wake ([unhide]).
-     * - Resume of a guest behind the panel on the rear: `move-stack <guest> 0`, then back to
-     *   the rear — a move to the display a task is already on does not raise it. KNOWN
-     *   LIMITATION: with the front unlocked the guest is seen on the front for the moment
-     *   between the two moves; locked, it passes behind the keyguard unseen.
+     * - Resume of a guest behind the panel on the rear: the panel moves its own task to the
+     *   back (a scoped broadcast, [ACTION_PORTAL_STEP_BACK]), locked or not. Only if the
+     *   guest is still not on top [STEP_BACK_SETTLE_MS] later: `move-stack <guest> 0` and
+     *   back to the rear (a move to the display a task is already on does not raise it) —
+     *   seen on the front for a moment when it is unlocked.
+     *
+     * Which of Panel / Resume runs is decided from the guest as it is when the button runs,
+     * not as the sheet showed it; a refused `am start` of the panel changes nothing.
      * - Front: `move-stack <guest> 0`, Close: `am force-stop` — either way the guest ends and
      *   the panel comes back ([guestAction]).
      *
@@ -1374,9 +1410,13 @@ class RearUserService : IRearService.Stub {
      * follows whether it is on top.
      */
     private fun onSheetButton(index: Int, guestOnTop: Boolean) {
+        // Decided from the guest as it is now, not as the sheet showed it when it opened.
         val step = synchronized(placing) {
             val g = guest ?: return
-            PortalAction.strip(index, guestOnTop, g.hiddenOnFront) { keyguardShowing() }
+            if (index == 0 && g.onTop != guestOnTop) {
+                Log.i(TAG, "portal sheet: the guest is ${if (g.onTop) "on top" else "behind"} now, not as the sheet showed it")
+            }
+            PortalAction.strip(index, g.onTop, g.hiddenOnFront) { keyguardShowing() }
         } ?: return
         Log.i(TAG, "portal sheet: $step")
         when (step) {
@@ -1390,20 +1430,31 @@ class RearUserService : IRearService.Stub {
             }
             PortalAction.Step.START_PANEL -> synchronized(placing) {
                 val g = guest ?: return
-                // If HyperOS refused it after all (the front locked in between), the guest is
-                // still on top and the next keep-alive tick says so (GUEST_ON_TOP).
-                exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY")
+                // Refused (the front locked in between, say): the guest is still on top, and
+                // its state and frame stay as they are.
+                if (!startPanel("Panel")) return
                 markOnTop(g.task, false)
                 guestBehind(g.pkg)
             }
             PortalAction.Step.UNHIDE -> synchronized(placing) {
                 if (unhide("Resume")) wake(rearDisplay())
             }
-            PortalAction.Step.RAISE_THROUGH_FRONT -> synchronized(placing) {
+            PortalAction.Step.PANEL_STEPS_BACK -> synchronized(placing) {
                 val g = guest ?: return
-                moveToDisplay(g.task, 0)
-                if (!moveToDisplay(g.task, rearDisplay())) return
-                guestOnTopAgain(g, "Resume")
+                // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
+                // the guest is on top without leaving the rear, locked or not.
+                exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
+                try { Thread.sleep(STEP_BACK_SETTLE_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+                val now = guest?.takeIf { it.task == g.task } ?: return
+                if (!onTopOfRear(now)) {
+                    // The fallback: out to display 0 and back, since a move to the display a
+                    // task is already on does not raise it. Seen on the front for a moment
+                    // when it is unlocked.
+                    Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
+                    moveToDisplay(g.task, 0)
+                    if (!moveToDisplay(g.task, rearDisplay())) return
+                }
+                guestOnTopAgain(now, "Resume")
                 wake(rearDisplay())
             }
             PortalAction.Step.FRONT -> guestAction("front")
@@ -1440,10 +1491,38 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
+     * Our panel started over whatever is on the rear; false (logged) when `am start` says
+     * it was refused. Under [placing].
+     */
+    private fun startPanel(why: String): Boolean {
+        val out = exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY")
+        val refused = out.contains("Error", ignoreCase = true) || out.contains("Exception", ignoreCase = true)
+        if (refused) Log.w(TAG, "portal: $why — the panel's start was refused: ${out.take(200)}")
+        return !refused
+    }
+
+    /** Whether [g]'s window is what the rear composes on top (SurfaceFlinger, as the keep-alive reads it). */
+    private fun onTopOfRear(g: Guest): Boolean {
+        val entry = GuestTask.byId(exec("am stack list"), g.task)
+        val taskTop = entry?.top?.substringBefore('/')?.takeIf { it.isNotEmpty() }
+        val rear = rearPhysicalId()
+        val top = SurfaceDump.topPackage(
+            exec("dumpsys SurfaceFlinger"),
+            isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
+            known = listOfNotNull(g.pkg, PKG, taskTop),
+        )
+        return top != null && (top == g.pkg || top == taskTop)
+    }
+
+    /**
      * The front unlocked with a guest hidden on it: the guest is showing there now. It goes
-     * back to the rear — on top of the panel, since nothing can put it back behind it — and
-     * the rear is left as it is (lit or not). The user unlocked the front, so the guest no
-     * longer has a keyguard to hide behind; ending it instead would lose the app's place.
+     * back to the rear, and — since Panel is what put it on the front — behind the panel:
+     * moved to the rear, then the panel started over it, finishing as Panel does unlocked
+     * (START_PANEL). The rear is left as it is (lit or not). The user unlocked the front, so
+     * the guest no longer has a keyguard to hide behind; ending it instead would lose the
+     * app's place. KNOWN, AND INHERENT: between the unlock and USER_PRESENT reaching us
+     * (or the next keep-alive tick) the guest is seen on the front, and for the moment
+     * between its move and the panel's start it is on top of the rear.
      * From the keep-alive (GUEST_EXPOSED) and from [ensureOnRear], which the app process runs
      * on USER_PRESENT, so it is back within a moment of the unlock. Under [placing].
      */
@@ -1455,10 +1534,17 @@ class RearUserService : IRearService.Stub {
             guestRef.compareAndSet(g, g.copy(hiddenOnFront = false))
             return
         }
-        unhide(why)
+        if (!moveToDisplay(g.task, rearDisplay())) return
+        if (!startPanel("back from the front: $why")) {
+            // The panel refused: the guest is on top of the rear, and is shown as such.
+            guestOnTopAgain(g, "back from the front: $why")
+            return
+        }
+        Log.i(TAG, "portal: ${g.pkg} back from the front ($why), behind the panel")
+        guest = g.copy(onTop = false, hiddenOnFront = false)
+        guestBehind(g.pkg)
     }
 
-    /** TASK 9 FILLS THIS: a long-press on the app at [index] (its DPI row). */
     // -- DPI from the back ----------------------------------------------------------------
     //
     // A long-press on an app in the open sheet opens its DPI row (PortalSheet.dpiRow): - and
@@ -1894,7 +1980,7 @@ class RearUserService : IRearService.Stub {
 
                         // Back in front, and the camera was ahead of us until now:
                         // that is somebody closing it. Nothing else did.
-                        Where.REAR -> if (cameraLaunched && cameraWasOnTop) closeCamera()
+                        Where.REAR -> if (cameraLaunched && cameraWasOnTop) closeCamera() else forgetUnseenCamera()
                     }
                 } catch (e: InterruptedException) {
                     return@Thread
@@ -2102,6 +2188,10 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val BAND_WATCH_MS = 30 * 60_000L
         /** How long Back gets to close the camera before its task is removed instead. */
         private const val BACK_SETTLE_MS = 900L
+        /** A camera launch not seen in front of the panel by then, with the panel in front, is over. */
+        private const val CAMERA_UNSEEN_MS = 5_000L
+        /** How long Resume gives the panel to step back before the guest goes through the front. */
+        private const val STEP_BACK_SETTLE_MS = 400L
 
         /** How long a moved guest must survive before it counts as placed. */
         private const val GUEST_SURVIVE_MS = 2_000L
@@ -2119,6 +2209,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val POKE_EVERY_MS = 1_000L
         /** RearActivity re-arms its sleep countdown on it: the sheet's blocker keeps touches from the panel. */
         const val ACTION_PORTAL_POKE = "dev.kb896.aiusage.PORTAL_POKE"
+        /** The panel moves its own task to the back (Resume); RearActivity.ACTION_PORTAL_STEP_BACK. */
+        const val ACTION_PORTAL_STEP_BACK = "dev.kb896.aiusage.PORTAL_STEP_BACK"
         /**
          * What may go into a shell command as a package or a component: these come from
          * the app's config and from dumps, and this service runs them at shell uid.

@@ -26,7 +26,7 @@ class PortalActionTest {
     }
 
     @Test fun `Resume of a guest behind the panel raises it through the front`() {
-        assertEquals(Step.RAISE_THROUGH_FRONT, PortalAction.strip(0, guestOnTop = false, hiddenOnFront = false, frontLocked = notAsked))
+        assertEquals(Step.PANEL_STEPS_BACK, PortalAction.strip(0, guestOnTop = false, hiddenOnFront = false, frontLocked = notAsked))
     }
 
     @Test fun `Front and Close, whatever the guest's state`() {

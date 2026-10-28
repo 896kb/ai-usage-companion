@@ -16,11 +16,11 @@ object PortalAction {
         /** Resume of a guest hidden on display 0 by [HIDE_ON_FRONT]: straight back to the rear. */
         UNHIDE,
         /**
-         * Resume of a guest behind the panel on the rear: out to display 0 and back, since a
-         * move to the display it is already on does not raise it. Unseen while the front is
-         * locked; a brief flash on the front when it is not.
+         * Resume of a guest behind the panel on the rear: the panel moves its own task to the
+         * back, so the guest is on top without leaving the rear, locked or not. If it is not
+         * on top a moment later, out to display 0 and back instead.
          */
-        RAISE_THROUGH_FRONT,
+        PANEL_STEPS_BACK,
         /** Front: the guest to display 0, and it is no longer the guest. */
         FRONT,
         /** Close: force-stopped. */
@@ -36,7 +36,7 @@ object PortalAction {
         0 -> when {
             guestOnTop -> if (frontLocked()) Step.HIDE_ON_FRONT else Step.START_PANEL
             hiddenOnFront -> Step.UNHIDE
-            else -> Step.RAISE_THROUGH_FRONT
+            else -> Step.PANEL_STEPS_BACK
         }
         1 -> Step.FRONT
         2 -> Step.CLOSE

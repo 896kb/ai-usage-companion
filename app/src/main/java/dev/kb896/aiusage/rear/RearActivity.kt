@@ -39,6 +39,12 @@ class RearActivity : Activity() {
          * instead. Same string as RearUserService.ACTION_PORTAL_POKE.
          */
         const val ACTION_PORTAL_POKE = "dev.kb896.aiusage.PORTAL_POKE"
+        /**
+         * From the shell (`am broadcast -p`), for the portal sheet's Resume: this task goes
+         * behind the guest on the rear, which is then on top without leaving the display.
+         * Same string as RearUserService.ACTION_PORTAL_STEP_BACK.
+         */
+        const val ACTION_PORTAL_STEP_BACK = "dev.kb896.aiusage.PORTAL_STEP_BACK"
 
         /**
          * The panel's camera button was pressed.
@@ -313,9 +319,18 @@ class RearActivity : Activity() {
                     intent.getIntExtra(EXTRA_CHARGE_PERCENT, -1)
                         .let { if (it in 0..100) it else -1 },
                 )
-                ACTION_MIRROR_SYNC -> dial.republishMirror()
+                // Also the guard said again: the app process asking may be a new one, which
+                // starts unguarded (ShizukuBridge) and would otherwise never hear it — a
+                // pocket-locked panel would then open the shell's sheet. Said at once from the
+                // last mirror, since a dozing panel may draw no frame to publish a new one.
+                ACTION_MIRROR_SYNC -> {
+                    guardSent = null
+                    lastMirror?.let { announceGuard(it.aod || it.locked) }
+                    dial.republishMirror()
+                }
                 // Somebody is using the portal sheet over the panel: not a panel to doze.
                 ACTION_PORTAL_POKE -> if (!inAod) armSleep()
+                ACTION_PORTAL_STEP_BACK -> moveTaskToBack(true)
                 ACTION_LOCK -> lockPanel()
                 ACTION_NOTIFICATION -> { peekForNotice(); dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
@@ -501,7 +516,7 @@ class RearActivity : Activity() {
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
-                addAction(ACTION_MIRROR_SYNC); addAction(ACTION_PORTAL_POKE)
+                addAction(ACTION_MIRROR_SYNC); addAction(ACTION_PORTAL_POKE); addAction(ACTION_PORTAL_STEP_BACK)
                 addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
                 addAction(ACTION_REAR_BRIGHTNESS)
                 addAction(ACTION_QUICK_STATES)
