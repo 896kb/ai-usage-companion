@@ -66,7 +66,6 @@ class ShizukuBridge(private val context: Context) {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
-            portalCallback?.let { cb -> runCatching { service?.setPortalCallback(cb) } }
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
             runCatching { service?.setPanelGuarded(panelGuarded) }
             pending?.let { p -> pending = null; show(p) }
@@ -318,18 +317,6 @@ class ShizukuBridge(private val context: Context) {
             .onFailure { Log.w(TAG, "camera launch failed: ${it.message}") }
     }
 
-    /** The panel's callback, kept to hand on whenever the service (re)connects. */
-    @Volatile private var portalCallback: dev.kb896.aiusage.IPortalCallback? = null
-
-    fun setPortalCallback(callback: dev.kb896.aiusage.IPortalCallback?) {
-        portalCallback = callback
-        if (service == null) bind()
-        runCatching { service?.setPortalCallback(callback) }.onFailure {
-            Log.w(TAG, "portal callback: ${it.message}")
-            if (it is android.os.DeadObjectException) service = null
-        }
-    }
-
     /** The pinned apps' names and icons, kept to hand on whenever the service (re)connects. */
     @Volatile private var portalApps: android.os.Bundle? = null
 
@@ -342,18 +329,6 @@ class ShizukuBridge(private val context: Context) {
         }
     }
 
-    /** Blocks (waits for the service, settles, survives, retries): call off the main thread. */
-    fun launchGuest(pkg: String): Boolean {
-        val display = rearDisplayId()
-        if (display < 0) return false
-        val svc = awaitService() ?: return false
-        return runCatching { svc.launchGuest(pkg, display) }
-            .onFailure {
-                Log.w(TAG, "guest launch failed: ${it.message}")
-                if (it is android.os.DeadObjectException) service = null
-            }.getOrDefault(false)
-    }
-
     /** Blocks while waiting for the service: call off the main thread. */
     fun sendFocusedToBack(): String {
         val display = rearDisplayId()
@@ -364,13 +339,6 @@ class ShizukuBridge(private val context: Context) {
                 Log.w(TAG, "send to back failed: ${it.message}")
                 if (it is android.os.DeadObjectException) service = null
             }.getOrDefault("")
-    }
-
-    fun guestAction(which: String) {
-        runCatching { service?.guestAction(which) }.onFailure {
-            Log.w(TAG, "guest action failed: ${it.message}")
-            if (it is android.os.DeadObjectException) service = null
-        }
     }
 
     /**

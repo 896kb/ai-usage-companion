@@ -3,7 +3,6 @@ package dev.kb896.aiusage.rear
 import android.content.Context
 import android.util.Log
 import dev.kb896.aiusage.BuildConfig
-import dev.kb896.aiusage.IPortalCallback
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.StatePayload
@@ -187,7 +186,7 @@ class RearUserService : IRearService.Stub {
         // About to come up over the guest, if there is one: it is no longer on top.
         val g = guest
         if (g != null) {
-            if (markOnTop(g.task, false)) toldGuest(g.pkg, false)
+            if (markOnTop(g.task, false)) syncSheetGuest()
             frame.hide()
         }
         // Straight onto the rear display first: the manifest's miui.rear.policy makes
@@ -569,7 +568,7 @@ class RearUserService : IRearService.Stub {
      * changed off the lock, and only by compare-and-set against the guest it was read
      * from, so a reading that predates a launch can never write the old guest back.
      * [Guest.placed] is false until [guestPlaced]: while a launch waits to see whether the
-     * task survives its move, the keep-alive leaves the frame and the panel's strip alone.
+     * task survives its move, the keep-alive leaves the frame and the sheet's strip alone.
      * [Guest.hiddenOnFront]: the sheet's Panel moved it to display 0 behind the keyguard
      * (see [onSheetButton]); it is still the guest, behind, and Resume brings it back.
      */
@@ -581,12 +580,6 @@ class RearUserService : IRearService.Stub {
     private var guest: Guest?
         get() = guestRef.get()
         set(value) = guestRef.set(value)
-    /**
-     * The panel's line, kept for [IPortalCallback.onGuest] only: the panel's own portal
-     * strip reads it until Task 10 removes the panel-side portal. Pulls and frames are no
-     * longer relayed — the shell draws the sheet (see the touch watch below).
-     */
-    @Volatile private var portal: IPortalCallback? = null
     private val frame by lazy { PortalFrame(rearLayerStack()) }
 
     /** [onTop] on whatever guest has [task] now; true if this call changed it. */
@@ -596,12 +589,6 @@ class RearUserService : IRearService.Stub {
             if (g.task != task || g.onTop == onTop) return false
             if (guestRef.compareAndSet(g, g.copy(onTop = onTop))) return true
         }
-    }
-
-    override fun setPortalCallback(callback: IPortalCallback?) {
-        portal = callback
-        val g = guest
-        tell { it.onGuest(g?.pkg.orEmpty(), g?.onTop == true) }
     }
 
     /**
@@ -616,15 +603,6 @@ class RearUserService : IRearService.Stub {
     override fun setPortalApps(apps: android.os.Bundle?) {
         portalApps = PortalAppsSnapshot.fromBundle(apps)
         shellSheet?.apps(portalApps)
-    }
-
-    /** A call to the panel; a dead one is forgotten, never thrown. */
-    private fun tell(call: (IPortalCallback) -> Unit) {
-        val p = portal ?: return
-        try { call(p) } catch (e: Exception) {
-            Log.w(TAG, "portal callback gone: ${e.message}")
-            if (portal === p) portal = null
-        }
     }
 
     /** The rear display's layer stack, from dumpsys display; 1 on the 17 Pro, as measured. */
@@ -886,16 +864,16 @@ class RearUserService : IRearService.Stub {
         pkg
     }
 
-    /** A guest is on top: the frame, the watcher, and the panel told. Under [placing]. */
+    /** A guest is on top: the frame, the watcher, and the sheet told. Under [placing]. */
     private fun guestPlaced(displayId: Int) {
         guest = guest?.copy(placed = true)
         syncDensity("${guest?.pkg} is the guest") // already set as it landed; a no-op then
         frame.show() // already up from the launch's move; a no-op while running
         syncTouchWatch()
-        toldGuest(guest?.pkg.orEmpty(), true)
+        syncSheetGuest()
     }
 
-    /** No guest any more: frame, watcher and the panel's strip off. Under [placing]. */
+    /** No guest any more: frame, watcher and the sheet's strip off. Under [placing]. */
     private fun dropGuest(why: String) {
         Log.i(TAG, "portal: guest over — $why")
         guest = null
@@ -903,7 +881,7 @@ class RearUserService : IRearService.Stub {
         syncDensity("the guest is over")
         // Over the panel the watch goes on (it is for the panel too); dozing, it stops.
         syncTouchWatch()
-        toldGuest("", false)
+        syncSheetGuest()
     }
 
     /** [dropGuest], and the panel back in front. Under [placing]. */
@@ -919,7 +897,7 @@ class RearUserService : IRearService.Stub {
                 val g = guest ?: return
                 markOnTop(g.task, false)
                 frame.hide()
-                toldGuest(g.pkg, false)
+                syncSheetGuest()
             }
             // RearActivity has gone behind (moveTaskToBack); the guest is on top again. One
             // the shell sheet hid on the front has to be brought back for that to be true.
@@ -928,7 +906,7 @@ class RearUserService : IRearService.Stub {
                 if (g.hiddenOnFront) { synchronized(placing) { unhide("the panel's Resume") }; return }
                 markOnTop(g.task, true)
                 frame.show()
-                toldGuest(g.pkg, true)
+                syncSheetGuest()
                 wake(if (placedDisplayId >= 0) placedDisplayId else Panel.DISPLAY_ID)
             }
             // Read under the lock: a launch may have replaced the guest since the panel asked.
@@ -944,12 +922,6 @@ class RearUserService : IRearService.Stub {
             }
             else -> Log.w(TAG, "portal: unknown guest action '$which'")
         }
-    }
-
-    /** [IPortalCallback.onGuest] to the panel, and the shell sheet's strip with it. */
-    private fun toldGuest(pkg: String, onTop: Boolean) {
-        tell { it.onGuest(pkg, onTop) }
-        syncSheetGuest()
     }
 
     // -- the portal sheet, in the shell ---------------------------------------------------
@@ -1408,21 +1380,21 @@ class RearUserService : IRearService.Stub {
         }
     }
 
-    /** The guest no longer on top: no frame, the panel's strip and the sheet told. Its DPI stays. Under [placing]. */
+    /** The guest no longer on top: no frame, and the sheet told. Its DPI stays. Under [placing]. */
     private fun guestBehind(pkg: String) {
         frame.hide()
         syncDensity("$pkg is behind")
-        toldGuest(pkg, false)
+        syncSheetGuest()
     }
 
-    /** [g] on top of the rear again, not hidden: frame, density, touches, the strips. Under [placing]. */
+    /** [g] on top of the rear again, not hidden: frame, density, touches, the sheet's strip. Under [placing]. */
     private fun guestOnTopAgain(g: Guest, why: String) {
         Log.i(TAG, "portal: ${g.pkg} on top again — $why")
         guest = g.copy(onTop = true, hiddenOnFront = false)
         syncDensity("${g.pkg} is on top")
         frame.show()
         syncTouchWatch()
-        toldGuest(g.pkg, true)
+        syncSheetGuest()
     }
 
     /**
@@ -1702,7 +1674,7 @@ class RearUserService : IRearService.Stub {
                                 // A hidden flag here is stale (it is on the rear): cleared with it.
                                 if ((!g.onTop || g.hiddenOnFront) &&
                                     guestRef.compareAndSet(g, g.copy(onTop = true, hiddenOnFront = false))) {
-                                    toldGuest(g.pkg, true)
+                                    syncSheetGuest()
                                 }
                                 // Every tick, but a comparison unless something changed (or a
                                 // refused command is due a retry).
@@ -1721,7 +1693,7 @@ class RearUserService : IRearService.Stub {
                                 if ((covered || stale) &&
                                     guestRef.compareAndSet(g, g.copy(onTop = g.onTop && !covered, hiddenOnFront = g.hiddenOnFront && !stale)) &&
                                     covered) {
-                                    toldGuest(g.pkg, false)
+                                    syncSheetGuest()
                                 }
                                 syncDensity("${g.pkg} is behind")
                                 frame.hide()

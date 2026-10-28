@@ -17,7 +17,6 @@ import android.view.MotionEvent
 import android.view.GestureDetector
 import android.graphics.Color
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -217,16 +216,6 @@ class RearActivity : Activity() {
          */
         const val ACTION_GET_QUICK = "dev.kb896.aiusage.GET_QUICK"
         const val ACTION_SET_QUICK = "dev.kb896.aiusage.SET_QUICK"
-        /**
-         * The App Portal: the panel asks the app process, which holds Shizuku, to launch a
-         * pinned app as the guest ([ACTION_PORTAL_LAUNCH] with [EXTRA_PORTAL_PKG]) or to act
-         * on the guest ([ACTION_PORTAL_GUEST] with [EXTRA_PORTAL_WHICH]: panel, resume,
-         * front, close).
-         */
-        const val ACTION_PORTAL_LAUNCH = "dev.kb896.aiusage.PORTAL_LAUNCH"
-        const val ACTION_PORTAL_GUEST = "dev.kb896.aiusage.PORTAL_GUEST"
-        const val EXTRA_PORTAL_PKG = "portalPkg"
-        const val EXTRA_PORTAL_WHICH = "portalWhich"
         const val ACTION_QUICK_STATES = "dev.kb896.aiusage.QUICK_STATES"
         const val EXTRA_QUICK = "quick"
         const val EXTRA_QUICK_ON = "quickOn"
@@ -295,126 +284,13 @@ class RearActivity : Activity() {
          * the restore happens behind a dark screen rather than in front of somebody.
          */
         const val SLEEP_FALLBACK_MS = 30_000L
-
-        /**
-         * The panel whose callback the shell service should hold. A relaunch can create the
-         * next panel before the last one is destroyed, in this same process; without this the
-         * old one's late register(null) — or its late connection — would take the relay away
-         * from the new one.
-         */
-        @Volatile private var portalOwner: RearActivity? = null
     }
 
     private lateinit var dial: RearDialView
 
-    /** Posts to the panel's view unless this activity has already gone. */
-    private fun onPanel(block: () -> Unit) {
-        // The main looper, not dial.post: the dial is detached while calibrating, and a
-        // detached view only runs its posts once it is attached again.
-        mainHandler.post { if (!isDestroyed && !isFinishing) block() }
-    }
-    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-
-    /**
-     * Where the frozen frames are decoded. Not the binder thread: oneway calls to one binder
-     * are delivered in order, so a decode there holds up the relayed pull's moves behind it.
-     */
-    private val portalDecoder = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-        Thread(r, "portal-frame").apply { isDaemon = true }
-    }
-
     /** Between onStart and onStop — stopped behind a guest, the sleep timer stands down. */
     private var started = false
-    private var stoppedOnce = false
 
-    /** The shell service's line to this panel, registered through PortalRelayService. */
-    private val portalCallback = object : dev.kb896.aiusage.IPortalCallback.Stub() {
-        override fun onPull(phase: Int, y: Float) {
-            onPanel {
-                if (phase == 0) portalWake()
-                dial.portalRelay(phase, y)
-            }
-        }
-        override fun onFrame(png: android.os.ParcelFileDescriptor?) {
-            if (png == null) return
-            val decode = Runnable {
-                // Half size: it is shown blurred, and a quarter of the pixels decodes faster.
-                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
-                val bmp = runCatching {
-                    android.os.ParcelFileDescriptor.AutoCloseInputStream(png).use {
-                        android.graphics.BitmapFactory.decodeStream(it, null, opts)
-                    }
-                }.getOrNull()
-                if (bmp != null) onPanel { dial.portalBackdrop = bmp }
-            }
-            // Refused once the panel has gone: the pipe is closed rather than leaked.
-            runCatching { portalDecoder.execute(decode) }.onFailure { runCatching { png.close() } }
-        }
-        override fun onGuest(pkg: String?, onTop: Boolean) {
-            onPanel {
-                dial.portalGuestOnTop = onTop
-                dial.portalGuest = pkg?.takeIf { it.isNotEmpty() }
-            }
-        }
-    }
-
-    private var portalRelay: dev.kb896.aiusage.IPortalRelay? = null
-    private val portalConnection = object : android.content.ServiceConnection {
-        override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) {
-            portalRelay = dev.kb896.aiusage.IPortalRelay.Stub.asInterface(binder)
-            // A panel already replaced, or already going, does not take the relay back.
-            if (portalOwner !== this@RearActivity || isDestroyed || isFinishing) return
-            runCatching { portalRelay?.register(portalCallback) }
-                .onFailure { Log.w(TAG, "portal: register failed: ${it.message}") }
-        }
-        override fun onServiceDisconnected(name: android.content.ComponentName?) { portalRelay = null }
-    }
-
-    /**
-     * A pull relayed over the guest is somebody reaching for the panel on purpose: no dim,
-     * no always-on, no slider in the way of the sheet, and the display held again.
-     */
-    private fun portalWake() {
-        if (sleepStage.dimming) endDim(off = false)
-        exitAod()
-        guardedAfterWake = false
-        // Not under the camera tip: its slider is also the lock, and unlocking it would
-        // open the camera as if it had been swiped through.
-        if (dial.isLocked && !dial.cameraTipUp) dial.unlock()
-        // Mid hand-back after a spent lock: called off, as onNeedsScreen calls it off.
-        window.decorView.removeCallbacks(restorePanel)
-        awaitingDoze = false
-        if (!holding) holdScreen(true)
-        dial.onInteraction?.invoke()
-    }
-
-    private var portalLoadedFor: List<String>? = null
-
-    /** The pinned apps' icons and names, loaded when the pinned list changes. */
-    private fun loadPortalApps(pinned: List<String>) {
-        if (pinned == portalLoadedFor) return
-        portalLoadedFor = pinned
-        Thread {
-            val pm = packageManager
-            val installed = pinned.filter { runCatching { pm.getApplicationInfo(it, 0) }.isSuccess }.toSet()
-            val shown = dev.kb896.aiusage.data.PortalApps.present(pinned, installed).take(PortalSheet.MAX_APPS)
-            // Uninstalled between the two looks: its package stands in for its name.
-            val labels = shown.map { pkg ->
-                runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
-            }
-            val icons = shown.map { pkg ->
-                runCatching { pm.getApplicationIcon(pkg).toBitmap(96, 96) }.getOrNull()
-            }
-            onPanel {
-                // A newer list has been asked for since: that load's answer is the one to show.
-                if (portalLoadedFor != pinned) return@onPanel
-                dial.portalPackages = shown
-                dial.portalLabels = labels
-                dial.portalIcons = icons
-                dial.invalidate()
-            }
-        }.apply { isDaemon = true; name = "portal-icons"; start() }
-    }
     private lateinit var calibrationView: CalibrationView
     private var calibrating = false
 
@@ -576,28 +452,6 @@ class RearActivity : Activity() {
         dial.onAutoBrightness = { on ->
             sendBroadcast(Intent(ACTION_SET_REAR_AUTO_BRIGHTNESS).setPackage(packageName).putExtra(EXTRA_AUTO_BRIGHTNESS, on))
         }
-        // The App Portal: this panel's callback goes to the shell service through the app
-        // process, and the panel's choices come back as broadcasts like the control centre's.
-        portalOwner = this
-        runCatching {
-            bindService(
-                Intent(this, dev.kb896.aiusage.service.PortalRelayService::class.java),
-                portalConnection, BIND_AUTO_CREATE,
-            )
-        }.onFailure { Log.w(TAG, "portal: bind failed: ${it.message}") }
-        dial.onPortalApp = { pkg ->
-            sendBroadcast(Intent(ACTION_PORTAL_LAUNCH).setPackage(packageName).putExtra(EXTRA_PORTAL_PKG, pkg))
-        }
-        dial.onPortalButton = { i ->
-            val which = when (i) { 0 -> if (dial.portalGuestOnTop) "panel" else "resume"; 1 -> "front"; else -> "close" }
-            if (which == "resume") moveTaskToBack(true)
-            sendBroadcast(Intent(ACTION_PORTAL_GUEST).setPackage(packageName).putExtra(EXTRA_PORTAL_WHICH, which))
-        }
-        dial.onPortalShutOverGuest = {
-            // Shut over a live guest: this panel steps behind it, the guest is in front again.
-            moveTaskToBack(true)
-            sendBroadcast(Intent(ACTION_PORTAL_GUEST).setPackage(packageName).putExtra(EXTRA_PORTAL_WHICH, "resume"))
-        }
         // A card swiped away here: the relay clears it on the front if matching is on.
         dial.onNoticeDismissed = { key ->
             sendBroadcast(Intent(ACTION_DISMISS_NOTIFICATION).setPackage(packageName).putExtra(EXTRA_NOTIFICATION_KEY, key))
@@ -670,7 +524,6 @@ class RearActivity : Activity() {
         if (!calibrating) {
             val decoded = StatePayload.decode(payload)
             dial.config = decoded.config
-            loadPortalApps(decoded.config.portalApps)
             dial.state = decoded.state
             dial.weather = decoded.weather
             // The switch may have just been thrown either way: on has to take the hold
@@ -775,11 +628,6 @@ class RearActivity : Activity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         dial.throughCrt(ev) // first: everything below reads the flat picture's coordinates
         dial.toPanel(ev) // then real pixels into panel units — the Pro Max's display is larger
-        // A finger on the panel itself: whatever guest frame a hand-back was holding is done.
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) dial.portalHandedBack()
-        // An open App Portal has the panel: straight to the view, past the dim, always-on,
-        // the guard and the double tap — none of them may swallow a tap on the sheet.
-        if (dial.portalShowing()) return super.dispatchTouchEvent(ev)
         // The camera tip takes nothing but its slider — not even the double tap — and
         // nothing at all before the slider has come.
         val tip = dial.cameraTipUp
@@ -1110,9 +958,10 @@ class RearActivity : Activity() {
         if (keepAwake) return@Runnable
         // Stopped behind a guest app: letting go would tell the app process the panel is
         // dozing, which pauses the shell service's guest checks while the guest is in plain
-        // view. Only then — stopped because the rear went dark, the panel must still say so.
+        // view. Stopped with the rear still lit is that — something is in front of the panel
+        // — and only then: stopped because the rear went dark, the panel must still say so.
         // onStart arms the countdown again.
-        if (!started && dial.portalGuest != null) return@Runnable
+        if (!started && display?.state == android.view.Display.STATE_ON) return@Runnable
         // Never under the camera tip: it waits for a swipe, and gives up on its own. The
         // countdown starts over instead, so the panel sleeps once the tip has gone.
         if (dial.cameraTipUp) { window.decorView.postDelayed(sleepPanelRef, AWAKE_MS); return@Runnable }
@@ -1459,31 +1308,15 @@ class RearActivity : Activity() {
     override fun onStart() {
         super.onStart()
         started = true
-        // Pinned apps may have been installed or updated while away: look again. (Not on
-        // the first start — onCreate's render has just loaded them.)
-        if (stoppedOnce) {
-            portalLoadedFor = null
-            if (!calibrating) loadPortalApps(dial.config.portalApps)
-        }
         armSleep()
     }
 
     override fun onStop() {
         super.onStop()
         started = false
-        stoppedOnce = true
-        // The guest is in front again: the frame held for the hand-back can go.
-        dial.portalHandedBack()
     }
 
     override fun onDestroy() {
-        if (portalOwner === this) {
-            portalOwner = null
-            runCatching { portalRelay?.register(null) }
-        }
-        runCatching { unbindService(portalConnection) }
-        portalRelay = null
-        portalDecoder.shutdownNow()
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
         window.decorView.removeCallbacks(restorePanel)
         window.decorView.removeCallbacks(restoreBrightness)

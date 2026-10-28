@@ -90,12 +90,6 @@
             </intent-filter>
         </service>
 
-        <!-- The App Portal's relay: RearActivity (:rear) binds it to hand its callback to
-             the Shizuku service this process holds. Never exported. -->
-        <service
-            android:name=".service.PortalRelayService"
-            android:exported="false" />
-
         <!-- Send to back: the Quick Settings tile that moves the front app to the rear. -->
         <service
             android:name=".service.PortalTileService"

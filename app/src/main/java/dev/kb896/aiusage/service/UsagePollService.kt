@@ -53,8 +53,6 @@ class UsagePollService : Service() {
 
     /** The control centre's brightness, written off the main thread, newest value only. */
     private val brightnessWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
-    /** Guest launches block for up to ~16 s, so they get their own thread, not the brightness one. */
-    private val portalWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val latestBrightness = java.util.concurrent.atomic.AtomicInteger(-1)
 
     /**
@@ -269,8 +267,6 @@ class UsagePollService : Service() {
             // And its switches: silent, Bluetooth, mobile data, Wi-Fi.
             addAction(RearActivity.ACTION_GET_QUICK)
             addAction(RearActivity.ACTION_SET_QUICK)
-            addAction(RearActivity.ACTION_PORTAL_LAUNCH)
-            addAction(RearActivity.ACTION_PORTAL_GUEST)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         // Held by this service rather than by NotificationRelay, even though the relay is
@@ -436,16 +432,6 @@ class UsagePollService : Service() {
             }
             if (intent?.action == RearActivity.ACTION_GET_QUICK) {
                 brightnessWorker.execute { sendQuickStates() }
-                return
-            }
-            if (intent?.action == RearActivity.ACTION_PORTAL_LAUNCH) {
-                val pkg = intent.getStringExtra(RearActivity.EXTRA_PORTAL_PKG).orEmpty()
-                portalWorker.execute { runCatching { Graph.of(this@UsagePollService).bridge.launchGuest(pkg) } }
-                return
-            }
-            if (intent?.action == RearActivity.ACTION_PORTAL_GUEST) {
-                val which = intent.getStringExtra(RearActivity.EXTRA_PORTAL_WHICH).orEmpty()
-                portalWorker.execute { runCatching { Graph.of(this@UsagePollService).bridge.guestAction(which) } }
                 return
             }
             if (intent?.action == RearActivity.ACTION_SET_QUICK) {
@@ -817,7 +803,6 @@ class UsagePollService : Service() {
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         runCatching { contentResolver.unregisterContentObserver(brightnessWatch) }
         runCatching { contentResolver.unregisterContentObserver(quickWatch) }
-        portalWorker.shutdownNow()
         scope.cancel()
         super.onDestroy()
     }
