@@ -1338,17 +1338,19 @@ class MainActivity : ComponentActivity() {
             val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
                 .getOrDefault(pkg)
             SettingsRows.reorderable(
-                portalRows, "  $label", canMoveUp = i > 0,
+                portalRows, config.portalDpi[pkg]?.let { "  $label · $it dpi" } ?: "  $label", canMoveUp = i > 0,
                 onMoveUp = { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) }; buildSettingsRows() },
                 onClick = {
-                    Modal.show(
-                        Modal.builder(this).setTitle(label.trim())
-                            .setPositiveButton("Unpin") { _, _ ->
-                                write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg)) }
-                                buildSettingsRows()
-                            }
-                            .setNegativeButton("Cancel", null),
-                        danger = true,
+                    PortalAppSheet.show(
+                        this, pkg, label, config.portalDpi[pkg],
+                        onDpi = { dpi ->
+                            write { c -> c.copy(portalDpi = if (dpi == null) c.portalDpi - pkg else c.portalDpi + (pkg to dpi)) }
+                            buildSettingsRows()
+                        },
+                        onUnpin = {
+                            write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg), portalDpi = it.portalDpi - pkg) }
+                            buildSettingsRows()
+                        },
                     )
                 },
             )
