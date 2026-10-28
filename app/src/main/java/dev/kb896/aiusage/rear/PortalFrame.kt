@@ -42,6 +42,11 @@ import dev.kb896.aiusage.Panel
  * away and ends; a show meanwhile turns the same fade back from where it is. The thread
  * decides to end under this instance's lock, the same lock show takes — so a show either
  * turns a fade the thread will see, or finds the thread gone and starts another.
+ *
+ * UNDER THE SHEET IT GOES. The portal sheet hides it as far as the sheet is open (FrameVeil,
+ * fed by ShellSheet's render thread with each frame it draws): the layer's alpha is ALPHA
+ * times the fade times what the sheet leaves. Nothing new wakes for it: the render thread
+ * draws every frame while the frame is up anyway, and reads the latest value.
  */
 class PortalFrame(private val layerStack: Int) {
 
@@ -59,6 +64,8 @@ class PortalFrame(private val layerStack: Int) {
     private val gate = FrameGate()
     /** How much of it shows. Under this instance's lock. */
     private val fade = FrameFade()
+    /** How much of it the portal sheet hides. Its latch under this instance's lock; [sheetOpen] any thread. */
+    private val veil = FrameVeil()
     /** The running thread's layer, for a capture to leave out (GuestCover); null while there is none. */
     @Volatile private var layer: SurfaceControl? = null
 
@@ -85,8 +92,20 @@ class PortalFrame(private val layerStack: Int) {
     @Synchronized
     fun hide() {
         gate.want(false)
+        veil.hidden()
         fade.hide(now())
     }
+
+    /** How far the portal sheet is open, 0 to 1 (PortalSheet.progress). Any thread; no lock, no wakeup. */
+    fun sheetOpen(progress: Float) = veil.sheet(progress)
+
+    /** A sheet button's choice is coming: the frame stays as hidden as the sheet has it while the sheet shuts (FrameVeil.hold). */
+    @Synchronized
+    fun holdVeil() = veil.hold()
+
+    /** The choice is done: if it left the frame wanted, the sheet alone hides it again. */
+    @Synchronized
+    fun releaseVeil() = veil.release(stillShown = fade.shown)
 
     /**
      * The front's Portal border switch (PanelConfig.portalBorder): off, the frame fades out
@@ -95,11 +114,12 @@ class PortalFrame(private val layerStack: Int) {
     @Synchronized
     fun allow(on: Boolean) {
         if (gate.allowed == on) return
-        if (gate.allow(on)) up() else fade.hide(now())
+        if (gate.allow(on)) up() else { veil.hidden(); fade.hide(now()) }
     }
 
     /** Fading in, and a thread to draw it if none is running. Under the lock. */
     private fun up() {
+        if (!fade.shown) veil.shown()
         fade.show(now())
         start()
     }
@@ -117,16 +137,16 @@ class PortalFrame(private val layerStack: Int) {
     }
 
     /**
-     * This frame's level, and whether [myGen]'s thread should carry on: false, and the thread
-     * forgotten, once the fade has gone all the way out (or another thread has taken over).
+     * This frame's layer alpha, or null when [myGen]'s thread should stop: the thread is
+     * forgotten once the fade has gone all the way out (or another thread has taken over).
      * Under the lock, so a show cannot slip between the decision and the thread's end.
      */
     @Synchronized
-    private fun level(myGen: Int): Float? {
+    private fun alphaNow(myGen: Int): Float? {
         if (gen != myGen) return null
         val now = now()
         if (fade.gone(now)) { thread = null; return null }
-        return fade.level(now)
+        return FrameVeil.alpha(ALPHA, fade.level(now), veil.veil())
     }
 
     private fun run(myGen: Int) {
@@ -161,7 +181,7 @@ class PortalFrame(private val layerStack: Int) {
         layer = sc
         try {
             while (!Thread.currentThread().isInterrupted) {
-                val level = level(myGen) ?: break
+                val a = alphaNow(myGen) ?: break
                 val began = System.nanoTime()
                 val canvas = if (hardware) {
                     try { surface.lockHardwareCanvas() } catch (e: Throwable) {
@@ -176,7 +196,6 @@ class PortalFrame(private val layerStack: Int) {
                     surface.unlockCanvasAndPost(canvas)
                 }
                 // The whole layer, with the frame it goes with, and only when it moves.
-                val a = ALPHA * level
                 if (a != alpha) {
                     SurfaceControl.Transaction().use { it.setAlpha(sc, a).apply() }
                     alpha = a

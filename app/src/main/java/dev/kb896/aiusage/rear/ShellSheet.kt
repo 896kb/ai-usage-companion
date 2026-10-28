@@ -117,6 +117,16 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     @Volatile private var face: PanelType.Face = face
     private val version = AtomicInteger()
 
+    /**
+     * Told how far open the sheet is drawn, 0 to 1 (PortalSheet.progress: scrolled to the
+     * slider is open), with each frame the render thread posts, and 0 once it has [end]ed —
+     * the portal frame fades under it (PortalFrame.sheetOpen). Called on the render thread,
+     * or [end]'s; it must be quick and take no lock of the caller's.
+     */
+    @Volatile var onProgress: ((Float) -> Unit)? = null
+    /** So a render thread outliving its [end] cannot tell [onProgress] about a sheet that is gone. */
+    private val progressLock = Any()
+
     /** Volatile: [up] reads it from threads that do not hold the lock. */
     @Volatile private var thread: Thread? = null
     @Volatile private var run: Run? = null
@@ -206,6 +216,8 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
             runCatching { t.join(JOIN_MS) }
         }
         thread = null
+        // After gen moved on: a late frame of the old run is not told after this.
+        synchronized(progressLock) { onProgress?.invoke(0f) }
         pressed = -1
         page = 0f
         sliderDrag = null
@@ -358,6 +370,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
                 if (radius != blurred && blur(r, radius)) blurred = radius
                 drawn = v
                 timing.drew(at, guestOnTop != null)
+                synchronized(progressLock) { if (gen == r.gen) onProgress?.invoke(PortalSheet.progress(at)) }
             }
             val took = (System.nanoTime() - began) / 1_000_000
             Thread.sleep(maxOf(FRAME_MS - took, 1L))

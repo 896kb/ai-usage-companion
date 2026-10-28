@@ -1277,6 +1277,18 @@ class RearUserService : IRearService.Stub {
     private var touchDownAt = 0L
     /** Run once the sheet is down: the tapped app's launch, a button's choice. Under [sheetLock]. */
     private var afterShut: (() -> Unit)? = null
+    /**
+     * [afterShut] is a button's choice that holds the frame's veil (PortalFrame.holdVeil):
+     * the choice lets it go when it has run, and a choice dropped unrun lets it go here
+     * ([dropChoice], [sheetDown]) — never left holding. Under [sheetLock].
+     */
+    private var veilHeld = false
+
+    /** No choice to run after all; a veil it held let go. Under [sheetLock]. */
+    private fun dropChoice() {
+        afterShut = null
+        if (veilHeld) { veilHeld = false; frame.releaseVeil() }
+    }
     private var anim: java.util.concurrent.ScheduledFuture<*>? = null
     /** The button (or the slider's part, PortalSheetPainter.PRESS_*) shown pressed, or -1. Under [sheetLock]. */
     private var pressed = -1
@@ -1308,6 +1320,8 @@ class RearUserService : IRearService.Stub {
             val face = sheetFace(sheetType)
             if (face == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
             val s = ShellSheet(rearLayerStack(), face)
+            // The portal frame fades under the sheet, as far as it is open.
+            s.onProgress = { frame.sheetOpen(it) }
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
             s.dpiValues(portalDpi)
@@ -1470,7 +1484,7 @@ class RearUserService : IRearService.Stub {
             is EdgeGestures.Action.PullStart -> if (sheetUp) {
                 if (!sheetAlive()) return false
                 // Caught and dragged: a pending launch or button waits for no shut that is coming.
-                afterShut = null
+                dropChoice()
                 setPressed(-1)
                 motion.grab(touchDownY, touchDownAt)
                 driving = true
@@ -1520,7 +1534,7 @@ class RearUserService : IRearService.Stub {
         beginPending = true
         driving = true
         gestures.sheet = true
-        afterShut = null
+        dropChoice()
         pressed = -1
         s.page(0f)
         s.sliderDrag(null)
@@ -1650,7 +1664,14 @@ class RearUserService : IRearService.Stub {
                 val pkg = apps.packages.getOrNull(hit.index)
                 shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
             }
-            is PortalSheet.Hit.Button -> shutSheet(atMs) { onSheetButton(hit.index, onTop ?: false) }
+            is PortalSheet.Hit.Button -> {
+                // The frame stays as hidden as the open sheet has it while the sheet shuts:
+                // the choice may fade it out, and it must not come back up in between.
+                frame.holdVeil()
+                // Before the shut, which may hand the choice over at once (sheetDown).
+                veilHeld = true
+                shutSheet(atMs) { try { onSheetButton(hit.index, onTop ?: false) } finally { frame.releaseVeil() } }
+            }
             is PortalSheet.Hit.Page -> {
                 steady(atMs)
                 pager.show(hit.index, atMs)
@@ -2093,8 +2114,13 @@ class RearUserService : IRearService.Stub {
         pager.reset()
         val then = afterShut
         afterShut = null
-        val s = shellSheet ?: return
-        if (!wasUp) return
+        // From here a held veil is the choice's to let go, if it runs; else it goes now.
+        val held = veilHeld
+        veilHeld = false
+        val unrun = { if (held) frame.releaseVeil() }
+        val s = shellSheet ?: return unrun()
+        if (!wasUp) return unrun()
+        if (then == null) unrun()
         runCatching {
             sheetClock.execute {
                 runCatching { s.end() }.onFailure { Log.w(TAG, "portal sheet: end failed: ${it.message}") }
@@ -2102,6 +2128,7 @@ class RearUserService : IRearService.Stub {
             }
         }.onFailure {
             runCatching { s.end() }
+            if (then != null) unrun()
         }
     }
 
@@ -2113,7 +2140,7 @@ class RearUserService : IRearService.Stub {
         val s = synchronized(sheetLock) {
             if (!sheetUp) return
             Log.i(TAG, "portal sheet: shut — $why")
-            afterShut = null
+            dropChoice()
             sheetDown()
             shellSheet
         }
