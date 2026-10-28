@@ -961,6 +961,7 @@ class RearDialView(context: Context) : View(context) {
             val now = SystemClock.uptimeMillis()
             if (value) {
                 closeControlCenterNow() // nothing stays open into always-on
+                closePortalNow()
                 aodSince = now; aodWallAt = System.currentTimeMillis(); aodRealAt = SystemClock.elapsedRealtime()
                 aodReturnPage = pager.page
                 pager.goTo(PAGE_NOTICES, now, AOD_FADE_MS.toFloat()) // the clock page is the always-on page, reached with the fade
@@ -1436,6 +1437,50 @@ class RearDialView(context: Context) : View(context) {
         // Every pane this frame gets its own node — see nodePool.
         nodesUsed = 0
         lab?.let { drawLab(canvas, it); return }
+        // The frame clock, now rather than at drawFrame: the portal and the centre read it
+        // before the panel draws, and over a guest's frame the panel does not draw at all.
+        frameNowMs = SystemClock.uptimeMillis()
+        // THE APP PORTAL, over the panel — or over the guest's frozen frame — blurred as
+        // the control centre blurs it. The frame arrives ~240 ms after the pull starts;
+        // until it does, the panel's dark ground stands in.
+        val pt = portalProgress()
+        // Over a guest it is drawn to the very end, shut included: until the panel has
+        // stepped behind the guest again, the guest's own frame is what should show.
+        if (pt > 0.001f || ptOverGuest) {
+            val shot = portalBackdrop
+            // Over a guest the panel is not drawn, so nothing else will say whether this
+            // frame is moving: it starts from still, and only the portal can change that.
+            if (ptOverGuest) animating = false
+            val recorder = canvas as? android.graphics.RecordingCanvas
+            if (recorder != null && width > 0 && height > 0) {
+                ptNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
+                val inner = ptNode.beginRecording(Panel.WIDTH, Panel.HEIGHT)
+                try {
+                    drawPortalBackdrop(inner, shot)
+                } finally {
+                    ptNode.endRecording()
+                }
+                val blur = CC_BLUR * pt
+                ptNode.setRenderEffect(
+                    if (blur > 0.5f) android.graphics.RenderEffect.createBlurEffect(
+                        blur, blur, android.graphics.Shader.TileMode.CLAMP,
+                    ) else null,
+                )
+                recorder.drawRenderNode(ptNode)
+            } else {
+                drawPortalBackdrop(canvas, shot)
+            }
+            ccDim.color = ((CC_DIM * pt * 255).toInt().coerceIn(0, 255)) shl 24
+            canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), ccDim)
+            PortalSheet.draw(
+                canvas, pt, portalIcons, portalLabels, portalGuest, portalGuestOnTop,
+                accent = config.titleColor, ink = Panel.Palette.FG,
+            )
+            // Another frame while it settles or the guest's frame fades in; a finger's
+            // drag asks for its own with every move.
+            if (ptAt != 0L || (ptOverGuest && shot != null && frameNowMs - ptBackdropAt < PORTAL_FADE_MS)) animating = true
+            return
+        }
         // THE CONTROL CENTRE, over the panel blurred behind it. The panel is recorded into
         // a node of its own and drawn through a blur that deepens as the centre comes down;
         // a canvas that cannot hold a node (a software one) gets the centre without the blur.
@@ -1466,6 +1511,25 @@ class RearDialView(context: Context) : View(context) {
             return
         }
         drawPanelPicture(canvas)
+        // A portal settling shut that has gone too faint to draw is still settling.
+        if (ptAt != 0L) animating = true
+    }
+
+    /**
+     * What the App Portal blurs: over a guest its frozen frame, faded in over the panel's
+     * dark ground (which stays if the capture never came, or came back black); otherwise
+     * the panel itself.
+     */
+    private fun drawPortalBackdrop(canvas: Canvas, shot: android.graphics.Bitmap?) {
+        if (!ptOverGuest) {
+            drawPanelPicture(canvas)
+            return
+        }
+        canvas.drawColor(config.background or (0xFF shl 24))
+        if (shot == null) return
+        val fade = ((frameNowMs - ptBackdropAt) / PORTAL_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        ptShotPaint.alpha = (255 * fade).toInt()
+        canvas.drawBitmap(shot, null, android.graphics.RectF(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat()), ptShotPaint)
     }
 
     /** The panel itself, everything but the control centre. */
@@ -4624,6 +4688,27 @@ class RearDialView(context: Context) : View(context) {
         if (!interactive) return false
         // The control centre, when it is open or being pulled: it has the whole surface.
         if (controlCenterTouch(event)) return true
+        // The App Portal, from the bottom edge, as the control centre is from the top.
+        if (portalTouch(event)) {
+            // A pull it has just taken from the panel: everything below saw the finger
+            // land and must be told it is gone, or a page swipe, a volume drag or a
+            // transport press would carry on under the portal.
+            if (ptStole) {
+                ptStole = false
+                val cancel = android.view.MotionEvent.obtain(event)
+                cancel.action = android.view.MotionEvent.ACTION_CANCEL
+                try { panelTouch(cancel) } finally { cancel.recycle() }
+            }
+            return true
+        }
+        val took = panelTouch(event)
+        // A finger in the bottom band is watched for a pull even where nothing on the
+        // panel wants it, or the portal would never see it move.
+        return took || (event.actionMasked == android.view.MotionEvent.ACTION_DOWN && ptArmed)
+    }
+
+    /** The panel's own share of the touches: everything but the control centre and the portal. */
+    private fun panelTouch(event: android.view.MotionEvent): Boolean {
         // LOCKED MEANS LOCKED. Every other target on this panel is skipped entirely —
         // not tested and rejected, never reached — so there is no path by which a
         // pocket can press play, change the volume or turn the page. The slider is the
@@ -6163,6 +6248,7 @@ class RearDialView(context: Context) : View(context) {
     fun lock() {
         // Nothing stays open over a lock.
         closeControlCenterNow()
+        closePortalNow()
         // THE REAL CLOCK, NOT THE FRAME CLOCK. frameNowMs is the last frame the panel
         // DREW, and a panel that has been dozing has not drawn for as long as it slept —
         // so stamping the lock with it dated the lock minutes into the past, the grace
@@ -9606,8 +9692,10 @@ class RearDialView(context: Context) : View(context) {
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 val shown = controlCenterProgress() > 0.01f
+                // Never over the App Portal: whichever is showing has the panel.
                 ccGesture = shown ||
-                    (!locked && !aod && onlyAccount == null && ControlCenter.startsPull(event.x, event.y))
+                    (!locked && !aod && onlyAccount == null && !portalShowing() &&
+                        ControlCenter.startsPull(event.x, event.y))
                 if (!ccGesture) return false
                 if (!shown) onControlCenterOpening?.invoke()
                 downX = event.x; downY = event.y
@@ -9702,6 +9790,268 @@ class RearDialView(context: Context) : View(context) {
             }
         }
         return ccGesture
+    }
+
+    // ---- the App Portal ----
+
+    /** Open, or settling there; the drag's travel while a finger (or a relayed one) has it. See PortalPull. */
+    private var ptOpen = false
+    private var ptDy = 0f
+    private var ptFrom = 0f
+    private var ptTo = 0f
+    private var ptAt = 0L
+    private var ptSettleMs = ControlCenter.SETTLE_MAX_MS
+    /** Whether the portal has this gesture, and whether it has moved past the slop. */
+    private var ptGesture = false
+    private var ptDragging = false
+    /**
+     * A finger landed in the bottom band with the portal shut. The panel gets it as well
+     * until it moves: up past the slop and the portal takes it ([ptStole], and the panel is
+     * sent a cancel); a tap, or a drag any other way, stays the panel's. The transport row
+     * and the camera button sit in that band, and a press on them must still work.
+     */
+    private var ptArmed = false
+    private var ptStole = false
+    private var ptDownX = 0f
+    private var ptDownY = 0f
+    private var ptVelocity = 0f
+    private var ptLastY = 0f
+    private var ptLastAt = 0L
+    private val ptNode = android.graphics.RenderNode("app-portal")
+    private val ptShotPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    /**
+     * This opening came over a guest app (a relayed pull), so shutting it must hand the
+     * rear back to the guest. A flag of its own, not "a backdrop arrived": the frozen frame
+     * takes ~240 ms, and a pull let go before then must still step back.
+     */
+    private var ptOverGuest = false
+    /** A relayed finger has it, from phase 0 to its lift: the panel's own touches wait. */
+    private var ptRelaying = false
+
+    /** The pinned apps, as RearActivity loaded them. */
+    var portalIcons: List<android.graphics.Bitmap?> = emptyList()
+    var portalLabels: List<String> = emptyList()
+    var portalPackages: List<String> = emptyList()
+    /** The guest app's package, null for none; and whether it is on top of the rear. */
+    var portalGuest: String? = null
+        set(value) { field = value; invalidate() }
+    var portalGuestOnTop = false
+    /**
+     * The guest's frozen frame while the portal is over it; null draws the dark ground.
+     * One that lands after the portal has already shut and handed the rear back belongs to
+     * no pull, and is dropped rather than kept to show stale under the next.
+     */
+    var portalBackdrop: android.graphics.Bitmap? = null
+        set(value) {
+            field = if (value != null && !ptOverGuest && !ptRelaying) null else value
+            ptBackdropAt = SystemClock.uptimeMillis()
+            invalidate()
+        }
+    /** When the frozen frame arrived, for its fade in. */
+    private var ptBackdropAt = 0L
+
+    /** A pinned app tapped; a guest button (0 Panel/Resume, 1 Front, 2 Close); shut over a guest. */
+    var onPortalApp: ((String) -> Unit)? = null
+    var onPortalButton: ((Int) -> Unit)? = null
+    var onPortalShutOverGuest: (() -> Unit)? = null
+
+    /** How far up it is now: under a finger, settling, or at rest. */
+    private fun portalProgress(): Float {
+        if (ptDragging) return PortalPull.progress(ptOpen, ptDy)
+        if (ptAt == 0L) return ptTo
+        val t = ((frameNowMs - ptAt) / ptSettleMs.toFloat()).coerceIn(0f, 1f)
+        if (t >= 1f) {
+            // Arrived: at rest from here, so nothing reads it as still settling.
+            ptAt = 0L
+            return ptTo
+        }
+        animating = true
+        // EASED OUT, as the control centre's settle is.
+        val e = 1f - (1f - t) * (1f - t)
+        return ptFrom + (ptTo - ptFrom) * e
+    }
+
+    /** Up, being pulled, or over a guest (shut but not yet handed back): it has the panel. */
+    private fun portalShowing(): Boolean = ptRelaying || ptOverGuest || portalProgress() > 0.01f
+
+    /** Go [open] from [from], carrying on at [velocity] (down positive) if it was moving that way. */
+    private fun settlePortal(open: Boolean, from: Float, velocity: Float = 0f) {
+        ptOpen = open
+        ptFrom = from
+        ptTo = if (open) 1f else 0f
+        val toward = if (open) -velocity else velocity
+        ptSettleMs = ControlCenter.settleMs(Math.abs(ptTo - from) * PortalPull.TRAVEL, toward)
+        ptAt = SystemClock.uptimeMillis()
+        // Shutting over a guest hands the rear back once it is down. On a timer, not from
+        // the frame that sees it arrive: a frame is not promised (a panel still coming up,
+        // a display going to sleep), and the guest must get its rear back regardless.
+        removeCallbacks(portalShut)
+        if (!open && ptOverGuest) postDelayed(portalShut, ptSettleMs)
+        invalidate()
+    }
+
+    private val portalShut = Runnable { portalSettledShut() }
+
+    /** Shut over a guest: the frame goes, and the panel goes behind it again. */
+    private fun portalSettledShut() {
+        // Taken up again, or opened, before the settle finished: not shut after all.
+        if (ptOpen || ptDragging || ptGesture || ptRelaying || !ptOverGuest) return
+        ptOverGuest = false
+        portalBackdrop = null
+        if (portalGuest != null) onPortalShutOverGuest?.invoke()
+    }
+
+    /** Shut at once: a lock, always-on. Over a guest the rear goes back to it, as it was before the pull. */
+    private fun closePortalNow() {
+        removeCallbacks(portalShut)
+        ptArmed = false
+        if (!ptOpen && ptTo == 0f && ptAt == 0L && !ptDragging && !ptGesture && !ptRelaying && !ptOverGuest) return
+        ptOpen = false; ptFrom = 0f; ptTo = 0f; ptAt = 0L; ptDy = 0f
+        ptDragging = false; ptGesture = false; ptRelaying = false
+        portalSettledShut()
+        invalidate()
+    }
+
+    /** A pull relayed from the rear touchscreen: phase 0 start, 1 move, 2 lift, 3 cancel. */
+    fun portalRelay(phase: Int, y: Float) {
+        val now = SystemClock.uptimeMillis()
+        when (phase) {
+            0 -> {
+                // Never both: the portal comes up over a guest, so the centre goes.
+                closeControlCenterNow()
+                removeCallbacks(portalShut)
+                ptOverGuest = true; ptRelaying = true
+                ptGesture = false; ptArmed = false
+                // The finger landed SLOP lower than where the service committed the pull.
+                ptDownY = y + EdgeGestures.SLOP
+                ptDragging = true; ptOpen = false; ptAt = 0L
+                ptLastY = y; ptLastAt = now; ptVelocity = 0f
+                ptDy = y - ptDownY
+            }
+            1 -> if (ptRelaying) {
+                val ms = (now - ptLastAt).coerceAtLeast(1L)
+                ptVelocity = 0.6f * ((y - ptLastY) / ms) + 0.4f * ptVelocity
+                ptLastY = y; ptLastAt = now; ptDy = y - ptDownY
+            }
+            2, 3 -> if (ptRelaying) {
+                ptRelaying = false
+                ptDy = y - ptDownY
+                val at = PortalPull.progress(ptOpen, ptDy)
+                val v = if (now - ptLastAt > 80L) 0f else ptVelocity
+                ptDragging = false
+                ptDy = 0f
+                settlePortal(if (phase == 2) PortalPull.release(ptOpen, y - ptDownY, v) else false, at, v)
+            }
+        }
+        invalidate()
+    }
+
+    /**
+     * The App Portal's share of the panel's own touches: a pull from the bottom edge, a
+     * drag down to close, a tap on the sheet. False when it is none of its business — or,
+     * for a finger only armed in the band, not yet.
+     */
+    private fun portalTouch(event: android.view.MotionEvent): Boolean {
+        if (ptRelaying) {
+            // A relayed finger is driving it: the rest of another one's gesture is nobody's.
+            if (event.actionMasked != android.view.MotionEvent.ACTION_DOWN) return true
+            // But a finger landing on the panel means the relayed one is off the glass,
+            // whether or not its lift ever came through (the service gone mid-pull): let it
+            // go where it was, and this finger has the portal from there.
+            portalRelay(2, ptLastY)
+        }
+        val now = SystemClock.uptimeMillis()
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                ptArmed = false; ptStole = false
+                val shown = portalShowing()
+                ptDownX = event.x; ptDownY = event.y
+                ptLastY = event.y; ptLastAt = now; ptVelocity = 0f
+                ptDragging = false; ptDy = 0f
+                if (!shown) {
+                    // Shut: only armed, never over the control centre (which, showing,
+                    // took this finger before it got here).
+                    ptGesture = false
+                    ptArmed = !locked && !aod && onlyAccount == null &&
+                        controlCenterProgress() <= 0.01f && PortalPull.startsPull(event.x, event.y)
+                    return false
+                }
+                // Showing: it has the whole surface, from wherever a settle had got to.
+                ptGesture = true
+                removeCallbacks(portalShut)
+                if (ptAt != 0L) { ptOpen = portalProgress() > 0.5f; ptAt = 0L; ptTo = if (ptOpen) 1f else 0f }
+                return true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                if (ptArmed) {
+                    val dx = event.x - ptDownX
+                    val dy = event.y - ptDownY
+                    if (maxOf(Math.abs(dx), Math.abs(dy)) < DRAG_SLOP) return false
+                    ptArmed = false
+                    // Up, and more up than sideways: the portal's. Anything else is the panel's.
+                    if (dy >= 0f || -dy <= Math.abs(dx)) return false
+                    ptGesture = true; ptStole = true
+                    ptOpen = false; ptAt = 0L; ptTo = 0f
+                    ptDragging = true; ptDy = dy
+                    ptLastY = event.y; ptLastAt = now
+                    invalidate()
+                    return true
+                }
+                // Over a guest's frame nothing beneath is showing to be touched.
+                if (!ptGesture) return ptOverGuest
+                val dy = event.y - ptDownY
+                if (!ptDragging && Math.abs(dy) >= DRAG_SLOP) ptDragging = true
+                if (ptDragging) {
+                    val ms = (now - ptLastAt).coerceAtLeast(1L)
+                    ptVelocity = 0.6f * ((event.y - ptLastY) / ms) + 0.4f * ptVelocity
+                    ptLastY = event.y; ptLastAt = now; ptDy = dy
+                    invalidate()
+                }
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                ptArmed = false
+                if (!ptGesture) return ptOverGuest
+                ptGesture = false
+                val up = event.actionMasked == android.view.MotionEvent.ACTION_UP
+                if (ptDragging) {
+                    val at = PortalPull.progress(ptOpen, ptDy)
+                    // A finger that stopped before lifting is not flicking.
+                    val v = if (now - ptLastAt > 80L) 0f else ptVelocity
+                    val dy = ptDy
+                    ptDragging = false; ptDy = 0f
+                    // Let go: past halfway it goes. Taken away (a cancel): it stays as it was.
+                    val open = if (up) PortalPull.release(ptOpen, dy, v) else ptOpen
+                    settlePortal(open, at, v)
+                    return true
+                }
+                // A tap: on the sheet it is a choice; outside it, it shuts. A choice is not
+                // "shut over the guest" — what was chosen decides what comes to the front.
+                // Only once it has settled open: PortalSheet.hit is laid out for the
+                // fully open sheet, and mid-slide the drawing sits lower than its boxes.
+                if (ptOpen && portalProgress() >= 0.99f && up) {
+                    when (val hit = PortalSheet.hit(event.x, event.y, portalLabels.size, portalGuest != null)) {
+                        is PortalSheet.Hit.App -> {
+                            ptOverGuest = false; portalBackdrop = null
+                            portalPackages.getOrNull(hit.index)?.let { onPortalApp?.invoke(it) }
+                            settlePortal(false, 1f)
+                        }
+                        is PortalSheet.Hit.Button -> {
+                            ptOverGuest = false; portalBackdrop = null
+                            onPortalButton?.invoke(hit.index)
+                            settlePortal(false, 1f)
+                        }
+                        PortalSheet.Hit.Outside -> settlePortal(false, 1f)
+                    }
+                } else if (!ptOpen) {
+                    // Caught on its way shut: it carries on shutting (and, over a guest,
+                    // hands the rear back when it is down).
+                    settlePortal(false, portalProgress())
+                }
+                return true
+            }
+        }
+        return ptGesture
     }
 
     private val sunPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -13536,6 +13886,8 @@ class RearDialView(context: Context) : View(context) {
         /** The control centre's blur at full, in panel units, and its dim. */
         private const val CC_BLUR = 22f
         private const val CC_DIM = 0.25f
+        /** How long the guest's frozen frame takes to fade in behind the App Portal. */
+        private const val PORTAL_FADE_MS = 150L
         /** How often a brightness drag writes the setting, at most. */
         private const val BRIGHT_SEND_MS = 50L
         /** Between the brightness cell and the round button under it. */
