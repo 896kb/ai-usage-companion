@@ -10,18 +10,23 @@ import dev.kb896.aiusage.rear.PortalAppsSnapshot
 import dev.kb896.aiusage.rear.PortalSheet
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Loads the pinned apps' labels and icons in the main app's process and hands them to
  * [send] (the shell service's setPortalApps, via the bridge). Everything runs on one
  * background thread; [refresh] is cheap enough to call on every config write, because a
  * load that would equal the last one sent (same apps, same install times, same language) sends nothing.
- * The bridge re-sends the last bundle itself when the shell service reconnects.
+ * The bridge re-sends the last bundle itself when the shell service reconnects. A send that
+ * failed ([send] false: a oneway call too big for the binder's room just then) is not
+ * counted as sent, and is tried again after [RETRY_MS].
  */
-class PortalAppsLoader(private val context: Context, private val send: (android.os.Bundle) -> Unit) {
+class PortalAppsLoader(private val context: Context, private val send: (android.os.Bundle) -> Boolean) {
 
-    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "portal-apps").apply { isDaemon = true } }
+    private val worker = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "portal-apps").apply { isDaemon = true } }
     private var lastSignature: List<String>? = null
+    /** A retry is waiting. On the worker. */
+    private var retrying = false
 
     fun refresh() {
         runCatching { worker.execute { runCatching { load() }.onFailure { Log.w(TAG, "load: ${it.message}") } } }
@@ -53,8 +58,14 @@ class PortalAppsLoader(private val context: Context, private val send: (android.
         if (icons.sumOf { it?.size ?: 0 } > PortalAppsSnapshot.ICON_BUDGET) icons = bitmaps.map { encode(it, QUALITY_TIGHT) }
         icons = PortalAppsSnapshot.withinBudget(icons, PortalAppsSnapshot.ICON_BUDGET)
         val bytes = shown.indices.mapNotNull { i -> icons[i]?.let { shown[i] to it } }.toMap()
-        send(PortalAppsSnapshot.of(shown, labels, bytes).toBundle())
-        lastSignature = signature
+        if (send(PortalAppsSnapshot.of(shown, labels, bytes).toBundle())) {
+            lastSignature = signature
+        } else if (!retrying) {
+            retrying = true
+            runCatching {
+                worker.schedule({ retrying = false; runCatching { load() }.onFailure { Log.w(TAG, "load: ${it.message}") } }, RETRY_MS, TimeUnit.MILLISECONDS)
+            }
+        }
     }
 
     private fun encode(bmp: Bitmap?, quality: Int): ByteArray? = bmp?.let {
@@ -66,5 +77,7 @@ class PortalAppsLoader(private val context: Context, private val send: (android.
         const val ICON_PX = 96
         const val QUALITY = 90
         const val QUALITY_TIGHT = 60
+        /** After a failed send, the next try. */
+        const val RETRY_MS = 5_000L
     }
 }

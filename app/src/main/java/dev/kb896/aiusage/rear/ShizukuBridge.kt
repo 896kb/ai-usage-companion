@@ -325,13 +325,18 @@ class ShizukuBridge(private val context: Context) {
     /** The pinned apps' names and icons, kept to hand on whenever the service (re)connects. */
     @Volatile private var portalApps: android.os.Bundle? = null
 
-    fun setPortalApps(apps: android.os.Bundle) {
+    /**
+     * Hands [apps] to the shell service, now or — not connected — when it connects. False
+     * when the call failed (too big for the binder's room just then, the service gone):
+     * the caller sends again later, since an equal load would otherwise never be re-sent.
+     */
+    fun setPortalApps(apps: android.os.Bundle): Boolean {
         portalApps = apps
-        if (service == null) { bind(); return }
-        runCatching { service?.setPortalApps(apps) }.onFailure {
+        if (service == null) { bind(); return true }
+        return runCatching { service?.setPortalApps(apps) }.onFailure {
             Log.w(TAG, "portal apps: ${it.message}")
             if (it is android.os.DeadObjectException) service = null
-        }
+        }.isSuccess
     }
 
     /** Blocks while waiting for the service: call off the main thread. */

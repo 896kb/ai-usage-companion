@@ -6,6 +6,23 @@ package dev.kb896.aiusage.data
  */
 object PortalApps {
 
+    /**
+     * The most apps that can be pinned: four pages of the biggest grid, and as many icons
+     * as go to the shell in one call (PortalAppsSnapshot.ICON_BUDGET).
+     */
+    const val MAX = 48
+
+    /**
+     * [pkg] pinned at the end ([on]) or unpinned. Pinning past [max] changes nothing — the
+     * picker then puts its switch back off and says why; pinning twice, unpinning what is
+     * not pinned, change nothing either.
+     */
+    fun pinned(pinned: List<String>, pkg: String, on: Boolean, max: Int = MAX): List<String> = when {
+        !on -> pinned.filter { it != pkg }
+        pkg in pinned || pinned.size >= max -> pinned
+        else -> pinned + pkg
+    }
+
     /** Pinned at the end, or unpinned if it already was. */
     fun toggled(pinned: List<String>, pkg: String): List<String> =
         if (pkg in pinned) pinned.filter { it != pkg } else pinned + pkg

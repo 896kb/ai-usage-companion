@@ -408,19 +408,25 @@ object SettingsRows {
         parent.addView(row, rowParams(dp(context, 8)))
     }
 
+    /**
+     * A switch, [name] beside it. Returns a way to set it back without asking anyone — for
+     * a change the caller turns down (the portal's pin list when it is full); under
+     * ORIGINAL the platform Switch still calls [onChange] with the value it is set to.
+     */
     fun toggle(
         parent: LinearLayout,
         name: String,
         initial: Boolean,
         onChange: (Boolean) -> Unit,
-    ) {
+    ): (Boolean) -> Unit {
         val context = parent.context
         if (!glass(context)) {
             // A Switch, not a CheckBox. These are settings that take effect immediately
             // and stay that way, which is what a switch means; a checkbox reads as one of
             // several selections waiting to be confirmed, and there is nothing here to
             // confirm.
-            parent.addView(android.widget.Switch(context).apply {
+            val switch = android.widget.Switch(context)
+            parent.addView(switch.apply {
                 text = name
                 textSize = 13f
                 isChecked = initial
@@ -436,7 +442,7 @@ object SettingsRows {
                 trackTintList = null
                 setOnCheckedChangeListener { _, checked -> onChange(checked) }
             }, rowParams(dp(context, 6)))
-            return
+            return { on -> switch.isChecked = on }
         }
         // Under GLASS the platform Switch is a GlassSwitch beside its own label instead
         // of using its built-in text — the liquid track has no room in its 64x28dp frame
@@ -452,11 +458,13 @@ object SettingsRows {
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         // The 896 Store's toggle, copied whole (ui/liquid/LiquidToggle): the app's own
         // stuttered, the store's runs smoothly. On is the app's accent.
-        row.addView(dev.kb896.aiusage.ui.liquid.LiquidToggle(context).apply {
+        val liquid = dev.kb896.aiusage.ui.liquid.LiquidToggle(context).apply {
             setCheckedSilently(initial)
             onCheckedChange = onChange
-        })
+        }
+        row.addView(liquid)
         parent.addView(row, rowParams(dp(context, 8)))
+        return { on -> liquid.setCheckedSilently(on) }
     }
 
     /**

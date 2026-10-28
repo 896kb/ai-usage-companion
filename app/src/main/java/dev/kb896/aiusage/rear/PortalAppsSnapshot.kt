@@ -43,8 +43,11 @@ class PortalAppsSnapshot(
         const val KEY_LABELS = "labels"
         fun iconKey(pkg: String) = "icon:$pkg"
 
-        /** The most icon bytes one bundle carries: well inside the binder's half megabyte for oneway calls. */
-        const val ICON_BUDGET = 300 * 1024
+        /**
+         * The most icon bytes one bundle carries: two bundles in flight at once (a reload on
+         * the heels of the last) still fit the binder's half megabyte for oneway calls.
+         */
+        const val ICON_BUDGET = 200 * 1024
 
         /** [icons] in order while their sizes add up to no more than [budget]; every one after that null. */
         fun withinBudget(icons: List<ByteArray?>, budget: Int): List<ByteArray?> {

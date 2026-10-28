@@ -25,4 +25,18 @@ class PortalAppsTest {
     @Test fun `only installed apps are shown, once each, in pinned order`() {
         assertEquals(listOf("c", "a"), PortalApps.present(listOf("c", "gone", "a", "c"), setOf("a", "c")))
     }
+
+    @Test fun `pinning adds at the end, unpinning removes, either twice changes nothing`() {
+        assertEquals(listOf("a", "b"), PortalApps.pinned(listOf("a"), "b", on = true))
+        assertEquals(listOf("a", "b"), PortalApps.pinned(listOf("a", "b"), "b", on = true))
+        assertEquals(listOf("b"), PortalApps.pinned(listOf("a", "b"), "a", on = false))
+        assertEquals(listOf("b"), PortalApps.pinned(listOf("b"), "a", on = false))
+    }
+
+    @Test fun `no more than MAX can be pinned, and unpinning still works when full`() {
+        val full = (1..PortalApps.MAX).map { "p$it" }
+        assertEquals(full, PortalApps.pinned(full, "new", on = true))
+        assertEquals(PortalApps.MAX - 1, PortalApps.pinned(full, "p3", on = false).size)
+        assertEquals(listOf("a", "b"), PortalApps.pinned(listOf("a", "b"), "c", on = true, max = 2))
+    }
 }

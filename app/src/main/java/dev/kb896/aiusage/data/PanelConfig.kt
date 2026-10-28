@@ -636,6 +636,13 @@ data class PanelConfig(
     val portalDpi: Map<String, Int> = emptyMap(),
     /** App Portal: how many apps a page of the back's grid holds. See PortalGrid. */
     val portalGrid: PortalGrid = PortalGrid.R3C4,
+    /** App Portal: the frame round a guest app on the back (PortalFrame). On, as it always was. */
+    val portalBorder: Boolean = true,
+    /**
+     * App Portal: the apps' names under their icons on the back. Off, the icons grow into
+     * the names' room (PortalSheet.icon).
+     */
+    val portalAppNames: Boolean = true,
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */
@@ -752,10 +759,15 @@ data class PanelConfig(
     companion object {
         val DEFAULT = PanelConfig()
 
-        /** Lenient so a newer payload cannot crash an older :rear process mid-install. */
+        /**
+         * Lenient so a newer payload cannot crash an older :rear process mid-install — nor
+         * wipe the config: a value an older build does not know (a new enum name, say) is
+         * read as that field's default (coerceInputValues), not the whole config's.
+         */
         private val json = Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
+            coerceInputValues = true
         }
 
         fun encode(config: PanelConfig): String = json.encodeToString(serializer(), config)

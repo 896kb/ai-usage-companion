@@ -1367,8 +1367,18 @@ class MainActivity : ComponentActivity() {
                 },
             )
         }
-        SettingsRows.colorRow(portalRows, "Portal frame colour", config.portalFrameColor) { c ->
-            write { it.copy(portalFrameColor = c) }
+        SettingsRows.toggle(portalRows, "Show app names", config.portalAppNames) { on ->
+            write { it.copy(portalAppNames = on) }
+        }
+        // The frame round a guest on the back; its colour only while there is one to colour.
+        SettingsRows.toggle(portalRows, "Portal border", config.portalBorder) { on ->
+            write { it.copy(portalBorder = on) }
+            buildSettingsRows()
+        }
+        if (config.portalBorder) {
+            SettingsRows.colorRow(portalRows, "Portal frame colour", config.portalFrameColor) { c ->
+                write { it.copy(portalFrameColor = c) }
+            }
         }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
         // notifications with written ones — which is exactly right for filming and would

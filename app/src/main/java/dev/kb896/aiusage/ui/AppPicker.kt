@@ -13,7 +13,8 @@ import kotlinx.coroutines.withContext
 /**
  * The App Portal's pin list: every app with a launcher icon (this one excepted), by name,
  * the pinned ones ticked. Ticking pins at the end of the list; order is changed with the
- * rows under it.
+ * rows under it. No more than PortalApps.MAX: past that a tick is put back, and the note at
+ * the top says why.
  */
 object AppPicker {
 
@@ -53,9 +54,16 @@ object AppPicker {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(activity, 20), dp(activity, 4), dp(activity, 20), 0)
             }
+            val count = SettingsRows.note(column, countNote(current.size))
             apps.forEach { app ->
-                SettingsRows.toggle(column, app.label, app.pkg in pinned) {
-                    current = PortalApps.toggled(current, app.pkg)
+                var setBack: (Boolean) -> Unit = {}
+                setBack = SettingsRows.toggle(column, app.label, app.pkg in pinned) { on ->
+                    val next = PortalApps.pinned(current, app.pkg, on)
+                    val refused = on && app.pkg !in next
+                    // Full: the tick goes back off (under ORIGINAL that calls here again, unpinning nothing).
+                    if (refused) setBack(false)
+                    current = next
+                    count.text = countNote(current.size, refused)
                 }
             }
             val scroll = object : ScrollView(activity) {
@@ -73,6 +81,13 @@ object AppPicker {
             dialog.setOnDismissListener { opening = false }
             Modal.show(dialog)
         }
+    }
+
+    /** The note over the list: how many are pinned, and — full, a tick turned down — why. */
+    private fun countNote(n: Int, refused: Boolean = false): String = when {
+        n >= PortalApps.MAX && refused -> "${PortalApps.MAX} pinned, the most there can be. Unpin one to pin another."
+        n >= PortalApps.MAX -> "${PortalApps.MAX} pinned, the most there can be."
+        else -> "$n of ${PortalApps.MAX} pinned."
     }
 
     private fun dp(context: Context, value: Int) =
