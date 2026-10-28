@@ -41,28 +41,31 @@ class PortalActionTest {
         assertNull(PortalAction.strip(-1, false, false, notAsked))
     }
 
-    @Test fun `reads the focused display`() {
-        assertEquals(1, PortalAction.topFocusedDisplay("    mTopFocusedDisplayId=1\n"))
-        assertEquals(0, PortalAction.topFocusedDisplay("  mGlobalConfiguration=...\n  mTopFocusedDisplayId=0"))
-        assertNull(PortalAction.topFocusedDisplay(""))
-        assertNull(PortalAction.topFocusedDisplay("Can't find service: window"))
+    @Test fun `a right-edge swipe is the guest's Back only while it is on top and the sheet is down`() {
+        assertTrue(PortalAction.wantsBack(guestOnTop = true, sheetUp = false))
+        assertFalse(PortalAction.wantsBack(guestOnTop = false, sheetUp = false))
+        assertFalse(PortalAction.wantsBack(guestOnTop = true, sheetUp = true))
+        assertFalse(PortalAction.wantsBack(guestOnTop = false, sheetUp = true))
     }
 
-    @Test fun `rear focused - Xiaomi's Back reaches the guest, ours is not sent`() {
-        assertFalse(PortalAction.sendBack(guestOnTop = true, sheetUp = false, focusedDisplay = 1, rear = 1))
+    @Test fun `the back navigation's callback is invoked only when it is the guest's`() {
+        assertEquals(PortalAction.BackStep.INVOKE,
+            PortalAction.backStep(navigation = true, focusedTask = 75481, guestTask = 75481, callback = true))
     }
 
-    @Test fun `front focused - ours goes to the guest`() {
-        assertTrue(PortalAction.sendBack(guestOnTop = true, sheetUp = false, focusedDisplay = 0, rear = 1))
+    @Test fun `focus on another task - the front's app, say - nothing is invoked`() {
+        assertEquals(PortalAction.BackStep.NOT_THE_GUEST,
+            PortalAction.backStep(navigation = true, focusedTask = 75435, guestTask = 75481, callback = true))
+        // Not even when it has no callback to speak of: it is still not the guest's.
+        assertEquals(PortalAction.BackStep.NOT_THE_GUEST,
+            PortalAction.backStep(navigation = true, focusedTask = -1, guestTask = 75481, callback = false))
     }
 
-    @Test fun `focus unknown - ours goes, as before the rule`() {
-        assertTrue(PortalAction.sendBack(guestOnTop = true, sheetUp = false, focusedDisplay = null, rear = 1))
-    }
-
-    @Test fun `no Back of ours over the panel or with the sheet up`() {
-        assertFalse(PortalAction.sendBack(guestOnTop = false, sheetUp = false, focusedDisplay = 0, rear = 1))
-        assertFalse(PortalAction.sendBack(guestOnTop = true, sheetUp = true, focusedDisplay = 0, rear = 1))
+    @Test fun `no navigation, or the guest's with no callback, invokes nothing`() {
+        assertEquals(PortalAction.BackStep.NO_NAVIGATION,
+            PortalAction.backStep(navigation = false, focusedTask = 75481, guestTask = 75481, callback = true))
+        assertEquals(PortalAction.BackStep.NO_CALLBACK,
+            PortalAction.backStep(navigation = true, focusedTask = 75481, guestTask = 75481, callback = false))
     }
 
     @Test fun `a guarded panel takes no pull, a guest on top always does`() {

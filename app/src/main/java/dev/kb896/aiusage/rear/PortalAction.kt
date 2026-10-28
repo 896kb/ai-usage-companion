@@ -3,7 +3,7 @@ package dev.kb896.aiusage.rear
 /**
  * What the shell does for the portal sheet's choices and for a Back on the rear: pure, so
  * the rules are tested away from the shell (see specs/2026-10-28-app-portal-shell-sheet-design.md,
- * "Pull, release, taps", "Back", "Settled on the device" 1–2).
+ * "Pull, release, taps", "Back on the rear", "Settled on the device" 1).
  */
 object PortalAction {
 
@@ -43,20 +43,38 @@ object PortalAction {
         else -> null
     }
 
-    private val topFocused = Regex("""mTopFocusedDisplayId=(-?\d+)""")
+    /**
+     * Whether a right-edge swipe is the guest's Back: only to a guest on top, and never with
+     * the sheet up. Always ours to deliver (SystemBack): a BACK key — Xiaomi's strip's, or
+     * any `input keyevent` — never reaches an app on display 1 on HyperOS (see the spec,
+     * "Back on the rear"), whichever display has focus.
+     */
+    fun wantsBack(guestOnTop: Boolean, sheetUp: Boolean): Boolean = guestOnTop && !sheetUp
 
-    /** The display with input focus, from `dumpsys window | grep -m1 mTopFocusedDisplayId`; null when it does not say. */
-    fun topFocusedDisplay(dump: String): Int? = topFocused.find(dump)?.groupValues?.get(1)?.toIntOrNull()
+    /** What a system back navigation comes to (SystemBack). */
+    enum class BackStep {
+        /** The guest's own callback: started, triggered, invoked; the navigation finished as done. */
+        INVOKE,
+        /** The system had no navigation to give: nothing to do. */
+        NO_NAVIGATION,
+        /** The focused window is another task's — the front's app, most often: finished undone, nothing invoked. */
+        NOT_THE_GUEST,
+        /** The guest's, but with no callback: finished undone. */
+        NO_CALLBACK,
+    }
 
     /**
-     * Whether the shell sends its own Back to the rear for a right-edge swipe. Only to a
-     * guest on top and never with the sheet up; and not when the rear ([rear]) has input
-     * focus, because Xiaomi's strip then delivers its own Back to the guest — two would go
-     * back twice. Any other focus (the front's, or unknown) gets ours: Xiaomi's went to the
-     * front app, and the guest would otherwise not go back at all.
+     * Whether to invoke the callback of a back navigation ([navigation] false: none was
+     * given) that targets [focusedTask], for the guest's [guestTask]. The navigation is for
+     * the GLOBALLY focused window, which may be an app on the front: a callback that is not
+     * the guest's is never invoked. Whether it had one ([callback]) matters only then.
      */
-    fun sendBack(guestOnTop: Boolean, sheetUp: Boolean, focusedDisplay: Int?, rear: Int): Boolean =
-        guestOnTop && !sheetUp && focusedDisplay != rear
+    fun backStep(navigation: Boolean, focusedTask: Int, guestTask: Int, callback: Boolean): BackStep = when {
+        !navigation -> BackStep.NO_NAVIGATION
+        focusedTask != guestTask -> BackStep.NOT_THE_GUEST
+        !callback -> BackStep.NO_CALLBACK
+        else -> BackStep.INVOKE
+    }
 
     /**
      * Whether a bottom pull opens the sheet. Over a guest on top always; over the panel

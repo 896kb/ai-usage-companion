@@ -1456,43 +1456,35 @@ class RearUserService : IRearService.Stub {
         if (back) sendBackOnce()
     }
 
+    /** Backs, one at a time and in order, off the touch reader and every lock it takes. */
+    private val backWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-back").apply { isDaemon = true } }
+    }
+
     /**
-     * A right-edge swipe over a guest on top (the sheet down): Back to it ONCE. Xiaomi's strip
-     * sends its own Back to whichever display has input focus, so ours goes only when that
-     * is not the rear ([PortalAction.sendBack], spec "Settled on the device" 2). Focus is
-     * read every time — it moves with touches on either screen — and off the reader thread,
-     * since `dumpsys window` takes a moment.
+     * A right-edge swipe over a guest on top (the sheet down): the guest's Back, ONCE, as a
+     * system back navigation (SystemBack) — a BACK key never reaches an app on the rear, and
+     * Xiaomi's strip's arrives and does nothing (spec "Back on the rear"). Only the guest's:
+     * when the focused window is another task's (the front's app) nothing is invoked. One
+     * line logged per Back.
      */
     private fun sendBackOnce() {
-        Thread {
-            val rear = rearDisplay()
-            // One read for both: which display has focus, and which app has the rear's.
-            val dump = exec("dumpsys window | grep -E 'mTopFocusedDisplayId|Display: mDisplayId=|mFocusedApp='")
-            val focused = PortalAction.topFocusedDisplay(dump)
-            val g = guest
-            val onTop = g?.onTop == true
-            val up = synchronized(sheetLock) { sheetUp }
-            if (PortalAction.sendBack(onTop, up, focused, rear)) {
-                // Only to the guest: whatever else holds the rear's focus (a system dialog,
-                // the panel come back in between) gets no Back of ours.
-                // The guest's task counts whoever's window it is: a permission dialog, a chooser
-                // started into it, is the guest's to take the Back.
-                val app = FocusDump.focusedPackage(dump, rear)
-                val task = FocusDump.focusedTask(dump, rear)
-                if (g == null || (app != g.pkg && task != g.task)) {
-                    if (app == null && task == null) {
-                        Log.i(TAG, "portal: Back — the rear's focus is unknown (nothing in the dump); none of ours")
-                    } else {
-                        Log.i(TAG, "portal: Back — the rear's focused app is $app (task $task), not the guest ${g?.pkg} (task ${g?.task}); none of ours")
-                    }
-                } else {
-                    Log.i(TAG, "portal: Back — display ${focused ?: "?"} has focus, ours to display $rear")
-                    exec("input -d $rear keyevent KEYCODE_BACK")
+        val g = guest ?: return
+        runCatching {
+            backWorker.execute {
+                // Still the guest it was swiped for, on top.
+                val now = guest?.takeIf { it.task == g.task && it.onTop } ?: return@execute
+                val o = SystemBack.invoke(now.task)
+                val what = when {
+                    o.error != null -> "failed — ${o.error}"
+                    o.step == PortalAction.BackStep.INVOKE -> "the guest's callback invoked"
+                    o.step == PortalAction.BackStep.NOT_THE_GUEST -> "focus is on task ${o.focusedTask}, not the guest's (the front?) — skipped"
+                    o.step == PortalAction.BackStep.NO_CALLBACK -> "the guest's, with no callback — nothing invoked"
+                    else -> "no back navigation given — nothing to do"
                 }
-            } else if (onTop && !up) {
-                Log.i(TAG, "portal: Back — the rear has focus, Xiaomi's reaches the guest; none of ours")
+                Log.i(TAG, "portal: Back ${o.type} for ${now.pkg} (task ${now.task}): $what, ${o.ms} ms")
             }
-        }.apply { isDaemon = true; name = "portal-back"; start() }
+        }.onFailure { Log.w(TAG, "portal: Back not queued: ${it.message}") }
     }
 
     private fun rearDisplay() = placedDisplayId.takeIf { it >= 0 } ?: Panel.DISPLAY_ID
@@ -1540,7 +1532,7 @@ class RearUserService : IRearService.Stub {
                 setPressed(-1)
                 if (sheetAlive()) steady(atMs)
             }
-            EdgeGestures.Action.Back -> return PortalAction.sendBack(guest?.onTop == true, sheetUp, null, rearDisplay())
+            EdgeGestures.Action.Back -> return PortalAction.wantsBack(guest?.onTop == true, sheetUp)
         }
         return false
     }
