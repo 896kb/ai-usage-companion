@@ -267,8 +267,8 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
     }
 
     /**
-     * The guest under the sheet: null for none (no strip), else whether it is on top
-     * (Resume) or behind our panel (Panel) — see PortalSheet.buttonNames.
+     * The guest under the sheet: null for none (no strip), else whether it is on top (the
+     * strip offers Panel) or behind our panel (it offers Resume) — see PortalSheet.buttonNames.
      */
     fun guest(onTop: Boolean?) {
         guestOnTop = onTop

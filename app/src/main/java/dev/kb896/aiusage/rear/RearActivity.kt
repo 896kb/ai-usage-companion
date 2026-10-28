@@ -34,6 +34,12 @@ class RearActivity : Activity() {
          *  this process cannot, the move needs shell privileges. */
         const val ACTION_STRANDED = "dev.kb896.aiusage.STRANDED"
         const val ACTION_FINISH = "dev.kb896.aiusage.FINISH"
+        /**
+         * From the shell service while its portal sheet is up over this panel: the sheet's
+         * blocker keeps every touch from the panel, so the sleep countdown is re-armed here
+         * instead. Same string as RearUserService.ACTION_PORTAL_POKE.
+         */
+        const val ACTION_PORTAL_POKE = "dev.kb896.aiusage.PORTAL_POKE"
 
         /**
          * The panel's camera button was pressed.
@@ -432,6 +438,8 @@ class RearActivity : Activity() {
                         .let { if (it in 0..100) it else -1 },
                 )
                 ACTION_MIRROR_SYNC -> dial.republishMirror()
+                // Somebody is using the portal sheet over the panel: not a panel to doze.
+                ACTION_PORTAL_POKE -> if (!inAod) armSleep()
                 ACTION_LOCK -> lockPanel()
                 ACTION_NOTIFICATION -> { peekForNotice(); dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
@@ -639,7 +647,7 @@ class RearActivity : Activity() {
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
-                addAction(ACTION_MIRROR_SYNC)
+                addAction(ACTION_MIRROR_SYNC); addAction(ACTION_PORTAL_POKE)
                 addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
                 addAction(ACTION_REAR_BRIGHTNESS)
                 addAction(ACTION_QUICK_STATES)

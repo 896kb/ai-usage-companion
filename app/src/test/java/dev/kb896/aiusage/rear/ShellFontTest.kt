@@ -1,27 +1,30 @@
 package dev.kb896.aiusage.rear
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ShellFontTest {
 
     private val never: () -> String = { error("pm path asked for no reason") }
+    private val pm = "package:/data/app/~~a/dev.kb896.aiusage.dev-1/split_config.arm64_v8a.apk\npackage:/data/app/~~a/dev.kb896.aiusage.dev-1/base.apk\n"
 
-    @Test fun `the context's code path first`() {
-        assertEquals("/data/app/x/base.apk", ShellFont.apkPath("/data/app/x/base.apk", "/other.apk", never))
+    @Test fun `the context's code path first, and pm path not asked until it is needed`() {
+        assertEquals("/data/app/x/base.apk", ShellFont.apkCandidates("/data/app/x/base.apk", never).first())
     }
 
-    @Test fun `else the first apk on the class path`() {
-        assertEquals("/data/app/y/base.apk", ShellFont.apkPath(null, "/system/framework/a.jar:/data/app/y/base.apk:/z.apk", never))
+    @Test fun `then pm path, the base apk before a split`() {
+        assertEquals(
+            listOf("/data/app/x/base.apk", "/data/app/~~a/dev.kb896.aiusage.dev-1/base.apk", "/data/app/~~a/dev.kb896.aiusage.dev-1/split_config.arm64_v8a.apk"),
+            ShellFont.apkCandidates("/data/app/x/base.apk", { pm }).toList(),
+        )
     }
 
-    @Test fun `else pm path, the base apk over a split`() {
-        val pm = "package:/data/app/~~a/dev.kb896.aiusage.dev-1/split_config.arm64_v8a.apk\npackage:/data/app/~~a/dev.kb896.aiusage.dev-1/base.apk\n"
-        assertEquals("/data/app/~~a/dev.kb896.aiusage.dev-1/base.apk", ShellFont.apkPath(null, "", { pm }))
+    @Test fun `no code path - pm path alone, and the code path is not listed twice`() {
+        assertEquals("/data/app/~~a/dev.kb896.aiusage.dev-1/base.apk", ShellFont.apkCandidates(null, { pm }).first())
+        assertEquals(2, ShellFont.apkCandidates("/data/app/~~a/dev.kb896.aiusage.dev-1/base.apk", { pm }).count())
     }
 
-    @Test fun `nothing anywhere is null`() {
-        assertNull(ShellFont.apkPath(null, null, { "" }))
+    @Test fun `nothing anywhere is no candidate`() {
+        assertEquals(emptyList<String>(), ShellFont.apkCandidates(null, { "" }).toList())
     }
 }

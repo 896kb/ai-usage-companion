@@ -19,11 +19,12 @@ import java.util.zip.ZipFile
  * Two ways to the bytes, in order:
  * 1. Through Resources, when Shizuku handed the service a Context of our package (its
  *    UserService constructor with a Context, Shizuku 13+). This is the one that works for
- *    a release build too: R8 shortens resource paths there (the font is `res/7g.otf` in
- *    the release APK), and only the resource table knows which entry it is.
- * 2. The APK as a zip, at [ENTRY] — what a debug build keeps. The APK is the Context's,
- *    else the first .apk on the class path (the user service is started with our APK as
- *    its class path), else `pm path`'s.
+ *    a release build too: AGP shortens resource paths when it shrinks resources (the font
+ *    is `res/7g.otf` in the release APK), and only the resource table knows which entry it is.
+ * 2. Our APK as a zip, at [ENTRY] — what a debug build keeps. Each candidate APK is tried
+ *    in turn until one HAS the font: the Context's code path, then `pm path`'s (base APK
+ *    first). Not the class path: the user service runs in Shizuku's process, whose class
+ *    path is Shizuku's own APK.
  *
  * Null if neither gives a font; the caller then opens no sheet.
  */
@@ -34,7 +35,7 @@ internal object ShellFont {
 
     fun load(context: Context?, pmPath: () -> String): Typeface? {
         val bytes = fromResources(context)
-            ?: apkPath(context?.packageCodePath, System.getProperty("java.class.path"), pmPath)?.let { fromApk(it) }
+            ?: apkCandidates(context?.packageCodePath, pmPath).firstNotNullOfOrNull { fromApk(it) }
         if (bytes == null) {
             Log.w(TAG, "portal sheet: the panel's font is not readable — no sheet")
             return null
@@ -59,14 +60,14 @@ internal object ShellFont {
     }.onFailure { Log.w(TAG, "portal sheet: $path unreadable: ${it.message}") }.getOrNull()?.takeIf { it.isNotEmpty() }
 
     /**
-     * Our APK: [codePath] if known, else the first `.apk` on [classPath], else the base APK
-     * in [pmPath]'s `package:` lines (asked only when needed).
+     * Our APKs to look in, in order: [codePath] if it is one, then the `package:` lines of
+     * [pmPath] with the base APK before any split. Lazy — `pm path` is asked only if the
+     * code path did not have the font.
      */
-    fun apkPath(codePath: String?, classPath: String?, pmPath: () -> String): String? {
-        codePath?.takeIf { it.endsWith(".apk") }?.let { return it }
-        classPath?.split(':')?.firstOrNull { it.endsWith(".apk") }?.let { return it }
+    fun apkCandidates(codePath: String?, pmPath: () -> String): Sequence<String> = sequence {
+        codePath?.takeIf { it.endsWith(".apk") }?.let { yield(it) }
         val apks = pmPath().lines().map { it.trim() }.filter { it.startsWith("package:") }
-            .map { it.removePrefix("package:") }.filter { it.endsWith(".apk") }
-        return apks.firstOrNull { it.endsWith("/base.apk") } ?: apks.firstOrNull()
+            .map { it.removePrefix("package:") }.filter { it.endsWith(".apk") && it != codePath }
+        yieldAll(apks.sortedBy { if (it.endsWith("/base.apk")) 0 else 1 })
     }
 }

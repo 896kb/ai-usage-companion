@@ -139,4 +139,22 @@ class SheetMotionTest {
         assertEquals(Phase.SHUT, m.phase)
         assertEquals(0f, m.progress(1_200), 0f)
     }
+
+    @Test fun `a drag at the grab's own time is no flick`() {
+        // The pull is recognised a little way from where it landed, at that event's time:
+        // grabbed and dragged at the same instant, the first step has moved but taken no time.
+        val m = SheetMotion()
+        m.grab(560f, 100)
+        m.drag(540f, 100)
+        m.release(540f, 150)
+        assertFalse(m.heading)
+    }
+
+    @Test fun `grabbed at the landing, the first step's speed is the real one`() {
+        val m = SheetMotion()
+        m.grab(560f, 0)
+        m.drag(540f, 200)
+        m.release(540f, 210)
+        assertFalse(m.heading)
+    }
 }

@@ -1,7 +1,6 @@
 package dev.kb896.aiusage.rear
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -16,7 +15,7 @@ class RearTouchesTest {
     private fun move(x: Int, y: Int) = listOf("0003 0035 ${hex(x)}", "0003 0036 ${hex(y)}", syn)
     private val lift = listOf("0003 0039 ffffffff", "0001 014a 00000000", syn)
 
-    private fun RearTouches.run(lines: List<String>, at: Long = 0L) = lines.mapNotNull { feed(it, at) }
+    private fun RearTouches.run(lines: List<String>, at: Long = 0L) = lines.flatMap { feed(it, at) }
 
     @Test fun `a landing finger is a down, in panel pixels`() {
         val e = touches().run(land(60100, 54500)).single()
@@ -44,7 +43,7 @@ class RearTouchesTest {
     }
 
     @Test fun `a line that is not an event is nothing`() {
-        assertNull(touches().feed("add device 3: /dev/input/event7", 0))
+        assertTrue(touches().feed("add device 3: /dev/input/event7", 0).isEmpty())
     }
 
     @Test fun `a finger landing where the last one lifted is still a down`() {
@@ -74,6 +73,16 @@ class RearTouchesTest {
         assertEquals(listOf("Down", "Up", "Down"), events.map { it::class.simpleName })
         assertEquals(300f, events[2].x, 0.5f)
         assertEquals(300f, events[2].y, 0.5f)
+    }
+
+    @Test fun `a contact that lands and lifts in one frame is a down, then an up`() {
+        val t = touches()
+        val oneFrame = listOf("0003 0039 00000001", "0003 0035 ${hex(60100)}", "0003 0036 ${hex(54500)}", "0003 0039 ffffffff", syn)
+        val events = t.run(oneFrame)
+        assertEquals(listOf("Down", "Up"), events.map { it::class.simpleName })
+        assertEquals(601f, events[1].x, 0.5f)
+        // and the next landing is a fresh first finger
+        assertTrue(t.run(land(10000, 10000, id = 2)).single() is RearTouches.Down)
     }
 
     @Test fun `a line with a device prefix is read`() {

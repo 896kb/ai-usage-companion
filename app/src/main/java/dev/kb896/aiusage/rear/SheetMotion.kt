@@ -89,10 +89,14 @@ class SheetMotion {
     /** The finger at [y]: how far open it is now. */
     fun drag(y: Float, atMs: Long): Float {
         if (phase != Phase.HELD || !dragging) return progress(atMs)
-        val ms = (atMs - lastAt).coerceAtLeast(1L)
-        // As the panel's: the newest step counts most, so a flick is read at its end.
-        velocity = 0.6f * ((y - lastY) / ms) + 0.4f * velocity
-        lastY = y; lastAt = atMs
+        // A step that took no time says nothing about speed — taken as 1 ms, a finger that
+        // had moved 20 px since it landed read as a flick. Its distance counts in the next
+        // step that does take time.
+        if (atMs > lastAt) {
+            // As the panel's: the newest step counts most, so a flick is read at its end.
+            velocity = 0.6f * ((y - lastY) / (atMs - lastAt)) + 0.4f * velocity
+            lastY = y; lastAt = atMs
+        }
         dy = y - downY
         return progress(atMs)
     }

@@ -8,8 +8,9 @@ import dev.kb896.aiusage.Panel
  * (see EdgeGestures).
  *
  * Multitouch protocol B, as [BandTap] reads it: a tracking id starts a contact, -1 ends
- * it, positions arrive between SYN_REPORTs. An event is emitted on the SYN that closes a
- * frame, so a down carries its first position rather than none.
+ * it, positions arrive between SYN_REPORTs. Events are emitted on the SYN that closes a
+ * frame, so a down carries its first position rather than none; a contact that lands and
+ * lifts within one frame (a very light tap) is a down and then an up.
  *
  * Other fingers are ignored until the first lifts; a finger still down then is not
  * promoted, the next landing is the new first. The last position is kept across lifts, as
@@ -31,14 +32,15 @@ class RearTouches(private val maxX: Int, private val maxY: Int) {
     private var rawX = -1
     private var rawY = -1
 
-    fun feed(line: String, nowMs: Long): Event? {
+    /** The events this line completes, in order: none for most lines. */
+    fun feed(line: String, nowMs: Long): List<Event> {
         val t = line.trim().split(WHITESPACE).takeLast(3)
-        if (t.size < 3) return null
-        val type = t[0].toIntOrNull(16) ?: return null
-        val code = t[1].toIntOrNull(16) ?: return null
-        val value = t[2].toLongOrNull(16)?.toInt() ?: return null
+        if (t.size < 3) return emptyList()
+        val type = t[0].toIntOrNull(16) ?: return emptyList()
+        val code = t[1].toIntOrNull(16) ?: return emptyList()
+        val value = t[2].toLongOrNull(16)?.toInt() ?: return emptyList()
         if (type == EV_SYN && code == SYN_REPORT) return frame(nowMs)
-        if (type != EV_ABS) return null
+        if (type != EV_ABS) return emptyList()
         when (code) {
             ABS_MT_SLOT -> slot = value
             ABS_MT_TRACKING_ID -> if (value == -1) {
@@ -49,23 +51,24 @@ class RearTouches(private val maxX: Int, private val maxY: Int) {
             ABS_MT_POSITION_X -> if (slot == primary) { rawX = value; moved = true }
             ABS_MT_POSITION_Y -> if (slot == primary) { rawY = value; moved = true }
         }
-        return null
+        return emptyList()
     }
 
-    private fun frame(nowMs: Long): Event? {
+    private fun frame(nowMs: Long): List<Event> {
         if (rawX < 0 || rawY < 0) {
             // Only before the very first position: nothing to report, but never stay stuck.
             if (lifted) primary = -1
             landed = false; lifted = false; moved = false
-            return null
+            return emptyList()
         }
         val x = rawX * Panel.WIDTH / (maxX + 1f)
         val y = rawY * Panel.HEIGHT / (maxY + 1f)
-        val e: Event? = when {
-            landed -> Down(x, y, nowMs)
-            lifted -> Up(x, y, nowMs)
-            moved && primary >= 0 -> Move(x, y, nowMs)
-            else -> null
+        val e: List<Event> = when {
+            landed && lifted -> listOf(Down(x, y, nowMs), Up(x, y, nowMs))
+            landed -> listOf(Down(x, y, nowMs))
+            lifted -> listOf(Up(x, y, nowMs))
+            moved && primary >= 0 -> listOf(Move(x, y, nowMs))
+            else -> emptyList()
         }
         if (lifted) primary = -1
         landed = false; lifted = false; moved = false

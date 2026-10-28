@@ -278,6 +278,8 @@ class RearUserService : IRearService.Stub {
      */
     override fun openCamera(displayId: Int): Boolean {
         if (displayId < 0) return false
+        // The back is the camera's from here: a sheet up would sit over it with its blocker.
+        closeSheetNow("the camera is opening")
         val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
         val ok = !out.contains("Error", ignoreCase = true)
         if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
@@ -406,8 +408,8 @@ class RearUserService : IRearService.Stub {
      * time before the camera has come up too. Only a panel that is on top AFTER the
      * camera was seen in front of it means the user has closed it.
      */
-    private var cameraLaunched = false
-    private var cameraWasOnTop = false
+    @Volatile private var cameraLaunched = false
+    @Volatile private var cameraWasOnTop = false
 
     /**
      * `am kill` rather than `am force-stop`, and the difference matters here.
@@ -1016,11 +1018,15 @@ class RearUserService : IRearService.Stub {
             // The font and the layer stack, off every binder thread and before the first pull.
             sheetOrNull()
             val touches = RearTouches(maxX, maxY)
+            val startedAt = android.os.SystemClock.uptimeMillis()
+            var events = 0
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
-                        val e = touches.feed(line, android.os.SystemClock.uptimeMillis()) ?: continue
-                        onRearTouch(e, gestures)
+                        for (e in touches.feed(line, android.os.SystemClock.uptimeMillis())) {
+                            events++
+                            onRearTouch(e, gestures)
+                        }
                     }
                 }
             } catch (_: java.io.IOException) {
@@ -1028,8 +1034,20 @@ class RearUserService : IRearService.Stub {
             } catch (e: Exception) {
                 Log.w(TAG, "portal: touch watch stopped", e)
             } finally {
-                touchWatch.compareAndSet(proc, null)
                 runCatching { proc.destroy() }
+                val lived = android.os.SystemClock.uptimeMillis() - startedAt
+                // A watch that ended at once, or read nothing, may have had a stale device
+                // path (input devices renumber): the next start asks getevent again.
+                if (lived < TOUCH_SHORT_LIFE_MS || events == 0) rearTouch = null
+                // Died on its own (stopTouchWatch had not taken it): a sheet up has no reader
+                // left to close it — its blocker would hold every touch — so it goes now,
+                // and the watch comes back. Not at once after a quick death, so a getevent
+                // that cannot run is not respawned in a loop: the keep-alive tick does it.
+                if (touchWatch.compareAndSet(proc, null)) {
+                    Log.w(TAG, "portal: the touch watch died after ${lived} ms, $events events")
+                    closeSheetNow("the touch watch died")
+                    if (lived >= TOUCH_SHORT_LIFE_MS) syncTouchWatch()
+                }
             }
         }.apply { isDaemon = true; name = "portal-touches"; start() }
     }
@@ -1053,6 +1071,11 @@ class RearUserService : IRearService.Stub {
     private var driving = false
     /** Where the current finger landed: a drag is measured from there. Under [sheetLock]. */
     private var touchDownY = 0f
+    /**
+     * And when: a drag is timed from there too. Grabbed at the pull's own time, its first step
+     * took "1 ms" and every pull read as a flick. Under [sheetLock].
+     */
+    private var touchDownAt = 0L
     /** Run once the sheet is down: the tapped app's launch, a strip button. Under [sheetLock]. */
     private var afterShut: (() -> Unit)? = null
     private var anim: java.util.concurrent.ScheduledFuture<*>? = null
@@ -1069,18 +1092,19 @@ class RearUserService : IRearService.Stub {
     }
 
     @Volatile private var shellSheet: ShellSheet? = null
-    @Volatile private var sheetFontFailed = false
+    /** The font did not load: no new try before this uptime. */
+    @Volatile private var sheetFontRetryAt = 0L
     private val sheetMaking = Any()
 
-    /** The sheet, made once the panel's font is in hand; null (logged once) if it cannot be. */
+    /** The sheet, made once the panel's font is in hand; null if it cannot be (tried again after a minute). */
     private fun sheetOrNull(): ShellSheet? {
         shellSheet?.let { return it }
-        if (sheetFontFailed) return null
+        if (android.os.SystemClock.uptimeMillis() < sheetFontRetryAt) return null
         synchronized(sheetMaking) {
             shellSheet?.let { return it }
-            if (sheetFontFailed) return null
+            if (android.os.SystemClock.uptimeMillis() < sheetFontRetryAt) return null
             val font = ShellFont.load(context) { exec("pm path $PKG") }
-            if (font == null) { sheetFontFailed = true; return null }
+            if (font == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
             val s = ShellSheet(rearLayerStack(), font)
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
@@ -1105,6 +1129,7 @@ class RearUserService : IRearService.Stub {
             for (a in actions) if (sheetAction(a, e.atMs)) back = true
             if (e is RearTouches.Down) {
                 touchDownY = e.y
+                touchDownAt = e.atMs
                 if (actions.any { it is EdgeGestures.Action.SheetDown }) {
                     // A finger held so still the touchscreen says nothing still becomes a long-press.
                     runCatching {
@@ -1152,7 +1177,7 @@ class RearUserService : IRearService.Stub {
         when (a) {
             // The screenshot starts as the finger lands; ShellSheet drops it if another
             // opening's shot has been asked for since.
-            EdgeGestures.Action.Arm -> if (!sheetUp && bandTaps == null && pullOpens()) sheetOrNull()?.let { s ->
+            EdgeGestures.Action.Arm -> if (!sheetUp && !cameraUp() && pullOpens()) sheetOrNull()?.let { s ->
                 val shot = s.newShot()
                 Thread {
                     val png = captureRear()
@@ -1163,8 +1188,9 @@ class RearUserService : IRearService.Stub {
             EdgeGestures.Action.Disarm -> Unit
             is EdgeGestures.Action.SheetDown -> {
                 if (!sheetAlive()) return false
-                // Caught: a pending launch or button waits for no shut that is not coming.
-                afterShut = null
+                // Not the end of a pending launch or button: a touch that lifts again lets the
+                // shut carry on (tap → resume) and the choice runs. Only a drag drops it.
+                pokePanel()
                 stopAnim()
                 motion.hold(atMs)
                 pushProgress(atMs)
@@ -1172,8 +1198,10 @@ class RearUserService : IRearService.Stub {
             }
             is EdgeGestures.Action.PullStart -> if (sheetUp) {
                 if (!sheetAlive()) return false
+                // Caught and dragged: a pending launch or button waits for no shut that is coming.
+                afterShut = null
                 setPressed(-1)
-                motion.grab(touchDownY, atMs)
+                motion.grab(touchDownY, touchDownAt)
                 driving = true
                 shellSheet?.progress(motion.drag(a.y, atMs))
             } else openSheet(a.y, atMs)
@@ -1200,17 +1228,16 @@ class RearUserService : IRearService.Stub {
 
     /**
      * The pull that opens the sheet: no keyguard check, nothing started — it is our own
-     * layer. Not over the camera we opened (its band-tap watch has the back then). Under
+     * layer. Not over the camera we opened ([cameraUp]: the back is the camera's then). Under
      * [sheetLock].
      */
     private fun openSheet(y: Float, atMs: Long) {
-        if (bandTaps != null) return
+        if (cameraUp()) return
         if (!pullOpens()) { Log.i(TAG, "portal sheet: the panel is guarded (lock slider / always-on) — no sheet over it"); return }
         val s = sheetOrNull() ?: return
         syncSheetGuest()
-        s.apps(portalApps)
         motion.reset()
-        motion.grab(touchDownY, atMs)
+        motion.grab(touchDownY, touchDownAt)
         motion.drag(y, atMs)
         sheetUp = true
         beginPending = true
@@ -1219,6 +1246,7 @@ class RearUserService : IRearService.Stub {
         afterShut = null
         pressed = -1
         s.progress(motion.progress(atMs))
+        pokePanel()
         sheetClock.execute {
             val p = synchronized(sheetLock) { if (!sheetUp || !beginPending) return@execute; motion.progress(android.os.SystemClock.uptimeMillis()) }
             val ok = runCatching { s.begin(p) }.getOrElse { Log.w(TAG, "portal sheet: begin threw: ${it.message}"); false }
@@ -1245,6 +1273,32 @@ class RearUserService : IRearService.Stub {
         if (panelGuarded == guarded) return
         panelGuarded = guarded
         Log.i(TAG, if (guarded) "portal: the panel is guarded — no sheet over it" else "portal: the panel is open again")
+    }
+
+    /**
+     * The camera we opened is (as far as we know) the rear's top app: launched and not yet
+     * seen closed, or its band-tap watch running. No sheet over it — the back is the camera's.
+     */
+    private fun cameraUp() = bandTaps != null || cameraLaunched
+
+    private val pokeWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-poke").apply { isDaemon = true } }
+    }
+    @Volatile private var lastPokeAt = 0L
+
+    /**
+     * The sheet up over our PANEL: its blocker keeps every touch from the panel, whose sleep
+     * countdown (RearActivity.AWAKE_MS) would then run out under it — the rear dozing, the
+     * sheet shut. So each opening and each touch on the sheet re-arms it, by a broadcast
+     * scoped to our package, at most once a second, off the touch thread. Over a guest on
+     * top nothing: the panel is behind, and its sleep there is already not the rear's.
+     */
+    private fun pokePanel() {
+        if (sheetGuestOnTop == true) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastPokeAt < POKE_EVERY_MS) return
+        lastPokeAt = now
+        runCatching { pokeWorker.execute { exec("am broadcast -p $PKG -a $ACTION_PORTAL_POKE") } }
     }
 
     /** Whether a bottom pull may open the sheet now: [PortalAction.sheetOpens]. */
@@ -1671,6 +1725,8 @@ class RearUserService : IRearService.Stub {
                                 }
                                 syncDensity("${g.pkg} is behind")
                                 frame.hide()
+                                // A dark rear: nobody can see or touch a sheet up there.
+                                if (top == null) closeSheetNow("the rear is dark")
                                 // The panel back in front after the camera was: somebody closed it.
                                 if (top == PKG && cameraLaunched && cameraWasOnTop) closeCamera()
                                 continue
@@ -1963,6 +2019,14 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val SHEET_FRAME_MS = 16L
         /** No rear touchscreen found: how long before getevent is asked again. */
         private const val TOUCH_RETRY_MS = 60_000L
+        /** A touch watch that ends sooner than this is suspect: its device path is asked again. */
+        private const val TOUCH_SHORT_LIFE_MS = 1_000L
+        /** The font did not load: how long before it is tried again. */
+        private const val SHEET_FONT_RETRY_MS = 60_000L
+        /** The least time between two pokes keeping the panel awake under the sheet. */
+        private const val POKE_EVERY_MS = 1_000L
+        /** RearActivity re-arms its sleep countdown on it: the sheet's blocker keeps touches from the panel. */
+        const val ACTION_PORTAL_POKE = "dev.kb896.aiusage.PORTAL_POKE"
         /**
          * What may go into a shell command as a package or a component: these come from
          * the app's config and from dumps, and this service runs them at shell uid.
