@@ -16,7 +16,13 @@ import kotlin.system.exitProcess
 class RearUserService : IRearService.Stub {
 
     @Suppress("unused") constructor()
-    @Suppress("unused") constructor(context: Context)
+    /**
+     * Shizuku 13+ hands a Context of our package here: the shell sheet reads the panel's
+     * font through its Resources (see ShellFont).
+     */
+    @Suppress("unused") constructor(context: Context) { this.context = context }
+
+    private var context: Context? = null
 
     /** Volatile: the App Portal's binder calls and the keep-alive read it off the lock. */
     @Volatile private var placedDisplayId = -1
@@ -32,6 +38,10 @@ class RearUserService : IRearService.Stub {
     private var lastReplaceAt = 0L
 
     override fun destroy() {
+        // The sheet's blocker must not outlive us: an untrusted layer left up takes every
+        // touch on the rear. On this thread, since the process exits right after.
+        closeSheetNow("the service is going", sync = true)
+        stopTouchWatch()
         // The guest's density must not outlive the service that set it. Closed first, so
         // nothing re-applies one between this restore and the exit; and nothing read means
         // nothing was ever set, so no first read just to find that out.
@@ -95,6 +105,9 @@ class RearUserService : IRearService.Stub {
         // receive — or spoof — panel state. Do not drop this as "redundant."
         exec("am broadcast -p $PKG -a $ACTION_FINISH")
         placedDisplayId = -1
+        // Nothing of ours on the rear any more: no touches read, no sheet over it.
+        syncTouchWatch()
+        closeSheetNow("the panel was hidden")
         // A hidden panel is a panel nobody wants back: the keep-alive would otherwise read
         // the empty rear display as "taken" and re-place it within a tick.
         keepAlive?.interrupt()
@@ -131,6 +144,9 @@ class RearUserService : IRearService.Stub {
         // is dark is seen by the keep-alive (nothing on top) and hides it there.
         val guestOnTop = guest?.onTop == true
         if (dozing && !guestOnTop) frame.hide() else if (!dozing && guestOnTop) frame.show()
+        // A sheet is never left up over a rear going to sleep: its blocker would outlive it.
+        if (dozing) closeSheetNow("the panel is asleep")
+        syncTouchWatch()
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
 
@@ -139,6 +155,7 @@ class RearUserService : IRearService.Stub {
         // sleep by definition. Not gated on `dozing` — gating it here would make the
         // notification that wakes a dozing panel the one thing that cannot.
         dozing = false
+        syncTouchWatch()
         // Required. The activity is created on display 0 where the screen is
         // already on, so FLAG_TURN_SCREEN_ON has nothing to act on; without
         // this the task is placed and focused but the panel stays state=OFF.
@@ -164,13 +181,13 @@ class RearUserService : IRearService.Stub {
             // wake a display somebody deliberately let go.
             update(payload)
             if (!dozing) wake(displayId)
+            syncTouchWatch()
             return
         }
-        // About to come up over the guest, if there is one: it is no longer on top. (Not
-        // while a portal is open over it — the panel is already there for that.)
+        // About to come up over the guest, if there is one: it is no longer on top.
         val g = guest
-        if (g != null && !portalOverGuest) {
-            if (markOnTop(g.task, false)) tell { it.onGuest(g.pkg, false) }
+        if (g != null) {
+            if (markOnTop(g.task, false)) toldGuest(g.pkg, false)
             frame.hide()
         }
         // Straight onto the rear display first: the manifest's miui.rear.policy makes
@@ -227,7 +244,7 @@ class RearUserService : IRearService.Stub {
         }
         syncDensity("the panel is placed")
         placedDisplayId = displayId
-        wake(displayId)
+        wake(displayId) // and the touch watch with it (syncTouchWatch)
     }
 
     /**
@@ -555,11 +572,12 @@ class RearUserService : IRearService.Stub {
     private var guest: Guest?
         get() = guestRef.get()
         set(value) = guestRef.set(value)
+    /**
+     * The panel's line, kept for [IPortalCallback.onGuest] only: the panel's own portal
+     * strip reads it until Task 10 removes the panel-side portal. Pulls and frames are no
+     * longer relayed — the shell draws the sheet (see the touch watch below).
+     */
     @Volatile private var portal: IPortalCallback? = null
-    /** True from a relayed pull's start until the panel says the portal shut. */
-    @Volatile private var portalOverGuest = false
-    /** When [portalOverGuest] was last set, so a portal that never reported back is let go. */
-    @Volatile private var portalAt = 0L
     private val frame by lazy { PortalFrame(rearLayerStack()) }
 
     /** [onTop] on whatever guest has [task] now; true if this call changed it. */
@@ -588,6 +606,7 @@ class RearUserService : IRearService.Stub {
 
     override fun setPortalApps(apps: android.os.Bundle?) {
         portalApps = PortalAppsSnapshot.fromBundle(apps)
+        shellSheet?.apps(portalApps)
     }
 
     /** A call to the panel; a dead one is forgotten, never thrown. */
@@ -616,6 +635,8 @@ class RearUserService : IRearService.Stub {
             val config = StatePayload.decode(payload).config
             frame.style(config.portalFrameColor)
             portalDpi = config.portalDpi
+            sheetLook = config.theme to config.glassStyle
+            shellSheet?.theme(config.theme, config.glassStyle)
         } catch (e: Exception) {
             Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
             return
@@ -796,7 +817,6 @@ class RearUserService : IRearService.Stub {
         if (component.isNullOrEmpty() || !COMPONENT.matches(component)) {
             Log.w(TAG, "portal: no launcher activity for $pkg"); return@synchronized false
         }
-        portalOverGuest = false
         // One guest at a time: the old one goes to the front, alive — never killed.
         guest?.let { old -> if (old.pkg != pkg) moveToDisplay(old.task, 0) }
         repeat(2) { attempt ->
@@ -848,7 +868,6 @@ class RearUserService : IRearService.Stub {
         val pkg = FocusDump.focusedPackage(dump, 0) ?: return@synchronized ""
         val task = FocusDump.focusedTask(dump, 0) ?: return@synchronized ""
         if (!PACKAGE_NAME.matches(pkg) || !GuestTask.sendable(pkg, PKG)) return@synchronized ""
-        portalOverGuest = false
         guest?.let { old -> if (old.task != task) moveToDisplay(old.task, 0) }
         guest = Guest(pkg, task, onTop = true)
         syncDensity("$pkg is landing")
@@ -863,19 +882,19 @@ class RearUserService : IRearService.Stub {
         guest = guest?.copy(placed = true)
         syncDensity("${guest?.pkg} is the guest") // already set as it landed; a no-op then
         frame.show() // already up from the launch's move; a no-op while running
-        watchGuest(displayId)
-        tell { it.onGuest(guest?.pkg.orEmpty(), true) }
+        syncTouchWatch()
+        toldGuest(guest?.pkg.orEmpty(), true)
     }
 
     /** No guest any more: frame, watcher and the panel's strip off. Under [placing]. */
     private fun dropGuest(why: String) {
         Log.i(TAG, "portal: guest over — $why")
         guest = null
-        portalOverGuest = false
         frame.hide()
         syncDensity("the guest is over")
-        stopGuestWatch()
-        tell { it.onGuest("", false) }
+        // Over the panel the watch goes on (it is for the panel too); dozing, it stops.
+        syncTouchWatch()
+        toldGuest("", false)
     }
 
     /** [dropGuest], and the panel back in front. Under [placing]. */
@@ -889,18 +908,16 @@ class RearUserService : IRearService.Stub {
             // The panel stays over a live guest; the strip then offers Resume.
             "panel" -> {
                 val g = guest ?: return
-                portalOverGuest = false
                 markOnTop(g.task, false)
                 frame.hide()
-                tell { it.onGuest(g.pkg, false) }
+                toldGuest(g.pkg, false)
             }
             // RearActivity has gone behind (moveTaskToBack); the guest is on top again.
             "resume" -> {
                 val g = guest ?: return
-                portalOverGuest = false
                 markOnTop(g.task, true)
                 frame.show()
-                tell { it.onGuest(g.pkg, true) }
+                toldGuest(g.pkg, true)
                 wake(if (placedDisplayId >= 0) placedDisplayId else Panel.DISPLAY_ID)
             }
             // Read under the lock: a launch may have replaced the guest since the panel asked.
@@ -918,98 +935,430 @@ class RearUserService : IRearService.Stub {
         }
     }
 
-    /**
-     * Over a guest, the rear touchscreen read as the camera's is: the bottom pull relayed
-     * to the panel, and a right-edge Back sent to the guest. See EdgeGestures.
-     */
-    private val guestWatch = AtomicReference<Process?>(null)
-
-    /** One screenshot, started at once when a finger lands in the pull band. */
-    private inner class Shot {
-        @Volatile var png: ByteArray? = null
-        val thread: Thread = Thread { png = captureRear() }.apply { isDaemon = true; name = "portal-shot"; start() }
+    /** [IPortalCallback.onGuest] to the panel, and the shell sheet's strip with it. */
+    private fun toldGuest(pkg: String, onTop: Boolean) {
+        tell { it.onGuest(pkg, onTop) }
+        syncSheetGuest()
     }
 
-    private fun watchGuest(displayId: Int) {
-        stopGuestWatch()
-        val device = BandTap.rearDevice(exec("getevent -pl"))
-        if (device == null) {
-            if (!warnedNoRearTouch) {
-                warnedNoRearTouch = true
-                Log.w(TAG, "portal: no rear touchscreen in getevent — no pull or Back over the guest")
-            }
-            return
+    // -- the portal sheet, in the shell ---------------------------------------------------
+    //
+    // See specs/2026-10-28-app-portal-shell-sheet-design.md. The sheet is a layer of ours
+    // (ShellSheet) and its input is the raw rear touchscreen (getevent → RearTouches →
+    // EdgeGestures), so the first swipe counts over the panel and over a guest, locked or
+    // not, and nothing is ever started to show it.
+    //
+    // THE TOUCH WATCH runs while the rear is lit and ours: the panel placed and not asleep
+    // on purpose, or a guest on top (the panel's own sleep timer runs out behind a guest;
+    // the guest is still lit). One getevent at a time, started and stopped by
+    // [syncTouchWatch] — from show/wake/setDozing/hide, guest changes, and every keep-alive
+    // tick as the safety net for a getevent that died.
+    //
+    // THE SHEET: [sheetLock] guards the gestures, [motion] and the flags below. The reader
+    // thread feeds touches; [sheetClock], one thread, runs begin()/end() (end() may block
+    // for its join, never on the reader), the settle's frames and the long-press tick — so
+    // begin and end are applied in the order they were asked for.
+
+    private val touchWatch = AtomicReference<Process?>(null)
+    private val touchLock = Any()
+    @Volatile private var rearTouch: Triple<String, Int, Int>? = null
+    /** No rear touchscreen found: not asked again before this uptime. */
+    @Volatile private var rearTouchRetryAt = 0L
+    private var warnedNoRearTouch = false
+
+    private fun touchWanted() = placedDisplayId >= 0 && (!dozing || guest?.onTop == true)
+
+    /** The watch running if and only if [touchWanted]. Any thread. */
+    private fun syncTouchWatch() = synchronized(touchLock) {
+        val running = touchWatch.get()?.isAlive == true
+        when {
+            touchWanted() && !running -> startTouchWatch()
+            !touchWanted() && running -> stopTouchWatch()
         }
+    }
+
+    /** Under [touchLock]. */
+    private fun startTouchWatch() {
+        stopTouchWatch()
+        val device = rearTouch ?: run {
+            if (android.os.SystemClock.uptimeMillis() < rearTouchRetryAt) return
+            BandTap.rearDevice(exec("getevent -pl")).also { d ->
+                if (d != null) rearTouch = d
+                else {
+                    rearTouchRetryAt = android.os.SystemClock.uptimeMillis() + TOUCH_RETRY_MS
+                    if (!warnedNoRearTouch) {
+                        warnedNoRearTouch = true
+                        Log.w(TAG, "portal: no rear touchscreen in getevent — no sheet, no Back")
+                    }
+                }
+            }
+        } ?: return
         val (path, maxX, maxY) = device
         val proc = try {
             ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
         } catch (e: Exception) { Log.w(TAG, "portal: getevent failed: ${e.message}"); return }
-        guestWatch.set(proc)
+        touchWatch.set(proc)
+        val gestures = EdgeGestures()
+        synchronized(sheetLock) {
+            gestures.sheet = sheetUp
+            this.gestures = gestures
+        }
         Thread {
+            // The font and the layer stack, off every binder thread and before the first pull.
+            sheetOrNull()
             val touches = RearTouches(maxX, maxY)
-            val gestures = EdgeGestures()
-            var shot: Shot? = null
-            // Set only by a pull this thread accepted, so a refused one relays nothing.
-            var relaying = false
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
                         val e = touches.feed(line, android.os.SystemClock.uptimeMillis()) ?: continue
-                        for (a in gestures.feed(e)) when (a) {
-                            EdgeGestures.Action.Arm -> shot = if (guest?.onTop == true) Shot() else null
-                            EdgeGestures.Action.Disarm -> { shot = null; relaying = false }
-                            is EdgeGestures.Action.PullStart -> when {
-                                guest?.onTop != true || portalOverGuest -> shot = null
-                                // No callback means the panel's process is gone: no portal to
-                                // relay to, but the pull still asks for the panel, so it comes back.
-                                portal == null -> {
-                                    shot = null
-                                    if (keyguardShowing()) {
-                                        Log.d(TAG, "portal: pull over the guest refused — no panel callback, keyguard")
-                                    } else {
-                                        Log.i(TAG, "portal: pull over the guest with no panel callback — bringing the panel back")
-                                        exec("am start --display $displayId -n $PKG/$ACTIVITY")
-                                    }
-                                }
-                                keyguardShowing() -> { shot = null; Log.d(TAG, "portal: pull over the guest refused — keyguard") }
-                                else -> {
-                                    portalOverGuest = true
-                                    portalAt = android.os.SystemClock.uptimeMillis()
-                                    relaying = true
-                                    exec("am start --display $displayId -n $PKG/$ACTIVITY")
-                                    tell { it.onPull(0, a.y) }
-                                    val waiting = shot
-                                    shot = null
-                                    if (waiting != null) Thread {
-                                        // Never holds up the gesture: the backdrop fades in when it lands.
-                                        try { waiting.thread.join(SHOT_WAIT_MS) } catch (_: InterruptedException) { return@Thread }
-                                        waiting.png?.let { sendFrame(it) }
-                                    }.apply { isDaemon = true; name = "portal-frame-send"; start() }
-                                }
-                            }
-                            is EdgeGestures.Action.PullMove -> if (relaying) tell { it.onPull(1, a.y) }
-                            is EdgeGestures.Action.PullEnd -> if (relaying) { relaying = false; tell { it.onPull(2, a.y) } }
-                            EdgeGestures.Action.Back -> if (guest?.onTop == true && !portalOverGuest) {
-                                exec("input -d $displayId keyevent KEYCODE_BACK")
-                            }
-                        }
+                        onRearTouch(e, gestures)
                     }
                 }
             } catch (_: java.io.IOException) {
-                // The stream closing under us is how stopGuestWatch() ends this.
+                // The stream closing under us is how stopTouchWatch() ends this.
             } catch (e: Exception) {
-                Log.w(TAG, "portal: guest watcher stopped", e)
+                Log.w(TAG, "portal: touch watch stopped", e)
             } finally {
-                guestWatch.compareAndSet(proc, null)
+                touchWatch.compareAndSet(proc, null)
                 runCatching { proc.destroy() }
             }
-        }.apply { isDaemon = true; name = "portal-guest-touches"; start() }
+        }.apply { isDaemon = true; name = "portal-touches"; start() }
     }
 
-    private var warnedNoRearTouch = false
+    /** No touches read; a sheet up goes with it, since nothing could close it any more. */
+    private fun stopTouchWatch() {
+        val proc = touchWatch.getAndSet(null) ?: return
+        runCatching { proc.destroy() }
+        closeSheetNow("the touch watch stopped")
+    }
 
-    private fun stopGuestWatch() {
-        guestWatch.getAndSet(null)?.let { runCatching { it.destroy() } }
+    private val sheetLock = Any()
+    /** The watch's classifier; one per getevent. Under [sheetLock]. */
+    private var gestures = EdgeGestures()
+    private val motion = SheetMotion()
+    /** From an opening's begin until its end is asked for. Under [sheetLock]. */
+    private var sheetUp = false
+    /** begin() asked for and not yet run on [sheetClock]. Under [sheetLock]. */
+    private var beginPending = false
+    /** This finger is moving the sheet (a pull or a drag on it). Under [sheetLock]. */
+    private var driving = false
+    /** Where the current finger landed: a drag is measured from there. Under [sheetLock]. */
+    private var touchDownY = 0f
+    /** Run once the sheet is down: the tapped app's launch, a strip button. Under [sheetLock]. */
+    private var afterShut: (() -> Unit)? = null
+    private var anim: java.util.concurrent.ScheduledFuture<*>? = null
+    /** The strip button shown pressed, or -1. Under [sheetLock]. */
+    private var pressed = -1
+    /** The guest as the sheet shows it: null none (no strip), true on top (Panel), false behind (Resume). */
+    @Volatile private var sheetGuestOnTop: Boolean? = null
+    @Volatile private var sheetLook: Pair<dev.kb896.aiusage.data.PanelTheme, dev.kb896.aiusage.data.GlassStyle?>? = null
+
+    private val sheetClock: java.util.concurrent.ScheduledExecutorService by lazy {
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "portal-sheet-clock").apply { isDaemon = true }
+        }
+    }
+
+    @Volatile private var shellSheet: ShellSheet? = null
+    @Volatile private var sheetFontFailed = false
+    private val sheetMaking = Any()
+
+    /** The sheet, made once the panel's font is in hand; null (logged once) if it cannot be. */
+    private fun sheetOrNull(): ShellSheet? {
+        shellSheet?.let { return it }
+        if (sheetFontFailed) return null
+        synchronized(sheetMaking) {
+            shellSheet?.let { return it }
+            if (sheetFontFailed) return null
+            val font = ShellFont.load(context) { exec("pm path $PKG") }
+            if (font == null) { sheetFontFailed = true; return null }
+            val s = ShellSheet(rearLayerStack(), font)
+            sheetLook?.let { (theme, style) -> s.theme(theme, style) }
+            s.apps(portalApps)
+            shellSheet = s
+            syncSheetGuest()
+            return s
+        }
+    }
+
+    private fun syncSheetGuest() {
+        val g = guest?.takeIf { it.placed }
+        sheetGuestOnTop = g?.onTop
+        shellSheet?.guest(sheetGuestOnTop)
+    }
+
+    /** One touch, on the reader thread. */
+    private fun onRearTouch(e: RearTouches.Event, from: EdgeGestures) {
+        var back = false
+        synchronized(sheetLock) {
+            if (from !== gestures) return
+            val actions = from.feed(e)
+            for (a in actions) if (sheetAction(a, e.atMs)) back = true
+            if (e is RearTouches.Down) {
+                touchDownY = e.y
+                if (actions.any { it is EdgeGestures.Action.SheetDown }) {
+                    // A finger held so still the touchscreen says nothing still becomes a long-press.
+                    runCatching {
+                        sheetClock.schedule({ longPressTick(from) }, EdgeGestures.LONG_PRESS_MS + 5, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    }
+                }
+            }
+        }
+        // As before the sheet: our Back to a guest on top, never with the sheet up (Task 8
+        // changes the rule to the focused display's).
+        if (back) exec("input -d ${rearDisplay()} keyevent KEYCODE_BACK")
+    }
+
+    private fun longPressTick(from: EdgeGestures) = runCatching {
+        synchronized(sheetLock) {
+            if (from !== gestures) return@synchronized
+            for (a in from.tick(android.os.SystemClock.uptimeMillis())) sheetAction(a, android.os.SystemClock.uptimeMillis())
+        }
+    }.onFailure { Log.w(TAG, "portal sheet: long-press tick failed: ${it.message}") }
+
+    private fun rearDisplay() = placedDisplayId.takeIf { it >= 0 } ?: Panel.DISPLAY_ID
+
+    /** Under [sheetLock]. True: send Back to the guest. */
+    private fun sheetAction(a: EdgeGestures.Action, atMs: Long): Boolean {
+        when (a) {
+            // The screenshot starts as the finger lands; ShellSheet drops it if another
+            // opening's shot has been asked for since.
+            EdgeGestures.Action.Arm -> if (!sheetUp && bandTaps == null) sheetOrNull()?.let { s ->
+                val shot = s.newShot()
+                Thread {
+                    val png = captureRear()
+                    if (png != null) runCatching { s.backdrop(png, shot) }
+                        .onFailure { Log.w(TAG, "portal sheet: backdrop failed: ${it.message}") }
+                }.apply { isDaemon = true; name = "portal-shot"; start() }
+            }
+            EdgeGestures.Action.Disarm -> Unit
+            is EdgeGestures.Action.SheetDown -> {
+                if (!sheetAlive()) return false
+                // Caught: a pending launch or button waits for no shut that is not coming.
+                afterShut = null
+                stopAnim()
+                motion.hold(atMs)
+                pushProgress(atMs)
+                setPressed(if (motion.fullyOpen(atMs)) (hitAt(a.x, a.y) as? PortalSheet.Hit.Button)?.index ?: -1 else -1)
+            }
+            is EdgeGestures.Action.PullStart -> if (sheetUp) {
+                if (!sheetAlive()) return false
+                setPressed(-1)
+                motion.grab(touchDownY, atMs)
+                driving = true
+                shellSheet?.progress(motion.drag(a.y, atMs))
+            } else openSheet(a.y, atMs)
+            is EdgeGestures.Action.PullMove -> if (driving && sheetAlive()) shellSheet?.progress(motion.drag(a.y, atMs))
+            is EdgeGestures.Action.PullEnd -> if (driving) {
+                driving = false
+                if (sheetAlive()) { motion.release(a.y, atMs); afterMotion(atMs) }
+            }
+            is EdgeGestures.Action.Tap -> {
+                setPressed(-1)
+                if (sheetAlive()) tap(a.x, a.y, atMs)
+            }
+            is EdgeGestures.Action.LongPress -> if (sheetAlive() && motion.fullyOpen(atMs)) {
+                (hitAt(a.x, a.y) as? PortalSheet.Hit.App)?.let { onSheetLongPress(it.index) }
+            }
+            EdgeGestures.Action.Cancel -> {
+                setPressed(-1)
+                if (sheetAlive() && motion.phase == SheetMotion.Phase.HELD) { motion.resume(atMs); afterMotion(atMs) }
+            }
+            EdgeGestures.Action.Back -> return guest?.onTop == true && !sheetUp
+        }
+        return false
+    }
+
+    /**
+     * The pull that opens the sheet: no keyguard check, nothing started — it is our own
+     * layer. Not over the camera we opened (its band-tap watch has the back then). Under
+     * [sheetLock].
+     */
+    private fun openSheet(y: Float, atMs: Long) {
+        if (bandTaps != null) return
+        val s = sheetOrNull() ?: return
+        syncSheetGuest()
+        s.apps(portalApps)
+        motion.reset()
+        motion.grab(touchDownY, atMs)
+        motion.drag(y, atMs)
+        sheetUp = true
+        beginPending = true
+        driving = true
+        gestures.sheet = true
+        afterShut = null
+        pressed = -1
+        s.progress(motion.progress(atMs))
+        sheetClock.execute {
+            val p = synchronized(sheetLock) { if (!sheetUp || !beginPending) return@execute; motion.progress(android.os.SystemClock.uptimeMillis()) }
+            val ok = runCatching { s.begin(p) }.getOrElse { Log.w(TAG, "portal sheet: begin threw: ${it.message}"); false }
+            synchronized(sheetLock) {
+                beginPending = false
+                if (!ok && sheetUp) {
+                    Log.i(TAG, "portal sheet: could not come up — the pull does nothing")
+                    sheetDown()
+                } else if (sheetUp) {
+                    // Let go while it was coming up: the settle already began.
+                    afterMotion(android.os.SystemClock.uptimeMillis())
+                }
+            }
+        }
+    }
+
+    /** Up, or on its way up; a sheet whose layers went is put down here. Under [sheetLock]. */
+    private fun sheetAlive(): Boolean {
+        if (!sheetUp) return false
+        if (beginPending || shellSheet?.up == true) return true
+        Log.w(TAG, "portal sheet: its layers are gone — shut")
+        sheetDown()
+        return false
+    }
+
+    private fun hitAt(x: Float, y: Float) =
+        PortalSheet.hit(x, y, portalApps.size, withStrip = sheetGuestOnTop != null)
+
+    private fun setPressed(i: Int) {
+        if (pressed == i) return
+        pressed = i
+        shellSheet?.press(i)
+    }
+
+    /**
+     * A tap: on the settled sheet a choice — the app (its launch once the sheet is down),
+     * a strip button ([onSheetButton]), outside the boxes to shut it; on a sheet still
+     * moving, it carries on where it was going. Under [sheetLock].
+     */
+    private fun tap(x: Float, y: Float, atMs: Long) {
+        if (!motion.fullyOpen(atMs) || !motion.heading) { motion.resume(atMs); afterMotion(atMs); return }
+        val apps = portalApps
+        val onTop = sheetGuestOnTop
+        when (val hit = PortalSheet.hit(x, y, apps.size, withStrip = onTop != null)) {
+            is PortalSheet.Hit.App -> {
+                val pkg = apps.packages.getOrNull(hit.index)
+                shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
+            }
+            is PortalSheet.Hit.Button -> shutSheet(atMs) { onSheetButton(hit.index, onTop ?: false) }
+            PortalSheet.Hit.Outside -> shutSheet(atMs, null)
+        }
+    }
+
+    /** Settles it shut, then [then] on a thread of its own. Under [sheetLock]. */
+    private fun shutSheet(atMs: Long, then: (() -> Unit)?) {
+        motion.settle(false, atMs)
+        afterShut = then
+        afterMotion(atMs)
+    }
+
+    /**
+     * TASK 8 FILLS THIS: the strip's choice, run once the sheet is down. [index] 0 is Panel
+     * when the guest was on top ([guestOnTop]), else Resume; 1 Front; 2 Close. For now the
+     * old guest actions, so the strip works: Panel starts the panel over the guest (which
+     * HyperOS refuses while the front is locked — Task 8 moves the guest to display 0 then),
+     * Resume brings the guest back on top through display 0 (move-stack to the display it
+     * is already on does not raise it).
+     */
+    private fun onSheetButton(index: Int, guestOnTop: Boolean) {
+        when (index) {
+            0 -> if (guestOnTop) {
+                exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY")
+                guestAction("panel")
+            } else {
+                synchronized(placing) {
+                    val g = guest ?: return
+                    moveToDisplay(g.task, 0)
+                    moveToDisplay(g.task, rearDisplay())
+                }
+                guestAction("resume")
+            }
+            1 -> guestAction("front")
+            2 -> guestAction("close")
+        }
+    }
+
+    /** TASK 9 FILLS THIS: a long-press on the app at [index] (its DPI row). */
+    private fun onSheetLongPress(index: Int) {
+        Log.i(TAG, "portal sheet: long-press on ${portalApps.packages.getOrNull(index)} (DPI from the back comes with Task 9)")
+    }
+
+    /** Whatever [motion] now says, carried out. Under [sheetLock]. */
+    private fun afterMotion(nowMs: Long) {
+        when (motion.phase) {
+            SheetMotion.Phase.SETTLING -> { pushProgress(nowMs); if (!beginPending) startAnim() }
+            SheetMotion.Phase.SHUT -> sheetDown()
+            else -> { stopAnim(); pushProgress(nowMs) }
+        }
+    }
+
+    private fun pushProgress(nowMs: Long) { shellSheet?.progress(motion.progress(nowMs)) }
+
+    private fun startAnim() {
+        if (anim != null) return
+        anim = runCatching {
+            sheetClock.scheduleAtFixedRate({ animStep() }, SHEET_FRAME_MS, SHEET_FRAME_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }.getOrNull()
+    }
+
+    private fun stopAnim() {
+        anim?.cancel(false)
+        anim = null
+    }
+
+    /** One frame of a settle, on [sheetClock]. */
+    private fun animStep() {
+        try {
+            synchronized(sheetLock) {
+                if (!sheetUp || motion.phase != SheetMotion.Phase.SETTLING) { stopAnim(); return }
+                if (!sheetAlive()) return
+                val now = android.os.SystemClock.uptimeMillis()
+                shellSheet?.progress(motion.at(now))
+                if (motion.phase != SheetMotion.Phase.SETTLING) afterMotion(now)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "portal sheet: settle frame failed: ${e.message}")
+        }
+    }
+
+    /**
+     * The sheet down: shut, its layers ended on [sheetClock] (never the reader — end()
+     * may wait for its render thread), fingers back to the edges, and [afterShut] run.
+     * Under [sheetLock].
+     */
+    private fun sheetDown() {
+        stopAnim()
+        val wasUp = sheetUp
+        sheetUp = false
+        beginPending = false
+        driving = false
+        pressed = -1
+        gestures.sheet = false
+        motion.reset()
+        val then = afterShut
+        afterShut = null
+        val s = shellSheet ?: return
+        if (!wasUp) return
+        runCatching {
+            sheetClock.execute {
+                runCatching { s.end() }.onFailure { Log.w(TAG, "portal sheet: end failed: ${it.message}") }
+                then?.let { Thread(it).apply { isDaemon = true; name = "portal-sheet-choice"; start() } }
+            }
+        }.onFailure {
+            runCatching { s.end() }
+        }
+    }
+
+    /**
+     * Shut at once, no settle, nothing chosen run: the rear is going dark, the panel is
+     * hidden, the watch stopped. [sync]: end() on this thread (destroy, which exits next).
+     */
+    private fun closeSheetNow(why: String, sync: Boolean = false) {
+        val s = synchronized(sheetLock) {
+            if (!sheetUp) return
+            Log.i(TAG, "portal sheet: shut — $why")
+            afterShut = null
+            sheetDown()
+            shellSheet
+        }
+        if (sync) runCatching { s?.end() }
     }
 
     /** The rear as a PNG, from shell's screencap — about 240 ms. Null if it fails. */
@@ -1019,25 +1368,6 @@ class RearUserService : IRearService.Stub {
             val p = ProcessBuilder("sh", "-c", "exec screencap -d $id -p").start()
             p.inputStream.use { it.readBytes() }.takeIf { it.size > 100 }
         } catch (e: Exception) { null }
-    }
-
-    /** Handed over as a pipe, so no file needs to be readable by both uids. */
-    private fun sendFrame(bytes: ByteArray) {
-        if (portal == null) return
-        val (read, write) = try { android.os.ParcelFileDescriptor.createPipe() } catch (e: Exception) {
-            Log.w(TAG, "portal: no pipe for the frame: ${e.message}"); return
-        }
-        Thread {
-            // A panel that closes its end early is not an error worth a crash: an uncaught
-            // exception here would take the whole shell service down.
-            try {
-                android.os.ParcelFileDescriptor.AutoCloseOutputStream(write).use { it.write(bytes) }
-            } catch (e: Exception) {
-                Log.w(TAG, "portal: frame not taken: ${e.message}")
-            }
-        }.apply { isDaemon = true; name = "portal-frame-pipe"; start() }
-        tell { it.onFrame(read) }
-        runCatching { read.close() }
     }
 
     override fun setQuick(which: String, on: Boolean) {
@@ -1155,6 +1485,8 @@ class RearUserService : IRearService.Stub {
                     // Except over a guest on top: the panel's own sleep timer runs out behind
                     // it, and skipping would stop the guest being watched at all. A rear that
                     // is really dark shows here as nothing on top (GUEST_BEHIND).
+                    // The touch watch's safety net: a getevent that died is restarted here.
+                    syncTouchWatch()
                     if (dozing && guest?.onTop != true) continue
 
                     // The App Portal's guest first: its own rule (GuestGate), and the usual
@@ -1181,17 +1513,10 @@ class RearUserService : IRearService.Stub {
                         if (!g.placed && tick != GuestGate.Tick.GUEST_GONE) continue
                         when (tick) {
                             GuestGate.Tick.GUEST_ON_TOP -> {
-                                // The guest composited on top means no portal is over it. A
-                                // pull that started one and never heard back (refused start,
-                                // no callback, a recreated panel) is let go after a moment.
-                                if (portalOverGuest && android.os.SystemClock.uptimeMillis() - portalAt > PORTAL_STALE_MS) {
-                                    Log.i(TAG, "portal: the guest is on top — no portal over it any more")
-                                    portalOverGuest = false
-                                }
                                 // Compare-and-set against this reading: a launch or a guest
                                 // action since it was taken wins.
                                 if (!g.onTop && guestRef.compareAndSet(g, g.copy(onTop = true))) {
-                                    tell { it.onGuest(g.pkg, true) }
+                                    toldGuest(g.pkg, true)
                                 }
                                 // Every tick, but a comparison unless something changed (or a
                                 // refused command is due a retry).
@@ -1203,12 +1528,12 @@ class RearUserService : IRearService.Stub {
                                 // Behind the panel, it is no longer on top. On a dark rear
                                 // (top null) only the frame goes: nothing has covered it, and
                                 // it is on top again the moment the display lights.
-                                if (top != null && g.onTop && !portalOverGuest &&
+                                if (top != null && g.onTop &&
                                     guestRef.compareAndSet(g, g.copy(onTop = false))) {
-                                    tell { it.onGuest(g.pkg, false) }
+                                    toldGuest(g.pkg, false)
                                 }
                                 syncDensity("${g.pkg} is behind")
-                                if (top == null || !portalOverGuest) frame.hide()
+                                frame.hide()
                                 // The panel back in front after the camera was: somebody closed it.
                                 if (top == PKG && cameraLaunched && cameraWasOnTop) closeCamera()
                                 continue
@@ -1490,10 +1815,10 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val GUEST_SURVIVE_MS = 2_000L
         /** The longest a launch waits for an app's startup screens to settle. */
         private const val GUEST_SETTLE_LIMIT_MS = 6_000L
-        /** How long a pull's portal may go unreported before the guest on top ends it. */
-        private const val PORTAL_STALE_MS = 2_000L
-        /** The longest a pull's frame waits for its screenshot before going without. */
-        private const val SHOT_WAIT_MS = 1_000L
+        /** The sheet's settle, a frame at a time. */
+        private const val SHEET_FRAME_MS = 16L
+        /** No rear touchscreen found: how long before getevent is asked again. */
+        private const val TOUCH_RETRY_MS = 60_000L
         /**
          * What may go into a shell command as a package or a component: these come from
          * the app's config and from dumps, and this service runs them at shell uid.

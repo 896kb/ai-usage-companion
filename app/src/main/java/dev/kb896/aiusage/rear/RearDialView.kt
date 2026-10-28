@@ -9758,7 +9758,7 @@ class RearDialView(context: Context) : View(context) {
                     // Shut: only armed, never over the control centre (which, showing,
                     // took this finger before it got here).
                     ptGesture = false
-                    ptArmed = !locked && !aod && onlyAccount == null &&
+                    ptArmed = PANEL_PORTAL && !locked && !aod && onlyAccount == null &&
                         controlCenterProgress() <= 0.01f && PortalPull.startsPull(event.x, event.y)
                     return false
                 }
@@ -13669,6 +13669,12 @@ class RearDialView(context: Context) : View(context) {
         private const val CC_DIM = 0.25f
         /** How long the guest's frozen frame takes to fade in behind the App Portal. */
         private const val PORTAL_FADE_MS = 150L
+        /**
+         * The panel's own portal pull, off: the shell draws and drives the sheet now, from
+         * the raw touchscreen (RearUserService), and two portals must not answer one swipe.
+         * Task 10 removes the panel-side portal; until then this keeps it from arming.
+         */
+        private const val PANEL_PORTAL = false
         /** How often a brightness drag writes the setting, at most. */
         private const val BRIGHT_SEND_MS = 50L
         /** Between the brightness cell and the round button under it. */
