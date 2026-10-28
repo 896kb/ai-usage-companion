@@ -4,12 +4,17 @@ import dev.kb896.aiusage.Panel
 
 /**
  * The rear touchscreen's first finger, from `getevent <device>` lines, as down, move and
- * up in panel pixels — what the shell service can see of a guest app's touches, which it
- * cannot otherwise touch at all (see EdgeGestures).
+ * up in panel pixels — the shell service cannot otherwise see a guest app's touches
+ * (see EdgeGestures).
  *
  * Multitouch protocol B, as [BandTap] reads it: a tracking id starts a contact, -1 ends
  * it, positions arrive between SYN_REPORTs. An event is emitted on the SYN that closes a
  * frame, so a down carries its first position rather than none.
+ *
+ * Other fingers are ignored until the first lifts; a finger still down then is not
+ * promoted, the next landing is the new first. The last position is kept across lifts, as
+ * the kernel only re-sends an axis that changed, so a landing at the same X or Y as the
+ * last contact arrives without it.
  */
 class RearTouches(private val maxX: Int, private val maxY: Int) {
 
@@ -48,7 +53,12 @@ class RearTouches(private val maxX: Int, private val maxY: Int) {
     }
 
     private fun frame(nowMs: Long): Event? {
-        if (rawX < 0 || rawY < 0) { landed = false; lifted = false; return null }
+        if (rawX < 0 || rawY < 0) {
+            // Only before the very first position: nothing to report, but never stay stuck.
+            if (lifted) primary = -1
+            landed = false; lifted = false; moved = false
+            return null
+        }
         val x = rawX * Panel.WIDTH / (maxX + 1f)
         val y = rawY * Panel.HEIGHT / (maxY + 1f)
         val e: Event? = when {
@@ -57,7 +67,7 @@ class RearTouches(private val maxX: Int, private val maxY: Int) {
             moved && primary >= 0 -> Move(x, y, nowMs)
             else -> null
         }
-        if (lifted) { primary = -1; rawX = -1; rawY = -1 }
+        if (lifted) primary = -1
         landed = false; lifted = false; moved = false
         return e
     }

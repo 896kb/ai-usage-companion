@@ -46,4 +46,38 @@ class RearTouchesTest {
     @Test fun `a line that is not an event is nothing`() {
         assertNull(touches().feed("add device 3: /dev/input/event7", 0))
     }
+
+    @Test fun `a finger landing where the last one lifted is still a down`() {
+        val t = touches()
+        val first = t.run(land(60100, 54500)) + t.run(lift)
+        val same = t.run(listOf("0003 0039 00000002", syn)) + t.run(lift)
+        val events = first + same
+        assertEquals(listOf("Down", "Up", "Down", "Up"), events.map { it::class.simpleName })
+        assertEquals(601f, events[2].x, 0.5f)
+        assertEquals(545f, events[2].y, 0.5f)
+        val third = t.run(land(10000, 10000)).single()
+        assertTrue(third is RearTouches.Down)
+        assertEquals(100f, third.x, 0.5f)
+        assertEquals(100f, third.y, 0.5f)
+    }
+
+    @Test fun `a second finger left down after the first lifts is ignored, and the next landing is the new first`() {
+        val t = touches()
+        val events = t.run(
+            land(60100, 54500) +
+                listOf("0003 002f 00000001") + land(10000, 10000, id = 2) +
+                listOf("0003 002f 00000000", "0003 0039 ffffffff", syn) +
+                listOf("0003 002f 00000001") + move(12000, 12000) +
+                listOf("0003 002f 00000001", "0003 0039 ffffffff", syn) +
+                listOf("0003 002f 00000000") + land(30000, 30000, id = 3),
+        )
+        assertEquals(listOf("Down", "Up", "Down"), events.map { it::class.simpleName })
+        assertEquals(300f, events[2].x, 0.5f)
+        assertEquals(300f, events[2].y, 0.5f)
+    }
+
+    @Test fun `a line with a device prefix is read`() {
+        val e = touches().run(land(60100, 54500).map { "/dev/input/event7: $it" })
+        assertTrue(e.single() is RearTouches.Down)
+    }
 }
