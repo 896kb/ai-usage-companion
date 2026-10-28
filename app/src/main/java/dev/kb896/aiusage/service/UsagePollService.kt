@@ -260,6 +260,8 @@ class UsagePollService : Service() {
             addAction(RearActivity.ACTION_MEDIA_COMMAND)
             // The panel telling us it has let its display go, or taken it back.
             addAction(RearActivity.ACTION_DOZING)
+            // And whether its lock slider or always-on is up, for the shell's portal sheet.
+            addAction(RearActivity.ACTION_GUARDED)
             // The control centre's brightness: read it, set it — through Shizuku, here.
             addAction(RearActivity.ACTION_GET_REAR_BRIGHTNESS)
             addAction(RearActivity.ACTION_SET_REAR_BRIGHTNESS)
@@ -484,6 +486,10 @@ class UsagePollService : Service() {
                     val v = latestBrightness.getAndSet(-1)
                     if (v in 1..255) Graph.of(this@UsagePollService).bridge.setRearBrightness(v)
                 }
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_GUARDED) {
+                Graph.of(this@UsagePollService).bridge.setPanelGuarded(intent.getBooleanExtra(RearActivity.EXTRA_GUARDED, false))
                 return
             }
             if (intent?.action == RearActivity.ACTION_DOZING) {

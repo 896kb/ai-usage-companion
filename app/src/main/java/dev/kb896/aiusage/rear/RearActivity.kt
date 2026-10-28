@@ -184,6 +184,13 @@ class RearActivity : Activity() {
          */
         const val ACTION_DOZING = "dev.kb896.aiusage.DOZING"
         /**
+         * The panel's lock slider (pocket lock) or always-on came up, or went: [EXTRA_GUARDED].
+         * The shell's portal sheet opens no sheet over a guarded panel. Same route as
+         * [ACTION_DOZING]: the app process forwards it (IRearService.setPanelGuarded).
+         */
+        const val ACTION_GUARDED = "dev.kb896.aiusage.GUARDED"
+        const val EXTRA_GUARDED = "guarded"
+        /**
          * The control centre's brightness (ControlCenter): the panel asks for it
          * ([ACTION_GET_REAR_BRIGHTNESS]) and sets it ([ACTION_SET_REAR_BRIGHTNESS], with
          * [EXTRA_BRIGHTNESS] 1 to 255); the app process, which holds Shizuku, answers with
@@ -513,7 +520,7 @@ class RearActivity : Activity() {
 
         calibrationView = CalibrationView(this)
         dial = RearDialView(this)
-        dial.onMirror = { m -> lastMirror = m; sendMirror() }
+        dial.onMirror = { m -> lastMirror = m; sendMirror(); announceGuard(m.aod || m.locked) }
 
         // Fire-and-forget across the process boundary. This process cannot open the
         // camera itself — the Shizuku binding is in the main one — and it deliberately
@@ -902,6 +909,21 @@ class RearActivity : Activity() {
     }
 
     private var holding = true
+
+    /** Last guard sent, null before the first: each instance says it once, then on changes. */
+    private var guardSent: Boolean? = null
+
+    /**
+     * Tells the app process (and through it the shell) whether the panel is guarded — the lock
+     * slider up, which is also the pocket lock and always-on's resting state. Rides on the
+     * mirror, which the view publishes whenever either changes.
+     */
+    private fun announceGuard(guarded: Boolean) {
+        if (guardSent == guarded) return
+        guardSent = guarded
+        sendBroadcast(Intent(ACTION_GUARDED).setPackage(packageName).putExtra(EXTRA_GUARDED, guarded))
+    }
+
     private var lastMirror: RearDialView.Mirror? = null
     /** The back's state for the front screen's preview; the dim rides along, it being the window's, not the view's. */
     private fun sendMirror() {

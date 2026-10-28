@@ -112,6 +112,10 @@ interface IRearService {
     // oneway: the bridge re-sends this from the main thread when the service connects, and
     // nothing waits on the result.
     oneway void setPortalApps(in Bundle apps) = 22;
+    // The panel's lock slider, pocket lock or always-on is up (true) or not. While it is, and
+    // the panel (not a guest) is on top of the rear, a bottom pull opens no portal sheet.
+    // From RearActivity through the app process, like setDozing; oneway, nothing waits on it.
+    oneway void setPanelGuarded(boolean guarded) = 23;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
 
 }

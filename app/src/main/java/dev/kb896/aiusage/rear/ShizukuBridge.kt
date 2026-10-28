@@ -68,6 +68,7 @@ class ShizukuBridge(private val context: Context) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
             portalCallback?.let { cb -> runCatching { service?.setPortalCallback(cb) } }
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
+            runCatching { service?.setPanelGuarded(panelGuarded) }
             pending?.let { p -> pending = null; show(p) }
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
@@ -462,6 +463,19 @@ class ShizukuBridge(private val context: Context) {
     }
 
     fun isDozing(): Boolean = dozing
+
+    /**
+     * The panel's lock slider / pocket lock / always-on is up, or not. Kept, like [dozing],
+     * and handed on again whenever the service (re)connects: a new shell process starts
+     * unguarded. Never binds — a panel that says this is already being served.
+     */
+    fun setPanelGuarded(value: Boolean) {
+        panelGuarded = value
+        runCatching { service?.setPanelGuarded(value) }
+            .onFailure { Log.w(TAG, "setPanelGuarded($value) failed: ${it.message}") }
+    }
+
+    @Volatile private var panelGuarded = false
 
     @Volatile private var dozing = false
 

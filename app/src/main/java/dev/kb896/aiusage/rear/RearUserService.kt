@@ -428,6 +428,8 @@ class RearUserService : IRearService.Stub {
 
     override fun ensureOnRear(displayId: Int): Boolean = synchronized(placing) {
         if (displayId < 0) return@synchronized false
+        // Run on USER_PRESENT too: a guest hidden behind the keyguard is on the front now.
+        unhideIfExposed("the front was unlocked")
         if (panelWhere() != Where.MAIN) { strandStrikes = 0; return false }
         val task = taskId()
         if (task <= 0) return false
@@ -566,8 +568,13 @@ class RearUserService : IRearService.Stub {
      * from, so a reading that predates a launch can never write the old guest back.
      * [Guest.placed] is false until [guestPlaced]: while a launch waits to see whether the
      * task survives its move, the keep-alive leaves the frame and the panel's strip alone.
+     * [Guest.hiddenOnFront]: the sheet's Panel moved it to display 0 behind the keyguard
+     * (see [onSheetButton]); it is still the guest, behind, and Resume brings it back.
      */
-    private data class Guest(val pkg: String, val task: Int, val onTop: Boolean, val placed: Boolean = false)
+    private data class Guest(
+        val pkg: String, val task: Int, val onTop: Boolean, val placed: Boolean = false,
+        val hiddenOnFront: Boolean = false,
+    )
     private val guestRef = AtomicReference<Guest?>(null)
     private var guest: Guest?
         get() = guestRef.get()
@@ -912,9 +919,11 @@ class RearUserService : IRearService.Stub {
                 frame.hide()
                 toldGuest(g.pkg, false)
             }
-            // RearActivity has gone behind (moveTaskToBack); the guest is on top again.
+            // RearActivity has gone behind (moveTaskToBack); the guest is on top again. One
+            // the shell sheet hid on the front has to be brought back for that to be true.
             "resume" -> {
                 val g = guest ?: return
+                if (g.hiddenOnFront) { synchronized(placing) { unhide("the panel's Resume") }; return }
                 markOnTop(g.task, true)
                 frame.show()
                 toldGuest(g.pkg, true)
@@ -1104,9 +1113,29 @@ class RearUserService : IRearService.Stub {
                 }
             }
         }
-        // As before the sheet: our Back to a guest on top, never with the sheet up (Task 8
-        // changes the rule to the focused display's).
-        if (back) exec("input -d ${rearDisplay()} keyevent KEYCODE_BACK")
+        if (back) sendBackOnce()
+    }
+
+    /**
+     * A right-edge swipe over a guest on top (the sheet down): Back to it ONCE. Xiaomi's strip
+     * sends its own Back to whichever display has input focus, so ours goes only when that
+     * is not the rear ([PortalAction.sendBack], spec "Settled on the device" 2). Focus is
+     * read every time — it moves with touches on either screen — and off the reader thread,
+     * since `dumpsys window` takes a moment.
+     */
+    private fun sendBackOnce() {
+        Thread {
+            val rear = rearDisplay()
+            val focused = PortalAction.topFocusedDisplay(exec("dumpsys window | grep -m1 mTopFocusedDisplayId"))
+            val onTop = guest?.onTop == true
+            val up = synchronized(sheetLock) { sheetUp }
+            if (PortalAction.sendBack(onTop, up, focused, rear)) {
+                Log.i(TAG, "portal: Back — display ${focused ?: "?"} has focus, ours to display $rear")
+                exec("input -d $rear keyevent KEYCODE_BACK")
+            } else if (onTop && !up) {
+                Log.i(TAG, "portal: Back — the rear has focus, Xiaomi's reaches the guest; none of ours")
+            }
+        }.apply { isDaemon = true; name = "portal-back"; start() }
     }
 
     private fun longPressTick(from: EdgeGestures) = runCatching {
@@ -1123,7 +1152,7 @@ class RearUserService : IRearService.Stub {
         when (a) {
             // The screenshot starts as the finger lands; ShellSheet drops it if another
             // opening's shot has been asked for since.
-            EdgeGestures.Action.Arm -> if (!sheetUp && bandTaps == null) sheetOrNull()?.let { s ->
+            EdgeGestures.Action.Arm -> if (!sheetUp && bandTaps == null && pullOpens()) sheetOrNull()?.let { s ->
                 val shot = s.newShot()
                 Thread {
                     val png = captureRear()
@@ -1164,7 +1193,7 @@ class RearUserService : IRearService.Stub {
                 setPressed(-1)
                 if (sheetAlive() && motion.phase == SheetMotion.Phase.HELD) { motion.resume(atMs); afterMotion(atMs) }
             }
-            EdgeGestures.Action.Back -> return guest?.onTop == true && !sheetUp
+            EdgeGestures.Action.Back -> return PortalAction.sendBack(guest?.onTop == true, sheetUp, null, rearDisplay())
         }
         return false
     }
@@ -1176,6 +1205,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun openSheet(y: Float, atMs: Long) {
         if (bandTaps != null) return
+        if (!pullOpens()) { Log.i(TAG, "portal sheet: the panel is guarded (lock slider / always-on) — no sheet over it"); return }
         val s = sheetOrNull() ?: return
         syncSheetGuest()
         s.apps(portalApps)
@@ -1204,6 +1234,21 @@ class RearUserService : IRearService.Stub {
             }
         }
     }
+
+    /**
+     * The panel's lock slider, pocket lock or always-on is up (RearActivity says so through
+     * the app process: [setPanelGuarded]). Over the panel a pull then opens nothing.
+     */
+    @Volatile private var panelGuarded = false
+
+    override fun setPanelGuarded(guarded: Boolean) {
+        if (panelGuarded == guarded) return
+        panelGuarded = guarded
+        Log.i(TAG, if (guarded) "portal: the panel is guarded — no sheet over it" else "portal: the panel is open again")
+    }
+
+    /** Whether a bottom pull may open the sheet now: [PortalAction.sheetOpens]. */
+    private fun pullOpens() = PortalAction.sheetOpens(panelGuarded, guest?.let { it.placed && it.onTop } == true)
 
     /** Up, or on its way up; a sheet whose layers went is put down here. Under [sheetLock]. */
     private fun sheetAlive(): Boolean {
@@ -1250,29 +1295,110 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * TASK 8 FILLS THIS: the strip's choice, run once the sheet is down. [index] 0 is Panel
-     * when the guest was on top ([guestOnTop]), else Resume; 1 Front; 2 Close. For now the
-     * old guest actions, so the strip works: Panel starts the panel over the guest (which
-     * HyperOS refuses while the front is locked — Task 8 moves the guest to display 0 then),
-     * Resume brings the guest back on top through display 0 (move-stack to the display it
-     * is already on does not raise it).
+     * The strip's choice, run once the sheet is down, on a thread of its own. [index] 0 is
+     * Panel when the guest was on top ([guestOnTop], as the sheet showed it), else Resume;
+     * 1 Front; 2 Close. Each is a [PortalAction.Step] (spec "Settled on the device" 1):
+     *
+     * - Panel, front locked (`keyguardShowing()`): `am display move-stack <guest> 0`. The
+     *   guest goes behind the keyguard, unseen and not relaunched (35 ms measured), which
+     *   leaves our panel on top of the rear; the rear is woken. HyperOS refuses `am start` of
+     *   the panel while the front is locked, so this is the only way. The guest is then
+     *   [Guest.hiddenOnFront]: still the guest, behind (see [GuestGate]).
+     * - Panel, front unlocked: `am start --display <rear>` of the panel, over the guest.
+     * - Resume of a hidden guest: `move-stack <guest> <rear>` and a wake ([unhide]).
+     * - Resume of a guest behind the panel on the rear: `move-stack <guest> 0`, then back to
+     *   the rear — a move to the display a task is already on does not raise it. KNOWN
+     *   LIMITATION: with the front unlocked the guest is seen on the front for the moment
+     *   between the two moves; locked, it passes behind the keyguard unseen.
+     * - Front: `move-stack <guest> 0`, Close: `am force-stop` — either way the guest ends and
+     *   the panel comes back ([guestAction]).
+     *
+     * The guest's DPI stays through Panel and Resume (kept while the guest lives); the frame
+     * follows whether it is on top.
      */
     private fun onSheetButton(index: Int, guestOnTop: Boolean) {
-        when (index) {
-            0 -> if (guestOnTop) {
-                exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY")
-                guestAction("panel")
-            } else {
-                synchronized(placing) {
-                    val g = guest ?: return
-                    moveToDisplay(g.task, 0)
-                    moveToDisplay(g.task, rearDisplay())
-                }
-                guestAction("resume")
+        val step = synchronized(placing) {
+            val g = guest ?: return
+            PortalAction.strip(index, guestOnTop, g.hiddenOnFront) { keyguardShowing() }
+        } ?: return
+        Log.i(TAG, "portal sheet: $step")
+        when (step) {
+            PortalAction.Step.HIDE_ON_FRONT -> synchronized(placing) {
+                val g = guest ?: return
+                // Refused, it is still on top, and the keep-alive goes on seeing it there.
+                if (!moveToDisplay(g.task, 0)) return
+                guest = g.copy(onTop = false, hiddenOnFront = true)
+                guestBehind(g.pkg)
+                wake(rearDisplay())
             }
-            1 -> guestAction("front")
-            2 -> guestAction("close")
+            PortalAction.Step.START_PANEL -> synchronized(placing) {
+                val g = guest ?: return
+                // If HyperOS refused it after all (the front locked in between), the guest is
+                // still on top and the next keep-alive tick says so (GUEST_ON_TOP).
+                exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY")
+                markOnTop(g.task, false)
+                guestBehind(g.pkg)
+            }
+            PortalAction.Step.UNHIDE -> synchronized(placing) {
+                if (unhide("Resume")) wake(rearDisplay())
+            }
+            PortalAction.Step.RAISE_THROUGH_FRONT -> synchronized(placing) {
+                val g = guest ?: return
+                moveToDisplay(g.task, 0)
+                if (!moveToDisplay(g.task, rearDisplay())) return
+                guestOnTopAgain(g, "Resume")
+                wake(rearDisplay())
+            }
+            PortalAction.Step.FRONT -> guestAction("front")
+            PortalAction.Step.CLOSE -> guestAction("close")
         }
+    }
+
+    /** The guest no longer on top: no frame, the panel's strip and the sheet told. Its DPI stays. Under [placing]. */
+    private fun guestBehind(pkg: String) {
+        frame.hide()
+        syncDensity("$pkg is behind")
+        toldGuest(pkg, false)
+    }
+
+    /** [g] on top of the rear again, not hidden: frame, density, touches, the strips. Under [placing]. */
+    private fun guestOnTopAgain(g: Guest, why: String) {
+        Log.i(TAG, "portal: ${g.pkg} on top again — $why")
+        guest = g.copy(onTop = true, hiddenOnFront = false)
+        syncDensity("${g.pkg} is on top")
+        frame.show()
+        syncTouchWatch()
+        toldGuest(g.pkg, true)
+    }
+
+    /**
+     * A guest Panel hid on display 0 moved back onto the rear, on top. False when there is
+     * no hidden guest or the move was refused. Under [placing].
+     */
+    private fun unhide(why: String): Boolean {
+        val g = guest?.takeIf { it.hiddenOnFront } ?: return false
+        if (!moveToDisplay(g.task, rearDisplay())) return false
+        guestOnTopAgain(g, "back from the front: $why")
+        return true
+    }
+
+    /**
+     * The front unlocked with a guest hidden on it: the guest is showing there now. It goes
+     * back to the rear — on top of the panel, since nothing can put it back behind it — and
+     * the rear is left as it is (lit or not). The user unlocked the front, so the guest no
+     * longer has a keyguard to hide behind; ending it instead would lose the app's place.
+     * From the keep-alive (GUEST_EXPOSED) and from [ensureOnRear], which the app process runs
+     * on USER_PRESENT, so it is back within a moment of the unlock. Under [placing].
+     */
+    private fun unhideIfExposed(why: String) {
+        if (guest?.hiddenOnFront != true || keyguardShowing()) return
+        val g = guest ?: return
+        // Already back on the rear (somebody moved it): only the flag was stale.
+        if (GuestTask.byId(exec("am stack list"), g.task)?.display != 0) {
+            guestRef.compareAndSet(g, g.copy(hiddenOnFront = false))
+            return
+        }
+        unhide(why)
     }
 
     /** TASK 9 FILLS THIS: a long-press on the app at [index] (its DPI row). */
@@ -1507,7 +1633,11 @@ class RearUserService : IRearService.Stub {
                             isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
                             known = known,
                         ).let { if (it != null && it == taskTop) g.pkg else it }
-                        val tick = GuestGate.tick(g.pkg, entry != null, entry?.display == displayId, top, PKG)
+                        val tick = GuestGate.tick(
+                            g.pkg, entry != null, entry?.display == displayId, top, PKG,
+                            hiddenOnFront = g.hiddenOnFront, onFront = entry?.display == 0,
+                            frontLocked = { keyguardShowing() },
+                        )
                         // Mid-launch, the guest is the launch's: only a gone one is acted on,
                         // and that is checked again under the lock, after the launch.
                         if (!g.placed && tick != GuestGate.Tick.GUEST_GONE) continue
@@ -1515,7 +1645,9 @@ class RearUserService : IRearService.Stub {
                             GuestGate.Tick.GUEST_ON_TOP -> {
                                 // Compare-and-set against this reading: a launch or a guest
                                 // action since it was taken wins.
-                                if (!g.onTop && guestRef.compareAndSet(g, g.copy(onTop = true))) {
+                                // A hidden flag here is stale (it is on the rear): cleared with it.
+                                if ((!g.onTop || g.hiddenOnFront) &&
+                                    guestRef.compareAndSet(g, g.copy(onTop = true, hiddenOnFront = false))) {
                                     toldGuest(g.pkg, true)
                                 }
                                 // Every tick, but a comparison unless something changed (or a
@@ -1528,8 +1660,13 @@ class RearUserService : IRearService.Stub {
                                 // Behind the panel, it is no longer on top. On a dark rear
                                 // (top null) only the frame goes: nothing has covered it, and
                                 // it is on top again the moment the display lights.
-                                if (top != null && g.onTop &&
-                                    guestRef.compareAndSet(g, g.copy(onTop = false))) {
+                                // A hidden flag on a guest that is on the rear is stale (it came
+                                // back some other way than Resume): cleared in the same swap.
+                                val stale = g.hiddenOnFront && entry?.display == displayId
+                                val covered = top != null && g.onTop
+                                if ((covered || stale) &&
+                                    guestRef.compareAndSet(g, g.copy(onTop = g.onTop && !covered, hiddenOnFront = g.hiddenOnFront && !stale)) &&
+                                    covered) {
                                     toldGuest(g.pkg, false)
                                 }
                                 syncDensity("${g.pkg} is behind")
@@ -1538,13 +1675,20 @@ class RearUserService : IRearService.Stub {
                                 if (top == PKG && cameraLaunched && cameraWasOnTop) closeCamera()
                                 continue
                             }
+                            // The front unlocked over a guest hidden there by Panel.
+                            GuestGate.Tick.GUEST_EXPOSED -> {
+                                synchronized(placing) { unhideIfExposed("the front was unlocked") }
+                                continue
+                            }
                             // Checked again under the lock: this reading may predate a launch
                             // that has since placed (or replaced) the guest, and ending that
                             // one would undo it.
                             GuestGate.Tick.GUEST_GONE -> {
                                 synchronized(placing) {
                                     val now = guest
-                                    val still = now != null && GuestTask.byId(exec("am stack list"), now.task)?.display == displayId
+                                    val at = now?.let { GuestTask.byId(exec("am stack list"), it.task)?.display }
+                                    // Hidden on the front by Panel is not gone.
+                                    val still = at == displayId || (at == 0 && now?.hiddenOnFront == true)
                                     // Asleep on purpose, the rear stays dark: the panel's task is
                                     // already behind, and is simply revealed. Gone too, it is
                                     // relaunched on the next tick that is not asleep.
