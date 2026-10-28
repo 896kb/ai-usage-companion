@@ -4247,6 +4247,13 @@ class RearDialView(context: Context) : View(context) {
     /** Set by RearActivity, which forwards the press to the main process. */
     var onMediaTap: ((String) -> Unit)? = null
 
+    /**
+     * On a transport button or the mute button. Two quick presses of one — skipping two
+     * songs, pause and play again — are a double tap to RearActivity's detector, and must
+     * not put the panel to sleep.
+     */
+    fun onMediaControl(x: Float, y: Float): Boolean = mediaAt(x, y) != null || near(muteButton, x, y)
+
     private fun near(r: android.graphics.RectF?, x: Float, y: Float): Boolean {
         val b = r ?: return false
         return x >= b.left - CAMERA_SLOP && x <= b.right + CAMERA_SLOP &&
