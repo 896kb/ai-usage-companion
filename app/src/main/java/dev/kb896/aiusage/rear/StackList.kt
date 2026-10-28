@@ -15,4 +15,14 @@ object StackList {
         }
         return -1
     }
+
+    private val TASK_OF = Regex("""taskId=(\d+): ([^/\s]+)/""")
+
+    /**
+     * Every task of [pkg], in dump order. The camera opened on the back has two — the rear
+     * Camera and its front-screen companion, MainScreenSelfieActivity — and closing it from
+     * the back means both.
+     */
+    fun taskIdsOf(output: String, pkg: String): List<Int> =
+        TASK_OF.findAll(output).filter { it.groupValues[2] == pkg }.map { it.groupValues[1].toInt() }.toList()
 }
