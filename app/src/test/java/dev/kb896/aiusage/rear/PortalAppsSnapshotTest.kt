@@ -20,4 +20,15 @@ class PortalAppsSnapshotTest {
         val s = PortalAppsSnapshot.of(listOf("a", "b"), listOf("Alpha"), emptyMap())
         assertEquals(listOf("Alpha", "b"), s.labels)
     }
+
+    @Test fun iconsPastTheBudgetGoWithoutAndTheRestKeepTheirPlaces() {
+        val icons = listOf(ByteArray(40), null, ByteArray(50), ByteArray(20), ByteArray(5))
+        val kept = PortalAppsSnapshot.withinBudget(icons, 100)
+        assertEquals(listOf(40, null, 50, null, null), kept.map { it?.size })
+    }
+
+    @Test fun iconsWithinTheBudgetAreAllKept() {
+        val icons = listOf(ByteArray(40), ByteArray(60))
+        assertEquals(icons, PortalAppsSnapshot.withinBudget(icons, 100))
+    }
 }

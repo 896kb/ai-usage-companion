@@ -42,20 +42,29 @@ class PortalAppsLoader(private val context: Context, private val send: (android.
         }
         if (signature == lastSignature) return
         val labels = shown.map { pkg -> runCatching { infos.getValue(pkg).loadLabel(pm).toString() }.getOrDefault(pkg) }
-        val pngs = HashMap<String, ByteArray>()
-        for (pkg in shown) {
-            runCatching {
-                val out = ByteArrayOutputStream()
-                pm.getApplicationIcon(pkg).toBitmap(ICON_PX, ICON_PX).compress(Bitmap.CompressFormat.PNG, 100, out)
-                pngs[pkg] = out.toByteArray()
-            }
-        }
-        send(PortalAppsSnapshot.of(shown, labels, pngs).toBundle())
+        val bitmaps = shown.map { pkg -> runCatching { pm.getApplicationIcon(pkg).toBitmap(ICON_PX, ICON_PX) }.getOrNull() }
+        // Lossy WebP, not PNG: up to 48 icons go in one oneway call, and the shell's binder
+        // has half a megabyte for every oneway call in flight. Measured on 37 desktop app
+        // icons scaled to 96 px (libpng/libwebp, not the phone's encoder): PNG 8.9 KB each on
+        // average (48 of them 416 KB; 668 KB were all as big as the largest), WebP at 90
+        // 3.5 KB (164 KB; 280 KB). Over the budget anyway: once more at a lower quality, then
+        // the icons past the budget go without (their names still show).
+        var icons = bitmaps.map { encode(it, QUALITY) }
+        if (icons.sumOf { it?.size ?: 0 } > PortalAppsSnapshot.ICON_BUDGET) icons = bitmaps.map { encode(it, QUALITY_TIGHT) }
+        icons = PortalAppsSnapshot.withinBudget(icons, PortalAppsSnapshot.ICON_BUDGET)
+        val bytes = shown.indices.mapNotNull { i -> icons[i]?.let { shown[i] to it } }.toMap()
+        send(PortalAppsSnapshot.of(shown, labels, bytes).toBundle())
         lastSignature = signature
+    }
+
+    private fun encode(bmp: Bitmap?, quality: Int): ByteArray? = bmp?.let {
+        runCatching { ByteArrayOutputStream().also { out -> it.compress(Bitmap.CompressFormat.WEBP_LOSSY, quality, out) }.toByteArray() }.getOrNull()
     }
 
     private companion object {
         const val TAG = "PortalApps"
         const val ICON_PX = 96
+        const val QUALITY = 90
+        const val QUALITY_TIGHT = 60
     }
 }

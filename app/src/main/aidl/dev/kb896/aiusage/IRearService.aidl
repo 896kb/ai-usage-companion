@@ -107,7 +107,7 @@ interface IRearService {
     void guestAction(String which) = 20;
     // 21: retired (setPortalCallback)
     // The pinned apps for the shell's sheet: "packages" and "labels" (String[], same order)
-    // and "icon:<pkg>" (PNG bytes, 96x96). See PortalAppsSnapshot.
+    // and "icon:<pkg>" (WebP bytes, 96x96). See PortalAppsSnapshot.
     // oneway: the bridge re-sends this from the main thread when the service connects, and
     // nothing waits on the result.
     oneway void setPortalApps(in Bundle apps) = 22;

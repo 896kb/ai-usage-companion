@@ -7,7 +7,8 @@ import android.os.Bundle
 /**
  * The pinned apps as the shell's sheet needs them: package, label, icon, in grid order.
  * Sent from the main app as a [Bundle] ([toBundle]) and stored in the shell service as
- * received ([fromBundle]); icons stay PNG bytes until [icon] is first asked for, then are
+ * received ([fromBundle]); icons stay compressed bytes (WebP, or PNG from an older app —
+ * BitmapFactory reads either) until [icon] is first asked for, then are
  * decoded once and kept. Immutable except for that cache.
  */
 class PortalAppsSnapshot(
@@ -41,6 +42,21 @@ class PortalAppsSnapshot(
         const val KEY_PACKAGES = "packages"
         const val KEY_LABELS = "labels"
         fun iconKey(pkg: String) = "icon:$pkg"
+
+        /** The most icon bytes one bundle carries: well inside the binder's half megabyte for oneway calls. */
+        const val ICON_BUDGET = 300 * 1024
+
+        /** [icons] in order while their sizes add up to no more than [budget]; every one after that null. */
+        fun withinBudget(icons: List<ByteArray?>, budget: Int): List<ByteArray?> {
+            var total = 0
+            var full = false
+            return icons.map { b ->
+                if (b == null || full) return@map null
+                if (total + b.size > budget) { full = true; return@map null }
+                total += b.size
+                b
+            }
+        }
 
         val EMPTY = PortalAppsSnapshot(emptyList(), emptyList(), emptyList())
 

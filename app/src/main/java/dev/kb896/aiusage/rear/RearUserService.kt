@@ -655,7 +655,7 @@ class RearUserService : IRearService.Stub {
 
     /**
      * The pinned apps' names and icons, as the main app last sent them. Stored as received
-     * (PNG bytes); each icon is decoded lazily, on the first [PortalAppsSnapshot.icon] call
+     * (WebP bytes); each icon is decoded lazily, on the first [PortalAppsSnapshot.icon] call
      * (the shell sheet's first draw), then kept. Replaced whole, never edited, so a reader
      * holding one sees a consistent list.
      */
