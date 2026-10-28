@@ -6926,19 +6926,9 @@ class RearDialView(context: Context) : View(context) {
      * CLOCK's aspect for the clock, BATTERY's for everything else — so the first icon
      * added after that was written came out battery-shaped: tall and narrow, on a
      * camera. The pair now travels together and cannot be mismatched. See PanelIcons.Icon.
-     */
-    /**
-     * A traced glyph, at [h] units tall.
      *
-     * Drawn WITHOUT anti-aliasing, on a paint of its own. The tracer emits one rectangle
-     * per pixel row of the source glyph, so a solid shape arrives as a stack of abutting
-     * bars — and an anti-aliased edge on each of them blends with the background at every
-     * shared boundary. The result is a solid glyph rendered with a hairline of panel
-     * showing through between every row: the play triangle came out looking woven. It is
-     * most obvious on the transport glyphs because they are the only FILLED ones, which
-     * is why it survived three outline icons unnoticed.
-     *
-     * Pixel art, drawn like the mascot: no anti-aliasing, crisp edges, no seams.
+     * In the panel's theme and the extras' colour, through Glyphs.draw — which the shell's
+     * sheet draws with too; the rules for both sets are there.
      */
     private fun drawIcon(
         canvas: Canvas,
@@ -6946,66 +6936,9 @@ class RearDialView(context: Context) : View(context) {
         x: Float,
         y: Float,
         h: Float,
-        /**
-         * Anti-alias, for a glyph drawn under a rotation.
-         *
-         * Off everywhere else, and that is the point: these are stacks of one-pixel rows
-         * and hard edges are what keeps them crisp. Under a rotation there are no pixel
-         * rows to align to — the whole grid is at an angle — so the snapping that keeps
-         * an upright glyph clean instead leaves a staircase down every edge.
-         */
+        /** Anti-alias a traced glyph, for one drawn under a rotation. */
         smooth: Boolean = false,
-    ) {
-        val w = h * Glyphs.aspect(icon, config.theme)
-        val left = x + (h - w) / 2f          // centred in the cell, not left-aligned in it
-
-        // THE GLASS SET, if this theme has one for this glyph.
-        val outline = if (config.theme.isGlass) GlassIcons.of(icon) else null
-        if (outline != null) {
-            // ALWAYS anti-aliased, which is the opposite of the rule below and right for
-            // the same reason. The traced glyphs are pixel rows and want hard edges; these
-            // are curves, and a curve without smoothing is a staircase at any angle.
-            iconPaint.isAntiAlias = true
-            iconPaint.color = extras.color
-            iconPaint.style = Paint.Style.FILL
-            // Material draws on a 960-unit box whose Y axis runs from -960 to 0, so the
-            // glyph has to be brought down by a full box before it is anywhere near the
-            // cell it was asked for. Done here rather than in the generated data, which
-            // stays exactly as the source has it so regenerating stays a copy.
-            val k = h / GlassIcons.VIEWPORT
-            canvas.save()
-            canvas.translate(left, y)
-            canvas.scale(k, k)
-            canvas.translate(0f, -GlassIcons.ORIGIN_Y)
-            canvas.drawPath(outline.path, iconPaint)
-            canvas.restore()
-            return
-        }
-
-        iconPaint.isAntiAlias = smooth
-        iconPaint.color = extras.color
-        for (r in icon.rects) {
-            // SNAPPED TO WHOLE PIXELS, which is the whole reason this loop is not two
-            // lines. A traced row is one source pixel tall, and at 24 units from a
-            // 19-row glyph that is 1.26 device pixels: the rasteriser gives the leftover
-            // fraction partial coverage, so the rows came out alternating full and
-            // three-quarter brightness. The play triangle was visibly banded — measured
-            // at (122,129,247) and (92,98,187) on consecutive rows.
-            //
-            // Rounding each edge fixes it without a fudge factor. Row k's bottom and row
-            // k+1's top are the same expression, so they round to the same pixel: no
-            // gap, no overlap, no partial coverage. Rows land on 1 or 2 pixels depending
-            // where they fall, which is exactly what nearest-neighbour scaling of pixel
-            // art is supposed to do.
-            canvas.drawRect(
-                kotlin.math.round(left + r.x * w),
-                kotlin.math.round(y + r.y * h),
-                kotlin.math.round(left + (r.x + r.w) * w),
-                kotlin.math.round(y + (r.y + r.h) * h),
-                iconPaint,
-            )
-        }
-    }
+    ) = Glyphs.draw(canvas, icon, config.theme, x, y, h, extras.color, iconPaint, smooth)
 
     /**
      * The battery as the extras row draws it: the charging glyph while a charger is in,

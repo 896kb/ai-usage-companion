@@ -39,10 +39,11 @@ internal object ShellLayer {
 
     /**
      * A layer named [name], [Panel.WIDTH] by [Panel.HEIGHT], translucent, on [layerStack]
-     * at [z], [trusted] or not, shown at once when [visible]. Throws [Untrusted] when
+     * at [z], [trusted] or not, shown at once when [visible], the whole layer at [alpha]
+     * (SurfaceFlinger's, on everything drawn into it — nothing to do with trust). Throws [Untrusted] when
      * [trusted] cannot be had, or whatever building it threw; nothing is left behind either way.
      */
-    fun create(name: String, layerStack: Int, z: Int, trusted: Boolean, visible: Boolean = true): SurfaceControl {
+    fun create(name: String, layerStack: Int, z: Int, trusted: Boolean, visible: Boolean = true, alpha: Float = 1f): SurfaceControl {
         val layer = SurfaceControl.Builder().setName(name).setBufferSize(Panel.WIDTH, Panel.HEIGHT)
             .setFormat(PixelFormat.TRANSLUCENT).build()
         try {
@@ -51,6 +52,7 @@ internal object ShellLayer {
                     .getMethod("setLayerStack", SurfaceControl::class.java, Int::class.javaPrimitiveType)
                     .invoke(t, layer, layerStack)
                 if (trusted) trust(t, layer)?.let { throw Untrusted(it) }
+                if (alpha < 1f) t.setAlpha(layer, alpha)
                 t.setLayer(layer, z).setVisibility(layer, visible).apply()
             }
             return layer

@@ -84,7 +84,8 @@ class PortalFrame(private val layerStack: Int) {
         try {
             // Without trust the layer occludes the rear and every touch there is dropped:
             // see the class comment. Not trusted, not shown — ShellLayer never applies it.
-            val layer = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true)
+            // At [ALPHA] as a whole: one number on the layer, where paint alphas would be four.
+            val layer = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true, alpha = ALPHA)
             sc = layer
             surface = Surface(layer)
         } catch (e: ShellLayer.Untrusted) {
@@ -188,6 +189,11 @@ class PortalFrame(private val layerStack: Int) {
         private const val FRAME_MS = 16L
         private const val BUDGET_MS = 8L
         private const val RETRY_NS = 30_000_000_000L
+        /**
+         * The whole frame's opacity: at full it was louder than the app it frames ("the
+         * margin ray should be less visible"), so it is drawn at half.
+         */
+        internal const val ALPHA = 0.5f
         /** Edge inset and the display's corner radius (dumpsys display: RoundedCorner radius=97). */
         private const val INSET = 10f
         private const val CORNER = 97f

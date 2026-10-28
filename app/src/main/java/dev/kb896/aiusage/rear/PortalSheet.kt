@@ -18,6 +18,7 @@ object PortalSheet {
     data class Box(val left: Float, val top: Float, val right: Float, val bottom: Float) {
         val centerX get() = (left + right) / 2
         val centerY get() = (top + bottom) / 2
+        val width get() = right - left
         fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
         fun intersects(o: Box) = left < o.right && o.left < right && top < o.bottom && o.top < bottom
         fun rect() = RectF(left, top, right, bottom)
@@ -120,6 +121,42 @@ object PortalSheet {
         cells(count, withStrip).forEachIndexed { i, c -> if (i !in covered && c.contains(x, y)) return Hit.App(i) }
         return Hit.Outside
     }
+
+    /** A strip button's glyph is this tall; a guest's own icon (on Resume) this big. */
+    const val MARK_H = 24f
+    const val APP_MARK = 28f
+    /** Between a button's mark and its name, and kept clear inside its edges. */
+    const val MARK_GAP = 8f
+    const val BUTTON_PAD = 12f
+
+    /** Where a strip button's mark and name go: [markLeft]/[markTop] the mark's box, [textCenterX] the name's middle. */
+    data class Labelled(val markLeft: Float, val markTop: Float, val textCenterX: Float)
+
+    /** The width a name may take beside a mark [markW] wide in [box] (ellipsized to it). */
+    fun labelRoom(box: Box, markW: Float): Float =
+        (box.width - 2 * BUTTON_PAD - (if (markW > 0f) markW + MARK_GAP else 0f)).coerceAtLeast(0f)
+
+    /**
+     * A mark [markW] by [markH] left of a name [textW] wide, the two centred TOGETHER in
+     * [box] across and the mark centred down it — so "Panel" with its glyph sits in the
+     * middle of its button as the bare word did. No mark ([markW] 0): the name alone, centred.
+     */
+    fun labelled(box: Box, markW: Float, markH: Float, textW: Float): Labelled {
+        if (markW <= 0f) return Labelled(box.centerX, box.centerY, box.centerX)
+        val total = markW + MARK_GAP + textW
+        val left = box.centerX - total / 2
+        return Labelled(left, box.centerY - markH / 2, left + markW + MARK_GAP + textW / 2)
+    }
+
+    /** The DPI hint's line under the grid ("Hold an app for its DPI"): its baseline, or null with no apps. */
+    fun hintBaseline(count: Int, withStrip: Boolean): Float? {
+        val last = cells(count, withStrip).lastOrNull() ?: return null
+        return minOf(last.bottom + HINT_BELOW, Panel.HEIGHT - DPI_MARGIN)
+    }
+    private const val HINT_BELOW = 26f
+    const val HINT = "Hold an app for its DPI"
+    /** The hint shows on this many openings with apps on the sheet, then never again (until the shell restarts). */
+    const val HINT_OPENINGS = 5
 
     /** The first button's name, and the other two's. */
     fun buttonNames(guestOnTop: Boolean) = listOf(if (guestOnTop) "Panel" else "Resume", "Front", "Close")

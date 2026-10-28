@@ -2,6 +2,7 @@ package dev.kb896.aiusage.rear
 
 import android.content.Context
 import android.util.Log
+import androidx.core.graphics.drawable.toBitmap
 import dev.kb896.aiusage.BuildConfig
 import dev.kb896.aiusage.IRearEvents
 import dev.kb896.aiusage.IRearService
@@ -1193,6 +1194,31 @@ class RearUserService : IRearService.Stub {
         val g = guest?.takeIf { it.placed }
         sheetGuestOnTop = g?.onTop
         shellSheet?.guest(sheetGuestOnTop)
+        shellSheet?.guestIcon(g?.pkg?.let { guestIconOf(it) })
+    }
+
+    /** The last guest whose icon was looked up off the pinned apps, and what came of it (null while loading or none). */
+    @Volatile private var guestIconCache: Pair<String, android.graphics.Bitmap?>? = null
+
+    /**
+     * [pkg]'s icon for the sheet's Resume: a pinned app's as the main app sent it; else
+     * PackageManager's (it answers uid 2000 through our package's Context), loaded once
+     * per guest on a thread of its own — null until it lands, then handed to the sheet.
+     */
+    private fun guestIconOf(pkg: String): android.graphics.Bitmap? {
+        val apps = portalApps
+        apps.packages.indexOf(pkg).takeIf { it >= 0 }?.let { i -> apps.icon(i)?.let { return it } }
+        guestIconCache?.let { (p, icon) -> if (p == pkg) return icon }
+        guestIconCache = pkg to null
+        Thread {
+            val icon = runCatching { context?.packageManager?.getApplicationIcon(pkg)?.toBitmap(GUEST_ICON_PX, GUEST_ICON_PX) }
+                .onFailure { Log.w(TAG, "portal sheet: no icon for $pkg: ${it.message}") }
+                .getOrNull()
+            if (guestIconCache?.first != pkg) return@Thread
+            guestIconCache = pkg to icon
+            if (icon != null && guest?.takeIf { it.placed }?.pkg == pkg) shellSheet?.guestIcon(icon)
+        }.apply { isDaemon = true; name = "portal-guest-icon"; start() }
+        return null
     }
 
     /** One touch, on the reader thread. */
@@ -2361,6 +2387,9 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val TOUCH_SHORT_LIFE_MS = 1_000L
         /** The font did not load: how long before it is tried again. */
         private const val SHEET_FONT_RETRY_MS = 60_000L
+        /** The guest's icon on the sheet's Resume is rasterised this big (drawn at PortalSheet.APP_MARK). */
+        private const val GUEST_ICON_PX = 96
+
         /** The least time between two pokes keeping the panel awake under the sheet. */
         private const val POKE_EVERY_MS = 1_000L
         /** RearActivity re-arms its sleep countdown on it: the sheet's blocker keeps touches from the panel. */

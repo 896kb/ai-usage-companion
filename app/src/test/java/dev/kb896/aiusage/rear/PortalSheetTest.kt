@@ -141,4 +141,47 @@ class PortalSheetTest {
         assertEquals("–", PortalSheet.dpiLabel(null, null))
         assertEquals("380", PortalSheet.dpiLabel(380, 260))
     }
+
+    @Test fun `each button's mark and name sit inside it, centred together, the mark first`() {
+        for (b in PortalSheet.buttons()) for ((mark, textW) in listOf(PortalSheet.MARK_H to 50f, PortalSheet.APP_MARK to 70f)) {
+            val room = PortalSheet.labelRoom(b, mark)
+            val w = minOf(textW, room)
+            val at = PortalSheet.labelled(b, mark, mark, w)
+            val textLeft = at.textCenterX - w / 2
+            val textRight = at.textCenterX + w / 2
+            // Mark left of the name, a gap between.
+            assertEquals(PortalSheet.MARK_GAP, textLeft - (at.markLeft + mark), 0.01f)
+            // Inside the button, clear of its edges.
+            assertEquals(true, at.markLeft >= b.left + PortalSheet.BUTTON_PAD - 0.01f)
+            assertEquals(true, textRight <= b.right - PortalSheet.BUTTON_PAD + 0.01f)
+            assertEquals(true, at.markTop >= b.top && at.markTop + mark <= b.bottom)
+            // Centred together across, the mark centred down.
+            assertEquals(b.centerX, (at.markLeft + textRight) / 2, 0.01f)
+            assertEquals(b.centerY, at.markTop + mark / 2, 0.01f)
+        }
+    }
+
+    @Test fun `a name as wide as its room still fits beside the mark`() {
+        val b = PortalSheet.buttons()[0]
+        val room = PortalSheet.labelRoom(b, PortalSheet.APP_MARK)
+        assertEquals(true, room > 60f)
+        val at = PortalSheet.labelled(b, PortalSheet.APP_MARK, PortalSheet.APP_MARK, room)
+        assertEquals(b.left + PortalSheet.BUTTON_PAD, at.markLeft, 0.01f)
+        assertEquals(b.right - PortalSheet.BUTTON_PAD, at.textCenterX + room / 2, 0.01f)
+    }
+
+    @Test fun `without a mark the name is centred alone`() {
+        val b = PortalSheet.buttons()[1]
+        assertEquals(b.centerX, PortalSheet.labelled(b, 0f, 0f, 40f).textCenterX, 0.01f)
+        assertEquals(b.width - 2 * PortalSheet.BUTTON_PAD, PortalSheet.labelRoom(b, 0f), 0.01f)
+    }
+
+    @Test fun `the DPI hint stands under the grid and on the panel, and not without apps`() {
+        assertEquals(null, PortalSheet.hintBaseline(0, withStrip = true))
+        for (strip in listOf(false, true)) for (n in listOf(1, 4, 5, 12)) {
+            val y = PortalSheet.hintBaseline(n, strip)!!
+            assertEquals(true, y > PortalSheet.cells(n, strip).last().bottom)
+            assertEquals(true, y <= dev.kb896.aiusage.Panel.HEIGHT - PortalSheet.DPI_MARGIN)
+        }
+    }
 }

@@ -82,6 +82,8 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         var sheet: SurfaceControl?,
         val blockerSurface: Surface,
         val surface: Surface,
+        /** This opening shows the DPI hint under the grid (one of the first [PortalSheet.HINT_OPENINGS] with apps). */
+        val hint: Boolean,
     ) {
         /** Between a successful [begin] and [end], and not after the render loop died. */
         @Volatile var live = true
@@ -90,6 +92,10 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     @Volatile private var progress = 0f
     @Volatile private var backdrop: Backdrop? = null
     @Volatile private var apps = Apps(PortalAppsSnapshot.EMPTY, emptyList())
+    /** The guest's own icon, for Resume; null shows the Panel glyph there instead. */
+    @Volatile private var guestIcon: Bitmap? = null
+    /** Openings that showed the DPI hint: kept for this process only, so a restart shows it again. */
+    private var hinted = 0
     /** Null: no guest, so no Panel/Resume · Front · Close strip. */
     @Volatile private var guestOnTop: Boolean? = null
     @Volatile private var pressed = -1
@@ -154,7 +160,9 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
             SurfaceControl.Transaction().use { t ->
                 t.setVisibility(blocker, true).setVisibility(sheet, true).apply()
             }
-            val r = Run(++gen, blocker, sheet, blockerSurface, surface)
+            val hint = apps.snapshot.size > 0 && hinted < PortalSheet.HINT_OPENINGS
+            if (hint) hinted++
+            val r = Run(++gen, blocker, sheet, blockerSurface, surface, hint)
             run = r
             thread = Thread({ render(r) }, "portal-sheet").apply { isDaemon = true; start() }
             return true
@@ -278,6 +286,13 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         version.incrementAndGet()
     }
 
+    /** The guest's icon (any size; drawn at PortalSheet.APP_MARK) for Resume, or null for none. */
+    fun guestIcon(icon: Bitmap?) {
+        if (guestIcon === icon) return
+        guestIcon = icon
+        version.incrementAndGet()
+    }
+
     /** The strip's button under a finger (0 to 2), a DPI row's (PortalSheet.dpiPress), or -1 for none. */
     fun press(index: Int) {
         pressed = index
@@ -345,7 +360,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
 
     private fun loop(r: Run) {
         val surface = r.surface
-        val painter = Renderer()
+        val painter = Renderer(r.hint)
         var drawn = -1
         // As the frame: if the hardware canvas is refused, the software one (no blur, flat buttons).
         var hardware = true
@@ -377,7 +392,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     }
 
     /** One run's paints, nodes and painter, so an overlapping run shares nothing mutable of ours. */
-    private inner class Renderer {
+    private inner class Renderer(private val hint: Boolean) {
         private val sheetPainter = PortalSheetPainter(PanelTheme.GLASS, face)
         private val groundNode = RenderNode("portal-sheet-backdrop")
         /** Never recorded: the glass's source when there is no ground this frame. */
@@ -446,6 +461,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
                 guestOnTop = onTop ?: false, withStrip = onTop != null, pressed = pressed,
                 dpiApp = row?.let { a.snapshot.packages.indexOf(it) } ?: -1,
                 dpiLabel = row?.let { PortalSheet.dpiLabel(dpiValues[it], dpiDefault) }.orEmpty(),
+                guestIcon = guestIcon, hint = hint,
             )
         }
 

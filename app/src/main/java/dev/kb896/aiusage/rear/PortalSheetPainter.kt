@@ -67,13 +67,26 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     private fun applyFace() {
         face.set(text, PanelType.BODY)
         text.textSize = TEXT_SIZE * face.scale
+        face.set(hintText, PanelType.BODY)
+        hintText.textSize = HINT_SIZE * face.scale
     }
+
+    /** The DPI hint under the grid: the names' face, smaller, dimmer. */
+    private val hintText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(4f, 0f, 1.5f, SHADOW)
+    }
+
+    /** The strip's glyphs (Glyphs.draw sets its colour, style and smoothing). */
+    private val glyphPaint = Paint()
+    private val markClip = Path()
 
     init { applyFace() }
 
     private val buttonRect = RectF()
     private val buttonShape = Path()
     private val iconRect = RectF()
+    private val markBox = RectF()
 
     private fun ellipsize(s: String, width: Float): String {
         if (text.measureText(s) <= width) return s
@@ -102,12 +115,21 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * [dpiApp] (-1 none) has its DPI row open — `-  [dpiLabel]  +  Default`, under or over
      * its cell as PortalSheet.dpiRow places it — its cell lit as a pressed tile, and the
      * cells the row stands over left out.
+     *
+     * Each strip button wears a mark left of its name, the two centred together
+     * (PortalSheet.labelled): Panel the dashboard glyph, Front flip-to-front, Close a
+     * cross — in the theme's own set (Glyphs.draw). Resume wears [guestIcon], the app it
+     * brings back, as a small rounded icon; the dashboard glyph without one.
+     *
+     * [hint] puts "Hold an app for its DPI" under the grid, dim, while there are apps
+     * and no DPI row is open.
      */
     fun draw(
         canvas: Canvas, progress: Float, backdrop: RenderNode,
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, withStrip: Boolean, pressed: Int = -1,
         dpiApp: Int = -1, dpiLabel: String = "",
+        guestIcon: Bitmap? = null, hint: Boolean = false,
     ) {
         if (progress <= 0.004f) return
         glass.beginFrame(canvas.width, canvas.height)
@@ -129,7 +151,13 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
                     r.set(b.left, b.top + dy, b.right, b.bottom + dy)
                     val close = i == 2
                     drawButton(canvas, r, if (close) 1f else if (pressed == i) 0.5f else 0f, close, backdrop)
-                    canvas.drawText(ellipsize(names[i], r.width() - 12f), r.centerX(), r.centerY() + middle, text)
+                    val app = if (i == 0 && !guestOnTop) guestIcon else null
+                    val mark = if (app != null) PortalSheet.APP_MARK else PortalSheet.MARK_H
+                    val name = ellipsize(names[i], PortalSheet.labelRoom(b, mark))
+                    val at = PortalSheet.labelled(b, mark, mark, text.measureText(name))
+                    if (app != null) drawAppMark(canvas, app, at.markLeft, at.markTop + dy)
+                    else drawGlyph(canvas, BUTTON_GLYPHS[i], at.markLeft, at.markTop + dy)
+                    canvas.drawText(name, at.textCenterX, r.centerY() + middle, text)
                 }
             }
             val shown = labels.take(PortalSheet.MAX_APPS)
@@ -148,6 +176,11 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
                     canvas.drawBitmap(bmp, null, iconRect, iconPaint)
                 }
                 canvas.drawText(ellipsize(shown[i], PortalSheet.CELL - 8f), c.centerX, c.bottom - 12f + dy, text)
+            }
+            if (hint && row == null) PortalSheet.hintBaseline(shown.size, withStrip)?.let { y ->
+                hintText.color = ink
+                hintText.alpha = HINT_ALPHA
+                canvas.drawText(PortalSheet.HINT, PortalSheet.gridCenterX, y + dy, hintText)
             }
             row?.forEachIndexed { i, b ->
                 val part = PortalSheet.DpiPart.entries[i]
@@ -170,6 +203,29 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         }
     }
 
+    /** A strip glyph in the ink, its square box's top left at [x], [y]. Shadowed as the words are, under GLASS only:
+     *  ORIGINAL's are stacks of pixel rows, and each row's shadow would band the row above it. */
+    private fun drawGlyph(canvas: Canvas, icon: PanelIcons.Icon, x: Float, y: Float) {
+        if (theme.isGlass) glyphPaint.setShadowLayer(4f, 0f, 1.5f, SHADOW) else glyphPaint.clearShadowLayer()
+        Glyphs.draw(canvas, icon, theme, x, y, PortalSheet.MARK_H, ink, glyphPaint)
+    }
+
+    /** The guest's own icon, [PortalSheet.APP_MARK] square at [x], [y], its corners rounded. */
+    private fun drawAppMark(canvas: Canvas, icon: Bitmap, x: Float, y: Float) {
+        val s = PortalSheet.APP_MARK
+        markBox.set(x, y, x + s, y + s)
+        markClip.rewind()
+        markClip.addRoundRect(markBox, s * APP_CORNER, s * APP_CORNER, Path.Direction.CW)
+        val saved = canvas.save()
+        try {
+            canvas.clipPath(markClip)
+            iconPaint.alpha = 255
+            canvas.drawBitmap(icon, null, markBox, iconPaint)
+        } finally {
+            canvas.restoreToCount(saved)
+        }
+    }
+
     /**
      * A button at [rect], lit [on] (0 off, 0.5 pressed, 1 on): the control centre's, its
      * name drawn over it by [draw]. [close] is Close's, filled in the critical red.
@@ -189,5 +245,15 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
 
         /** The names' size in panel px, before the face's [PanelType.Face.scale]. */
         const val TEXT_SIZE = 20f
+
+        /** The DPI hint's size, as [TEXT_SIZE], and its ink's alpha: there to be found, not read first. */
+        const val HINT_SIZE = 16f
+        const val HINT_ALPHA = 150
+
+        /** The guest's icon on Resume: corners rounded by this much of its side. */
+        const val APP_CORNER = 0.24f
+
+        /** Panel (or Resume without an icon), Front, Close. */
+        val BUTTON_GLYPHS = listOf(PanelIcons.DASHBOARD, PanelIcons.FRONT, PanelIcons.CLOSE)
     }
 }
