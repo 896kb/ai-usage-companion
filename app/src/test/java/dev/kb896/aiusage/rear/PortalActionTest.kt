@@ -71,4 +71,16 @@ class PortalActionTest {
         assertTrue(PortalAction.sheetOpens(panelGuarded = false, guestOnTop = false))
         assertTrue(PortalAction.sheetOpens(panelGuarded = false, guestOnTop = true))
     }
+    @Test fun `the sheet has a guest from the moment it lands, not only once it has survived its move`() {
+        // Landed on the rear, the two-second survive wait still running: its buttons are there.
+        assertEquals(true, PortalAction.sheetGuest(landed = true, placed = false, onTop = true))
+        // Placed (survived), on top or behind the panel.
+        assertEquals(true, PortalAction.sheetGuest(landed = true, placed = true, onTop = true))
+        assertEquals(false, PortalAction.sheetGuest(landed = true, placed = true, onTop = false))
+        // Sent to the back from the front: placed at once, never "landed" by a launch.
+        assertEquals(true, PortalAction.sheetGuest(landed = false, placed = true, onTop = true))
+        // Started on the front and not yet moved: nobody's guest on the rear yet.
+        assertNull(PortalAction.sheetGuest(landed = false, placed = false, onTop = false))
+        assertNull(PortalAction.sheetGuest(landed = false, placed = false, onTop = true))
+    }
 }

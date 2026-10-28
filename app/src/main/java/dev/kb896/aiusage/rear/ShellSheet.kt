@@ -89,6 +89,8 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     ) {
         /** Between a successful [begin] and [end], and not after the render loop died. */
         @Volatile var live = true
+        /** When [begin] showed it (uptime ms), for the [TIMING_TAG] log. */
+        val beganAt = android.os.SystemClock.uptimeMillis()
     }
 
     /** Where the sheet stands on its axis (SheetMotion), 0 shut to PortalSheet.REVEALED. */
@@ -333,6 +335,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         // As the frame: if the hardware canvas is refused, the software one (flat buttons).
         var hardware = true
         var blurred = -1
+        val timing = Timing(r)
         while (!Thread.currentThread().isInterrupted && gen == r.gen) {
             val began = System.nanoTime()
             val v = version.get()
@@ -354,9 +357,36 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
                 val radius = blurPx(PortalSheet.progress(at))
                 if (radius != blurred && blur(r, radius)) blurred = radius
                 drawn = v
+                timing.drew(at, guestOnTop != null)
             }
             val took = (System.nanoTime() - began) / 1_000_000
             Thread.sleep(maxOf(FRAME_MS - took, 1L))
+        }
+    }
+
+    /**
+     * The [TIMING_TAG] log, one run's worth: when its first frame was posted, when its contents
+     * first showed (Arrival past nothing) and whether the guest's buttons were among them —
+     * and, if they came later, when. A few lines per opening, for the "buttons come late"
+     * report: `adb logcat -s PortalSheetTiming`.
+     */
+    private class Timing(private val r: Run) {
+        private var first = false
+        private var contentsAt = -1L
+        private var buttonsAt = -1L
+
+        fun drew(at: Float, buttons: Boolean) {
+            val ms = android.os.SystemClock.uptimeMillis() - r.beganAt
+            if (!first) { first = true; Log.i(TIMING_TAG, "sheet ${r.gen}: first frame +$ms ms, guest buttons ${if (buttons) "in" else "out"}") }
+            val showing = Arrival.of(PortalSheet.progress(at)) > 0.004f
+            if (showing && contentsAt < 0) {
+                contentsAt = ms
+                Log.i(TIMING_TAG, "sheet ${r.gen}: contents show +$ms ms, guest buttons ${if (buttons) "with them" else "not there"}")
+            }
+            if (showing && buttons && buttonsAt < 0) {
+                buttonsAt = ms
+                if (ms > contentsAt) Log.i(TIMING_TAG, "sheet ${r.gen}: guest buttons LATE +$ms ms, ${ms - contentsAt} ms after the contents")
+            }
         }
     }
 
@@ -447,6 +477,8 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
 
     companion object {
         private const val TAG = "AiUsageRear"
+        /** The sheet's opening times (Timing), apart from the rest so they can be read alone. */
+        private const val TIMING_TAG = "PortalSheetTiming"
         private const val FRAME_MS = 16L
         private const val JOIN_MS = 300L
         /** After a failure, pulls do not try again for this long. */

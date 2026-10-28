@@ -630,14 +630,20 @@ class RearUserService : IRearService.Stub {
      * changed off the lock, and only by compare-and-set against the guest it was read
      * from, so a reading that predates a launch can never write the old guest back.
      * [Guest.placed] is false until [guestPlaced]: while a launch waits to see whether the
-     * task survives its move, the keep-alive leaves the frame and the sheet's buttons alone.
+     * task survives its move, the keep-alive leaves it and its frame alone.
+     * [Guest.landed]: a launch has moved it onto the rear — from then on it is the sheet's
+     * guest, buttons and slider ([Guest.sheetOnTop], PortalAction.sheetGuest), without waiting
+     * the two seconds for [Guest.placed].
      * [Guest.hiddenOnFront]: the sheet's Panel moved it to display 0 behind the keyguard
      * (see [onSheetButton]); it is still the guest, behind, and Resume brings it back.
      */
     private data class Guest(
         val pkg: String, val task: Int, val onTop: Boolean, val placed: Boolean = false,
-        val hiddenOnFront: Boolean = false,
-    )
+        val hiddenOnFront: Boolean = false, val landed: Boolean = false,
+    ) {
+        /** As the sheet shows it: null none, true on top (Panel), false behind (Resume). */
+        val sheetOnTop: Boolean? get() = PortalAction.sheetGuest(landed, placed, onTop)
+    }
     private val guestRef = AtomicReference<Guest?>(null)
     private var guest: Guest?
         get() = guestRef.get()
@@ -919,17 +925,24 @@ class RearUserService : IRearService.Stub {
             // The frame comes up as the app lands, not after the survive wait; show() is
             // idempotent, so guestPlaced() below does not start a second one.
             frame.show()
+            // Landed: the sheet's guest from now, so a pull during the survive wait has its
+            // buttons from the first frame (they used to come in when it was placed).
+            guest = Guest(pkg, task, onTop = true, landed = true)
+            syncSheetGuest()
             // A task gone within two seconds of the move was a trampoline the move
             // relaunched (Shazam, measured); once more from the start, then give up.
             Thread.sleep(GUEST_SURVIVE_MS)
             val entry = GuestTask.byId(exec("am stack list"), task)
             if (entry != null && entry.display == displayId) {
-                guest = Guest(pkg, task, onTop = true)
+                guest = Guest(pkg, task, onTop = true, landed = true)
                 Log.i(TAG, "portal: $pkg is the guest, task $task")
                 guestPlaced(displayId)
                 return@synchronized true
             }
             frame.hide()
+            // Not landed after all: no buttons for a task that is gone.
+            guest = Guest(pkg, task, onTop = false)
+            syncSheetGuest()
             Log.w(TAG, "portal: $pkg's task $task did not survive the move (try ${attempt + 1})")
         }
         endGuest("did not stay on the rear")
@@ -1234,9 +1247,9 @@ class RearUserService : IRearService.Stub {
     }
 
     private fun syncSheetGuest() {
-        val g = guest?.takeIf { it.placed }
+        val g = guest?.takeIf { it.sheetOnTop != null }
         val was = sheetGuestOnTop
-        sheetGuestOnTop = g?.onTop
+        sheetGuestOnTop = g?.sheetOnTop
         shellSheet?.guest(sheetGuestOnTop, g?.pkg)
         shellSheet?.guestIcon(g?.pkg?.let { guestIconOf(it) })
         // An open sheet's stops follow: the slider's scroll comes with a guest and goes with it.
@@ -1274,7 +1287,7 @@ class RearUserService : IRearService.Stub {
                 .getOrNull()
             if (guestIconCache?.first != pkg) return@Thread
             guestIconCache = pkg to icon
-            if (icon != null && guest?.takeIf { it.placed }?.pkg == pkg) shellSheet?.guestIcon(icon)
+            if (icon != null && guest?.takeIf { it.sheetOnTop != null }?.pkg == pkg) shellSheet?.guestIcon(icon)
         }.apply { isDaemon = true; name = "portal-guest-icon"; start() }
         return null
     }
@@ -1474,7 +1487,7 @@ class RearUserService : IRearService.Stub {
     }
 
     /** Whether a bottom pull may open the sheet now: [PortalAction.sheetOpens]. */
-    private fun pullOpens() = PortalAction.sheetOpens(panelGuarded, guest?.let { it.placed && it.onTop } == true)
+    private fun pullOpens() = PortalAction.sheetOpens(panelGuarded, guest?.sheetOnTop == true)
 
     /** Up, or on its way up; a sheet whose layers went is put down here. Under [sheetLock]. */
     private fun sheetAlive(): Boolean {
@@ -1561,7 +1574,7 @@ class RearUserService : IRearService.Stub {
     }
 
     /** The guest — on top or behind the panel — whose DPI the slider is: null without one. */
-    private fun sliderGuest(): String? = guest?.takeIf { it.placed }?.pkg
+    private fun sliderGuest(): String? = guest?.takeIf { it.sheetOnTop != null }?.pkg
 
     /** The thumb's DPI for [pkg] as it stands: its own, else the display's. */
     private fun thumbOf(pkg: String) = portalDpi[pkg] ?: densityDefault ?: DensityDump.FALLBACK

@@ -64,4 +64,13 @@ object PortalAction {
      * there is most likely a pocket or a hand, and the panel is refusing touches anyway.
      */
     fun sheetOpens(panelGuarded: Boolean, guestOnTop: Boolean): Boolean = guestOnTop || !panelGuarded
+    /**
+     * The guest as the portal sheet shows it: null none (no Panel/Resume · Front · Close, no
+     * slider), else whether it is on top ([onTop]). A launched guest counts from the moment it
+     * [landed] on the rear — moved there, its frame up — not only once it has survived the
+     * move ([placed], two seconds later): a pull in between used to open the sheet without
+     * the guest's buttons, which then came in late, a second or more after the rest (seen on
+     * the phone, 2026-10-28). A guest sent to the back is [placed] at once.
+     */
+    fun sheetGuest(landed: Boolean, placed: Boolean, onTop: Boolean): Boolean? = if (landed || placed) onTop else null
 }
