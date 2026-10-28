@@ -69,6 +69,8 @@ object ElectricBorder {
      * noise sum that peaks near 0.39 — some 65 rear pixels at 450 dpi, a fifth of the
      * display's height. A third of that reads the same at arm's length and stays off the
      * middle of whatever the guest is showing.
+     *
+     * It bounds each axis separately; a point's diagonal can reach REACH * sqrt(2).
      */
     const val REACH = 22f
 

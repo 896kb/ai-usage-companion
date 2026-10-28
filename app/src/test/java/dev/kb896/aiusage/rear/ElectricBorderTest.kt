@@ -27,15 +27,46 @@ class ElectricBorderTest {
     }
 
     @Test fun `the bolt strays from the outline, but never further than its reach`() {
-        val clean = ElectricBorder.outline(lens)
-        val bolt = ElectricBorder.bolt(lens, time = 1.7f)
-        var strayed = 0f
-        for (i in clean.indices) {
-            val d = kotlin.math.abs(bolt[i] - clean[i])
-            assertTrue(d <= ElectricBorder.REACH + 0.001f)
-            strayed = maxOf(strayed, d)
+        for (shape in listOf(edge, lens)) for (time in listOf(0f, 1.7f, 13.3f, -4.2f)) {
+            val clean = ElectricBorder.outline(shape)
+            val bolt = ElectricBorder.bolt(shape, time)
+            var strayed = 0f
+            for (i in clean.indices) {
+                val d = kotlin.math.abs(bolt[i] - clean[i])
+                assertTrue(d <= ElectricBorder.REACH + 0.001f)
+                strayed = maxOf(strayed, d)
+            }
+            assertTrue("never moved ($shape, $time)", strayed > 1f)
         }
-        assertTrue("never moved", strayed > 1f)
+    }
+
+    @Test fun `the rounded outline starts at the top edge, runs clockwise and closes`() {
+        val p = ElectricBorder.outline(edge)
+        assertEquals(97f, p[0], 0.01f); assertEquals(10f, p[1], 0.01f)
+        assertEquals(p[0], p[p.size - 2], 0.01f); assertEquals(p[1], p[p.size - 1], 0.01f)
+        assertTrue(p[2] > p[0])
+    }
+
+    @Test fun `the rounded outline has no gaps`() {
+        val p = ElectricBorder.outline(edge)
+        for (i in 2 until p.size step 2)
+            assertTrue("gap at $i", hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]) <= ElectricBorder.STEP * 1.01f)
+    }
+
+    @Test fun `the rounded corners are arcs about their own centres`() {
+        val p = ElectricBorder.outline(edge)
+        for (i in p.indices step 2) {
+            val x = p[i]; val y = p[i + 1]
+            val cx = if (x < 97f) 97f else if (x > 807f) 807f else continue
+            val cy = if (y < 97f) 97f else if (y > 475f) 475f else continue
+            assertEquals("($x, $y)", 87f, hypot(x - cx, y - cy), 0.01f)
+        }
+    }
+
+    @Test fun `the circle starts at the top and runs clockwise`() {
+        val p = ElectricBorder.outline(lens)
+        assertEquals(150f, p[0], 0.01f); assertEquals(144f - 146f, p[1], 0.01f)
+        assertTrue(p[2] > 150f)
     }
 
     @Test fun `the same time draws the same bolt, a later one another`() {
