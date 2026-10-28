@@ -1,5 +1,6 @@
 package dev.kb896.aiusage.service
 
+import android.util.Log
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import java.util.concurrent.Executors
@@ -18,27 +19,49 @@ class PortalTileService : TileService() {
 
     private val worker = Executors.newSingleThreadExecutor()
 
+    /** True from the tap until the send has finished, across the shade closing and reopening. */
+    @Volatile private var sending = false
+
     override fun onStartListening() {
-        qsTile?.apply { state = Tile.STATE_INACTIVE; subtitle = null; updateTile() }
+        qsTile?.apply {
+            if (sending) { state = Tile.STATE_UNAVAILABLE; subtitle = "Sending…" }
+            else { state = Tile.STATE_INACTIVE; subtitle = null }
+            updateTile()
+        }
     }
 
     override fun onClick() {
+        if (sending) return
+        sending = true
         qsTile?.apply { state = Tile.STATE_UNAVAILABLE; subtitle = "Sending…"; updateTile() }
-        worker.execute {
-            val pkg = try {
-                Graph.of(applicationContext).bridge.sendFocusedToBack()
-            } catch (_: Exception) {
-                ""
+        try {
+            worker.execute {
+                try {
+                    val pkg = try {
+                        Graph.of(applicationContext).bridge.sendFocusedToBack()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "send to back failed: ${e.message}", e)
+                        ""
+                    }
+                    // qsTile is null once the tile stops listening (shade closed); then there is
+                    // nothing to update and onStartListening resets it next time.
+                    qsTile?.apply {
+                        state = Tile.STATE_INACTIVE
+                        subtitle = if (pkg.isEmpty()) "Nothing to send" else "On the back"
+                        updateTile()
+                    }
+                } finally {
+                    sending = false
+                }
             }
-            // qsTile is null once the tile stops listening (shade closed); then there is
-            // nothing to update and onStartListening resets it next time.
-            qsTile?.apply {
-                state = Tile.STATE_INACTIVE
-                subtitle = if (pkg.isEmpty()) "Nothing to send" else "On the back"
-                updateTile()
-            }
+        } catch (e: Exception) {
+            // Rejected (the worker is shut down): nothing will clear the flag otherwise.
+            sending = false
+            Log.w(TAG, "send to back not started: ${e.message}")
         }
     }
+
+    private companion object { const val TAG = "PortalTile" }
 
     override fun onDestroy() {
         worker.shutdown()
