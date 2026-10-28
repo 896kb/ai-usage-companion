@@ -203,6 +203,16 @@ class RearActivity : Activity() {
          */
         const val ACTION_GET_QUICK = "dev.kb896.aiusage.GET_QUICK"
         const val ACTION_SET_QUICK = "dev.kb896.aiusage.SET_QUICK"
+        /**
+         * The App Portal: the panel asks the app process, which holds Shizuku, to launch a
+         * pinned app as the guest ([ACTION_PORTAL_LAUNCH] with [EXTRA_PORTAL_PKG]) or to act
+         * on the guest ([ACTION_PORTAL_GUEST] with [EXTRA_PORTAL_WHICH]: panel, resume,
+         * front, close).
+         */
+        const val ACTION_PORTAL_LAUNCH = "dev.kb896.aiusage.PORTAL_LAUNCH"
+        const val ACTION_PORTAL_GUEST = "dev.kb896.aiusage.PORTAL_GUEST"
+        const val EXTRA_PORTAL_PKG = "portalPkg"
+        const val EXTRA_PORTAL_WHICH = "portalWhich"
         const val ACTION_QUICK_STATES = "dev.kb896.aiusage.QUICK_STATES"
         const val EXTRA_QUICK = "quick"
         const val EXTRA_QUICK_ON = "quickOn"

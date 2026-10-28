@@ -66,6 +66,7 @@ class ShizukuBridge(private val context: Context) {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
+            portalCallback?.let { cb -> runCatching { service?.setPortalCallback(cb) } }
             pending?.let { p -> pending = null; show(p) }
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
@@ -308,6 +309,32 @@ class ShizukuBridge(private val context: Context) {
         if (display < 0) return
         runCatching { service?.openCamera(display) }
             .onFailure { Log.w(TAG, "camera launch failed: ${it.message}") }
+    }
+
+    /** The panel's callback, kept to hand on whenever the service (re)connects. */
+    @Volatile private var portalCallback: dev.kb896.aiusage.IPortalCallback? = null
+
+    fun setPortalCallback(callback: dev.kb896.aiusage.IPortalCallback?) {
+        portalCallback = callback
+        runCatching { service?.setPortalCallback(callback) }.onFailure { Log.w(TAG, "portal callback: ${it.message}") }
+    }
+
+    /** Blocks for seconds (settle, survive, retry): call off the main thread. */
+    fun launchGuest(pkg: String): Boolean {
+        val display = rearDisplayId()
+        if (display < 0) return false
+        return runCatching { service?.launchGuest(pkg, display) == true }
+            .onFailure { Log.w(TAG, "guest launch failed: ${it.message}") }.getOrDefault(false)
+    }
+
+    fun sendFocusedToBack(): String {
+        val display = rearDisplayId()
+        if (display < 0) return ""
+        return runCatching { service?.sendFocusedToBack(display).orEmpty() }.getOrDefault("")
+    }
+
+    fun guestAction(which: String) {
+        runCatching { service?.guestAction(which) }.onFailure { Log.w(TAG, "guest action failed: ${it.message}") }
     }
 
     /**

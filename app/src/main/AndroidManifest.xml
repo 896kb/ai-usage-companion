@@ -16,6 +16,11 @@
     <!-- so the app may ask whether HyperOS's rear-screen app is installed (Setup.kt) -->
     <queries>
         <package android:name="com.xiaomi.subscreencenter" />
+        <!-- App Portal: the apps a person can pin, and their icons on the back. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
     <application
         android:label="${appLabel}"
@@ -84,6 +89,12 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- The App Portal's relay: RearActivity (:rear) binds it to hand its callback to
+             the Shizuku service this process holds. Never exported. -->
+        <service
+            android:name=".service.PortalRelayService"
+            android:exported="false" />
 
         <service
             android:name=".service.UsagePollService"
