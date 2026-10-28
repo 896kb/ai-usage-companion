@@ -95,9 +95,32 @@ class RearUserService : IRearService.Stub {
         // as dead is what once turned every screen-off into a relaunch. DISPLACED does
         // not — the task existing is exactly what makes that failure invisible.
         return when (panelWhere()) {
-            Where.REAR, Where.NOWHERE -> true
+            // There, with its task: this service may not be the one that placed it (see
+            // [adoptPlaced]).
+            Where.REAR, Where.NOWHERE -> { adoptPlaced(Panel.DISPLAY_ID, "isAlive"); true }
             Where.MAIN, Where.DISPLACED -> false
         }
+    }
+
+    /**
+     * The panel found on the rear by a service that did not put it there — the app was
+     * reinstalled, or this process restarted, with the panel left up. The app then only
+     * update()s it (it reads alive), so [show] never runs, [placedDisplayId] stays -1,
+     * and with it [touchWanted]: no touch watch, no pull, until the app restarts.
+     * Measured on device after a reinstall. So whatever finds the panel placed adopts it
+     * here: the display recorded, the touch watch started, and the keep-alive [show]
+     * would have started. Once only — a panel already recorded is left alone, and
+     * [hide] still clears it.
+     */
+    private fun adoptPlaced(displayId: Int, why: String) {
+        if (displayId < 0 || placedDisplayId >= 0) return
+        synchronized(placing) {
+            if (placedDisplayId >= 0) return
+            placedDisplayId = displayId
+            Log.i(TAG, "the panel is already on display $displayId ($why) — adopting it")
+            startKeepAlive(displayId)
+        }
+        syncTouchWatch()
     }
 
     override fun hide() {
@@ -130,6 +153,13 @@ class RearUserService : IRearService.Stub {
         styleFrame(payload)
         // See hide() — same exported-receiver-plus-shell-sender reasoning.
         exec("am broadcast -p $PKG -a $ACTION_STATE --es state ${shellQuote(payload)}")
+        // Only update()d, a panel this service did not place would never be recorded
+        // ([adoptPlaced]). One `am stack list`, and only until it is.
+        if (placedDisplayId < 0) {
+            val list = exec("am stack list")
+            val task = StackList.parseTaskId(list, "RearActivity")
+            if (task > 0 && GuestTask.byId(list, task)?.display == Panel.DISPLAY_ID) adoptPlaced(Panel.DISPLAY_ID, "update")
+        }
     }
 
     /**
@@ -453,14 +483,19 @@ class RearUserService : IRearService.Stub {
         if (displayId < 0) return@synchronized false
         // Run on USER_PRESENT too: a guest hidden behind the keyguard is on the front now.
         unhideIfExposed("the front was unlocked")
-        if (panelWhere() != Where.MAIN) { strandStrikes = 0; return false }
+        val where = panelWhere()
+        if (where != Where.MAIN) {
+            strandStrikes = 0
+            if (where == Where.REAR) adoptPlaced(displayId, "ensureOnRear")
+            return false
+        }
         val task = taskId()
         if (task <= 0) return false
         strandStrikes++
         Log.w(TAG, "task $task compositing on the MAIN display (strike $strandStrikes) — moving it back")
         moveToDisplay(task, displayId)
         wake(displayId)
-        placedDisplayId = displayId
+        adoptPlaced(displayId, "ensureOnRear")
 
         // Last resort. If repeated moves will not get it off the main display, the
         // panel is sitting on top of whatever the user is actually doing, and no
@@ -2005,7 +2040,10 @@ class RearUserService : IRearService.Stub {
 
                         // Back in front, and the camera was ahead of us until now:
                         // that is somebody closing it. Nothing else did.
-                        Where.REAR -> if (cameraLaunched && cameraWasOnTop) closeCamera() else forgetUnseenCamera()
+                        Where.REAR -> {
+                            adoptPlaced(displayId, "keep-alive")
+                            if (cameraLaunched && cameraWasOnTop) closeCamera() else forgetUnseenCamera()
+                        }
                     }
                 } catch (e: InterruptedException) {
                     return@Thread

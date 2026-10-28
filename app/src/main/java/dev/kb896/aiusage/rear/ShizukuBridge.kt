@@ -69,6 +69,9 @@ class ShizukuBridge(private val context: Context) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
             runCatching { service?.setPanelGuarded(panelGuarded) }
+            // A new shell process starts awake (dozing false): a panel asleep on purpose
+            // would otherwise be read and woken as if it were not.
+            runCatching { service?.setDozing(dozing) }
             runCatching { service?.setEvents(events) }
             pending?.let { p -> pending = null; show(p) }
         }
