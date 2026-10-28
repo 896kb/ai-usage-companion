@@ -1,5 +1,6 @@
 package dev.kb896.aiusage;
 
+import android.os.Bundle;
 import dev.kb896.aiusage.IPortalCallback;
 
 /** Runs inside Shizuku's shell-privileged process (uid 2000). */
@@ -106,6 +107,9 @@ interface IRearService {
     void guestAction(String which) = 20;
     // Where relayed pulls, frames and guest changes go; null when the panel goes away.
     void setPortalCallback(IPortalCallback callback) = 21;
+    // The pinned apps for the shell's sheet: "packages" and "labels" (String[], same order)
+    // and "icon:<pkg>" (PNG bytes, 96x96). See PortalAppsSnapshot.
+    void setPortalApps(in Bundle apps) = 22;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
 
 }

@@ -67,6 +67,7 @@ class ShizukuBridge(private val context: Context) {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
             portalCallback?.let { cb -> runCatching { service?.setPortalCallback(cb) } }
+            portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
             pending?.let { p -> pending = null; show(p) }
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
@@ -324,6 +325,18 @@ class ShizukuBridge(private val context: Context) {
         if (service == null) bind()
         runCatching { service?.setPortalCallback(callback) }.onFailure {
             Log.w(TAG, "portal callback: ${it.message}")
+            if (it is android.os.DeadObjectException) service = null
+        }
+    }
+
+    /** The pinned apps' names and icons, kept to hand on whenever the service (re)connects. */
+    @Volatile private var portalApps: android.os.Bundle? = null
+
+    fun setPortalApps(apps: android.os.Bundle) {
+        portalApps = apps
+        if (service == null) { bind(); return }
+        runCatching { service?.setPortalApps(apps) }.onFailure {
+            Log.w(TAG, "portal apps: ${it.message}")
             if (it is android.os.DeadObjectException) service = null
         }
     }

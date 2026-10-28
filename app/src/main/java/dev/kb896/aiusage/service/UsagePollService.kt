@@ -160,6 +160,9 @@ class UsagePollService : Service() {
         }
     }
 
+    private var portalApps: PortalAppsLoader? = null
+    private var stopConfigWatch: (() -> Unit)? = null
+
     override fun onCreate() {
         super.onCreate()
         // The type must be passed here as well as declared in the manifest — they are
@@ -173,6 +176,10 @@ class UsagePollService : Service() {
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
         val app = Graph.of(this)
+        // The pinned apps' icons and names go to the shell: now, and on every config write.
+        val loader = PortalAppsLoader(this) { app.bridge.setPortalApps(it) }.also { portalApps = it }
+        stopConfigWatch = ConfigStore(this).listen { loader.refresh() }
+        loader.refresh()
         app.repository.onFetchCompleted = {
             val current = app.repository.state.value
             // Only cache a refresh that actually produced numbers. onFetchCompleted
@@ -781,6 +788,9 @@ class UsagePollService : Service() {
     private var media: MediaWatcher? = null
 
     override fun onDestroy() {
+        stopConfigWatch?.invoke()
+        stopConfigWatch = null
+        portalApps?.stop()
         displays.unregisterDisplayListener(displayListener)
         media?.stop()
         media = null
