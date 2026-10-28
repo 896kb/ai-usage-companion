@@ -1009,25 +1009,36 @@ class RearUserService : IRearService.Stub {
 
     /**
      * [cover] off the rear once [pkg]'s [task] has drawn on [displayId] (GuestDrawn, asked of
-     * `dumpsys window <pkg>` as fast as it answers), or GuestReveal.MAX_WAIT_MS has gone by
-     * without a sign of it: slid left and faded on GuestReveal's curve, a transaction a
-     * frame at the display's rate, then removed. On the launch's thread, under [placing].
+     * `dumpsys window <pkg>` as fast as it answers): [reveal] with that for its sign.
      */
-    private fun reveal(cover: GuestCover, pkg: String, task: Int, displayId: Int) {
+    private fun reveal(cover: GuestCover, pkg: String, task: Int, displayId: Int) =
+        reveal(cover, pkg, displayId) { drawnOn(pkg, task, displayId) }
+
+    /** [pkg]'s [task] has an app window drawn on [displayId] at the rear's size (GuestDrawn). */
+    private fun drawnOn(pkg: String, task: Int, displayId: Int) =
+        task > 0 && GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, Panel.WIDTH, Panel.HEIGHT)
+
+    /**
+     * [cover] off the rear once [drawn] says [what] — the app now on top — has drawn there,
+     * asked as fast as it answers, or GuestReveal.MAX_WAIT_MS has gone by without a sign of
+     * it: slid left and faded on GuestReveal's curve, a transaction a frame at [displayId]'s
+     * rate, then removed. On the caller's thread, under [placing].
+     */
+    private fun reveal(cover: GuestCover, what: String, displayId: Int, drawn: () -> Boolean) {
         val coveredAt = android.os.SystemClock.uptimeMillis()
         val r = GuestReveal(coveredAt)
         try {
             while (r.waiting(android.os.SystemClock.uptimeMillis())) {
-                if (GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, Panel.WIDTH, Panel.HEIGHT)) {
+                if (drawn()) {
                     val now = android.os.SystemClock.uptimeMillis()
                     r.drawn(now)
-                    Log.i(TAG, "portal: $pkg drew on the rear ${now - coveredAt} ms after its move — revealing")
+                    Log.i(TAG, "portal: $what drew on the rear ${now - coveredAt} ms after the change — revealing")
                     break
                 }
                 Thread.sleep(DRAWN_POLL_MS)
             }
             if (r.phase == GuestReveal.Phase.COVERED) {
-                Log.w(TAG, "portal: no sign of $pkg drawing on the rear in ${GuestReveal.MAX_WAIT_MS} ms — revealing anyway")
+                Log.w(TAG, "portal: no sign of $what drawing on the rear in ${GuestReveal.MAX_WAIT_MS} ms — revealing anyway")
             }
             val frameMs = frameMsOf(displayId)
             while (true) {
@@ -1041,6 +1052,27 @@ class RearUserService : IRearService.Stub {
             cover.remove()
         }
     }
+
+    /**
+     * A change of what is on top of the rear, made under a cover (GuestCover) of the rear as
+     * it shows now and revealed as a launch is: [change] runs underneath, and if it changed
+     * something (true), the cover slides away once [drawn] says [what] — the new top — has
+     * drawn; if it did not, the cover simply goes, since the rear is as it was. No cover on
+     * a rear asleep, or where there can be none: [change] alone. The sheet is down already
+     * (a choice runs once it has ended), so it is not in the picture; the frame is left out
+     * where it can be, and fades as the change has it. Under [placing].
+     */
+    private fun covered(what: String, drawn: () -> Boolean, change: () -> Boolean): Boolean {
+        val display = rearDisplay()
+        val cover = if (!dozing) coverRear(display) else null
+        val changed = try { change() } catch (e: Throwable) { cover?.remove(); throw e }
+        if (cover != null) { if (changed) reveal(cover, what, display, drawn) else cover.remove() }
+        return changed
+    }
+
+    /** Our panel is what the rear composes on top (over [g]), and has drawn there at its size. */
+    private fun panelShown(g: Guest): Boolean =
+        rearTop(g) == PKG && drawnOn(PKG, taskId(), rearDisplay())
 
     /** One frame of [displayId] in ms, from its refresh rate; 60 Hz's when it does not say. */
     private fun frameMsOf(displayId: Int): Long = runCatching {
@@ -1827,63 +1859,93 @@ class RearUserService : IRearService.Stub {
         } ?: return
         Log.i(TAG, "portal sheet: $step")
         when (step) {
+            // Each change of what is on top of the rear but Close happens under a cover of
+            // the rear as it was, slid away once the new top has drawn (covered). Close keeps
+            // the system's own close animation, which already plays for it.
             PortalAction.Step.HIDE_ON_FRONT -> synchronized(placing) {
                 val g = guest ?: return
-                // Refused, it is still on top, and the keep-alive goes on seeing it there.
-                if (!moveToDisplay(g.task, 0)) return
-                guest = g.copy(onTop = false, hiddenOnFront = true)
-                guestBehind(g.pkg)
-                wake(rearDisplay())
+                covered("the panel", { panelShown(g) }) {
+                    // Refused, it is still on top, and the keep-alive goes on seeing it there.
+                    if (!moveToDisplay(g.task, 0)) return@covered false
+                    guest = g.copy(onTop = false, hiddenOnFront = true)
+                    guestBehind(g.pkg)
+                    wake(rearDisplay())
+                    true
+                }
             }
             PortalAction.Step.START_PANEL -> synchronized(placing) {
                 val g = guest ?: return
-                // Refused (the front locked in between, say): the guest is still on top, and
-                // its state and frame stay as they are.
-                if (!startPanel("Panel")) return
-                markOnTop(g.task, false)
-                guestBehind(g.pkg)
+                covered("the panel", { panelShown(g) }) {
+                    // Refused (the front locked in between, say): the guest is still on top, and
+                    // its state and frame stay as they are.
+                    if (!startPanel("Panel")) return@covered false
+                    markOnTop(g.task, false)
+                    guestBehind(g.pkg)
+                    true
+                }
             }
             PortalAction.Step.UNHIDE -> synchronized(placing) {
-                if (unhide("Resume")) wake(rearDisplay())
+                val g = guest ?: return
+                // The frame after the reveal, not before the guest is seen.
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay()) }) { unhide("Resume", showFrame = false) }
+                if (back) {
+                    if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
+                    wake(rearDisplay())
+                }
             }
             PortalAction.Step.PANEL_STEPS_BACK -> synchronized(placing) {
                 val g = guest ?: return
-                // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
-                // the guest is on top without leaving the rear, locked or not.
-                exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
-                // Watched until the guest is on top, up to STEP_BACK_LIMIT_MS: the broadcast
-                // reaches the panel when it does, and one look after a fixed wait took a slow
-                // step back for none.
-                val until = android.os.SystemClock.elapsedRealtime() + STEP_BACK_LIMIT_MS
-                var top: String?
-                do {
-                    try { Thread.sleep(STEP_BACK_POLL_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
-                    top = rearTop(g)
-                } while (top != g.pkg && android.os.SystemClock.elapsedRealtime() < until)
-                val now = guest?.takeIf { it.task == g.task } ?: return
-                // A guard come up meanwhile is why the panel stayed (RearActivity refuses the
-                // step back then); the fallback would take the guest past it.
-                if (top == PKG && panelGuarded) {
-                    Log.i(TAG, "portal: the panel is guarded — ${g.pkg} stays behind it")
-                    return
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay()) }) changed@{
+                    // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
+                    // the guest is on top without leaving the rear, locked or not.
+                    exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
+                    // Watched until the guest is on top, up to STEP_BACK_LIMIT_MS: the broadcast
+                    // reaches the panel when it does, and one look after a fixed wait took a slow
+                    // step back for none.
+                    val until = android.os.SystemClock.elapsedRealtime() + STEP_BACK_LIMIT_MS
+                    var top: String?
+                    do {
+                        try { Thread.sleep(STEP_BACK_POLL_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return@changed false }
+                        top = rearTop(g)
+                    } while (top != g.pkg && android.os.SystemClock.elapsedRealtime() < until)
+                    val now = guest?.takeIf { it.task == g.task } ?: return@changed false
+                    // A guard come up meanwhile is why the panel stayed (RearActivity refuses the
+                    // step back then); the fallback would take the guest past it.
+                    if (top == PKG && panelGuarded) {
+                        Log.i(TAG, "portal: the panel is guarded — ${g.pkg} stays behind it")
+                        return@changed false
+                    }
+                    // Only the panel itself still on top is a step back that did not happen. Nothing
+                    // read (a dark rear composes nothing) or something else is no proof against
+                    // it, and the fallback is seen on the front.
+                    if (top == PKG) {
+                        // The fallback: out to display 0 and back, since a move to the display a
+                        // task is already on does not raise it. Seen on the front for a moment
+                        // when it is unlocked.
+                        Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
+                        moveToDisplay(g.task, 0)
+                        if (!moveToDisplay(g.task, rearDisplay())) return@changed false
+                    } else if (top != g.pkg) {
+                        Log.i(TAG, "portal: after the step back the rear's top is ${top ?: "unknown"} — trusting it")
+                    }
+                    // The frame after the reveal, not before the guest is seen.
+                    guestOnTopAgain(now, "Resume", showFrame = false)
+                    true
                 }
-                // Only the panel itself still on top is a step back that did not happen. Nothing
-                // read (a dark rear composes nothing) or something else is no proof against
-                // it, and the fallback is seen on the front.
-                if (top == PKG) {
-                    // The fallback: out to display 0 and back, since a move to the display a
-                    // task is already on does not raise it. Seen on the front for a moment
-                    // when it is unlocked.
-                    Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
-                    moveToDisplay(g.task, 0)
-                    if (!moveToDisplay(g.task, rearDisplay())) return
-                } else if (top != g.pkg) {
-                    Log.i(TAG, "portal: after the step back the rear's top is ${top ?: "unknown"} — trusting it")
+                if (back) {
+                    if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
+                    wake(rearDisplay())
                 }
-                guestOnTopAgain(now, "Resume")
-                wake(rearDisplay())
             }
-            PortalAction.Step.FRONT -> guestAction("front")
+            // Moving a task between displays plays no animation: the guest used to vanish from
+            // the rear at once. Covered, and the panel revealed as Panel reveals it.
+            PortalAction.Step.FRONT -> synchronized(placing) {
+                val g = guest ?: return
+                covered("the panel", { panelShown(g) }) {
+                    guestAction("front")
+                    guest == null
+                }
+            }
             PortalAction.Step.CLOSE -> guestAction("close")
         }
     }
@@ -1895,12 +1957,16 @@ class RearUserService : IRearService.Stub {
         syncSheetGuest()
     }
 
-    /** [g] on top of the rear again, not hidden: frame, density, touches, the sheet's buttons. Under [placing]. */
-    private fun guestOnTopAgain(g: Guest, why: String) {
+    /**
+     * [g] on top of the rear again, not hidden: frame, density, touches, the sheet's buttons.
+     * The frame not yet with [showFrame] false: a covered Resume shows it after its reveal.
+     * Under [placing].
+     */
+    private fun guestOnTopAgain(g: Guest, why: String, showFrame: Boolean = true) {
         Log.i(TAG, "portal: ${g.pkg} on top again — $why")
         guest = g.copy(onTop = true, hiddenOnFront = false)
         syncDensity("${g.pkg} is on top")
-        frame.show()
+        if (showFrame) frame.show()
         syncTouchWatch()
         syncSheetGuest()
     }
@@ -1909,10 +1975,10 @@ class RearUserService : IRearService.Stub {
      * A guest Panel hid on display 0 moved back onto the rear, on top. False when there is
      * no hidden guest or the move was refused. Under [placing].
      */
-    private fun unhide(why: String): Boolean {
+    private fun unhide(why: String, showFrame: Boolean = true): Boolean {
         val g = guest?.takeIf { it.hiddenOnFront } ?: return false
         if (!moveToDisplay(g.task, rearDisplay())) return false
-        guestOnTopAgain(g, "back from the front: $why")
+        guestOnTopAgain(g, "back from the front: $why", showFrame)
         return true
     }
 
