@@ -146,4 +146,27 @@ object SurfaceDump {
             else -> Where.NOWHERE
         }
     }
+
+    private val appLayer = Regex("""^ VRI-([A-Za-z0-9_.]+)/""", RegexOption.MULTILINE)
+
+    /**
+     * The package whose window is on top of the rear display, or null when the rear
+     * composes no app window (dark, or only system strips). SurfaceFlinger lists layers top
+     * to bottom, and an app window is `VRI-<package>/<activity>`; Xiaomi's gesture strips
+     * (`VRI-SubScreenGesture…`, no slash) and our portal frame (`portal-frame`, no VRI)
+     * never match, so they are looked past.
+     */
+    fun topPackage(dump: String, isRear: (physicalId: String) -> Boolean): String? {
+        val matches = header.findAll(dump).toList()
+        for ((i, m) in matches.withIndex()) {
+            if (!isRear(m.groupValues[1])) continue
+            val start = m.range.last + 1
+            val end = if (i + 1 < matches.size) matches[i + 1].range.first else dump.length
+            // The table ends at its first blank line; past it a dump goes on with other
+            // listings that name windows too, and a dark rear must not borrow one of those.
+            val table = dump.substring(start, end).substringBefore("\n\n")
+            return appLayer.find(table)?.groupValues?.get(1)
+        }
+        return null
+    }
 }
