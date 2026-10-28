@@ -74,16 +74,20 @@ class UsagePollService : Service() {
         }
     }
 
-    /** Silent, Bluetooth, mobile data and Wi-Fi, to the panel. On brightnessWorker. */
+    /** Silent, Bluetooth, mobile data and Wi-Fi, to the panel and the shell's control centre. On brightnessWorker. */
     private fun sendQuickStates() {
         val audio = getSystemService(android.media.AudioManager::class.java)
         val silent = audio.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL
-        val rest = Graph.of(this).bridge.quickStates()
+        val bridge = Graph.of(this).bridge
+        val rest = bridge.quickStates()
+        val states = booleanArrayOf(silent, rest?.get(0) ?: false, rest?.get(1) ?: false, rest?.get(2) ?: false)
         sendBroadcast(
             Intent(RearActivity.ACTION_QUICK_STATES).setPackage(packageName)
-                .putExtra(RearActivity.EXTRA_QUICK_STATES, booleanArrayOf(silent, rest?.get(0) ?: false, rest?.get(1) ?: false, rest?.get(2) ?: false))
+                .putExtra(RearActivity.EXTRA_QUICK_STATES, states)
                 .putExtra(RearActivity.EXTRA_QUICK_REACHABLE, rest != null),
         )
+        // And to the shell, for its control centre over a guest.
+        bridge.setQuickStates(states, rest != null)
     }
 
     /** The switches, watched as the brightness is: a change anywhere reaches the tiles at once. */

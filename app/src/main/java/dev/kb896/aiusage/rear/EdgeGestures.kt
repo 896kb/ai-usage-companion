@@ -14,8 +14,13 @@ import kotlin.math.abs
  * - The right edge, x ≥ [BACK_LEFT] — Xiaomi's own Back band, whose inert chevron then
  *   lines up with what happens: [Action.Back] on a lift that travelled left at least
  *   [BACK_TRAVEL] further than it travelled vertically.
- * Where the two bands meet (the bottom-right corner), the pull wins. Anything else is
- * nobody's.
+ * - The top edge ([ControlCenter.startsPull]: within its EDGE of the top, over the left half
+ *   of the usable area): [Action.TopPullStart] once it has moved DOWN past [SLOP] more than
+ *   sideways — the control centre's pull, which the caller opens only over a guest (over
+ *   our panel the panel's own control centre has it) — then [Action.TopPullMove] every
+ *   move, and [Action.TopPullEnd] at the lift; nothing if it turns out not to be a pull.
+ * Where the bottom and right bands meet (the bottom-right corner), the pull wins. Anything
+ * else is nobody's.
  *
  * WITH THE SHEET UP ([sheet] true when a finger lands), every finger is the sheet's,
  * wherever it lands:
@@ -47,6 +52,10 @@ class EdgeGestures {
         data class PullStart(val y: Float, val onSheet: Boolean = false) : Action
         data class PullMove(val y: Float) : Action
         data class PullEnd(val y: Float) : Action
+        /** The control centre's pull from the top edge, the finger at [y]. */
+        data class TopPullStart(val y: Float) : Action
+        data class TopPullMove(val y: Float) : Action
+        data class TopPullEnd(val y: Float) : Action
         data object Back : Action
         /** A finger landed on the sheet. */
         data class SheetDown(val x: Float, val y: Float) : Action
@@ -60,7 +69,7 @@ class EdgeGestures {
         data object Cancel : Action
     }
 
-    private enum class Kind { NONE, PULL, BACK, SHEET }
+    private enum class Kind { NONE, PULL, TOP, BACK, SHEET }
 
     /** Whether the sheet is up, for fingers that land from now on. Set by the caller. */
     var sheet = false
@@ -79,6 +88,7 @@ class EdgeGestures {
         is RearTouches.Down -> {
             val stale = when {
                 kind == Kind.PULL && committed -> listOf(Action.PullEnd(lastY))
+                kind == Kind.TOP && committed -> listOf(Action.TopPullEnd(lastY))
                 kind == Kind.SHEET && committed -> listOf(if (sideways) Action.SlideEnd(lastX) else Action.PullEnd(lastY))
                 kind == Kind.SHEET -> listOf(Action.Cancel)
                 else -> emptyList()
@@ -88,6 +98,7 @@ class EdgeGestures {
             kind = when {
                 sheet -> Kind.SHEET
                 PortalPull.startsPull(e.x, e.y) -> Kind.PULL
+                ControlCenter.startsPull(e.x, e.y) -> Kind.TOP
                 e.x >= BACK_LEFT -> Kind.BACK
                 else -> Kind.NONE
             }
@@ -103,12 +114,19 @@ class EdgeGestures {
                 abs(e.x - downX) >= SLOP -> { kind = Kind.NONE; emptyList() }
                 else -> emptyList()
             }
+            Kind.TOP -> when {
+                committed -> listOf(Action.TopPullMove(e.y))
+                e.y - downY >= SLOP && e.y - downY > abs(e.x - downX) -> { committed = true; listOf(Action.TopPullStart(e.y)) }
+                abs(e.x - downX) >= SLOP || downY - e.y >= SLOP -> { kind = Kind.NONE; emptyList() }
+                else -> emptyList()
+            }
             Kind.SHEET -> sheetMove(e)
             else -> emptyList()
         } }
         is RearTouches.Up -> {
             val out = when (kind) {
                 Kind.PULL -> if (committed) listOf(Action.PullEnd(e.y)) else emptyList()
+                Kind.TOP -> if (committed) listOf(Action.TopPullEnd(e.y)) else emptyList()
                 Kind.BACK -> if ((downX - e.x) - abs(e.y - downY) >= BACK_TRAVEL) listOf(Action.Back) else emptyList()
                 Kind.SHEET -> sheetUp(e)
                 Kind.NONE -> emptyList()

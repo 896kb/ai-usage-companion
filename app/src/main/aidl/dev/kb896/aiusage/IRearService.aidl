@@ -118,6 +118,10 @@ interface IRearService {
     // The app process's ear for what the back decides (IRearEvents). Re-sent by the bridge
     // whenever the service (re)connects; oneway, nothing waits on it.
     oneway void setEvents(IRearEvents events) = 24;
+    // The control centre's tiles as the app has them — silent, Bluetooth, mobile data, Wi-Fi —
+    // and whether the last three can be switched, for the one the shell holds over a guest.
+    // Sent with every change the app sees, and on (re)connect; oneway, nothing waits on it.
+    oneway void setQuickStates(in boolean[] states, boolean reachable) = 25;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
 
 }

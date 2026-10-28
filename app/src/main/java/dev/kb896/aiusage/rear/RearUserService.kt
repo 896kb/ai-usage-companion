@@ -765,6 +765,7 @@ class RearUserService : IRearService.Stub {
             frame.allow(config.portalBorder)
             setPortalDpi { dpiEdits.overlay(config.portalDpi, android.os.SystemClock.uptimeMillis()) }
             sheetLook = config.theme to config.glassStyle
+            controlCenter.theme(config.theme, config.glassStyle, config.background)
             shellSheet?.theme(config.theme, config.glassStyle)
             // Handed on with every payload (the sheet ignores what it has already): a sheet
             // being made between this write and its publication picks it up there.
@@ -1555,6 +1556,7 @@ class RearUserService : IRearService.Stub {
             val face = sheetFace(sheetType)
             if (face == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
             val s = ShellSheet(rearLayerStack(), face)
+            controlCenter.face(face)
             // The portal frame fades under the sheet, as far as it is open.
             s.onProgress = { frame.sheetOpen(it); strip.sheetOpen(it) }
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
@@ -1594,6 +1596,7 @@ class RearUserService : IRearService.Stub {
             val face = sheetFace(type) ?: return
             sheetType = type
             s.face(face)
+            controlCenter.face(face)
         }
     }
 
@@ -1648,7 +1651,9 @@ class RearUserService : IRearService.Stub {
         var back = false
         synchronized(sheetLock) {
             if (from !== gestures) return
-            val actions = from.feed(e)
+            // The control centre over a guest takes its own first: its top pull, and every
+            // finger while it is down (ShellControlCenter.touch).
+            val actions = controlCenter.touch(e, from.feed(e), ::controlCenterOpens)
             for (a in actions) if (sheetAction(a, e.atMs)) back = true
             if (e is RearTouches.Down) {
                 // Something may change on the guest: its edge is read again soon.
@@ -1789,6 +1794,8 @@ class RearUserService : IRearService.Stub {
                 if (sheetAlive()) steady(atMs)
             }
             EdgeGestures.Action.Back -> return PortalAction.wantsBack(guest?.onTop == true, sheetUp)
+            // The control centre's, taken by it before they get here (ShellControlCenter.touch).
+            is EdgeGestures.Action.TopPullStart, is EdgeGestures.Action.TopPullMove, is EdgeGestures.Action.TopPullEnd -> Unit
         }
         return false
     }
@@ -2463,6 +2470,8 @@ class RearUserService : IRearService.Stub {
      * hidden, the watch stopped. [sync]: end() on this thread (destroy, which exits next).
      */
     private fun closeSheetNow(why: String, sync: Boolean = false) {
+        // The control centre over a guest goes with it, for every same reason.
+        controlCenter.closeNow(why, sync)
         val s = synchronized(sheetLock) {
             if (!sheetUp) return
             Log.i(TAG, "portal sheet: shut — $why")
@@ -2471,6 +2480,39 @@ class RearUserService : IRearService.Stub {
             shellSheet
         }
         if (sync) runCatching { s?.end() }
+    }
+
+    // -- the control centre over a guest, in the shell --------------------------------------
+    //
+    // ShellControlCenter: pulled from the top edge over a guest on top, as the panel's own is
+    // over the panel (which keeps it: over our panel nothing here opens). Its brightness and
+    // automatic mode are this service's own calls; its tiles are the app's, through IRearEvents.
+
+    private val controlCenter: ShellControlCenter by lazy {
+        ShellControlCenter(
+            layerStack = ::rearLayerStack,
+            rear = object : ShellControlCenter.Rear {
+                override fun brightness() = rearBrightness()
+                override fun auto() = rearAutoBrightness()
+                override fun setBrightness(value: Int) = setRearBrightness(value)
+                override fun setAuto(on: Boolean) = setRearAutoBrightness(on)
+            },
+            events = { events },
+            // The portal frame fades under it as under the sheet; the strip pauses its samples.
+            onProgress = { frame.controlCenterOpen(it); strip.sheetOpen(it) },
+        )
+    }
+
+    /**
+     * Whether a pull from the top edge opens the control centre here: over a guest on top
+     * only — over our panel the panel's own opens — not with the portal sheet up or coming,
+     * and not over the camera we opened. Under [sheetLock] (the touch reader's).
+     */
+    private fun controlCenterOpens(): Boolean =
+        !sheetUp && !beginPending && guest?.sheetOnTop == true && !cameraUp()
+
+    override fun setQuickStates(states: BooleanArray?, reachable: Boolean) {
+        controlCenter.quickStates(states ?: return, reachable)
     }
 
     override fun setQuick(which: String, on: Boolean) {

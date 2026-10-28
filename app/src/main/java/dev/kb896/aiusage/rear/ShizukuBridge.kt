@@ -73,6 +73,7 @@ class ShizukuBridge(private val context: Context) {
             // would otherwise be read and woken as if it were not.
             runCatching { service?.setDozing(dozing) }
             runCatching { service?.setEvents(events) }
+            quickStates?.let { (states, reachable) -> runCatching { service?.setQuickStates(states, reachable) } }
             pending?.let { p -> pending = null; show(p) }
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
@@ -458,6 +459,19 @@ class ShizukuBridge(private val context: Context) {
     @Volatile private var dozing = false
 
     /**
+     * The control centre's tiles — silent, Bluetooth, mobile data, Wi-Fi — and whether the
+     * last three can be switched, for the one the shell holds over a guest. Kept, and handed
+     * on again whenever the service (re)connects. Never binds.
+     */
+    fun setQuickStates(states: BooleanArray, reachable: Boolean) {
+        quickStates = states.copyOf() to reachable
+        runCatching { service?.setQuickStates(states, reachable) }
+            .onFailure { Log.w(TAG, "setQuickStates failed: ${it.message}") }
+    }
+
+    @Volatile private var quickStates: Pair<BooleanArray, Boolean>? = null
+
+    /**
      * An app's DPI nudged on the back: [dpi] for the package, 0 for its default. Set by
      * Graph, which saves it in the config and pushes the payload back; run on the main
      * thread, where the settings screen writes the config too, so the two never interleave.
@@ -472,7 +486,26 @@ class ShizukuBridge(private val context: Context) {
             if (pkg.isNullOrEmpty() || pkg.length > 255) return
             mainHandler.post { this@ShizukuBridge.onPortalDpi(pkg, dpi) }
         }
+
+        // The shell's control centre over a guest: its tiles go the way the panel's do, as
+        // the broadcasts UsagePollService already serves (RearActivity.ACTION_SET_QUICK,
+        // ACTION_GET_QUICK), which switch them and send the states back to both.
+        override fun onQuick(which: String?, on: Boolean) {
+            if (which !in QUICK) return
+            context.sendBroadcast(
+                android.content.Intent(RearActivity.ACTION_SET_QUICK).setPackage(context.packageName)
+                    .putExtra(RearActivity.EXTRA_QUICK, which).putExtra(RearActivity.EXTRA_QUICK_ON, on),
+            )
+        }
+
+        override fun onControlCenterOpening() {
+            context.sendBroadcast(android.content.Intent(RearActivity.ACTION_GET_QUICK).setPackage(context.packageName))
+        }
     }
 
-    private companion object { const val TAG = "AiUsageBridge" }
+    private companion object {
+        const val TAG = "AiUsageBridge"
+        /** The tiles the shell may ask to switch (ControlCenterPainter.QUICK_NAMES); nothing else. */
+        val QUICK = ControlCenterPainter.QUICK_NAMES.toSet()
+    }
 }

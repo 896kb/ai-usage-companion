@@ -200,4 +200,38 @@ class EdgeGesturesTest {
             sheet(Down(600f, 560f, 0), Move(600f, 500f, 10)),
         )
     }
+
+    // ---- the top band: the control centre's pull (ControlCenter.startsPull) ----
+
+    @Test fun `a pull down from the top edge commits past the slop and is followed to the lift`() {
+        val actions = run(Down(400f, 10f, 0), Move(400f, 20f, 10), Move(401f, 60f, 20), Move(402f, 200f, 30), Up(402f, 240f, 40))
+        assertEquals(
+            listOf(Action.TopPullStart(60f), Action.TopPullMove(200f), Action.TopPullEnd(240f)),
+            actions,
+        )
+    }
+
+    @Test fun `only over the left half of the usable area, right at the top`() {
+        assertEquals(emptyList<Action>(), run(Down(800f, 10f, 0), Move(800f, 100f, 10), Up(800f, 200f, 20)))
+        assertEquals(emptyList<Action>(), run(Down(400f, 80f, 0), Move(400f, 150f, 10), Up(400f, 200f, 20)))
+        assertEquals(emptyList<Action>(), run(Down(200f, 10f, 0), Move(200f, 100f, 10), Up(200f, 200f, 20)))
+    }
+
+    @Test fun `a sideways or upward drag from the top band is not a pull`() {
+        assertEquals(emptyList<Action>(), run(Down(400f, 20f, 0), Move(460f, 25f, 10), Move(460f, 200f, 20), Up(460f, 220f, 30)))
+        assertEquals(emptyList<Action>(), run(Down(400f, 40f, 0), Move(400f, 0f, 10), Up(400f, 0f, 20)))
+    }
+
+    @Test fun `a new finger closes a top pull that never lifted`() {
+        assertEquals(
+            listOf(Action.TopPullStart(80f), Action.TopPullEnd(80f)),
+            run(Down(400f, 10f, 0), Move(400f, 80f, 10), Down(600f, 300f, 20)),
+        )
+    }
+
+    @Test fun `with the sheet up the top band is the sheet's`() {
+        val g = EdgeGestures().apply { sheet = true }
+        val actions = listOf(Down(400f, 10f, 0), Move(400f, 80f, 10)).flatMap { g.feed(it) }
+        assertEquals(listOf(Action.SheetDown(400f, 10f), Action.PullStart(80f, onSheet = true)), actions)
+    }
 }
