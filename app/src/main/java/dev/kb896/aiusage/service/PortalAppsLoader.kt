@@ -1,6 +1,8 @@
 package dev.kb896.aiusage.service
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.core.graphics.drawable.toBitmap
@@ -36,18 +38,16 @@ class PortalAppsLoader(private val context: Context, private val send: (android.
 
     private fun load() {
         val pm = context.packageManager
-        val pinned = ConfigStore(context).load().portalApps
-        val infos = pinned.mapNotNull { pkg ->
-            runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()?.let { pkg to it }
-        }.toMap()
-        val shown = PortalApps.present(pinned, infos.keys).take(PortalSheet.MAX_APPS)
+        val infos = shown(pm, ConfigStore(context).load().portalApps)
+        val shown = infos.map { it.first }
         // The locale too: the labels are in the language they were loaded in.
         val signature = listOf(context.resources.configuration.locales.toLanguageTags()) + shown.map { pkg ->
             "$pkg@${runCatching { pm.getPackageInfo(pkg, 0).lastUpdateTime }.getOrDefault(0L)}"
         }
         if (signature == lastSignature) return
-        val labels = shown.map { pkg -> runCatching { infos.getValue(pkg).loadLabel(pm).toString() }.getOrDefault(pkg) }
-        val bitmaps = shown.map { pkg -> runCatching { pm.getApplicationIcon(pkg).toBitmap(ICON_PX, ICON_PX) }.getOrNull() }
+        val read = read(pm, infos)
+        val labels = read.map { it.label }
+        val bitmaps = read.map { it.icon }
         // Lossy WebP, not PNG: up to 48 icons go in one oneway call, and the shell's binder
         // has half a megabyte for every oneway call in flight. Measured on 37 desktop app
         // icons scaled to 96 px (libpng/libwebp, not the phone's encoder): PNG 8.9 KB each on
@@ -72,12 +72,37 @@ class PortalAppsLoader(private val context: Context, private val send: (android.
         runCatching { ByteArrayOutputStream().also { out -> it.compress(Bitmap.CompressFormat.WEBP_LOSSY, quality, out) }.toByteArray() }.getOrNull()
     }
 
-    private companion object {
-        const val TAG = "PortalApps"
-        const val ICON_PX = 96
-        const val QUALITY = 90
-        const val QUALITY_TIGHT = 60
+    /** A pinned app as the sheet shows it: its [label] and its [icon] at [ICON_PX] square. */
+    class Shown(val pkg: String, val label: String, val icon: Bitmap?)
+
+    companion object {
+        private const val TAG = "PortalApps"
+        private const val ICON_PX = 96
+
+        /**
+         * Of [pinned], the apps the sheet shows: those still installed, in order, no more
+         * than PortalSheet.MAX_APPS, each with its ApplicationInfo. The front's portal
+         * preview asks the same, so it shows what the back does.
+         */
+        fun shown(pm: PackageManager, pinned: List<String>): List<Pair<String, ApplicationInfo>> {
+            val infos = pinned.mapNotNull { pkg ->
+                runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()?.let { pkg to it }
+            }.toMap()
+            return PortalApps.present(pinned, infos.keys).take(PortalSheet.MAX_APPS).map { it to infos.getValue(it) }
+        }
+
+        /** The labels and icons of [apps] (from [shown]), in their order; a label that will not load is the package. */
+        fun read(pm: PackageManager, apps: List<Pair<String, ApplicationInfo>>): List<Shown> = apps.map { (pkg, info) ->
+            Shown(
+                pkg,
+                runCatching { info.loadLabel(pm).toString() }.getOrDefault(pkg),
+                runCatching { pm.getApplicationIcon(pkg).toBitmap(ICON_PX, ICON_PX) }.getOrNull(),
+            )
+        }
+
+        private const val QUALITY = 90
+        private const val QUALITY_TIGHT = 60
         /** After a failed send, the next try. */
-        const val RETRY_MS = 5_000L
+        private const val RETRY_MS = 5_000L
     }
 }

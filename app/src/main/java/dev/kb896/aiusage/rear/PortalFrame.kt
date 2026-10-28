@@ -162,8 +162,12 @@ class PortalFrame(private val layerStack: Int) {
         }
     }
 
-    /** One run's paints and cached outlines, so an overlapping run shares nothing mutable. */
-    private class Renderer {
+    /**
+     * One run's paints and cached outlines, so an overlapping run shares nothing mutable.
+     * The front's portal preview (ui.PortalSheetPreview) draws the border with one of its
+     * own, so the two cannot drift; the caller sets the frame's [ALPHA].
+     */
+    class Renderer {
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND

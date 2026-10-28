@@ -41,6 +41,7 @@ import androidx.core.content.ContextCompat
 import dev.kb896.aiusage.rear.RearActivity
 import dev.kb896.aiusage.rear.ShizukuBridge
 import dev.kb896.aiusage.service.Graph
+import dev.kb896.aiusage.service.PortalAppsLoader
 import androidx.core.app.NotificationManagerCompat
 import dev.kb896.aiusage.service.UsagePollService
 import dev.kb896.aiusage.service.WeatherPoll
@@ -137,6 +138,8 @@ class MainActivity : ComponentActivity() {
         rowsHadAccess = access
         syncFromConfig()
         stopWatchingConfig = ConfigStore(this).listen { syncFromConfig() }
+        // A pinned app installed or removed while away: the preview's portal follows, as the back's does.
+        loadPortalPreview(ConfigStore(this).load().portalApps, again = true)
         // Have the user service bound before any row needs it. Placement used to bind
         // it as a side effect; with placement gated on the onboarding, nothing else does.
         if (graph.bridge.status().granted) graph.bridge.bind()
@@ -453,6 +456,8 @@ class MainActivity : ComponentActivity() {
             // shows it, rather than whatever the back is doing (always-on, as often as not).
             else -> preview.show(dev.kb896.aiusage.rear.RearDialView.PAGE_NOTICES, aod = false)
         }
+        // The Portal tab shows the portal's sheet open over the panel, as the back does.
+        preview.portal(i == TAB_PORTAL)
         inkHeadings()
     }
 
@@ -851,9 +856,37 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshPreview() {
         val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
-        preview.config = ConfigStore(this).load()
+        val config = ConfigStore(this).load()
+        preview.config = config
         preview.state = graph.repository.state.value
         preview.weather = WeatherPoll.latest
+        loadPortalPreview(config.portalApps)
+    }
+
+    /** The preview's portal apps, kept by package, and the pinned list they were last read for. */
+    private val portalPreviewApps = PortalPreviewApps<android.graphics.Bitmap>()
+    private var portalPreviewFor: List<String>? = null
+    private var portalPreviewJob: Job? = null
+
+    /**
+     * The pinned apps' names and icons for the preview's portal sheet, read as the shell's
+     * are (PortalAppsLoader.shown and .read: the installed ones, in order), off the main
+     * thread and only the ones not read before. Nothing to do while [pinned] is what they
+     * were last read for; [again] reads which are installed anew.
+     */
+    private fun loadPortalPreview(pinned: List<String>, again: Boolean = false) {
+        if (!again && pinned == portalPreviewFor) return
+        portalPreviewFor = pinned
+        portalPreviewJob?.cancel()
+        val pm = packageManager
+        portalPreviewJob = lifecycleScope.launch {
+            val shown = withContext(Dispatchers.IO) { PortalAppsLoader.shown(pm, pinned) }
+            val missing = portalPreviewApps.missing(shown.map { it.first }).toSet()
+            val read = withContext(Dispatchers.IO) { PortalAppsLoader.read(pm, shown.filter { it.first in missing }) }
+            read.forEach { portalPreviewApps.put(it.pkg, it.label, it.icon) }
+            val (labels, icons) = portalPreviewApps.arranged(shown.map { it.first })
+            findViewById<PanelPreviewView>(R.id.panel_preview)?.portalApps(labels, icons)
+        }
     }
 
     private fun bindSettings() {

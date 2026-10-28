@@ -1,8 +1,12 @@
 package dev.kb896.aiusage.ui
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.util.AttributeSet
 import android.widget.FrameLayout
+import androidx.core.view.isVisible
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.DashboardState
 import dev.kb896.aiusage.data.PanelConfig
@@ -31,6 +35,8 @@ class PanelPreviewView @JvmOverloads constructor(
 ) : FrameLayout(context, attrs) {
 
     private val dial = RearDialView(context)
+    /** The App Portal's sheet over the panel, while the Portal tab is chosen ([portal]). */
+    private val sheet = PortalSheetPreview(context).apply { visibility = GONE }
 
     var state: DashboardState
         get() = dial.state
@@ -38,7 +44,7 @@ class PanelPreviewView @JvmOverloads constructor(
 
     var config: PanelConfig
         get() = dial.config
-        set(value) { dial.config = value }
+        set(value) { dial.config = value; sheet.config = value }
     /** The weather reading the back has; without it the preview had no weather line at all. */
     var weather: dev.kb896.aiusage.data.WeatherReading?
         get() = dial.weather
@@ -79,6 +85,24 @@ class PanelPreviewView @JvmOverloads constructor(
         durationMs, positionMs, positionAtMs, speed, lyricsLrc, lyricsFor,
     )
 
+    /**
+     * The App Portal's sheet as the back shows it, open over the panel: the panel blurred
+     * and dimmed under it, as SurfaceFlinger blurs the rear under the shell's sheet — by
+     * the control centre's blur, which the sheet's is tuned to read as (ShellSheet.BLUR_MAX).
+     * Off, the panel as it is. A RenderEffect is a hardware renderer's: drawn in software,
+     * the panel goes unblurred and the sheet's dim alone is over it.
+     */
+    fun portal(on: Boolean) {
+        if (sheet.isVisible == on) return
+        sheet.isVisible = on
+        dial.setRenderEffect(
+            if (on) RenderEffect.createBlurEffect(RearDialView.CC_BLUR, RearDialView.CC_BLUR, Shader.TileMode.CLAMP) else null,
+        )
+    }
+
+    /** The pinned apps for the portal's sheet, in grid order — see PortalSheetPreview.apps. */
+    fun portalApps(labels: List<String>, icons: List<Bitmap?>) = sheet.apps(labels, icons)
+
     /** The back's corner radius in panel pixels, until the back says otherwise. */
     private var cornerPx = DEFAULT_CORNER
     private var last: RearDialView.Mirror? = null
@@ -86,6 +110,7 @@ class PanelPreviewView @JvmOverloads constructor(
 
     init {
         addView(dial, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
+        addView(sheet, LayoutParams(Panel.WIDTH, Panel.HEIGHT))
         clipChildren = true
         // Black behind the panel, as the rear display is: a translucent ground or picture
         // must not let the settings scrolling behind the preview show through it.
@@ -156,20 +181,23 @@ class PanelPreviewView @JvmOverloads constructor(
         val width = MeasureSpec.getSize(widthSpec)
         val height = (width / aspect).toInt()
         setMeasuredDimension(width, height)
-        dial.measure(
+        for (child in listOf(dial, sheet)) child.measure(
             MeasureSpec.makeMeasureSpec(Panel.WIDTH, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(Panel.HEIGHT, MeasureSpec.EXACTLY),
         )
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        dial.layout(0, 0, Panel.WIDTH, Panel.HEIGHT)
-        // Pivot at the top-left so the scaled child lands exactly on this view's origin;
-        // the default pivot is the centre, which would leave it offset by half the
-        // difference between the panel's size and the preview's.
-        dial.pivotX = 0f
-        dial.pivotY = 0f
-        dial.scaleX = width / Panel.WIDTH.toFloat()
-        dial.scaleY = height / Panel.HEIGHT.toFloat()
+        // The sheet over the panel, laid and scaled alike.
+        for (child in listOf(dial, sheet)) {
+            child.layout(0, 0, Panel.WIDTH, Panel.HEIGHT)
+            // Pivot at the top-left so the scaled child lands exactly on this view's origin;
+            // the default pivot is the centre, which would leave it offset by half the
+            // difference between the panel's size and the preview's.
+            child.pivotX = 0f
+            child.pivotY = 0f
+            child.scaleX = width / Panel.WIDTH.toFloat()
+            child.scaleY = height / Panel.HEIGHT.toFloat()
+        }
     }
 }

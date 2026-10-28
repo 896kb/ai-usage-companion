@@ -18,7 +18,8 @@ import dev.kb896.aiusage.data.PanelTheme
  * Paints the App Portal's sheet — the buttons, the pinned apps' icons and names a page at
  * a time with their page dots, and the guest's DPI slider — over the blur SurfaceFlinger
  * lays under the shell's layer. Needs no View, Context or Resources: the shell draws with
- * it into a surface's hardware canvas from app_process. Everything comes in: the [theme],
+ * it into a surface's hardware canvas from app_process, and the front's preview of the
+ * portal (ui.PortalSheetPreview) into its view's. Everything comes in: the [theme],
  * the panel's [face] (app_process has no default typeface, and text drawn without one
  * aborts), and the icons as bitmaps.
  *
@@ -30,7 +31,8 @@ import dev.kb896.aiusage.data.PanelTheme
  * Laid out by PortalSheet, in panel pixels.
  *
  * Not thread-safe; all painters in a process must draw one at a time (ShellSheet
- * serialises with its DRAW lock) — they share Glass's shaders (uniforms, highlight matrix).
+ * serialises with its DRAW lock; the front draws them all on its main thread) — they share
+ * Glass's shaders (uniforms, highlight matrix).
  */
 class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
 

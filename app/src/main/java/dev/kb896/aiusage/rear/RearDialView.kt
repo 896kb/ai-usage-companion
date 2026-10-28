@@ -13096,8 +13096,8 @@ class RearDialView(context: Context) : View(context) {
 
         /** How far a finger travels before the panel decides what the gesture is. */
         private const val DRAG_SLOP = 16f
-        /** The control centre's blur at full, in panel units, and its dim. */
-        private const val CC_BLUR = 22f
+        /** The control centre's blur at full, in panel units (the front's portal preview blurs by it too), and its dim. */
+        internal const val CC_BLUR = 22f
         private const val CC_DIM = 0.25f
         /** How often a brightness drag writes the setting, at most. */
         private const val BRIGHT_SEND_MS = 50L
