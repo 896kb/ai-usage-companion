@@ -48,6 +48,8 @@ class PortalFrame(private val layerStack: Int) {
     private var refusalLogged = false
     /** Once per process: the firmware gives no way to make the layer a trusted overlay. */
     @Volatile private var untrustedLogged = false
+    /** Wanted (a guest on top) and allowed (the front's Portal border switch). Under this instance's lock. */
+    private val gate = FrameGate()
 
     /** The colour, from the panel's config. Takes effect next frame. */
     fun style(color: Int) {
@@ -56,8 +58,29 @@ class PortalFrame(private val layerStack: Int) {
 
     val showing get() = thread?.isAlive == true
 
+    /** Up, if the Portal border switch allows it: wanted either way, for when it does. */
     @Synchronized
     fun show() {
+        if (gate.want(true)) start()
+    }
+
+    @Synchronized
+    fun hide() {
+        gate.want(false)
+        stop()
+    }
+
+    /**
+     * The front's Portal border switch (PanelConfig.portalBorder): off, the frame goes at
+     * once and stays down; back on while a guest is on top, it is up again at once.
+     */
+    @Synchronized
+    fun allow(on: Boolean) {
+        if (gate.allowed == on) return
+        if (gate.allow(on)) start() else stop()
+    }
+
+    private fun start() {
         if (thread?.isAlive == true) return
         val since = System.nanoTime() - failedAt
         if (failedAt != 0L && since < RETRY_NS) {
@@ -69,8 +92,7 @@ class PortalFrame(private val layerStack: Int) {
         thread = Thread({ run(myGen) }, "portal-frame").apply { isDaemon = true; start() }
     }
 
-    @Synchronized
-    fun hide() {
+    private fun stop() {
         val t = thread ?: return
         t.interrupt()
         // The render thread never takes this lock, so waiting for it here is safe.
