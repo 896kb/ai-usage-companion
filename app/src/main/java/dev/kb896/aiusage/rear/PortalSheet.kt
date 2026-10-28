@@ -148,16 +148,6 @@ object PortalSheet {
         return Labelled(left, box.centerY - markH / 2, left + markW + MARK_GAP + textW / 2)
     }
 
-    /** The DPI hint's line under the grid ("Hold an app for its DPI"): its baseline, or null with no apps. */
-    fun hintBaseline(count: Int, withStrip: Boolean): Float? {
-        val last = cells(count, withStrip).lastOrNull() ?: return null
-        return minOf(last.bottom + HINT_BELOW, Panel.HEIGHT - DPI_MARGIN)
-    }
-    private const val HINT_BELOW = 26f
-    const val HINT = "Hold an app for its DPI"
-    /** The hint shows on this many openings with apps on the sheet, then never again (until the shell restarts). */
-    const val HINT_OPENINGS = 5
-
     /** The first button's name, and the other two's. */
     fun buttonNames(guestOnTop: Boolean) = listOf(if (guestOnTop) "Panel" else "Resume", "Front", "Close")
 

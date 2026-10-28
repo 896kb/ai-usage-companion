@@ -67,14 +67,6 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     private fun applyFace() {
         face.set(text, PanelType.BODY)
         text.textSize = TEXT_SIZE * face.scale
-        face.set(hintText, PanelType.BODY)
-        hintText.textSize = HINT_SIZE * face.scale
-    }
-
-    /** The DPI hint under the grid: the names' face, smaller, dimmer. */
-    private val hintText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER
-        setShadowLayer(4f, 0f, 1.5f, SHADOW)
     }
 
     /** The strip's glyphs (Glyphs.draw sets its colour, style and smoothing). */
@@ -120,16 +112,13 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * (PortalSheet.labelled): Panel the dashboard glyph, Front flip-to-front, Close a
      * cross — in the theme's own set (Glyphs.draw). Resume wears [guestIcon], the app it
      * brings back, as a small rounded icon; the dashboard glyph without one.
-     *
-     * [hint] puts "Hold an app for its DPI" under the grid, dim, while there are apps
-     * and no DPI row is open.
      */
     fun draw(
         canvas: Canvas, progress: Float, backdrop: RenderNode,
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, withStrip: Boolean, pressed: Int = -1,
         dpiApp: Int = -1, dpiLabel: String = "",
-        guestIcon: Bitmap? = null, hint: Boolean = false,
+        guestIcon: Bitmap? = null,
     ) {
         if (progress <= 0.004f) return
         glass.beginFrame(canvas.width, canvas.height)
@@ -176,11 +165,6 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
                     canvas.drawBitmap(bmp, null, iconRect, iconPaint)
                 }
                 canvas.drawText(ellipsize(shown[i], PortalSheet.CELL - 8f), c.centerX, c.bottom - 12f + dy, text)
-            }
-            if (hint && row == null) PortalSheet.hintBaseline(shown.size, withStrip)?.let { y ->
-                hintText.color = ink
-                hintText.alpha = HINT_ALPHA
-                canvas.drawText(PortalSheet.HINT, PortalSheet.gridCenterX, y + dy, hintText)
             }
             row?.forEachIndexed { i, b ->
                 val part = PortalSheet.DpiPart.entries[i]
@@ -245,10 +229,6 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
 
         /** The names' size in panel px, before the face's [PanelType.Face.scale]. */
         const val TEXT_SIZE = 20f
-
-        /** The DPI hint's size, as [TEXT_SIZE], and its ink's alpha: there to be found, not read first. */
-        const val HINT_SIZE = 16f
-        const val HINT_ALPHA = 150
 
         /** The guest's icon on Resume: corners rounded by this much of its side. */
         const val APP_CORNER = 0.24f

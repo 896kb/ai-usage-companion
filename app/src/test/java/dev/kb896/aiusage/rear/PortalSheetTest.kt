@@ -175,13 +175,4 @@ class PortalSheetTest {
         assertEquals(b.centerX, PortalSheet.labelled(b, 0f, 0f, 40f).textCenterX, 0.01f)
         assertEquals(b.width - 2 * PortalSheet.BUTTON_PAD, PortalSheet.labelRoom(b, 0f), 0.01f)
     }
-
-    @Test fun `the DPI hint stands under the grid and on the panel, and not without apps`() {
-        assertEquals(null, PortalSheet.hintBaseline(0, withStrip = true))
-        for (strip in listOf(false, true)) for (n in listOf(1, 4, 5, 12)) {
-            val y = PortalSheet.hintBaseline(n, strip)!!
-            assertEquals(true, y > PortalSheet.cells(n, strip).last().bottom)
-            assertEquals(true, y <= dev.kb896.aiusage.Panel.HEIGHT - PortalSheet.DPI_MARGIN)
-        }
-    }
 }
