@@ -31,7 +31,15 @@ class RearUserService : IRearService.Stub {
     /** When the panel was last rebuilt from scratch, for the cooldown below. */
     private var lastReplaceAt = 0L
 
-    override fun destroy() = exitProcess(0)
+    override fun destroy() {
+        // The guest's density must not outlive the service that set it. Closed first, so
+        // nothing re-applies one between this reset and the exit.
+        synchronized(densityLock) {
+            densityClosed = true
+            applyDensity(null, "the service is going")
+        }
+        exitProcess(0)
+    }
 
     /**
      * Whether the panel is actually THERE — composited on the rear display, not merely
@@ -88,6 +96,8 @@ class RearUserService : IRearService.Stub {
         // Always under the lock, so a launch in flight finishes first and is then undone,
         // rather than placing its guest after this looked and found none.
         synchronized(placing) { if (guest != null) dropGuest("the panel was hidden") }
+        // dropGuest resets it when there was a guest; this covers there being none.
+        syncDensity("the panel was hidden")
     }
 
     override fun update(payload: String) {
@@ -151,6 +161,7 @@ class RearUserService : IRearService.Stub {
         if (g != null && !portalOverGuest) {
             if (markOnTop(g.task, false)) tell { it.onGuest(g.pkg, false) }
             frame.hide()
+            syncDensity("the panel is coming up over ${g.pkg}")
         }
         // Straight onto the rear display first: the manifest's miui.rear.policy makes
         // HyperOS allow it (ActivityStarterImpl logs "allow app"), so the panel never
@@ -571,15 +582,90 @@ class RearUserService : IRearService.Stub {
             ?.groupValues?.get(1)?.toIntOrNull() ?: Panel.DISPLAY_ID
     }
 
-    /** The frame follows the config's colour. */
+    /**
+     * The frame follows the config's colour, and the guest's density the config's DPI: a
+     * new payload may carry a new value for the app that is the guest right now.
+     */
     private fun styleFrame(payload: String) {
         if (CalibrateMode.isCalibrate(payload)) return
         try {
             val config = StatePayload.decode(payload).config
             frame.style(config.portalFrameColor)
+            portalDpi = config.portalDpi
         } catch (e: Exception) {
             Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
+            return
         }
+        syncDensity("a new payload")
+    }
+
+    /**
+     * DPI PER APP: display 1's density follows the guest. While a guest is on top it has
+     * its own (config.portalDpi, see [RearDensity]); any other time — the panel on top, no
+     * guest — the display has its default. Each change relayouts everything on display 1
+     * (the panel declares configChanges density, so it is untouched), so `wm density` runs
+     * only when the target differs from [appliedDensity], and the keep-alive's per-tick
+     * call costs a comparison, never a dump.
+     *
+     * Its own lock, [densityLock], not [placing]: the keep-alive's on-top/behind branches
+     * and guestAction's panel/resume run off [placing] on purpose — it is held through a
+     * launch's settle and survive waits, seconds at a time — and taking it here would stall
+     * them behind any launch. [densityLock] is a leaf: taken inside [placing] (launch, show,
+     * end), never the other way round. Each call reads the guest afresh under it, so
+     * whichever call runs last applies the latest state; two threads can never leave an
+     * older value set after a newer one.
+     *
+     * Never left behind: dropGuest (so endGuest), hide() and destroy() all reset it.
+     * What this cannot cover is Shizuku killing the service process outright; then the
+     * override survives on display 1. The next service instance's first read of
+     * `wm density` sees it as [appliedDensity], so its first evaluation — the first
+     * payload — puts the display's default back.
+     */
+    private val densityLock = Any()
+    /** The override this service has set on display 1; null = the display's own. Under [densityLock]. */
+    private var appliedDensity: Int? = null
+    /** Whether `wm density` has been read yet (once per service). Under [densityLock]. */
+    private var densityRead = false
+    /** Set by destroy(): nothing may apply a density after its reset. Under [densityLock]. */
+    private var densityClosed = false
+    /** Display 1's own density, for the log. */
+    private var physicalDensity = DensityDump.FALLBACK
+    /** The config's per-app DPI, from the latest payload. */
+    @Volatile private var portalDpi: Map<String, Int> = emptyMap()
+
+    /**
+     * Display 1 at the density the guest's state calls for. A guest still being placed
+     * counts as on top: its density is set before its move, so it arrives laid out once
+     * at its own DPI instead of landing at the default and relayouting when it is confirmed.
+     */
+    private fun syncDensity(why: String) = synchronized(densityLock) {
+        if (densityClosed) return@synchronized
+        val g = guest
+        val target = RearDensity.target(g?.pkg, g != null && (g.onTop || !g.placed), portalDpi)
+        applyDensity(target, why)
+    }
+
+    /** Under [densityLock]. A refused command leaves [appliedDensity] as it was, so the next call retries. */
+    private fun applyDensity(target: Int?, why: String) {
+        if (!densityRead) {
+            densityRead = true
+            val d = DensityDump.parse(exec("wm density -d ${Panel.DISPLAY_ID}"))
+            physicalDensity = d.physical ?: DensityDump.FALLBACK
+            appliedDensity = d.override
+            Log.i(TAG, "density: display ${Panel.DISPLAY_ID} is $physicalDensity dpi" +
+                (d.override?.let { ", overridden to $it — reset unless a guest wants one" } ?: ""))
+        }
+        if (target == appliedDensity) return
+        val out = exec(
+            if (target != null) "wm density $target -d ${Panel.DISPLAY_ID}"
+            else "wm density reset -d ${Panel.DISPLAY_ID}"
+        )
+        if (out.contains("Exception", ignoreCase = true) || out.contains("Error", ignoreCase = true)) {
+            Log.w(TAG, "density: ${target ?: "reset"} refused — $why: ${out.take(200)}")
+            return
+        }
+        appliedDensity = target
+        Log.i(TAG, "density: display ${Panel.DISPLAY_ID} at ${target?.let { "$it dpi" } ?: "its own $physicalDensity dpi"} — $why")
     }
 
     override fun launchGuest(pkg: String?, displayId: Int): Boolean = synchronized(placing) {
@@ -602,6 +688,8 @@ class RearUserService : IRearService.Stub {
             val task = startSettled(component, pkg)
             if (task == null) { endGuest("never started"); return@synchronized false }
             guest = Guest(pkg, task, onTop = false)
+            // Before the move, so it lands laid out once at its own DPI (see syncDensity).
+            syncDensity("$pkg is landing")
             moveToDisplay(task, displayId)
             wake(displayId)
             // The frame comes up as the app lands, not after the survive wait; show() is
@@ -648,6 +736,7 @@ class RearUserService : IRearService.Stub {
         portalOverGuest = false
         guest?.let { old -> if (old.task != task) moveToDisplay(old.task, 0) }
         guest = Guest(pkg, task, onTop = true)
+        syncDensity("$pkg is landing")
         if (!moveToDisplay(task, displayId)) { endGuest("move refused"); return@synchronized "" }
         wake(displayId)
         guestPlaced(displayId)
@@ -657,6 +746,7 @@ class RearUserService : IRearService.Stub {
     /** A guest is on top: the frame, the watcher, and the panel told. Under [placing]. */
     private fun guestPlaced(displayId: Int) {
         guest = guest?.copy(placed = true)
+        syncDensity("${guest?.pkg} is the guest") // already set as it landed; a no-op then
         frame.show() // already up from the launch's move; a no-op while running
         watchGuest(displayId)
         tell { it.onGuest(guest?.pkg.orEmpty(), true) }
@@ -668,6 +758,7 @@ class RearUserService : IRearService.Stub {
         guest = null
         portalOverGuest = false
         frame.hide()
+        syncDensity("the guest is over")
         stopGuestWatch()
         tell { it.onGuest("", false) }
     }
@@ -686,6 +777,7 @@ class RearUserService : IRearService.Stub {
                 portalOverGuest = false
                 markOnTop(g.task, false)
                 frame.hide()
+                syncDensity("the panel over ${g.pkg}")
                 tell { it.onGuest(g.pkg, false) }
             }
             // RearActivity has gone behind (moveTaskToBack); the guest is on top again.
@@ -693,6 +785,7 @@ class RearUserService : IRearService.Stub {
                 val g = guest ?: return
                 portalOverGuest = false
                 markOnTop(g.task, true)
+                syncDensity("${g.pkg} resumed")
                 frame.show()
                 tell { it.onGuest(g.pkg, true) }
                 wake(if (placedDisplayId >= 0) placedDisplayId else Panel.DISPLAY_ID)
@@ -987,6 +1080,9 @@ class RearUserService : IRearService.Stub {
                                 if (!g.onTop && guestRef.compareAndSet(g, g.copy(onTop = true))) {
                                     tell { it.onGuest(g.pkg, true) }
                                 }
+                                // Every tick, but a comparison unless the state changed (or a
+                                // refused command is due a retry).
+                                syncDensity("${g.pkg} is on top")
                                 if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
                                 continue
                             }
@@ -998,6 +1094,7 @@ class RearUserService : IRearService.Stub {
                                     guestRef.compareAndSet(g, g.copy(onTop = false))) {
                                     tell { it.onGuest(g.pkg, false) }
                                 }
+                                syncDensity("${g.pkg} is behind")
                                 if (top == null || !portalOverGuest) frame.hide()
                                 // The panel back in front after the camera was: somebody closed it.
                                 if (top == PKG && cameraLaunched && cameraWasOnTop) closeCamera()
