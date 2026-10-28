@@ -32,4 +32,31 @@ class PortalSheetTest {
     @Test fun `anywhere else is outside`() {
         assertEquals(Hit.Outside, PortalSheet.hit(100f, 300f, apps.size, withStrip = true))
     }
+
+    @Test fun `twelve apps with the strip all fit on the panel`() {
+        PortalSheet.cells(12, withStrip = true).forEach {
+            assertEquals(true, it.right <= dev.kb896.aiusage.Panel.WIDTH)
+            assertEquals(true, it.bottom <= dev.kb896.aiusage.Panel.HEIGHT)
+        }
+    }
+
+    @Test fun `more than twelve apps are capped`() {
+        assertEquals(12, PortalSheet.cells(15, withStrip = true).size)
+    }
+
+    @Test fun `with the strip, a tapped app is still that app`() {
+        val c = PortalSheet.cells(7, withStrip = true)[5]
+        assertEquals(Hit.App(5), PortalSheet.hit(c.centerX, c.centerY, 7, withStrip = true))
+    }
+
+    @Test fun `the gap between cells is outside`() {
+        val c = PortalSheet.cells(7, withStrip = false)[0]
+        assertEquals(Hit.Outside, PortalSheet.hit(c.right + 6f, c.centerY, 7, withStrip = false))
+    }
+
+    @Test fun `without the strip the buttons' area is not a button`() {
+        val b = PortalSheet.buttons()[1]
+        val h = PortalSheet.hit(b.centerX, b.centerY, 7, withStrip = false)
+        assertEquals(false, h is Hit.Button)
+    }
 }

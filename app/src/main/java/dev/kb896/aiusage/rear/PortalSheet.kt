@@ -42,7 +42,8 @@ object PortalSheet {
 
     fun cells(count: Int, withStrip: Boolean): List<Box> {
         val top = TOP + if (withStrip) STRIP + GAP else 0f
-        return (0 until count).map { i ->
+        val n = count.coerceAtMost(MAX_APPS)
+        return (0 until n).map { i ->
             val col = i % COLUMNS; val row = i / COLUMNS
             val l = LEFT + col * (CELL + GAP); val t = top + row * (CELL + GAP)
             Box(l, t, l + CELL, t + CELL)
@@ -57,6 +58,10 @@ object PortalSheet {
         }
     }
 
+    /**
+     * Valid only for the fully open sheet: [draw] translates by (1 - progress) * HEIGHT * 0.4,
+     * so callers must ignore taps until the sheet has settled open.
+     */
     fun hit(x: Float, y: Float, count: Int, withStrip: Boolean): Hit {
         if (withStrip) buttons().forEachIndexed { i, b -> if (b.contains(x, y)) return Hit.Button(i) }
         cells(count, withStrip).forEachIndexed { i, c -> if (c.contains(x, y)) return Hit.App(i) }
@@ -64,8 +69,14 @@ object PortalSheet {
     }
 
     // Lazy: the unit tests load this object on the JVM, where android.graphics cannot be built.
-    private val pane by lazy { Paint(Paint.ANTI_ALIAS_FLAG) }
+    private val pane by lazy { Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) }
     private val text by lazy { Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 20f } }
+
+    private fun ellipsize(s: String, width: Float): String {
+        if (text.measureText(s) <= width) return s
+        val n = text.breakText(s, true, width - text.measureText("…"), null)
+        return s.take(n).trimEnd() + "…"
+    }
 
     /**
      * The sheet at [progress] (0 shut, 1 open): it slides up by what is left to open and
@@ -83,7 +94,7 @@ object PortalSheet {
         val alpha = (255 * progress).toInt().coerceIn(0, 255)
         if (labels.isEmpty() && !withStrip) {
             text.color = ink; text.alpha = alpha
-            canvas.drawText("Pin apps in the app on the front", (LEFT + Panel.WIDTH) / 2f, Panel.HEIGHT / 2f, text)
+            canvas.drawText("Pin apps in the app on the front", LEFT + (COLUMNS * CELL + (COLUMNS - 1) * GAP) / 2f, Panel.HEIGHT / 2f, text)
         }
         if (withStrip) {
             val names = listOf(if (guestOnTop) "Panel" else "Resume", "Front", "Close")
@@ -95,7 +106,8 @@ object PortalSheet {
                 canvas.drawText(names[i], b.centerX, b.centerY + 7f, text)
             }
         }
-        cells(labels.size, withStrip).forEachIndexed { i, c ->
+        val shown = labels.take(MAX_APPS)
+        cells(shown.size, withStrip).forEachIndexed { i, c ->
             pane.color = ink; pane.alpha = (alpha * 0.12f).toInt()
             canvas.drawRoundRect(c.rect(), 24f, 24f, pane)
             icons.getOrNull(i)?.let { bmp ->
@@ -104,7 +116,7 @@ object PortalSheet {
                 canvas.drawBitmap(bmp, null, RectF(l, t, l + s, t + s), pane)
             }
             text.color = ink; text.alpha = alpha
-            canvas.drawText(labels[i].take(12), c.centerX, c.bottom - 12f, text)
+            canvas.drawText(ellipsize(shown[i], CELL - 8f), c.centerX, c.bottom - 12f, text)
         }
         canvas.restore()
     }
