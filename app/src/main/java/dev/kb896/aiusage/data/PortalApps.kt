@@ -8,7 +8,7 @@ object PortalApps {
 
     /** Pinned at the end, or unpinned if it already was. */
     fun toggled(pinned: List<String>, pkg: String): List<String> =
-        if (pkg in pinned) pinned - pkg else pinned + pkg
+        if (pkg in pinned) pinned.filter { it != pkg } else pinned + pkg
 
     /** One place up; the first stays first, an unknown package changes nothing. */
     fun movedUp(pinned: List<String>, pkg: String): List<String> {

@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PanelConfigPortalTest {
@@ -9,6 +10,8 @@ class PanelConfigPortalTest {
         val old = PanelConfig.encode(PanelConfig())
             .replace(Regex(""","portalApps":\[[^\]]*\]"""), "")
             .replace(Regex(""","portalFrameColor":-?\d+"""), "")
+        assertFalse("portalApps" in old)
+        assertFalse("portalFrameColor" in old)
         val c = PanelConfig.decode(old)
         assertEquals(emptyList<String>(), c.portalApps)
         assertEquals(0xFF28FF85.toInt(), c.portalFrameColor)

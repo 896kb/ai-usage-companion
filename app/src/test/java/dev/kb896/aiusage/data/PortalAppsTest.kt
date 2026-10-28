@@ -12,6 +12,10 @@ class PortalAppsTest {
         assertEquals(listOf("b"), PortalApps.toggled(listOf("a", "b"), "a"))
     }
 
+    @Test fun `unpinning drops every copy`() {
+        assertEquals(listOf("b"), PortalApps.toggled(listOf("a", "b", "a"), "a"))
+    }
+
     @Test fun `moving up swaps with the one above, and the first stays first`() {
         assertEquals(listOf("b", "a", "c"), PortalApps.movedUp(listOf("a", "b", "c"), "b"))
         assertEquals(listOf("a", "b"), PortalApps.movedUp(listOf("a", "b"), "a"))
