@@ -41,11 +41,31 @@ internal object ShellFont {
             return null
         }
         return try {
+            systemFonts()
             val buffer = ByteBuffer.allocateDirect(bytes.size).apply { put(bytes); flip() }
             Typeface.CustomFallbackBuilder(FontFamily.Builder(Font.Builder(buffer).build()).build()).build()
         } catch (e: Throwable) {
             Log.w(TAG, "portal sheet: the panel's font did not build — no sheet: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Typeface's own state, which every app gets from the zygote and app_process never does:
+     * without it CustomFallbackBuilder.build() throws "The Typeface is not fully initialized"
+     * (measured on the 17 Pro, OS4.0.5.0). The hidden loadPreinstalledSystemFontMap() is what
+     * the zygote calls; once is enough, and a firmware without it fails the build below as
+     * before, with no sheet.
+     */
+    @Volatile private var systemFontsLoaded = false
+
+    private fun systemFonts() {
+        if (systemFontsLoaded) return
+        synchronized(this) {
+            if (systemFontsLoaded) return
+            runCatching { Typeface::class.java.getMethod("loadPreinstalledSystemFontMap").invoke(null) }
+                .onFailure { Log.w(TAG, "portal sheet: system fonts not loaded: ${it.message}") }
+            systemFontsLoaded = true
         }
     }
 
