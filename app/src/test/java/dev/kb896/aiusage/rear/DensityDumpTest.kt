@@ -31,3 +31,42 @@ class DensityDumpTest {
         }
     }
 }
+
+class DensityStartTest {
+    @Test fun `no marker - the override found is the baseline`() {
+        assertEquals(DensityDump.Start(380, false), DensityDump.start(380, null))
+        assertEquals(DensityDump.Start(380, false), DensityDump.start(380, "null"))
+    }
+
+    @Test fun `no marker and no override - nothing to restore`() {
+        assertEquals(DensityDump.Start(null, false), DensityDump.start(null, "null"))
+    }
+
+    @Test fun `our override left behind over the display's own 380`() {
+        assertEquals(DensityDump.Start(380, true), DensityDump.start(300, "300,380"))
+    }
+
+    @Test fun `our override left behind over no override`() {
+        assertEquals(DensityDump.Start(null, true), DensityDump.start(300, "300,-"))
+    }
+
+    @Test fun `an override changed since the marker is not ours`() {
+        assertEquals(DensityDump.Start(380, false), DensityDump.start(380, "300,-"))
+    }
+
+    @Test fun `an override reset since the marker leaves nothing to restore`() {
+        assertEquals(DensityDump.Start(null, false), DensityDump.start(null, "300,380"))
+    }
+
+    @Test fun `a garbled marker is ignored`() {
+        for (m in listOf("", "abc", "300", "300,", ",380", "300,abc", "300,380,1")) {
+            assertEquals(m, DensityDump.Start(300, false), DensityDump.start(300, m))
+        }
+    }
+
+    @Test fun `the marker round-trips`() {
+        assertEquals(DensityDump.Marker(300, 380), DensityDump.parseMarker(DensityDump.marker(300, 380)))
+        assertEquals(DensityDump.Marker(300, null), DensityDump.parseMarker(DensityDump.marker(300, null)))
+        assertEquals("300,-", DensityDump.marker(300, null))
+    }
+}
