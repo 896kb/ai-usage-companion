@@ -72,7 +72,7 @@ object SurfaceDump {
      * headings and rules whether or not it is composing anything. Names are truncated
      * with `[...]` in the middle when long, so this anchors on the end.
      */
-    private val layerName = Regex("""^\s*\S+#\d+\s*$""", RegexOption.MULTILINE)
+    private val layerName = Regex("""^\s*\S+#\d+[ \t\r]*$""", RegexOption.MULTILINE)
 
     /**
      * Where RearActivity is composited in [dump], with [isRear] saying which physical
@@ -147,16 +147,27 @@ object SurfaceDump {
         }
     }
 
-    private val appLayer = Regex("""^ VRI-([A-Za-z0-9_.]+)/""", RegexOption.MULTILINE)
+    private val appLayer = Regex("""^[ \t]*VRI-(\S+)#\d+[ \t\r]*$""", RegexOption.MULTILINE)
+    private val tableEnd = Regex("\r?\n\r?\n")
+    private const val TRUNCATION = "[...]"
 
     /**
      * The package whose window is on top of the rear display, or null when the rear
-     * composes no app window (dark, or only system strips). SurfaceFlinger lists layers top
-     * to bottom, and an app window is `VRI-<package>/<activity>`; Xiaomi's gesture strips
-     * (`VRI-SubScreenGesture…`, no slash) and our portal frame (`portal-frame`, no VRI)
-     * never match, so they are looked past.
+     * is not found or composes no app window (dark, or only system strips).
+     * SurfaceFlinger lists layers top to bottom, and an app window is
+     * `VRI-<package>/<activity>`; Xiaomi's gesture strips (`VRI-SubScreenGesture...`) and
+     * our portal frame (`portal-frame`, no VRI) are looked past.
+     *
+     * Long names are middle-truncated with `[...]` and may lose the `/`. Then only a
+     * package prefix survives: it is resolved to the first of [known] starting with it,
+     * and otherwise returned as `<prefix>[...]`, an app we cannot name (callers treat it
+     * as someone else). It is never skipped in favour of the app below it.
      */
-    fun topPackage(dump: String, isRear: (physicalId: String) -> Boolean): String? {
+    fun topPackage(
+        dump: String,
+        isRear: (physicalId: String) -> Boolean,
+        known: Collection<String> = emptyList(),
+    ): String? {
         val matches = header.findAll(dump).toList()
         for ((i, m) in matches.withIndex()) {
             if (!isRear(m.groupValues[1])) continue
@@ -164,8 +175,21 @@ object SurfaceDump {
             val end = if (i + 1 < matches.size) matches[i + 1].range.first else dump.length
             // The table ends at its first blank line; past it a dump goes on with other
             // listings that name windows too, and a dark rear must not borrow one of those.
-            val table = dump.substring(start, end).substringBefore("\n\n")
-            return appLayer.find(table)?.groupValues?.get(1)
+            val section = dump.substring(start, end)
+            val table = section.substring(0, tableEnd.find(section)?.range?.first ?: section.length)
+            for (layer in appLayer.findAll(table)) {
+                val name = layer.groupValues[1]
+                if (name.startsWith("SubScreenGesture")) continue
+                val slash = name.indexOf('/')
+                val cut = name.indexOf(TRUNCATION)
+                if (slash >= 0 && (cut < 0 || slash < cut)) return name.substring(0, slash)
+                if (cut >= 0) {
+                    val prefix = name.substring(0, cut)
+                    return known.firstOrNull { it.startsWith(prefix) } ?: (prefix + TRUNCATION)
+                }
+                // Neither a window of an app nor a truncated one: not ours to name.
+            }
+            return null
         }
         return null
     }
