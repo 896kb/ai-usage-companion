@@ -88,7 +88,7 @@ class PanelPreviewView @JvmOverloads constructor(
     /**
      * The App Portal's sheet as the back shows it, open over the panel: the panel blurred
      * and dimmed under it, as SurfaceFlinger blurs the rear under the shell's sheet — by
-     * the control centre's blur, which the sheet's is tuned to read as (ShellSheet.BLUR_MAX).
+     * the control centre's blur, which the sheet's is tuned to read as (ShellOverlay.BLUR_MAX).
      * Off, the panel as it is. A RenderEffect is a hardware renderer's: drawn in software,
      * the panel goes unblurred and the sheet's dim alone is over it.
      */

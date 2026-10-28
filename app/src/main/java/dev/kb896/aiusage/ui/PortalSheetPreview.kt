@@ -14,7 +14,7 @@ import dev.kb896.aiusage.rear.PortalFrame
 import dev.kb896.aiusage.rear.PortalSheet
 import dev.kb896.aiusage.rear.PortalSheetPainter
 import dev.kb896.aiusage.rear.SheetTint
-import dev.kb896.aiusage.rear.ShellSheet
+import dev.kb896.aiusage.rear.ShellOverlay
 
 /**
  * The App Portal's sheet as the back shows it, over the preview's panel while the Portal
@@ -60,7 +60,7 @@ internal class PortalSheetPreview(context: Context) : View(context) {
     }
     private val border = PortalFrame.Renderer()
     private val shapes = PortalFrame.shapesFor()
-    private val dim = Paint().apply { color = ShellSheet.dimColor(1f) }
+    private val dim = Paint().apply { color = ShellOverlay.dimColor(1f) }
     /** The border's clock starts with the view; only its motion shows, not where it began. */
     private val born = AnimationUtils.currentAnimationTimeMillis()
 
