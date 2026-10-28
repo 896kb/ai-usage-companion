@@ -96,6 +96,18 @@
             android:name=".service.PortalRelayService"
             android:exported="false" />
 
+        <!-- Send to back: the Quick Settings tile that moves the front app to the rear. -->
+        <service
+            android:name=".service.PortalTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="Send to back"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".service.UsagePollService"
             android:exported="false"
