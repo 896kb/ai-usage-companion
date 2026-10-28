@@ -116,4 +116,10 @@ class PortalActionTest {
         assertTrue(at.zipWithNext().all { (a, b) -> b > a })
         assertTrue(at.last() < 1_000)
     }
+    @Test fun `a task that vanishes in the survive wait is retried only when nobody closed it`() {
+        // A trampoline the move relaunched: nothing we sent closed it.
+        assertEquals(PortalAction.Vanished.RETRY, PortalAction.vanished(closedByUser = false))
+        // A Back invoked on it (at its root, it closes): the guest is over, not relaunched.
+        assertEquals(PortalAction.Vanished.OVER, PortalAction.vanished(closedByUser = true))
+    }
 }

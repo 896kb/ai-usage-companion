@@ -1008,6 +1008,12 @@ class RearUserService : IRearService.Stub {
                 guestPlaced(displayId)
                 return@synchronized true
             }
+            // Closed by a Back in the wait (at its root): over, not a failed move to retry.
+            if (PortalAction.vanished(closedByUser = backedTask == task) == PortalAction.Vanished.OVER) {
+                Log.i(TAG, "portal: $pkg's task $task closed on a Back in its survive wait — not relaunched")
+                if (dozing) dropGuest("its task closed on Back") else endGuest("its task closed on Back")
+                return@synchronized false
+            }
             chromeHide()
             // Not landed after all: no buttons for a task that is gone.
             guest = Guest(pkg, task, onTop = false)
@@ -1627,6 +1633,9 @@ class RearUserService : IRearService.Stub {
         if (back) sendBackOnce()
     }
 
+    /** The last task a Back was invoked on (PortalAction.vanished): its leaving is the user's doing. */
+    @Volatile private var backedTask = -1
+
     /** Backs, one at a time and in order, off the touch reader and every lock it takes. */
     private val backWorker by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-back").apply { isDaemon = true } }
@@ -1654,7 +1663,11 @@ class RearUserService : IRearService.Stub {
                     else -> "no back navigation given — nothing to do"
                 }
                 Log.i(TAG, "portal: Back ${o.type} for ${now.pkg} (task ${now.task}): $what, ${o.ms} ms")
-                if (o.step == PortalAction.BackStep.INVOKE) afterBack(now, o.typeCode)
+                if (o.step == PortalAction.BackStep.INVOKE) {
+                    // A Back on it may close it: a launch's survive wait must not relaunch it.
+                    backedTask = now.task
+                    afterBack(now, o.typeCode)
+                }
             }
         }.onFailure { Log.w(TAG, "portal: Back not queued: ${it.message}") }
     }

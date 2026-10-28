@@ -134,4 +134,20 @@ object PortalAction {
      * next tick, two seconds of a frame and a strip round nothing (seen on the phone).
      */
     val BACK_CHECKS_MS = listOf(120L, 300L, 700L)
+    /** What a guest's task gone in the launch's survive wait comes to. */
+    enum class Vanished {
+        /** Started again once: a trampoline the move relaunched (Shazam, measured). */
+        RETRY,
+        /** The guest is over: the user closed it (a Back at its root), and it is not relaunched. */
+        OVER,
+    }
+
+    /**
+     * A guest's task gone within the survive wait after its move: retried only when nothing
+     * we sent could have closed it ([closedByUser] false). A Back invoked on it in that wait
+     * closes it at its root — and the wait used to take that for a failed move and launch
+     * the app again (seen on the phone). Close, Front and Panel take the launch's lock, so
+     * they cannot happen inside it.
+     */
+    fun vanished(closedByUser: Boolean): Vanished = if (closedByUser) Vanished.OVER else Vanished.RETRY
 }
