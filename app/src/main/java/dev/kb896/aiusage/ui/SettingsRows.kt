@@ -75,8 +75,9 @@ object SettingsRows {
             this.progress = progress.coerceIn(0, max)
             setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: android.widget.SeekBar, p: Int, fromUser: Boolean) {
-                    caption.text = text(p)
+                    // onMove first: a caller's text() may depend on state it sets.
                     if (fromUser) onMove?.invoke(p)
+                    caption.text = text(p)
                 }
                 override fun onStartTrackingTouch(bar: android.widget.SeekBar) = Unit
                 override fun onStopTrackingTouch(bar: android.widget.SeekBar) = onDone(bar.progress)

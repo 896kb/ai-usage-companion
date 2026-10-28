@@ -15,11 +15,18 @@ import dev.kb896.aiusage.rear.RearDensity
  */
 object PortalAppSheet {
 
-    /** The slider's position for [dpi]; an unset app starts mid-range, labelled "Default". */
-    internal fun progressOf(dpi: Int?): Int =
-        ((dpi?.let { RearDensity.clamp(it) } ?: 450) - RearDensity.MIN) / RearDensity.STEP
+    /**
+     * Where an unset app's slider rests. Only a guess: the real default is the display's,
+     * and the app cannot read it (a guest may be overriding it right now), so the value
+     * line says "Default" rather than this number until the slider is moved.
+     */
+    private const val DEFAULT_GUESS = 450
 
-    internal fun dpiOf(progress: Int): Int = RearDensity.MIN + progress * RearDensity.STEP
+    /** The slider's position for [dpi]; an unset app starts mid-range, labelled "Default". */
+    private fun progressOf(dpi: Int?): Int =
+        ((dpi?.let { RearDensity.clamp(it) } ?: DEFAULT_GUESS) - RearDensity.MIN) / RearDensity.STEP
+
+    private fun dpiOf(progress: Int): Int = RearDensity.MIN + progress * RearDensity.STEP
 
     fun show(
         activity: Activity,
@@ -35,14 +42,19 @@ object PortalAppSheet {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(activity, 20), dp(activity, 4), dp(activity, 20), 0)
         }
-        SettingsRows.note(column, "Density of the back while $pkg is on top. Other times it keeps its own.")
+        SettingsRows.note(column, "Density of the back while ${label.trim()} is on top. Other times it keeps its own.")
         SettingsRows.slider(
             column,
             max = (RearDensity.MAX - RearDensity.MIN) / RearDensity.STEP,
             progress = progressOf(currentDpi),
             text = { if (touched) "${dpiOf(it)} dpi" else "Default" },
             onMove = { touched = true },
-            onDone = { touched = true; onDpi(dpiOf(it)) },
+            onDone = {
+                // A tap on the thumb without moving it must not save the guess as a choice.
+                val untouchedTap = currentDpi == null && !touched && it == progressOf(null)
+                touched = true
+                if (!untouchedTap) onDpi(dpiOf(it))
+            },
         )
         Modal.show(
             Modal.builder(activity).setTitle(label.trim())

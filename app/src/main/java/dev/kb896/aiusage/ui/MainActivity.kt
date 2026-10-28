@@ -1329,7 +1329,7 @@ class MainActivity : ComponentActivity() {
         SettingsRows.note(portalRows, "Pull up from the bottom of the back to open apps there. A swipe in from the right edge is the app's Back.")
         SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") {
             AppPicker.show(this, config.portalApps) { pinned ->
-                write { it.copy(portalApps = pinned) }
+                write { it.copy(portalApps = pinned, portalDpi = it.portalDpi.filterKeys { k -> k in pinned }) }
                 buildSettingsRows()
             }
         }
