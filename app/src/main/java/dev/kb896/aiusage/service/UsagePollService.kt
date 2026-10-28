@@ -418,12 +418,12 @@ class UsagePollService : Service() {
             }
             if (intent?.action == RearActivity.ACTION_PORTAL_LAUNCH) {
                 val pkg = intent.getStringExtra(RearActivity.EXTRA_PORTAL_PKG).orEmpty()
-                portalWorker.execute { Graph.of(this@UsagePollService).bridge.launchGuest(pkg) }
+                portalWorker.execute { runCatching { Graph.of(this@UsagePollService).bridge.launchGuest(pkg) } }
                 return
             }
             if (intent?.action == RearActivity.ACTION_PORTAL_GUEST) {
                 val which = intent.getStringExtra(RearActivity.EXTRA_PORTAL_WHICH).orEmpty()
-                portalWorker.execute { Graph.of(this@UsagePollService).bridge.guestAction(which) }
+                portalWorker.execute { runCatching { Graph.of(this@UsagePollService).bridge.guestAction(which) } }
                 return
             }
             if (intent?.action == RearActivity.ACTION_SET_QUICK) {

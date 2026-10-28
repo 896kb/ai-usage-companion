@@ -18,7 +18,7 @@ class ShizukuBridge(private val context: Context) {
         val ready get() = running && granted && rearDisplayId >= 0
     }
 
-    private var service: IRearService? = null
+    @Volatile private var service: IRearService? = null
     private var pending: String? = null
     private var binderListenerArmed = false
 
@@ -171,7 +171,12 @@ class ShizukuBridge(private val context: Context) {
         service?.let { return it }
         bind()
         val deadline = System.currentTimeMillis() + timeoutMs
-        while (service == null && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        try {
+            while (service == null && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return null
+        }
         return service
     }
 
@@ -316,25 +321,42 @@ class ShizukuBridge(private val context: Context) {
 
     fun setPortalCallback(callback: dev.kb896.aiusage.IPortalCallback?) {
         portalCallback = callback
-        runCatching { service?.setPortalCallback(callback) }.onFailure { Log.w(TAG, "portal callback: ${it.message}") }
+        if (service == null) bind()
+        runCatching { service?.setPortalCallback(callback) }.onFailure {
+            Log.w(TAG, "portal callback: ${it.message}")
+            if (it is android.os.DeadObjectException) service = null
+        }
     }
 
-    /** Blocks for seconds (settle, survive, retry): call off the main thread. */
+    /** Blocks (waits for the service, settles, survives, retries): call off the main thread. */
     fun launchGuest(pkg: String): Boolean {
         val display = rearDisplayId()
         if (display < 0) return false
-        return runCatching { service?.launchGuest(pkg, display) == true }
-            .onFailure { Log.w(TAG, "guest launch failed: ${it.message}") }.getOrDefault(false)
+        val svc = awaitService() ?: return false
+        return runCatching { svc.launchGuest(pkg, display) }
+            .onFailure {
+                Log.w(TAG, "guest launch failed: ${it.message}")
+                if (it is android.os.DeadObjectException) service = null
+            }.getOrDefault(false)
     }
 
+    /** Blocks while waiting for the service: call off the main thread. */
     fun sendFocusedToBack(): String {
         val display = rearDisplayId()
         if (display < 0) return ""
-        return runCatching { service?.sendFocusedToBack(display).orEmpty() }.getOrDefault("")
+        val svc = awaitService() ?: return ""
+        return runCatching { svc.sendFocusedToBack(display).orEmpty() }
+            .onFailure {
+                Log.w(TAG, "send to back failed: ${it.message}")
+                if (it is android.os.DeadObjectException) service = null
+            }.getOrDefault("")
     }
 
     fun guestAction(which: String) {
-        runCatching { service?.guestAction(which) }.onFailure { Log.w(TAG, "guest action failed: ${it.message}") }
+        runCatching { service?.guestAction(which) }.onFailure {
+            Log.w(TAG, "guest action failed: ${it.message}")
+            if (it is android.os.DeadObjectException) service = null
+        }
     }
 
     /**
