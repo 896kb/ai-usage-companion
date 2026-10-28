@@ -20,6 +20,24 @@ class ElectricBorderTest {
         }
     }
 
+    @Test fun `square left corners - the left side runs straight from top to bottom, the right stays round`() {
+        val usable = ElectricBorder.Shape.Rounded(306f, 10f, 894f, 562f, 87f, leftR = 0f)
+        assertEquals(2 * (588f - 87f) + (552f - 174f) + 552f + (Math.PI * 87).toFloat(), usable.length, 0.01f)
+        val pts = ElectricBorder.outline(usable)
+        var onLeft = 0
+        for (i in pts.indices step 2) {
+            val x = pts[i]; val y = pts[i + 1]
+            val onSide = x in 305.9f..306.1f || x in 893.9f..894.1f || y in 9.9f..10.1f || y in 561.9f..562.1f
+            val inCorner = x > 807f && (y < 97f || y > 475f)
+            assertTrue("($x, $y) off the outline", onSide || inCorner)
+            if (x in 305.9f..306.1f) onLeft++
+        }
+        // The whole left side, corner to corner, a point every four pixels.
+        assertTrue("left side has $onLeft points", onLeft >= (552 / ElectricBorder.STEP).toInt())
+        val out = FloatArray(2)
+        usable.at(0f, out, 0); assertEquals(306f, out[0], 0.01f); assertEquals(10f, out[1], 0.01f)
+    }
+
     @Test fun `the circle's points are at its radius, a point every four pixels or so`() {
         val pts = ElectricBorder.outline(lens)
         for (i in pts.indices step 2) assertEquals(146f, hypot(pts[i] - 150f, pts[i + 1] - 144f), 0.01f)

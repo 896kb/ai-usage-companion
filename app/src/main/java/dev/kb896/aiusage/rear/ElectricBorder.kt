@@ -35,26 +35,37 @@ object ElectricBorder {
             }
         }
 
-        data class Rounded(val left: Float, val top: Float, val right: Float, val bottom: Float, val r: Float) : Shape {
-            private val sw get() = right - left - 2 * r
-            private val sh get() = bottom - top - 2 * r
+        /**
+         * A rectangle with its right corners rounded by [r] and its left ones by [leftR] —
+         * the same unless said otherwise. The rear's usable screen is square on its left,
+         * where it meets the lens strip, and round on its right, where the glass is.
+         */
+        data class Rounded(
+            val left: Float, val top: Float, val right: Float, val bottom: Float, val r: Float,
+            val leftR: Float = r,
+        ) : Shape {
+            private val sw get() = right - left - r - leftR
+            private val shRight get() = bottom - top - 2 * r
+            private val shLeft get() = bottom - top - 2 * leftR
             private val arc get() = (PI * r / 2).toFloat()
-            override val length get() = 2 * sw + 2 * sh + 4 * arc
+            private val arcLeft get() = (PI * leftR / 2).toFloat()
+            override val length get() = 2 * sw + shRight + shLeft + 2 * arc + 2 * arcLeft
             override fun at(t: Float, out: FloatArray, index: Int) {
                 var d = t * length
                 fun put(x: Float, y: Float) { out[index] = x; out[index + 1] = y }
-                fun corner(cx: Float, cy: Float, start: Double, p: Float) {
+                fun corner(cx: Float, cy: Float, radius: Float, start: Double, p: Float) {
                     val a = start + p.coerceIn(0f, 1f) * PI / 2
-                    put(cx + r * cos(a).toFloat(), cy + r * sin(a).toFloat())
+                    put(cx + radius * cos(a).toFloat(), cy + radius * sin(a).toFloat())
                 }
-                if (d <= sw) return put(left + r + d, top); d -= sw
-                if (d <= arc) return corner(right - r, top + r, -PI / 2, d / arc); d -= arc
-                if (d <= sh) return put(right, top + r + d); d -= sh
-                if (d <= arc) return corner(right - r, bottom - r, 0.0, d / arc); d -= arc
+                if (d <= sw) return put(left + leftR + d, top); d -= sw
+                if (d <= arc) return corner(right - r, top + r, r, -PI / 2, d / arc); d -= arc
+                if (d <= shRight) return put(right, top + r + d); d -= shRight
+                if (d <= arc) return corner(right - r, bottom - r, r, 0.0, d / arc); d -= arc
                 if (d <= sw) return put(right - r - d, bottom); d -= sw
-                if (d <= arc) return corner(left + r, bottom - r, PI / 2, d / arc); d -= arc
-                if (d <= sh) return put(left, bottom - r - d); d -= sh
-                corner(left + r, top + r, PI, d / arc)
+                if (d <= arcLeft) return corner(left + leftR, bottom - leftR, leftR, PI / 2, d / arcLeft); d -= arcLeft
+                if (d <= shLeft) return put(left, bottom - leftR - d); d -= shLeft
+                if (arcLeft <= 0f) return put(left, top)
+                corner(left + leftR, top + leftR, leftR, PI, d / arcLeft)
             }
         }
     }

@@ -226,10 +226,14 @@ class PortalFrame(private val layerStack: Int) {
 
         /**
          * The usable screen's edge only, right of the lenses (Panel.CUTOUT_RIGHT): the frame
-         * neither runs round the lenses nor along the strip beside them.
+         * neither runs round the lenses nor along the strip beside them. Square on the left,
+         * where the screen meets the strip; round on the right, as the glass is.
          */
         fun shapesFor(): List<ElectricBorder.Shape> = listOf(
-            ElectricBorder.Shape.Rounded(Panel.CUTOUT_RIGHT + INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET),
+            ElectricBorder.Shape.Rounded(
+                Panel.CUTOUT_RIGHT + INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET,
+                leftR = 0f,
+            ),
         )
     }
 }
