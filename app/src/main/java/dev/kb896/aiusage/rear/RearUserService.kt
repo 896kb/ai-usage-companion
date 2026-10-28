@@ -37,7 +37,14 @@ class RearUserService : IRearService.Stub {
         // nothing was ever set, so no first read just to find that out.
         synchronized(densityLock) {
             densityClosed = true
-            if (densityRead) applyDensity(null, "the service is going")
+            if (densityRead) {
+                rereadNotBefore = 0L
+                applyDensity(null, "the service is going")
+                // One more go if it did not take. Past that there is nothing more to do here:
+                // the marker setting is still written, so the next start finds the override
+                // listed as ours and restores it (see readDensity).
+                if (currentDensity != baselineDensity || !densityKnown) applyDensity(null, "the service is going (retry)")
+            }
         }
         exitProcess(0)
     }
@@ -667,6 +674,8 @@ class RearUserService : IRearService.Stub {
     private var refusedDensity: String? = null
     /** Set by destroy(): nothing may apply a density after its restore. Under [densityLock]. */
     private var densityClosed = false
+    /** No re-read after an unknown outcome before this uptime (ms), so a failing exec is not retried every tick. Under [densityLock]. */
+    private var rereadNotBefore = 0L
     /** Display 1's physical density, for the log. */
     private var physicalDensity = DensityDump.FALLBACK
     /** The config's per-app DPI, from the latest payload. */
@@ -691,8 +700,12 @@ class RearUserService : IRearService.Stub {
     private fun applyDensity(guestDpi: Int?, why: String) {
         if (!readDensity()) return
         if (!densityKnown) {
+            if (android.os.SystemClock.elapsedRealtime() < rereadNotBefore) return
             val d = (execChecked("wm density -d ${Panel.DISPLAY_ID}") as? Run.Ok)?.let { DensityDump.parse(it.out) }
-            if (d?.physical == null) return
+            if (d?.physical == null) {
+                rereadNotBefore = android.os.SystemClock.elapsedRealtime() + REREAD_BACKOFF_MS
+                return
+            }
             currentDensity = d.override
             densityKnown = true
             Log.i(TAG, "density: display ${Panel.DISPLAY_ID} re-read after an unfinished change — ${d.override ?: "no override"}")
@@ -1318,20 +1331,42 @@ class RearUserService : IRearService.Stub {
         data object Unknown : Run
     }
 
-    /** [exec] for where a failure must not pass for success, and refused must not pass for unknown. */
-    private fun execChecked(cmd: String): Run = try {
-        val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
-        val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }.trim()
-        val code = p.waitFor()
-        if (code != 0 || out.contains("Exception", ignoreCase = true) || out.contains("Error", ignoreCase = true)) {
-            Log.w(TAG, "exit $code: $cmd: ${out.take(200)}")
-            Run.Refused(out)
-        } else Run.Ok(out)
-    } catch (e: InterruptedException) {
-        // Kept, as in exec(), so the keep-alive's next sleep sees it and ends.
-        Thread.currentThread().interrupt(); Run.Unknown
-    } catch (e: Exception) {
-        Log.e(TAG, "exec failed: $cmd", e); Run.Unknown
+    /**
+     * [exec] for where a failure must not pass for success, and refused must not pass for unknown.
+     *
+     * A leftover interrupt flag on the calling thread (the keep-alive's, say) used to make
+     * waitFor() throw AFTER the command had completed, which read as Unknown forever. So the
+     * flag is taken off before waiting, the command is classified by what it really did, and
+     * the flag is put back afterwards for the thread's next sleep to see.
+     */
+    private fun execChecked(cmd: String): Run {
+        var interrupted = false
+        try {
+            val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
+            val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }.trim()
+            if (Thread.interrupted()) interrupted = true
+            var code: Int? = null
+            while (code == null) {
+                try {
+                    code = p.waitFor()
+                } catch (e: InterruptedException) {
+                    interrupted = true
+                    // Finished all the same: its outcome is known. Still running: unknown.
+                    if (!p.isAlive) code = p.exitValue() else return Run.Unknown
+                }
+            }
+            // Error text only means a refusal from wm; `settings get` may legitimately print anything.
+            val errorText = cmd.startsWith("wm ") &&
+                (out.contains("Exception", ignoreCase = true) || out.contains("Error", ignoreCase = true))
+            return if (code != 0 || errorText) {
+                Log.w(TAG, "exit $code: $cmd: ${out.take(200)}")
+                Run.Refused(out)
+            } else Run.Ok(out)
+        } catch (e: Exception) {
+            Log.e(TAG, "exec failed: $cmd", e); return Run.Unknown
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
     }
 
     private fun exec(cmd: String): String = try {
@@ -1347,6 +1382,8 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        /** After a failed re-read of display 1's density, how long before the next exec. */
+        const val REREAD_BACKOFF_MS = 30_000L
         /** after a direct start on the rear display, before believing it took */
         private const val DIRECT_START_SETTLE_MS = 1_200L
         private val REPORT = """
