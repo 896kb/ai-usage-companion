@@ -38,11 +38,39 @@ class RearUserService : IRearService.Stub {
     /** When the panel was last rebuilt from scratch, for the cooldown below. */
     private var lastReplaceAt = 0L
 
+    /**
+     * A thread whose body cannot kill the process: anything it throws, an Error too, is logged
+     * and that thread's work ends. An uncaught throwable in any thread kills app_process — and
+     * our layers outlive it (ShellLayer.live).
+     */
+    private inline fun guarded(crossinline body: () -> Unit): Thread = Thread {
+        try { body() } catch (e: Throwable) { Log.e(TAG, "a shell thread (${Thread.currentThread().name}) failed", e) }
+    }
+
+    /** An executor's thread, as [guarded]: a task that throws ends that thread, never the process. */
+    private fun guardedThread(name: String, r: Runnable): Thread =
+        Thread({
+            try { r.run() } catch (e: Throwable) { Log.e(TAG, "a shell worker ($name) failed", e) }
+        }, name).apply { isDaemon = true }
+
+    init {
+        // The last chance: whatever still escapes takes our layers off the rear before the
+        // process dies, since they would otherwise stay there until a reboot (ShellLayer.live).
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching { Log.e(TAG, "uncaught in ${t.name} — our layers off the rear before the end", e) }
+            runCatching { ShellLayer.removeAll() }
+            previous?.uncaughtException(t, e)
+        }
+    }
+
     override fun destroy() {
         // The sheet's blocker must not outlive us: an untrusted layer left up takes every
         // touch on the rear. On this thread, since the process exits right after.
         closeSheetNow("the service is going", sync = true)
         stopTouchWatch()
+        // Every layer of ours off the rear now: they outlive the process (ShellLayer.live).
+        ShellLayer.removeAll()
         // The guest's density must not outlive the service that set it. Closed first, so
         // nothing re-applies one between this restore and the exit; and nothing read means
         // nothing was ever set, so no first read just to find that out.
@@ -363,7 +391,7 @@ class RearUserService : IRearService.Stub {
         bandTaps = proc
         val since = android.os.SystemClock.elapsedRealtime()
         Log.i(TAG, "camera close: watching $path for a tap in the left ${"%.1f".format(band * 100)}%")
-        Thread {
+        guarded {
             val tap = BandTap(maxX, maxY, band)
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
@@ -383,8 +411,8 @@ class RearUserService : IRearService.Stub {
             }
         }.apply { isDaemon = true; name = "camera-band-taps"; start() }
         // getevent blocks while nobody touches the screen, so the time limit needs its own clock.
-        Thread {
-            try { Thread.sleep(BAND_WATCH_MS) } catch (_: InterruptedException) { return@Thread }
+        guarded {
+            try { Thread.sleep(BAND_WATCH_MS) } catch (_: InterruptedException) { return@guarded }
             if (bandTaps === proc) stopBandTaps()
         }.apply { isDaemon = true; name = "camera-band-taps-limit"; start() }
     }
@@ -421,11 +449,11 @@ class RearUserService : IRearService.Stub {
         // the same as swiping it away in recents: the activity is paused, stopped and
         // destroyed, a recording finishes the way it does when Home is pressed, and the
         // front-screen half goes with it (measured: both tasks gone, the panel in focus).
-        Thread {
-            try { Thread.sleep(BACK_SETTLE_MS) } catch (_: InterruptedException) { return@Thread }
+        guarded {
+            try { Thread.sleep(BACK_SETTLE_MS) } catch (_: InterruptedException) { return@guarded }
             val dump = exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='")
-            if (FocusDump.focusedPackage(dump, displayId) != CAMERA_PACKAGE) return@Thread
-            val task = FocusDump.focusedTask(dump, displayId) ?: return@Thread
+            if (FocusDump.focusedPackage(dump, displayId) != CAMERA_PACKAGE) return@guarded
+            val task = FocusDump.focusedTask(dump, displayId) ?: return@guarded
             Log.i(TAG, "camera close: still up after Back — removing its task $task")
             exec("am stack remove $task")
         }.apply { isDaemon = true; name = "camera-close-settle"; start() }
@@ -1408,7 +1436,7 @@ class RearUserService : IRearService.Stub {
             gestures.sheet = sheetUp
             this.gestures = gestures
         }
-        Thread {
+        guarded {
             // The font and the layer stack, off every binder thread and before the first pull.
             sheetOrNull()
             // And the capture, once, so the first cover is taken in this process, not by screencap.
@@ -1427,7 +1455,7 @@ class RearUserService : IRearService.Stub {
                 }
             } catch (_: java.io.IOException) {
                 // The stream closing under us is how stopTouchWatch() ends this.
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "portal: touch watch stopped", e)
             } finally {
                 runCatching { proc.destroy() }
@@ -1604,11 +1632,11 @@ class RearUserService : IRearService.Stub {
         apps.packages.indexOf(pkg).takeIf { it >= 0 }?.let { i -> apps.icon(i)?.let { return it } }
         guestIconCache?.let { (p, icon) -> if (p == pkg) return icon }
         guestIconCache = pkg to null
-        Thread {
+        guarded {
             val icon = runCatching { context?.packageManager?.getApplicationIcon(pkg)?.toBitmap(GUEST_ICON_PX, GUEST_ICON_PX) }
                 .onFailure { Log.w(TAG, "portal sheet: no icon for $pkg: ${it.message}") }
                 .getOrNull()
-            if (guestIconCache?.first != pkg) return@Thread
+            if (guestIconCache?.first != pkg) return@guarded
             guestIconCache = pkg to icon
             if (icon != null && guest?.takeIf { it.sheetOnTop != null }?.pkg == pkg) shellSheet?.guestIcon(icon)
         }.apply { isDaemon = true; name = "portal-guest-icon"; start() }
@@ -1638,7 +1666,7 @@ class RearUserService : IRearService.Stub {
 
     /** Backs, one at a time and in order, off the touch reader and every lock it takes. */
     private val backWorker by lazy {
-        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-back").apply { isDaemon = true } }
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-back", r) }
     }
 
     /**
@@ -1685,12 +1713,12 @@ class RearUserService : IRearService.Stub {
     private fun afterBack(g: Guest, type: Int) {
         val closing = PortalAction.backMayClose(type)
         if (closing) chromeHide()
-        Thread {
+        guarded {
             val began = android.os.SystemClock.uptimeMillis()
             for (at in PortalAction.BACK_CHECKS_MS) {
                 val wait = began + at - android.os.SystemClock.uptimeMillis()
-                if (wait > 0) try { Thread.sleep(wait) } catch (_: InterruptedException) { return@Thread }
-                if (guest?.task != g.task) return@Thread // replaced or ended meanwhile
+                if (wait > 0) try { Thread.sleep(wait) } catch (_: InterruptedException) { return@guarded }
+                if (guest?.task != g.task) return@guarded // replaced or ended meanwhile
                 if (!guestStillOnRear(g)) {
                     synchronized(placing) {
                         // Checked again under the lock: a launch since may have moved things.
@@ -1701,7 +1729,7 @@ class RearUserService : IRearService.Stub {
                             else endGuest("its task closed on Back, $ms ms after it")
                         }
                     }
-                    return@Thread
+                    return@guarded
                 }
             }
             // Still there: a Back within the app, or one it kept (moveTaskToBack on the rear).
@@ -1835,7 +1863,7 @@ class RearUserService : IRearService.Stub {
         android.os.SystemClock.elapsedRealtime() - cameraLaunchedAt < BAND_WATCH_MS
 
     private val pokeWorker by lazy {
-        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-poke").apply { isDaemon = true } }
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-poke", r) }
     }
     @Volatile private var lastPokeAt = 0L
 
@@ -2314,7 +2342,7 @@ class RearUserService : IRearService.Stub {
     }
 
     private val densityWorker by lazy {
-        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-density").apply { isDaemon = true } }
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-density", r) }
     }
 
     /** A [flushDpi] when the next edit falls due. Any thread. */
@@ -2422,7 +2450,7 @@ class RearUserService : IRearService.Stub {
         runCatching {
             sheetClock.execute {
                 runCatching { s.end() }.onFailure { Log.w(TAG, "portal sheet: end failed: ${it.message}") }
-                then?.let { Thread(it).apply { isDaemon = true; name = "portal-sheet-choice"; start() } }
+                then?.let { choice -> guarded { choice() }.apply { isDaemon = true; name = "portal-sheet-choice"; start() } }
             }
         }.onFailure {
             runCatching { s.end() }
@@ -2538,7 +2566,7 @@ class RearUserService : IRearService.Stub {
 
     private fun startKeepAlive(displayId: Int) {
         if (keepAlive?.isAlive == true) return
-        keepAlive = Thread {
+        keepAlive = guarded {
             while (!Thread.currentThread().isInterrupted) {
                 try {
                     Thread.sleep(KEEPALIVE_MS)
@@ -2717,8 +2745,10 @@ class RearUserService : IRearService.Stub {
                         }
                     }
                 } catch (e: InterruptedException) {
-                    return@Thread
-                } catch (e: Exception) {
+                    return@guarded
+                } catch (e: Throwable) {
+                    // Any of it, an Error too: a keep-alive that dies leaves the rear unwatched
+                    // (and once took the process with it — see ShellLayer.live).
                     Log.e(TAG, "keep-alive tick failed", e)
                 }
             }

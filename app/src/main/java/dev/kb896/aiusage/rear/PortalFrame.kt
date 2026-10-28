@@ -170,7 +170,14 @@ class PortalFrame(private val layerStack: Int) {
             ShellLayer.remove(sc)
             return
         }
-        val r = Renderer()
+        val r = try { Renderer() } catch (e: Throwable) {
+            Log.w(TAG, "portal frame: no renderer: ${e.message}")
+            failedAt = System.nanoTime()
+            runCatching { surface.release() }
+            ShellLayer.remove(sc)
+            synchronized(this) { if (gen == myGen && thread === Thread.currentThread()) thread = null }
+            return
+        }
         val start = System.nanoTime()
         var slow = 0
         var fast = 0

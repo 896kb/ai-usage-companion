@@ -39,6 +39,30 @@ internal object ShellLayer {
     /** gui::TrustedOverlay::ENABLED. UNSET is 0 and DISABLED 1, and 1 still has touches dropped. */
     const val TRUSTED_OVERLAY_ENABLED = 2
 
+    /**
+     * Every layer made here and not yet [remove]d. ON THIS FIRMWARE A SHELL LAYER OUTLIVES ITS
+     * PROCESS: after the service crashed, its camera strip stayed composed at full alpha
+     * (handleNotAlive) until a reboot. So whatever ends the process first takes them all
+     * away ([removeAll]: the service's destroy, and its last-chance uncaught-exception handler).
+     */
+    private val live: MutableSet<SurfaceControl> = java.util.Collections.synchronizedSet(LinkedHashSet())
+
+    /**
+     * Every live layer off the rear in one transaction, then let go — synchronously, as the
+     * last thing a dying process does. Quiet: there is nobody left to tell.
+     */
+    fun removeAll() {
+        val all = synchronized(live) { live.toList().also { live.clear() } }
+        if (all.isEmpty()) return
+        runCatching {
+            SurfaceControl.Transaction().use { t ->
+                for (l in all) runCatching { t.setVisibility(l, false).reparent(l, null) }
+                t.apply()
+            }
+        }
+        for (l in all) runCatching { l.release() }
+    }
+
     /** A layer that had to be trusted could not be; [message] says why. */
     class Untrusted(why: String) : Exception(why)
 
@@ -63,6 +87,7 @@ internal object ShellLayer {
                 if (alpha < 1f) t.setAlpha(layer, alpha)
                 t.setLayer(layer, z).setVisibility(layer, visible).apply()
             }
+            live.add(layer)
             return layer
         } catch (e: Throwable) {
             runCatching { layer.release() }
@@ -73,6 +98,7 @@ internal object ShellLayer {
     /** Takes [layer] off the screen and lets it go. Safe on a layer already gone. */
     fun remove(layer: SurfaceControl?) {
         if (layer == null) return
+        live.remove(layer)
         runCatching { SurfaceControl.Transaction().use { it.reparent(layer, null).apply() } }
         runCatching { layer.release() }
     }
