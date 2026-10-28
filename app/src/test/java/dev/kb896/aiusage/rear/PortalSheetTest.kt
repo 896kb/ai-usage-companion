@@ -4,9 +4,12 @@ import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.PortalGrid
 import dev.kb896.aiusage.rear.PortalSheet.FULL
 import dev.kb896.aiusage.rear.PortalSheet.Hit
-import dev.kb896.aiusage.rear.PortalSheet.PEEK
+import dev.kb896.aiusage.rear.PortalSheet.OPEN
+import dev.kb896.aiusage.rear.PortalSheet.REVEALED
+import dev.kb896.aiusage.rear.PortalSheet.STRIP
 import dev.kb896.aiusage.rear.PortalSheet.Swipe
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,10 +23,22 @@ class PortalSheetTest {
 
     // -- the stops ---------------------------------------------------------------------
 
-    @Test fun `over a guest on top the sheet stops at the strip on the way, elsewhere only shut and full`() {
-        assertEquals(listOf(0f, PEEK, FULL), PortalSheet.detents(true))
-        assertEquals(listOf(0f, FULL), PortalSheet.detents(false))
-        assertEquals(listOf(0f, FULL), PortalSheet.detents(null))
+    @Test fun `with a guest, on top or behind, the open sheet scrolls on to the slider, without one it only opens`() {
+        assertEquals(listOf(0f, OPEN, REVEALED), PortalSheet.detents(true))
+        assertEquals(listOf(0f, OPEN, REVEALED), PortalSheet.detents(false))
+        assertEquals(listOf(0f, OPEN), PortalSheet.detents(null))
+        assertEquals(PortalPull.TRAVEL, OPEN, 0f)
+        assertEquals(OPEN + STRIP, REVEALED, 0f)
+    }
+
+    @Test fun `the pull opens it, past that the contents scroll`() {
+        assertEquals(0f, PortalSheet.progress(0f), 0f)
+        assertEquals(0.5f, PortalSheet.progress(OPEN / 2), 1e-5f)
+        assertEquals(1f, PortalSheet.progress(REVEALED), 0f)
+        assertEquals(0f, PortalSheet.scroll(OPEN), 0f)
+        assertEquals(0f, PortalSheet.scroll(OPEN / 2), 0f)
+        assertEquals(40f, PortalSheet.scroll(OPEN + 40f), 1e-4f)
+        assertEquals(STRIP, PortalSheet.scroll(REVEALED + 30f), 0f)
     }
 
     // -- the grid, for every size ------------------------------------------------------
@@ -46,26 +61,27 @@ class PortalSheetTest {
     @Test fun `every cell, button, dot and the slider stay on the panel and clear of Xiaomi's Back strip`() {
         for (grid in PortalGrid.entries) for (guest in guests) {
             val l = layout(48, guest, grid)
-            val boxes = l.slots + l.buttons + l.dots + listOfNotNull(l.slider?.icon, l.slider?.track, l.slider?.value)
-            boxes.forEach {
+            val slider = listOfNotNull(l.slider?.icon, l.slider?.track, l.slider?.value)
+            (l.slots + l.buttons + l.dots + slider).forEach {
                 assertTrue("$grid $guest $it", it.left >= Panel.CUTOUT_RIGHT && it.right < EdgeGestures.BACK_LEFT)
-                assertTrue("$grid $guest $it", it.top >= 0f && it.bottom <= Panel.HEIGHT)
             }
+            // On the panel as laid out; the slider's row on it once scrolled.
+            (l.slots + l.buttons + l.dots).forEach { assertTrue("$grid $guest $it", it.top >= 0f && it.bottom <= Panel.HEIGHT) }
+            slider.forEach { assertTrue(it.top - STRIP >= 0f && it.bottom - STRIP <= Panel.HEIGHT) }
             // The thumb's overhang past the track's end too.
             l.slider?.let { assertTrue(it.track.right + PortalSheet.THUMB / 2 < EdgeGestures.BACK_LEFT) }
         }
     }
 
-    @Test fun `the grid stays above the strip, and under the buttons`() {
+    @Test fun `the grid stays on the panel, under the buttons, the slider's row under it all`() {
         for (grid in PortalGrid.entries) for (guest in guests) {
             val l = layout(48, guest, grid)
             val gridTop = l.slots.minOf { it.top }
             val below = (l.slots + l.dots).maxOf { it.bottom }
-            assertTrue("$grid $guest", below <= l.upperBottom)
+            assertTrue("$grid $guest", below <= FULL)
             l.buttons.forEach { assertTrue(it.bottom < gridTop) }
+            l.slider?.let { s -> listOf(s.icon, s.track, s.value).forEach { assertTrue(it.top >= FULL && it.bottom <= FULL + STRIP) } }
         }
-        assertEquals(FULL - PEEK, layout(guest = true).upperBottom, 0f)
-        assertEquals(FULL, layout(guest = false).upperBottom, 0f)
     }
 
     @Test fun `fewer cells a page are bigger, and three rows of four are no smaller than they were`() {
@@ -75,17 +91,39 @@ class PortalSheetTest {
             assertTrue(sides.all { it <= PortalSheet.CELL_MAX })
         }
         assertEquals(120f, layout(guest = null).slots[0].width, 0.01f)
-        assertEquals(120f, layout(guest = false).slots[0].width, 0.01f)
-        // With the strip under it, three rows still fit, a little smaller.
-        assertTrue(layout(guest = true).slots[0].width >= 100f)
+        assertEquals(120f, layout(guest = true).slots[0].width, 0.01f)
     }
 
     @Test fun `an icon and its name sit inside their cell`() {
-        val c = layout(guest = true).slots[5]
-        val icon = PortalSheet.icon(c)
-        assertEquals(c.width * PortalSheet.ICON_SCALE, icon.width, 0.01f)
-        assertEquals(c.centerX, icon.centerX, 0.01f)
-        assertTrue(icon.top > c.top && icon.bottom < PortalSheet.nameBaseline(c) && PortalSheet.nameBaseline(c) < c.bottom)
+        for (grid in PortalGrid.entries) {
+            val c = layout(guest = true, grid = grid).slots[0]
+            val icon = PortalSheet.icon(c)
+            assertEquals(c.width * PortalSheet.ICON_SCALE, icon.width, 0.01f)
+            assertEquals(icon.width, icon.height, 0.01f)
+            assertEquals(c.centerX, icon.centerX, 0.01f)
+            assertTrue(icon.top > c.top && icon.bottom < PortalSheet.nameBaseline(c) && PortalSheet.nameBaseline(c) < c.bottom)
+        }
+    }
+
+    @Test fun `without names an icon fills its cell but a margin, centred, for every grid`() {
+        for (grid in PortalGrid.entries) for (guest in guests) {
+            val c = layout(guest = guest, grid = grid).slots[3]
+            val with = PortalSheet.icon(c, names = true)
+            val without = PortalSheet.icon(c, names = false)
+            val m = c.width * PortalSheet.ICON_MARGIN
+            assertEquals("$grid", c.width - 2 * m, without.width, 0.01f)
+            assertEquals(without.width, without.height, 0.01f)
+            assertEquals(c.centerX, without.centerX, 0.01f)
+            assertEquals(c.centerY, without.centerY, 0.01f)
+            assertTrue(without.width > with.width)
+            assertTrue(without.left >= c.left && without.right <= c.right && without.top >= c.top && without.bottom <= c.bottom)
+        }
+    }
+
+    @Test fun `without names the whole cell is still the app's`() {
+        val l = layout(7)
+        val c = l.slots[2]
+        assertEquals(Hit.App(2), PortalSheet.hit(l, c.left + 1f, c.bottom - 1f, 0f, 0))
     }
 
     // -- pages --------------------------------------------------------------------------
@@ -127,11 +165,11 @@ class PortalSheetTest {
     @Test fun `a tap on a cell is that app, on the page that shows`() {
         val l = layout(20)
         val c = l.slots[5]
-        assertEquals(Hit.App(5), PortalSheet.hit(l, c.centerX, c.centerY, FULL, 0))
-        assertEquals(Hit.App(17), PortalSheet.hit(l, c.centerX, c.centerY, FULL, 1))
+        assertEquals(Hit.App(5), PortalSheet.hit(l, c.centerX, c.centerY, 0f, 0))
+        assertEquals(Hit.App(17), PortalSheet.hit(l, c.centerX, c.centerY, 0f, 1))
         // Past the last app on its page, an empty slot is outside.
         val empty = l.slots[9]
-        assertEquals(Hit.Outside, PortalSheet.hit(l, empty.centerX, empty.centerY, FULL, 1))
+        assertEquals(Hit.Outside, PortalSheet.hit(l, empty.centerX, empty.centerY, 0f, 1))
     }
 
     @Test fun `with a guest, the strip's three buttons sit above the grid`() {
@@ -139,7 +177,7 @@ class PortalSheetTest {
             val l = layout(guest = guest)
             assertEquals(3, l.buttons.size)
             val b = l.buttons[2]
-            assertEquals(Hit.Button(2), PortalSheet.hit(l, b.centerX, b.centerY, FULL, 0))
+            assertEquals(Hit.Button(2), PortalSheet.hit(l, b.centerX, b.centerY, 0f, 0))
         }
         assertEquals(emptyList<PortalSheet.Box>(), layout(guest = null).buttons)
     }
@@ -147,45 +185,69 @@ class PortalSheetTest {
     @Test fun `a dot is its page`() {
         val l = layout(30)
         val d = l.dots[2]
-        assertEquals(Hit.Page(2), PortalSheet.hit(l, d.centerX, d.centerY, FULL, 0))
+        assertEquals(Hit.Page(2), PortalSheet.hit(l, d.centerX, d.centerY, 0f, 0))
+    }
+
+    @Test fun `a finger near a dot finds it, the row is tall enough for one`() {
+        for (guest in guests) {
+            val l = layout(30, guest)
+            val row = l.dotsRow!!
+            assertTrue(row.height >= 44f)
+            val d = l.dots[0]
+            assertEquals(Hit.Page(0), PortalSheet.hit(l, d.centerX - 15f, d.centerY + 15f, 0f, 0))
+            assertEquals(Hit.Page(2), PortalSheet.hit(l, l.dots[2].centerX + 15f, d.centerY - 8f, 0f, 0))
+        }
+    }
+
+    @Test fun `a miss in the dots' row keeps the sheet up`() {
+        val l = layout(30)
+        val y = l.dots[0].centerY
+        assertEquals(Hit.Blank, PortalSheet.hit(l, l.dotsRow!!.left + 4f, y, 0f, 0))
+        assertEquals(Hit.Blank, PortalSheet.hit(l, l.dotsRow!!.right - 4f, y, 0f, 0))
+        assertNull(layout(12).dotsRow)
+    }
+
+    @Test fun `the dots' row takes nothing from the apps over it`() {
+        val l = layout(30)
+        val c = l.slots.last()
+        assertEquals(Hit.App(11), PortalSheet.hit(l, c.centerX, c.bottom - 2f, 0f, 0))
     }
 
     @Test fun `anywhere else is outside, the gaps between cells too`() {
         val l = layout(guest = false)
-        assertEquals(Hit.Outside, PortalSheet.hit(l, 100f, 300f, FULL, 0))
+        assertEquals(Hit.Outside, PortalSheet.hit(l, 100f, 300f, 0f, 0))
         val c = l.slots[0]
-        assertEquals(Hit.Outside, PortalSheet.hit(l, c.right + 6f, c.centerY, FULL, 0))
+        assertEquals(Hit.Outside, PortalSheet.hit(l, c.right + 6f, c.centerY, 0f, 0))
     }
 
     // -- the strip and its slider --------------------------------------------------------
 
-    @Test fun `the slider is only there over a guest on top, along the bottom`() {
+    @Test fun `the slider is there with any guest, under the panel until the sheet scrolls`() {
         assertNull(layout(guest = null).slider)
-        assertNull(layout(guest = false).slider)
+        assertNotNull(layout(guest = false).slider)
         val s = layout(guest = true).slider!!
-        listOf(s.icon, s.track, s.value).forEach { assertTrue(it.top >= FULL - PEEK && it.bottom <= FULL) }
         assertTrue(s.icon.right < s.track.left - PortalSheet.THUMB / 2)
         assertTrue(s.track.right + PortalSheet.THUMB / 2 < s.value.left)
     }
 
-    @Test fun `in PEEK the strip is the slider's and anything above it is outside`() {
+    @Test fun `scrolled to the slider, its row is the slider's, and what has gone up is not hit`() {
         val l = layout(guest = true)
         val s = l.slider!!
-        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.centerX, s.track.centerY, PEEK, 0))
-        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.left - PortalSheet.THUMB / 2 + 1f, FULL - 4f, PEEK, 0))
-        assertEquals(Hit.SliderValue, PortalSheet.hit(l, s.value.centerX, s.value.centerY, PEEK, 0))
-        assertEquals(Hit.Strip, PortalSheet.hit(l, s.icon.centerX, s.icon.centerY, PEEK, 0))
-        // The guest above the strip — where the grid would be on the full sheet — is outside.
-        val c = l.slots[0]
-        assertEquals(Hit.Outside, PortalSheet.hit(l, c.centerX, c.centerY, PEEK, 0))
-        assertEquals(Hit.Outside, PortalSheet.hit(l, s.track.centerX, FULL - PEEK - 1f, PEEK, 0))
+        // On the screen: the row's content y less the scroll.
+        fun y(b: PortalSheet.Box) = b.centerY - STRIP
+        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.centerX, y(s.track), STRIP, 0))
+        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.left - PortalSheet.THUMB / 2 + 1f, FULL - 4f, STRIP, 0))
+        assertEquals(Hit.SliderValue, PortalSheet.hit(l, s.value.centerX, y(s.value), STRIP, 0))
+        assertEquals(Hit.Blank, PortalSheet.hit(l, s.icon.centerX, y(s.icon), STRIP, 0))
+        // The grid moved up with it: a cell is hit where it now stands.
+        val c = l.slots[4]
+        assertEquals(Hit.App(4), PortalSheet.hit(l, c.centerX, c.centerY - STRIP, STRIP, 0))
     }
 
-    @Test fun `on the full sheet the strip is still the slider's`() {
-        val l = layout(guest = true)
-        val s = l.slider!!
-        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.centerX, s.track.centerY, FULL, 0))
-        assertEquals(Hit.SliderValue, PortalSheet.hit(l, s.value.centerX, s.value.centerY, FULL, 0))
+    @Test fun `not scrolled, the bottom of the panel is the grid's, not the slider's`() {
+        val l = layout(30, guest = true)
+        val h = PortalSheet.hit(l, l.slider!!.track.centerX, FULL - 4f, 0f, 0)
+        assertTrue(h != Hit.Slider && h != Hit.SliderValue)
     }
 
     @Test fun `the slider spans RearDensity's range in its steps, held at its ends`() {
@@ -210,6 +272,17 @@ class PortalSheetTest {
         assertEquals(RearDensity.MAX, PortalSheet.sliderDrag(t, 400, 1_000f))
     }
 
+    @Test fun `a finger within half a thumb of the thumb is on it`() {
+        val t = layout(guest = true).slider!!.track
+        val x = PortalSheet.sliderX(t, 400)
+        assertTrue(PortalSheet.onThumb(t, 400, x))
+        assertTrue(PortalSheet.onThumb(t, 400, x + PortalSheet.THUMB / 2))
+        assertTrue(PortalSheet.onThumb(t, 400, x - 5f))
+        assertTrue(!PortalSheet.onThumb(t, 400, x + PortalSheet.THUMB / 2 + 1f))
+        // An off-step value stands where its step does.
+        assertTrue(PortalSheet.onThumb(t, 455, PortalSheet.sliderX(t, 460)))
+    }
+
     @Test fun `the value says what is dragged to, else the app's own, else Default`() {
         assertEquals("380 dpi", PortalSheet.sliderLabel(380, 300))
         assertEquals("300 dpi", PortalSheet.sliderLabel(null, 300))
@@ -218,54 +291,35 @@ class PortalSheetTest {
 
     // -- which way a sideways drag goes ---------------------------------------------------
 
-    @Test fun `a sideways drag on the strip moves the slider, in PEEK and on the full sheet`() {
+    @Test fun `a sideways drag on the slider's row moves the slider, anywhere above it turns the pages`() {
         val l = layout(30, guest = true)
-        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f, PEEK))
-        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f, FULL))
-        assertEquals(Swipe.NONE, PortalSheet.swipe(l, 300f, PEEK))
-    }
-
-    @Test fun `above the strip on the full sheet it turns the pages, when there are pages`() {
-        assertEquals(Swipe.PAGES, PortalSheet.swipe(layout(30, guest = true), 200f, FULL))
-        assertEquals(Swipe.PAGES, PortalSheet.swipe(layout(30), 540f, FULL))
-        assertEquals(Swipe.NONE, PortalSheet.swipe(layout(12), 200f, FULL))
+        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f, STRIP))
+        assertEquals(Swipe.PAGES, PortalSheet.swipe(l, FULL - 20f, 0f))
+        assertEquals(Swipe.PAGES, PortalSheet.swipe(l, 200f, STRIP))
+        assertEquals(Swipe.NONE, PortalSheet.swipe(layout(12), 200f, 0f))
+        assertEquals(Swipe.SLIDER, PortalSheet.swipe(layout(12, guest = false), FULL - 20f, STRIP))
     }
 
     // -- motion ----------------------------------------------------------------------------
 
-    @Test fun `each part arrives over its own stage, the strip first, the grid after it`() {
-        assertEquals(0f, PortalSheet.stripStage(0f), 0f)
-        assertEquals(0.5f, PortalSheet.stripStage(PEEK / 2), 1e-4f)
-        assertEquals(1f, PortalSheet.stripStage(PEEK), 0f)
-        assertEquals(1f, PortalSheet.stripStage(FULL), 0f)
-        // Over a guest on top the grid's stage is the strip to full; with no strip, shut to full.
-        assertEquals(0f, PortalSheet.upperStage(PEEK, withSlider = true), 0f)
-        assertEquals(0.5f, PortalSheet.upperStage((PEEK + FULL) / 2, withSlider = true), 1e-4f)
-        assertEquals(1f, PortalSheet.upperStage(FULL, withSlider = true), 0f)
-        assertEquals(0.5f, PortalSheet.upperStage(FULL / 2, withSlider = false), 1e-4f)
-        assertEquals(FULL - PEEK, PortalSheet.upperTravel(withSlider = true), 0f)
-        assertEquals(FULL, PortalSheet.upperTravel(withSlider = false), 0f)
+    @Test fun `the contents slide up into place as the control centre's come down`() {
+        assertEquals(Arrival.offset(0.7f, FULL), PortalSheet.arrivalShift(0.7f), 0f)
+        assertEquals(0f, PortalSheet.arrivalShift(1f), 0f)
+        assertTrue(PortalSheet.arrivalShift(0.6f) > PortalSheet.arrivalShift(0.8f))
     }
 
-    @Test fun `the strip rises with the sheet's top and arrives on the curve, then stays at the bottom`() {
-        // Shut: a whole strip's height below, and the arrival's quarter of its travel.
-        assertEquals(PEEK + PEEK / 4, PortalSheet.stripShift(0f), 1e-3f)
-        assertEquals(PEEK - 60f + Arrival.offset(60f / PEEK, PEEK), PortalSheet.stripShift(60f), 1e-3f)
-        assertEquals(0f, PortalSheet.stripShift(PEEK), 0f)
-        assertEquals(0f, PortalSheet.stripShift(FULL), 0f)
+    @Test fun `the top edge fades only as the contents scroll`() {
+        assertEquals(0f, PortalSheet.topFade(0f), 0f)
+        assertEquals(0.5f, PortalSheet.topFade(STRIP / 2), 1e-5f)
+        assertEquals(1f, PortalSheet.topFade(STRIP), 0f)
     }
 
-    @Test fun `the grid's part goes with the sheet's top and slides up into place on the curve`() {
-        assertEquals(0f, PortalSheet.upperShift(FULL, withSlider = true), 0f)
-        assertEquals(0f, PortalSheet.upperShift(FULL, withSlider = false), 0f)
-        val h = 400f
-        assertEquals(
-            (FULL - h) + Arrival.offset(PortalSheet.upperStage(h, true), FULL - PEEK),
-            PortalSheet.upperShift(h, withSlider = true), 1e-3f,
-        )
-        // Always below its place, by less as the sheet rises.
-        val shifts = (0..20).map { PortalSheet.upperShift(PEEK + it * (FULL - PEEK) / 20, withSlider = true) }
-        assertTrue(shifts.zipWithNext().all { (a, b) -> b <= a })
+    @Test fun `pages fade out past the grid's sides, the right band ending at the panel's edge`() {
+        val l = layout(30)
+        assertEquals(l.slots.minOf { it.left } - EdgeFade.BAND, PortalSheet.PAGES_LEFT, 1f)
+        assertEquals(Panel.WIDTH.toFloat(), PortalSheet.PAGES_RIGHT, 0.01f)
+        // At rest no app is in a band.
+        l.slots.forEach { assertTrue(it.left >= PortalSheet.PAGES_LEFT + EdgeFade.BAND - 0.01f && it.right <= PortalSheet.PAGES_RIGHT - EdgeFade.BAND + 0.01f) }
     }
 
     // -- the buttons' marks ----------------------------------------------------------------

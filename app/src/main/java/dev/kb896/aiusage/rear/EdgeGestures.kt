@@ -8,10 +8,9 @@ import kotlin.math.abs
  * own gesture strips). See specs/2026-10-28-app-portal-shell-sheet-design.md.
  *
  * WITH THE SHEET SHUT ([sheet] false), only the two edges the App Portal owns:
- * - The bottom band ([PortalPull.startsPull]): [Action.Arm] the moment it lands, so the
- *   screenshot for the backdrop starts while the finger is still deciding (it takes about
- *   240 ms); [Action.PullStart] once it has moved up past [SLOP] more than sideways, then
- *   every move, then the lift; [Action.Disarm] if it turns out not to be a pull.
+ * - The bottom band ([PortalPull.startsPull]): [Action.PullStart] once it has moved up
+ *   past [SLOP] more than sideways — the one start that may open the sheet — then every
+ *   move, then the lift; nothing if it turns out not to be a pull.
  * - The right edge, x ≥ [BACK_LEFT] — Xiaomi's own Back band, whose inert chevron then
  *   lines up with what happens: [Action.Back] on a lift that travelled left at least
  *   [BACK_TRAVEL] further than it travelled vertically.
@@ -21,8 +20,9 @@ import kotlin.math.abs
  * WITH THE SHEET UP ([sheet] true when a finger lands), every finger is the sheet's,
  * wherever it lands:
  * - [Action.SheetDown] at once (the caller stops a settle there and shows a press);
- * - a drag up or down past [SLOP], more vertical than sideways, is [Action.PullStart] /
- *   [Action.PullMove] / [Action.PullEnd], as a pull — the caller moves the sheet from
+ * - a drag up or down past [SLOP], more vertical than sideways, is [Action.PullStart]
+ *   (marked [Action.PullStart.onSheet]: it moves a sheet, never opens one — the sheet may
+ *   have gone under the finger) / [Action.PullMove] / [Action.PullEnd], as a pull — the caller moves the sheet from
  *   wherever it was when the finger landed (a drag down lowers it a stop, or shuts it);
  * - a drag sideways past [SLOP], more sideways than vertical, is [Action.SlideStart] /
  *   [Action.SlideMove] / [Action.SlideEnd] — the caller decides by where it landed what
@@ -35,8 +35,7 @@ import kotlin.math.abs
  * pull that opens the sheet runs to its own lift as a pull.
  *
  * A Down while the previous gesture never got its Up (a lost lift) closes that gesture
- * first, so nothing is left following a finger that is gone, and an armed screenshot is
- * never leaked.
+ * first, so nothing is left following a finger that is gone.
  *
  * The windows under the touch see it too, unless the sheet's blocker is up; reading is
  * all the shell does.
@@ -44,9 +43,8 @@ import kotlin.math.abs
 class EdgeGestures {
 
     sealed interface Action {
-        data object Arm : Action
-        data object Disarm : Action
-        data class PullStart(val y: Float) : Action
+        /** A pull begins, the finger at [y]: from the bottom band, or ([onSheet]) a drag on the sheet. */
+        data class PullStart(val y: Float, val onSheet: Boolean = false) : Action
         data class PullMove(val y: Float) : Action
         data class PullEnd(val y: Float) : Action
         data object Back : Action
@@ -81,7 +79,6 @@ class EdgeGestures {
         is RearTouches.Down -> {
             val stale = when {
                 kind == Kind.PULL && committed -> listOf(Action.PullEnd(lastY))
-                kind == Kind.PULL -> listOf(Action.Disarm)
                 kind == Kind.SHEET && committed -> listOf(if (sideways) Action.SlideEnd(lastX) else Action.PullEnd(lastY))
                 kind == Kind.SHEET -> listOf(Action.Cancel)
                 else -> emptyList()
@@ -95,7 +92,6 @@ class EdgeGestures {
                 else -> Kind.NONE
             }
             stale + when (kind) {
-                Kind.PULL -> listOf(Action.Arm)
                 Kind.SHEET -> listOf(Action.SheetDown(e.x, e.y))
                 else -> emptyList()
             }
@@ -104,7 +100,7 @@ class EdgeGestures {
             Kind.PULL -> when {
                 committed -> listOf(Action.PullMove(e.y))
                 downY - e.y >= SLOP && downY - e.y > abs(e.x - downX) -> { committed = true; listOf(Action.PullStart(e.y)) }
-                abs(e.x - downX) >= SLOP -> { kind = Kind.NONE; listOf(Action.Disarm) }
+                abs(e.x - downX) >= SLOP -> { kind = Kind.NONE; emptyList() }
                 else -> emptyList()
             }
             Kind.SHEET -> sheetMove(e)
@@ -112,7 +108,7 @@ class EdgeGestures {
         } }
         is RearTouches.Up -> {
             val out = when (kind) {
-                Kind.PULL -> if (committed) listOf(Action.PullEnd(e.y)) else listOf(Action.Disarm)
+                Kind.PULL -> if (committed) listOf(Action.PullEnd(e.y)) else emptyList()
                 Kind.BACK -> if ((downX - e.x) - abs(e.y - downY) >= BACK_TRAVEL) listOf(Action.Back) else emptyList()
                 Kind.SHEET -> sheetUp(e)
                 Kind.NONE -> emptyList()
@@ -129,7 +125,7 @@ class EdgeGestures {
         if (maxOf(dx, dy) < SLOP) return emptyList()
         committed = true
         sideways = dx > dy
-        return listOf(if (sideways) Action.SlideStart(e.x) else Action.PullStart(e.y))
+        return listOf(if (sideways) Action.SlideStart(e.x) else Action.PullStart(e.y, onSheet = true))
     }
 
     private fun sheetUp(e: RearTouches.Event): List<Action> {

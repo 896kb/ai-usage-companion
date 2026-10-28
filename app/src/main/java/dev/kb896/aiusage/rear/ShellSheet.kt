@@ -4,9 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PorterDuff
-import android.graphics.Rect
 import android.graphics.RectF
 import android.util.Log
 import android.view.Surface
@@ -36,8 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * would be an invisible wall over the rear, so there is never one without the other.
  *
  * THE BLUR IS SURFACEFLINGER'S, OF THE LIVE REAR. The sheet layer's background blur
- * radius (the hidden Transaction.setBackgroundBlurRadius) comes in as the sheet rises,
- * [blurPx] — so whatever is under it, the guest or our panel, is blurred as it is NOW,
+ * radius (the hidden Transaction.setBackgroundBlurRadius) follows the pull, [blurPx] — so whatever is under it, the guest or our panel, is blurred as it is NOW,
  * every frame. It used to be a screencap of the rear (~240 ms) taken as the finger landed:
  * on a fast pull it came late or stale, and the sheet blocked the picture instead of
  * blurring it. Measured on the 17 Pro (ro.surface_flinger.supports_background_blur=1): a
@@ -45,17 +42,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * 61 frames. Where the call is missing or refused, the sheet is drawn with the dim alone,
  * and that is logged once.
  *
- * ONLY THE SHEET IS BLURRED. The layer is cropped (Transaction.setCrop) to the sheet, from
- * its top edge down — [cropTop] — its top corners rounded where the firmware lets the
- * layer have a corner radius (the hidden setCornerRadius) — and the crop follows the sheet
- * every frame with the blur. SurfaceFlinger blurs only within a layer's bounds, so in
- * PEEK only the strip is blurred and the guest above it stays sharp. If the crop is
- * refused, the blur goes too (logged once): uncropped, it would blur the whole rear.
+ * The layer covers the whole rear, uncropped: a crop to a sheet rising from the bottom was
+ * tried and read as a hard straight cut through the blur.
  *
- * WHAT IS DRAWN, per frame: cleared; the dim over the sheet (from its top edge down, the
- * blur's ground); then PortalSheetPainter, its glass panes unbacked — there is no
+ * WHAT IS DRAWN, per frame: cleared; the dim over the whole layer (so the blur has the
+ * whole rear to cover); then PortalSheetPainter, its glass panes unbacked — there is no
  * picture in this process for them to bend — and tinted as clear glass over a middling
- * ground (SheetTint with no cells), or in Glass settings' style.
+ * ground (SheetTint), or in Glass settings' style.
  *
  * THREADING. [begin] makes both layers and shows them on the caller's thread, under the
  * instance lock, so when it says true they are there. Setters may be called from any
@@ -98,17 +91,19 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         @Volatile var live = true
     }
 
-    /** How high the sheet stands, 0 to PortalSheet.FULL. */
-    @Volatile private var height = 0f
+    /** Where the sheet stands on its axis (SheetMotion), 0 shut to PortalSheet.REVEALED. */
+    @Volatile private var position = 0f
     @Volatile private var apps = Apps(PortalAppsSnapshot.EMPTY, emptyList())
-    /** The guest's own icon, for Resume and the slider's strip; null shows the Panel glyph on Resume instead. */
+    /** The guest's own icon, for Resume and the slider's row; null shows the Panel glyph on Resume instead. */
     @Volatile private var guestIcon: Bitmap? = null
-    /** Null: no guest, so no Panel/Resume · Front · Close buttons; true: on top, so the slider's strip too. */
+    /** Null: no guest, so no Panel/Resume · Front · Close buttons and no slider; true on top (Panel), false behind (Resume). */
     @Volatile private var guestOnTop: Boolean? = null
     /** The guest's package, for its DPI on the slider. */
     @Volatile private var guestPkg: String? = null
     @Volatile private var pressed = -1
     @Volatile private var grid = PortalGrid.R3C4
+    /** The apps' names under their icons (PanelConfig.portalAppNames); without, bigger icons. */
+    @Volatile private var names = true
     /** The page showing, in pages (SheetPager.position). */
     @Volatile private var page = 0f
     /** The DPI the slider's thumb is being dragged to; null while it is not. */
@@ -137,19 +132,16 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
      */
     val up: Boolean get() = run?.live == true
 
-    /** The same as [up]. */
-    val showing: Boolean get() = up
-
     /**
-     * Makes the blocker and the sheet, shows both in one transaction at [heightStart],
+     * Makes the blocker and the sheet, shows both in one transaction at [positionStart],
      * and starts the render thread — all before returning, so true means they are up.
      * False when it cannot (no trusted overlay, no layer, the blocker's buffer refused, or
      * any of these in the last [RETRY_NS]); then there is no sheet and no blocker and the
-     * caller must not act as if one were up. Already up: just the height.
+     * caller must not act as if one were up. Already up: just the position.
      */
     @Synchronized
-    fun begin(heightStart: Float = 0f): Boolean {
-        height(heightStart)
+    fun begin(positionStart: Float = 0f): Boolean {
+        position(positionStart)
         if (up) return true
         if (failedAt != 0L && System.nanoTime() - failedAt < RETRY_NS) return false
         var blocker: SurfaceControl? = null
@@ -166,9 +158,6 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
             clear(blockerSurface)
             surface = Surface(sheet)
             SurfaceControl.Transaction().use { t ->
-                // Cropped to the sheet from the first frame: the blur must never cover the rear.
-                t.setCrop(sheet, Rect(0, cropTop(height), Panel.WIDTH, Panel.HEIGHT))
-                cornerRadius?.let { call -> runCatching { call.invoke(t, sheet, CORNER) } }
                 t.setVisibility(blocker, true).setVisibility(sheet, true).apply()
             }
             val r = Run(++gen, blocker, sheet, blockerSurface, surface)
@@ -218,13 +207,13 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         pressed = -1
         page = 0f
         sliderDrag = null
-        height = 0f
+        position = 0f
         version.incrementAndGet()
     }
 
-    /** How high it stands, 0 shut to PortalSheet.FULL. */
-    fun height(h: Float) {
-        height = h.coerceIn(0f, PortalSheet.FULL)
+    /** Where it stands on its axis: 0 shut, PortalSheet.OPEN open, past it scrolled to the slider. */
+    fun position(p: Float) {
+        position = p.coerceIn(0f, PortalSheet.REVEALED)
         version.incrementAndGet()
     }
 
@@ -232,6 +221,13 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     fun grid(g: PortalGrid) {
         if (grid == g) return
         grid = g
+        version.incrementAndGet()
+    }
+
+    /** Whether the apps' names show under their icons. */
+    fun names(on: Boolean) {
+        if (names == on) return
+        names = on
         version.incrementAndGet()
     }
 
@@ -336,7 +332,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         var drawn = -1
         // As the frame: if the hardware canvas is refused, the software one (flat buttons).
         var hardware = true
-        var placed: Pair<Int, Int>? = null
+        var blurred = -1
         while (!Thread.currentThread().isInterrupted && gen == r.gen) {
             val began = System.nanoTime()
             val v = version.get()
@@ -347,16 +343,16 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
                         hardware = false; continue
                     }
                 } else surface.lockCanvas(null)
-                val h = height
+                val at = position
                 try {
                     canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-                    synchronized(DRAW) { painter.draw(canvas, h) }
+                    synchronized(DRAW) { painter.draw(canvas, at) }
                 } finally {
                     surface.unlockCanvasAndPost(canvas)
                 }
                 // With the frame it goes with, and only when it moves.
-                val at = cropTop(h) to blurPx(ground(h))
-                if (at != placed && place(r, at.first, at.second)) placed = at
+                val radius = blurPx(PortalSheet.progress(at))
+                if (radius != blurred && blur(r, radius)) blurred = radius
                 drawn = v
             }
             val took = (System.nanoTime() - began) / 1_000_000
@@ -367,9 +363,8 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     /** One run's paints and painter, so an overlapping run shares nothing mutable of ours. */
     private inner class Renderer {
         private val sheetPainter = PortalSheetPainter(PanelTheme.GLASS, face)
-        private val dim = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val ground = Path()
-        private val groundRect = RectF()
+        private val dim = Paint()
+        private val full = RectF(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         private var frameLook = look
         /** The last layout and what it was made for, so a frame does not lay the sheet out again. */
         private var laid: PortalSheet.Layout? = null
@@ -378,28 +373,21 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         init {
             // No picture of what is under the sheet to measure: clear glass over a middling
             // ground, or the chosen style.
-            sheetPainter.paneTint = { rect ->
-                SheetTint.of(null, rect.left, rect.top, rect.right, rect.bottom, frameLook.theme.isGlass, frameLook.style)
-            }
+            sheetPainter.paneTint = { SheetTint.of(frameLook.theme.isGlass, frameLook.style) }
         }
 
-        /** The sheet at height [h] (read once by the loop, so the crop and blur go with what is drawn). */
-        fun draw(canvas: Canvas, h: Float) {
+        /** The sheet at [at] on its axis (read once by the loop, so the blur goes with what is drawn). */
+        fun draw(canvas: Canvas, at: Float) {
             val a = apps
             val onTop = guestOnTop
             frameLook = look
             val key = Triple(grid, a.snapshot.size, onTop)
             val layout = laid?.takeIf { laidFor == key } ?: PortalSheet.layout(key.first, key.second, key.third).also { laid = it; laidFor = key }
-            // Over the sheet, from its top edge down: SurfaceFlinger blurs under it, and the dim is its ground.
-            val top = Panel.HEIGHT - h
-            if (h > 0.5f) {
-                groundRect.set(0f, top, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
-                ground.rewind()
-                ground.addRoundRect(groundRect, floatArrayOf(CORNER, CORNER, CORNER, CORNER, 0f, 0f, 0f, 0f), Path.Direction.CW)
-                dim.color = dimColor(ground(h))
-                canvas.drawPath(ground, dim)
-            }
-            val slider = if (onTop == true) {
+            val p = PortalSheet.progress(at)
+            // Over the whole layer: SurfaceFlinger blurs under it, and the dim is the sheet's ground.
+            dim.color = dimColor(p)
+            canvas.drawRect(full, dim)
+            val slider = if (onTop != null) {
                 val own = guestPkg?.let { dpiValues[it] }
                 val dragged = sliderDrag
                 PortalSheetPainter.SliderLook(
@@ -410,45 +398,33 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
             sheetPainter.theme = frameLook.theme
             sheetPainter.face = face
             sheetPainter.draw(
-                canvas, h, layout, page, null, a.icons, a.snapshot.labels,
+                canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, pressed = pressed,
-                guestIcon = guestIcon, slider = slider,
+                guestIcon = guestIcon, slider = slider, names = names,
             )
         }
     }
 
     /**
-     * [r]'s sheet layer cropped to the sheet from [top] down, and its background blur at
-     * [radius] SurfaceFlinger px, in one transaction. True when done; false when the layer
-     * is gone. A refused blur is never tried again (logged once): the sheet keeps its dim
-     * and goes without. A refused crop takes the blur with it — uncropped, the blur would
-     * cover the whole rear, the guest above the strip too — and is logged once.
+     * Sets [r]'s sheet layer's background blur to [radius] SurfaceFlinger px. True when
+     * done; false when the layer is gone or the firmware has no such call — then never
+     * again (logged once): the sheet keeps its dim and goes without.
      */
-    private fun place(r: Run, top: Int, radius: Int): Boolean = synchronized(r) {
-        val sheet = r.sheet ?: return@synchronized false
-        SurfaceControl.Transaction().use { t ->
-            if (!cropBroken) {
-                try {
-                    t.setCrop(sheet, Rect(0, top, Panel.WIDTH, Panel.HEIGHT))
-                } catch (e: Throwable) {
-                    cropBroken = true
-                    Log.w(TAG, "portal sheet: no crop (${e.javaClass.simpleName}: ${e.message}); no blur either, the dim alone")
-                }
+    private fun blur(r: Run, radius: Int): Boolean {
+        val call = backgroundBlur ?: return false
+        if (blurBroken) return false
+        return synchronized(r) {
+            val sheet = r.sheet ?: return@synchronized false
+            try {
+                SurfaceControl.Transaction().use { t -> call.invoke(t, sheet, radius); t.apply() }
+                true
+            } catch (e: Throwable) {
+                val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+                blurBroken = true
+                Log.w(TAG, "portal sheet: no background blur (${cause.javaClass.simpleName}: ${cause.message}); the dim alone")
+                false
             }
-            val call = backgroundBlur
-            if (call != null && !blurBroken) {
-                try {
-                    // Without a crop, none: a blur once set is taken back.
-                    call.invoke(t, sheet, if (cropBroken) 0 else radius)
-                } catch (e: Throwable) {
-                    val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
-                    blurBroken = true
-                    Log.w(TAG, "portal sheet: no background blur (${cause.javaClass.simpleName}: ${cause.message}); the dim alone")
-                }
-            }
-            runCatching { t.apply() }.onFailure { Log.w(TAG, "portal sheet: placing failed: ${it.message}") }
         }
-        true
     }
 
     /** One transparent buffer, from the software canvas: no hardware renderer for a buffer posted once. */
@@ -493,25 +469,12 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         /** Every painter in the process paints under this: they share Glass's shaders. */
         private val DRAW = Any()
 
-        /** The sheet's top corners' radius, in panel px. */
-        const val CORNER = 28f
+        /** The blur at [progress], in whole SurfaceFlinger px, so a settled sheet sends no new transaction. */
+        internal fun blurPx(progress: Float): Int = Math.round(BLUR_MAX * progress.coerceIn(0f, 1f))
 
-        /**
-         * How much of the sheet's ground — its blur and its dim — is in at height [h], 0 to
-         * 1: all of it once the strip is (PortalSheet.PEEK), so the strip alone is blurred
-         * and dimmed as the full sheet is, and the crop does the rest.
-         */
-        internal fun ground(h: Float): Float = (h / PortalSheet.PEEK).coerceIn(0f, 1f)
-
-        /** The layer's crop's top at height [h]: the sheet's top edge, in whole px. */
-        internal fun cropTop(h: Float): Int = Math.round(Panel.HEIGHT - h.coerceIn(0f, PortalSheet.FULL))
-
-        /** The blur at [ground] (0 to 1), in whole SurfaceFlinger px, so a settled sheet sends no new transaction. */
-        internal fun blurPx(ground: Float): Int = Math.round(BLUR_MAX * ground.coerceIn(0f, 1f))
-
-        /** The dim's colour at [ground]: as the control centre's, coming in with the pull. */
-        internal fun dimColor(ground: Float): Int =
-            ((DIM * ground.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)) shl 24
+        /** The dim's colour at [progress]: as the control centre's, coming in with the pull. */
+        internal fun dimColor(progress: Float): Int =
+            ((DIM * progress.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)) shl 24
 
         /**
          * The hidden Transaction.setBackgroundBlurRadius(SurfaceControl, int), looked up once
@@ -524,20 +487,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
             }.onFailure { Log.w(TAG, "portal sheet: no setBackgroundBlurRadius on this firmware; the dim alone") }.getOrNull()
         }
 
-        /**
-         * The hidden Transaction.setCornerRadius(SurfaceControl, float), for the sheet's
-         * rounded top; null where the firmware has none — square corners then, logged once.
-         */
-        private val cornerRadius: java.lang.reflect.Method? by lazy {
-            runCatching {
-                SurfaceControl.Transaction::class.java
-                    .getMethod("setCornerRadius", SurfaceControl::class.java, Float::class.javaPrimitiveType)
-            }.onFailure { Log.w(TAG, "portal sheet: no setCornerRadius on this firmware; square corners") }.getOrNull()
-        }
-
         /** The call threw once: no more tries in this process. */
         @Volatile private var blurBroken = false
-        /** setCrop threw once: no crop, and so no blur, in this process. */
-        @Volatile private var cropBroken = false
     }
 }

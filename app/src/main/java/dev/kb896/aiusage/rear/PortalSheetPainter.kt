@@ -2,26 +2,30 @@ package dev.kb896.aiusage.rear
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.graphics.RenderEffect
 import android.graphics.RenderNode
+import android.graphics.Shader
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.data.PanelTheme
 
 /**
  * Paints the App Portal's sheet — the buttons, the pinned apps' icons and names a page at
- * a time with their page dots, and the guest's DPI slider — over a
- * backdrop someone else has drawn. Needs no View, Context or Resources: the panel's view
- * uses it, and so can the shell, which draws into a surface's hardware canvas from
- * app_process. Everything comes in: the [theme], the panel's [face] (app_process has no
- * default typeface, and text drawn without one aborts), the icons as bitmaps, and the
- * node the glass bends, if any.
+ * a time with their page dots, and the guest's DPI slider — over the blur SurfaceFlinger
+ * lays under the shell's layer. Needs no View, Context or Resources: the shell draws with
+ * it into a surface's hardware canvas from app_process. Everything comes in: the [theme],
+ * the panel's [face] (app_process has no default typeface, and text drawn without one
+ * aborts), and the icons as bitmaps.
  *
- * Its buttons are the control centre's (see CcButton): glass under GLASS — bending the
- * backdrop they stand on when there is one to bend, else unbacked panes — and under
- * ORIGINAL outlined as its tiles are. Close is the one filled, in the critical red. The
- * slider's track, thumb and value are the same buttons, pill-shaped and round.
+ * Its buttons are the control centre's (see CcButton): unbacked glass panes under GLASS —
+ * there is no picture of the rear here to bend — and under ORIGINAL outlined as its tiles
+ * are. Close is the one filled, in the critical red. The slider is the front's: its glass
+ * slider under GLASS, its flat one under ORIGINAL (drawTrack); its value is a button.
  *
  * Laid out by PortalSheet, in panel pixels.
  *
@@ -94,27 +98,23 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     class SliderLook(val thumbDpi: Int, val label: String)
 
     /**
-     * The sheet standing [height] high (0 shut to PortalSheet.FULL), laid out as [layout]
-     * has it, showing page [page] (fractional while the pages move). [icons] and [labels]
-     * are the pinned apps', standing straight on the blur with nothing behind them; with a
-     * guest the layout's three buttons stand above them, [guestOnTop] picking Panel or
-     * Resume for the first; over a guest on top, the strip with the DPI [slider] along the
-     * bottom, [guestIcon] at its start.
+     * The sheet at [progress] (0 shut, 1 open), its contents scrolled up by [scroll] (0 to
+     * PortalSheet.STRIP, the slider's row coming in under them), laid out as [layout] has
+     * it, showing page [page] (fractional while the pages move). [icons] and [labels] are
+     * the pinned apps', standing straight on the blur with nothing behind them, their names
+     * left out without [names] (the layout's icons then grow into their room); with a guest
+     * the layout's three buttons stand above them, [guestOnTop] picking Panel or Resume for
+     * the first, and the DPI [slider] under them, [guestIcon] at its start.
      *
-     * The contents arrive as the control centre's do (Arrival), each part over its own
-     * stage of the rise (PortalSheet.stripStage, .upperStage): fading in as one layer,
-     * sliding up into place, each piece — a button, an app's icon and name, the slider, its
-     * value — growing about its own middle. The grid's part goes with the sheet's top edge
-     * besides (PortalSheet.upperShift), cut off at the top edge and at the strip; the strip
-     * rises with the edge until it is all in, then stays at the bottom
-     * (PortalSheet.stripShift). So in PEEK the strip alone shows.
+     * The contents arrive as the control centre's do (Arrival, on [progress]): fading in as
+     * one layer, sliding up into place (PortalSheet.arrivalShift), each piece — a button, an
+     * app's icon and name, the slider, its value — growing about its own middle; the
+     * buttons and the grid on the one curve. Pages sliding sideways fade into the sides,
+     * and the contents scrolled up fade into the top edge, sharp to blurred to nothing
+     * (EdgeFade, [faded]).
      *
-     * [backdrop] is what the glass bends — the blurred ground drawn under the sheet, in
-     * the canvas's current space. Null, or a node with nothing recorded in it, gives glass
-     * without a lens (the shell's sheet: SurfaceFlinger blurs the live rear under it, and
-     * this process has no picture of it to bend). Every rect is moved rather than the
-     * canvas, so a pane of glass bends the blur where it actually stands. Always sampled in
-     * local space (the panes' and the backdrop's are the same), never in root space.
+     * Glass panes are unbacked — the shell has no picture of the rear to bend — and every
+     * rect is moved rather than the canvas.
      *
      * [pressed] (0 to 2, -1 none) is a button under a finger: half lit, as a control centre
      * tile coming on. Close is lit already. [PRESS_VALUE] is the slider's value, [PRESS_THUMB]
@@ -126,42 +126,28 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * brings back, as a small rounded icon; the dashboard glyph without one.
      */
     fun draw(
-        canvas: Canvas, height: Float, layout: PortalSheet.Layout, page: Float, backdrop: RenderNode?,
+        canvas: Canvas, progress: Float, scroll: Float, layout: PortalSheet.Layout, page: Float,
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, pressed: Int = -1,
-        guestIcon: Bitmap? = null, slider: SliderLook? = null,
+        guestIcon: Bitmap? = null, slider: SliderLook? = null, names: Boolean = true,
     ) {
-        if (height <= 0.5f) return
+        val arrived = Arrival.of(progress)
+        if (arrived <= 0.004f) return
         glass.beginFrame(canvas.width, canvas.height)
         text.color = ink
-        val top = Panel.HEIGHT - height
-        val w = Panel.WIDTH.toFloat()
-        val withSlider = layout.slider != null
-        val upper = PortalSheet.upperStage(height, withSlider)
-        val upperIn = Arrival.of(upper)
-        if (upperIn > 0.004f && top < layout.upperBottom) {
-            val saved = canvas.save()
-            try {
-                canvas.clipRect(0f, top, w, layout.upperBottom)
-                // Faded as one picture, as the control centre is: glass cannot take a paint's alpha.
-                if (upperIn < 0.996f) canvas.saveLayerAlpha(0f, top, w, layout.upperBottom, (255 * upperIn).toInt())
-                drawUpper(
-                    canvas, PortalSheet.upperShift(height, withSlider), Arrival.scale(upper),
-                    layout, page, backdrop, icons, labels, guestOnTop, pressed, guestIcon,
-                )
-            } finally {
-                canvas.restoreToCount(saved)
-            }
-        }
-        val s = layout.slider ?: return
-        val look = slider ?: return
-        val strip = PortalSheet.stripStage(height)
-        val stripIn = Arrival.of(strip)
-        if (stripIn <= 0.004f) return
+        val w = Panel.WIDTH.toFloat(); val h = Panel.HEIGHT.toFloat()
+        val g = Arrival.scale(progress)
+        val dy = PortalSheet.arrivalShift(progress) - scroll
         val saved = canvas.save()
         try {
-            if (stripIn < 0.996f) canvas.saveLayerAlpha(0f, top, w, Panel.HEIGHT.toFloat(), (255 * stripIn).toInt())
-            drawSlider(canvas, s, PortalSheet.stripShift(height), Arrival.scale(strip), look, pressed, guestIcon, backdrop)
+            // Faded as one picture, as the control centre is: glass cannot take a paint's alpha.
+            if (arrived < 0.996f) canvas.saveLayerAlpha(0f, 0f, w, h, (255 * arrived).toInt())
+            val paging = kotlin.math.abs(page - Math.round(page)) > 0.001f
+            faded(canvas, sides = paging, top = PortalSheet.topFade(scroll)) { c ->
+                drawUpper(c, dy, g, layout, page, icons, labels, guestOnTop, pressed, guestIcon, names)
+            }
+            val s = layout.slider
+            if (s != null && slider != null && scroll > 0.5f) drawSlider(canvas, s, dy, g, slider, pressed, guestIcon)
         } finally {
             canvas.restoreToCount(saved)
         }
@@ -179,26 +165,109 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         }
     }
 
+    /**
+     * [block] drawn within the pages' width, faded at the [sides] (pages moving) and at the
+     * [top] (on at that strength: the scroll's) as EdgeFade has it: sharp, then a blurred
+     * copy over it on the way, then nothing. With neither, drawn as it is. The blur needs a
+     * hardware canvas (a RenderNode with a RenderEffect); on a software one the fade alone.
+     */
+    private fun faded(canvas: Canvas, sides: Boolean, top: Float, block: (Canvas) -> Unit) {
+        val l = PortalSheet.PAGES_LEFT; val r = PortalSheet.PAGES_RIGHT
+        val w = Panel.WIDTH.toFloat(); val h = Panel.HEIGHT.toFloat()
+        val clip = canvas.save()
+        try {
+            canvas.clipRect(l, 0f, r, h)
+            if (!sides && top <= 0.001f) { block(canvas); return }
+            if (!canvas.isHardwareAccelerated) {
+                canvas.saveLayer(l, 0f, r, h, null)
+                block(canvas)
+                mask(canvas, sides, top, blurred = false)
+                return
+            }
+            val node = content
+            node.setPosition(0, 0, w.toInt(), h.toInt())
+            val rc = node.beginRecording(w.toInt(), h.toInt())
+            try { block(rc) } finally { node.endRecording() }
+            // Sharp: whole inside, gone at the edges.
+            var layer = canvas.saveLayer(l, 0f, r, h, null)
+            canvas.drawRenderNode(node)
+            mask(canvas, sides, top, blurred = false)
+            canvas.restoreToCount(layer)
+            // Blurred, over it, on the way out.
+            blurredContent.setPosition(0, 0, w.toInt(), h.toInt())
+            blurredContent.setRenderEffect(blurEffect)
+            val bc = blurredContent.beginRecording(w.toInt(), h.toInt())
+            try { bc.drawRenderNode(node) } finally { blurredContent.endRecording() }
+            layer = canvas.saveLayer(l, 0f, r, h, null)
+            canvas.drawRenderNode(blurredContent)
+            mask(canvas, sides, top, blurred = true)
+            canvas.restoreToCount(layer)
+        } finally {
+            canvas.restoreToCount(clip)
+        }
+    }
+
+    /**
+     * The masks over a layer of the contents, DST_IN: the sides' across the pages' width
+     * and the top's down from the top edge — for the sharp copy, or the [blurred] one, which
+     * is blurred at one edge only (the sides' while pages move) and fades as the sharp does
+     * at the other.
+     */
+    private fun mask(canvas: Canvas, sides: Boolean, top: Float, blurred: Boolean) {
+        val l = PortalSheet.PAGES_LEFT; val r = PortalSheet.PAGES_RIGHT
+        val h = Panel.HEIGHT.toFloat()
+        if (sides) {
+            maskPaint.shader = sideShader(blurred)
+            canvas.drawRect(l, 0f, r, h, maskPaint)
+        }
+        if (top > 0.001f) {
+            // The blurred copy is the sides' when they fade; the top's only without them.
+            val colours = if (blurred && !sides) EdgeFade.blurMask(top) else EdgeFade.sharpMask(top)
+            maskPaint.shader = LinearGradient(0f, 0f, 0f, EdgeFade.BAND, colours, EdgeFade.positions(), Shader.TileMode.CLAMP)
+            canvas.drawRect(l, 0f, r, h, maskPaint)
+        }
+    }
+
+    /** The sides' mask across the pages' width: the band's stops at the left, mirrored at the right. */
+    private fun sideShader(blurred: Boolean): Shader {
+        cachedSides[if (blurred) 1 else 0]?.let { return it }
+        val l = PortalSheet.PAGES_LEFT; val r = PortalSheet.PAGES_RIGHT
+        val band = EdgeFade.BAND / (r - l)
+        val stops = EdgeFade.positions()
+        val colours = if (blurred) EdgeFade.blurMask() else EdgeFade.sharpMask()
+        val n = stops.size
+        val pos = FloatArray(2 * n) { i -> if (i < n) stops[i] * band else 1f - stops[2 * n - 1 - i] * band }
+        val col = IntArray(2 * n) { i -> if (i < n) colours[i] else colours[2 * n - 1 - i] }
+        return LinearGradient(l, 0f, r, 0f, col, pos, Shader.TileMode.CLAMP).also { cachedSides[if (blurred) 1 else 0] = it }
+    }
+
+    private val content = RenderNode("portal-sheet-content")
+    private val blurredContent = RenderNode("portal-sheet-blurred")
+    private val blurEffect = RenderEffect.createBlurEffect(EdgeFade.BLUR, EdgeFade.BLUR, Shader.TileMode.DECAL)
+    private val maskPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
+    private val cachedSides = arrayOfNulls<Shader>(2)
+
     /** The buttons, the pages of apps and their dots, [dy] down, each piece grown to [g]. */
     private fun drawUpper(
-        canvas: Canvas, dy: Float, g: Float, layout: PortalSheet.Layout, page: Float, backdrop: RenderNode?,
+        canvas: Canvas, dy: Float, g: Float, layout: PortalSheet.Layout, page: Float,
         icons: List<Bitmap?>, labels: List<String>, guestOnTop: Boolean, pressed: Int, guestIcon: Bitmap?,
+        names: Boolean,
     ) {
         val m = text.fontMetrics
         val middle = -(m.ascent + m.descent) / 2f
         if (labels.isEmpty() && layout.buttons.isEmpty()) {
             canvas.drawText("Pin apps in the app on the front", layout.emptyX, layout.emptyY + dy, text)
         }
-        val names = PortalSheet.buttonNames(guestOnTop)
+        val buttonNames = PortalSheet.buttonNames(guestOnTop)
         layout.buttons.forEachIndexed { i, b ->
             grown(canvas, b.centerX, b.centerY + dy, g) {
                 val r = buttonRect
                 r.set(b.left, b.top + dy, b.right, b.bottom + dy)
                 val close = i == 2
-                drawButton(canvas, r, if (close) 1f else if (pressed == i) 0.5f else 0f, close, backdrop)
+                drawButton(canvas, r, if (close) 1f else if (pressed == i) 0.5f else 0f, close)
                 val app = if (i == 0 && !guestOnTop) guestIcon else null
                 val mark = if (app != null) PortalSheet.APP_MARK else PortalSheet.MARK_H
-                val name = ellipsize(names[i], PortalSheet.labelRoom(b, mark))
+                val name = ellipsize(buttonNames[i], PortalSheet.labelRoom(b, mark))
                 val at = PortalSheet.labelled(b, mark, mark, text.measureText(name))
                 if (app != null) drawAppMark(canvas, app, at.markLeft, at.markTop + dy, PortalSheet.APP_MARK)
                 else drawGlyph(canvas, BUTTON_GLYPHS[i], at.markLeft, at.markTop + dy)
@@ -218,11 +287,11 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
                 // The icon and its name, one piece.
                 grown(canvas, c.centerX + dx, c.centerY + dy, g) {
                     icons.getOrNull(i)?.let { bmp ->
-                        val ic = PortalSheet.icon(c)
+                        val ic = PortalSheet.icon(c, names)
                         iconRect.set(ic.left + dx, ic.top + dy, ic.right + dx, ic.bottom + dy)
                         canvas.drawBitmap(bmp, null, iconRect, iconPaint)
                     }
-                    labels.getOrNull(i)?.let { name ->
+                    if (names) labels.getOrNull(i)?.let { name ->
                         canvas.drawText(ellipsize(name, c.width - 8f), c.centerX + dx, PortalSheet.nameBaseline(c) + dy, text)
                     }
                 }
@@ -240,47 +309,65 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     }
 
     /**
-     * The strip's slider, [dy] down: the guest's icon, the track with its fill up to the
+     * The slider's row, [dy] down: the guest's icon, the track with its fill up to the
      * thumb, the thumb, and the value as a button (a tap on it is Default) — three pieces,
      * each grown to [g] about its middle.
      */
     private fun drawSlider(
         canvas: Canvas, s: PortalSheet.Slider, dy: Float, g: Float, look: SliderLook,
-        pressed: Int, guestIcon: Bitmap?, backdrop: RenderNode?,
+        pressed: Int, guestIcon: Bitmap?,
     ) {
         guestIcon?.let { icon ->
             grown(canvas, s.icon.centerX, s.icon.centerY + dy, g) {
                 drawAppMark(canvas, icon, s.icon.left, s.icon.top + dy, PortalSheet.SLIDER_ICON)
             }
         }
-        grown(canvas, s.track.centerX, s.track.centerY + dy, g) { drawTrack(canvas, s, dy, look, pressed, backdrop) }
+        grown(canvas, s.track.centerX, s.track.centerY + dy, g) { drawTrack(canvas, s, dy, look, pressed) }
         grown(canvas, s.value.centerX, s.value.centerY + dy, g) {
             val m = text.fontMetrics
             val middle = -(m.ascent + m.descent) / 2f
             buttonRect.set(s.value.left, s.value.top + dy, s.value.right, s.value.bottom + dy)
-            drawButton(canvas, buttonRect, if (pressed == PRESS_VALUE) 0.5f else 0f, false, backdrop)
+            drawButton(canvas, buttonRect, if (pressed == PRESS_VALUE) 0.5f else 0f, false)
             canvas.drawText(ellipsize(look.label, buttonRect.width() - 12f), buttonRect.centerX(), buttonRect.centerY() + middle, text)
         }
     }
 
-    /** The slider's track, its fill up to the thumb, and the thumb, [dy] down. */
-    private fun drawTrack(canvas: Canvas, s: PortalSheet.Slider, dy: Float, look: SliderLook, pressed: Int, backdrop: RenderNode?) {
+    /**
+     * The slider's track, its fill up to the thumb, and the thumb, [dy] down — the front's
+     * sliders, at the rear's size. GLASS: GlassSlider's — a capsule track in its grey, filled
+     * in the front's accent, and a pill thumb, white at rest and, held, one and a half times
+     * as big and clear glass. ORIGINAL: the front's PanelSeekBar — square track in the
+     * panel's TRACK, filled and thumbed in its green.
+     */
+    private fun drawTrack(canvas: Canvas, s: PortalSheet.Slider, dy: Float, look: SliderLook, pressed: Int) {
         val cy = s.track.centerY + dy
         val thumbX = PortalSheet.sliderX(s.track, look.thumbDpi)
-        // The track: the thumb's whole travel, a pill.
-        buttonRect.set(s.track.left - TRACK_H / 2, cy - TRACK_H / 2, s.track.right + TRACK_H / 2, cy + TRACK_H / 2)
-        val glassy = drawButton(canvas, buttonRect, 0f, false, backdrop, radius = TRACK_H / 2)
-        // Filled up to the thumb, in the "on" colour.
-        fillRect.set(buttonRect.left, buttonRect.top, thumbX, buttonRect.bottom)
-        buttonShape.rewind()
-        buttonShape.addRoundRect(fillRect, TRACK_H / 2, TRACK_H / 2, Path.Direction.CW)
+        val held = pressed == PRESS_THUMB
+        val glassy = theme.isGlass
+        val th = if (glassy) TRACK_H else TRACK_H_FLAT
+        val radius = if (glassy) th / 2 else 0f
         buttonPaint.style = Paint.Style.FILL
-        buttonPaint.color = if (glassy) CcButton.glassFill(0x00FFFFFF, 1f) else CcButton.flatFill(0x00FFFFFF, 0.6f)
-        canvas.drawPath(buttonShape, buttonPaint)
-        // The thumb: lit, a little bigger while held.
-        val r = PortalSheet.THUMB / 2 * if (pressed == PRESS_THUMB) 1.15f else 1f
-        buttonRect.set(thumbX - r, cy - r, thumbX + r, cy + r)
-        drawButton(canvas, buttonRect, 1f, false, backdrop, radius = r)
+        fillRect.set(s.track.left, cy - th / 2, s.track.right, cy + th / 2)
+        buttonPaint.color = if (glassy) GLASS_TRACK else Panel.Palette.TRACK
+        canvas.drawRoundRect(fillRect, radius, radius, buttonPaint)
+        fillRect.right = thumbX
+        buttonPaint.color = if (glassy) GLASS_ACCENT else Panel.Palette.WORK
+        canvas.drawRoundRect(fillRect, radius, radius, buttonPaint)
+        if (!glassy) {
+            val half = PortalSheet.THUMB_H / 2 * if (held) FLAT_HELD else 1f
+            buttonPaint.color = Panel.Palette.WORK
+            canvas.drawRect(thumbX - half, cy - half, thumbX + half, cy + half, buttonPaint)
+            return
+        }
+        val scale = if (held) GLASS_HELD else 1f
+        val tw = PortalSheet.THUMB * scale; val ht = PortalSheet.THUMB_H * scale
+        buttonRect.set(thumbX - tw / 2, cy - ht / 2, thumbX + tw / 2, cy + ht / 2)
+        drawButton(canvas, buttonRect, 0f, false, radius = ht / 2)
+        // Plain white at rest, clear glass while held — GlassSlider's thumb.
+        if (!held) {
+            buttonPaint.color = 0xFFFFFFFF.toInt()
+            canvas.drawRoundRect(buttonRect, ht / 2, ht / 2, buttonPaint)
+        }
     }
 
     /** A button's glyph in the ink, its square box's top left at [x], [y]. Shadowed as the words are, under GLASS only:
@@ -311,13 +398,13 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * corners the control centre's, or [radius]. True when it is a pane of glass.
      */
     private fun drawButton(
-        canvas: Canvas, rect: RectF, on: Float, close: Boolean, backdrop: RenderNode?,
+        canvas: Canvas, rect: RectF, on: Float, close: Boolean,
         radius: Float = minOf(rect.width(), rect.height()) * CcButton.CORNER,
     ): Boolean {
         buttonShape.rewind()
         buttonShape.addRoundRect(rect, radius, radius, Path.Direction.CW)
         val tint = if (close) Panel.Palette.CRIT and 0x00FFFFFF else 0x00FFFFFF
-        val glassy = theme.isGlass && glass.drawPane(canvas, rect, radius, paneTint(rect), shape = buttonShape, source = backdrop, local = true)
+        val glassy = theme.isGlass && glass.drawPane(canvas, rect, radius, paneTint(rect), shape = buttonShape, source = null, local = true)
         // No mark: the name is the button's, drawn over it in the ink.
         CcButton.drawBody(canvas, buttonShape, on, tint, glassy, background = 0, paint = buttonPaint) { _, _ -> }
         return glassy
@@ -330,8 +417,17 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
 
         private const val SHADOW = 0xCC000000.toInt()
 
-        /** The slider's track, this thick. */
-        private const val TRACK_H = 12f
+        /** The slider's track, this thick: GlassSlider's 6 dp to its 24 dp thumb; PanelSeekBar's to its 18 dp one. */
+        private const val TRACK_H = 7f
+        private const val TRACK_H_FLAT = 9f
+
+        /** GlassSlider's track and fill over a dark ground (ui.glass.Ink.track, .ACCENT). */
+        private const val GLASS_TRACK = 0x5C787880
+        private const val GLASS_ACCENT = 0xFFE7FF00.toInt()
+
+        /** A held thumb's size: GlassSlider's swell; the flat square's a little. */
+        private const val GLASS_HELD = 1.5f
+        private const val FLAT_HELD = 1.15f
 
         /** A page dot's radius, and how faint the dots of the pages not showing are. */
         private const val DOT_R = 4f
@@ -340,7 +436,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         /** The names' size in panel px, before the face's [PanelType.Face.scale]. */
         private const val TEXT_SIZE = 20f
 
-        /** The guest's icon on Resume and on the strip: corners rounded by this much of its side. */
+        /** The guest's icon on Resume and on the slider's row: corners rounded by this much of its side. */
         private const val APP_CORNER = 0.24f
 
         /** Panel (or Resume without an icon), Front, Close. */

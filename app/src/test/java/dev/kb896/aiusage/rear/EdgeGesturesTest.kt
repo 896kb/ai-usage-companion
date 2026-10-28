@@ -14,21 +14,21 @@ class EdgeGesturesTest {
         return events.flatMap { g.feed(it) }
     }
 
-    @Test fun `a landing in the bottom band arms the screenshot at once`() {
-        assertEquals(listOf(Action.Arm), run(Down(600f, 560f, 0)))
+    @Test fun `a landing in the bottom band says nothing until it moves`() {
+        assertEquals(emptyList<Action>(), run(Down(600f, 560f, 0)))
     }
 
     @Test fun `a pull up commits past the slop and is followed to the lift`() {
         val actions = run(Down(600f, 560f, 0), Move(600f, 550f, 10), Move(601f, 500f, 20), Move(602f, 400f, 30), Up(602f, 380f, 40))
         assertEquals(
-            listOf(Action.Arm, Action.PullStart(500f), Action.PullMove(400f), Action.PullEnd(380f)),
+            listOf(Action.PullStart(500f), Action.PullMove(400f), Action.PullEnd(380f)),
             actions,
         )
     }
 
     @Test fun `a sideways drag from the band is not a pull`() {
         val actions = run(Down(600f, 560f, 0), Move(700f, 555f, 10), Up(800f, 555f, 20))
-        assertEquals(listOf(Action.Arm, Action.Disarm), actions)
+        assertEquals(emptyList<Action>(), actions)
     }
 
     @Test fun `a swipe in from the right edge is Back`() {
@@ -47,33 +47,33 @@ class EdgeGesturesTest {
     @Test fun `a new finger closes a pull that never lifted`() {
         val actions = run(Down(600f, 560f, 0), Move(600f, 500f, 10), Move(600f, 450f, 20), Down(100f, 300f, 30))
         assertEquals(
-            listOf(Action.Arm, Action.PullStart(500f), Action.PullMove(450f), Action.PullEnd(450f)),
+            listOf(Action.PullStart(500f), Action.PullMove(450f), Action.PullEnd(450f)),
             actions,
         )
     }
 
-    @Test fun `a new finger disarms a band touch that never lifted`() {
+    @Test fun `a new finger after a band touch that never lifted starts afresh`() {
         assertEquals(
-            listOf(Action.Arm, Action.Disarm, Action.Arm),
-            run(Down(600f, 560f, 0), Down(610f, 560f, 10)),
+            listOf(Action.PullStart(500f)),
+            run(Down(600f, 560f, 0), Down(610f, 560f, 10), Move(610f, 500f, 20)),
         )
     }
 
-    @Test fun `a tap in the band arms and disarms`() {
-        assertEquals(listOf(Action.Arm, Action.Disarm), run(Down(600f, 560f, 0), Up(600f, 560f, 10)))
+    @Test fun `a tap in the band is nothing`() {
+        assertEquals(emptyList<Action>(), run(Down(600f, 560f, 0), Up(600f, 560f, 10)))
     }
 
     @Test fun `a committed pull stays a pull to the lift, even back down`() {
         val actions = run(Down(600f, 560f, 0), Move(600f, 500f, 10), Move(600f, 570f, 20), Up(600f, 570f, 30))
         assertEquals(
-            listOf(Action.Arm, Action.PullStart(500f), Action.PullMove(570f), Action.PullEnd(570f)),
+            listOf(Action.PullStart(500f), Action.PullMove(570f), Action.PullEnd(570f)),
             actions,
         )
     }
 
     @Test fun `the bottom-right corner is the pull's, not Back's`() {
         assertEquals(
-            listOf(Action.Arm, Action.Disarm),
+            emptyList<Action>(),
             run(Down(880f, 540f, 0), Move(840f, 541f, 10), Up(780f, 545f, 20)),
         )
     }
@@ -113,14 +113,14 @@ class EdgeGesturesTest {
 
     @Test fun `a drag down on the sheet is a pull from where it landed`() {
         assertEquals(
-            listOf(Action.SheetDown(500f, 200f), Action.PullStart(230f), Action.PullMove(320f), Action.PullEnd(330f)),
+            listOf(Action.SheetDown(500f, 200f), Action.PullStart(230f, onSheet = true), Action.PullMove(320f), Action.PullEnd(330f)),
             sheet(Down(500f, 200f, 0), Move(502f, 210f, 10), Move(503f, 230f, 20), Move(504f, 320f, 30), Up(504f, 330f, 40)),
         )
     }
 
     @Test fun `a drag up on the sheet is a pull too, so a sheet on its way shut can be caught`() {
         assertEquals(
-            listOf(Action.SheetDown(500f, 400f), Action.PullStart(380f), Action.PullEnd(300f)),
+            listOf(Action.SheetDown(500f, 400f), Action.PullStart(380f, onSheet = true), Action.PullEnd(300f)),
             sheet(Down(500f, 400f, 0), Move(500f, 380f, 10), Up(500f, 300f, 30)),
         )
     }
@@ -141,7 +141,7 @@ class EdgeGesturesTest {
 
     @Test fun `a pull is a pull to its lift, however far it then goes sideways`() {
         assertEquals(
-            listOf(Action.SheetDown(400f, 300f), Action.PullStart(320f), Action.PullMove(330f), Action.PullEnd(330f)),
+            listOf(Action.SheetDown(400f, 300f), Action.PullStart(320f, onSheet = true), Action.PullMove(330f), Action.PullEnd(330f)),
             sheet(Down(400f, 300f, 0), Move(405f, 320f, 10), Move(600f, 330f, 20), Up(700f, 330f, 30)),
         )
     }
@@ -166,7 +166,7 @@ class EdgeGesturesTest {
         out += g.feed(Up(600f, 380f, 30))
         out += g.feed(Down(400f, 200f, 100))
         assertEquals(
-            listOf(Action.Arm, Action.PullStart(500f), Action.PullMove(400f), Action.PullEnd(380f), Action.SheetDown(400f, 200f)),
+            listOf(Action.PullStart(500f), Action.PullMove(400f), Action.PullEnd(380f), Action.SheetDown(400f, 200f)),
             out,
         )
     }
@@ -184,12 +184,20 @@ class EdgeGesturesTest {
             sheet(Down(400f, 200f, 0), Down(500f, 300f, 50)),
         )
         assertEquals(
-            listOf(Action.SheetDown(400f, 200f), Action.PullStart(250f), Action.PullEnd(250f), Action.SheetDown(500f, 300f)),
+            listOf(Action.SheetDown(400f, 200f), Action.PullStart(250f, onSheet = true), Action.PullEnd(250f), Action.SheetDown(500f, 300f)),
             sheet(Down(400f, 200f, 0), Move(400f, 250f, 10), Down(500f, 300f, 50)),
         )
         assertEquals(
             listOf(Action.SheetDown(400f, 200f), Action.SlideStart(450f), Action.SlideEnd(450f), Action.SheetDown(500f, 300f)),
             sheet(Down(400f, 200f, 0), Move(450f, 200f, 10), Down(500f, 300f, 50)),
+        )
+    }
+
+    @Test fun `only a pull from the band may open the sheet, a drag on the sheet is marked`() {
+        assertEquals(listOf(Action.PullStart(500f, onSheet = false)), run(Down(600f, 560f, 0), Move(600f, 500f, 10)))
+        assertEquals(
+            listOf(Action.SheetDown(600f, 560f), Action.PullStart(500f, onSheet = true)),
+            sheet(Down(600f, 560f, 0), Move(600f, 500f, 10)),
         )
     }
 }
