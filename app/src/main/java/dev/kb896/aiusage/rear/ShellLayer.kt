@@ -22,14 +22,17 @@ internal object ShellLayer {
 
     /**
      * Z on the rear's layer stack, top-level. The frame stays on top of everything of
-     * ours; the sheet goes under it, and the sheet's blocker under the sheet. For touches
-     * the order between blocker and sheet does not matter: the InputDispatcher checks
-     * every window above the touched one, so the untrusted blocker occludes the windows
-     * below wherever it stands, and the trusted sheet and frame occlude nothing.
+     * ours; the sheet goes under it, the sheet's blocker under the sheet, and a guest's
+     * arrival cover under them all. For touches the order between blocker and sheet does
+     * not matter: the InputDispatcher checks every window above the touched one, so the
+     * untrusted blocker occludes the windows below wherever it stands, and the trusted
+     * sheet, frame and cover occlude nothing.
      */
     const val Z_FRAME = Int.MAX_VALUE
     const val Z_SHEET = Int.MAX_VALUE - 1
     const val Z_BLOCKER = Int.MAX_VALUE - 2
+    /** A guest's arrival (GuestCover): over every app, under the sheet, so a pull meanwhile still opens over it. */
+    const val Z_COVER = Int.MAX_VALUE - 3
 
     /** gui::TrustedOverlay::ENABLED. UNSET is 0 and DISABLED 1, and 1 still has touches dropped. */
     const val TRUSTED_OVERLAY_ENABLED = 2

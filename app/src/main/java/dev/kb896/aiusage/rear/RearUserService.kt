@@ -912,26 +912,55 @@ class RearUserService : IRearService.Stub {
         if (component.isNullOrEmpty() || !COMPONENT.matches(component)) {
             Log.w(TAG, "portal: no launcher activity for $pkg"); return@synchronized false
         }
-        // One guest at a time: the old one goes to the front, alive — never killed.
-        guest?.let { old -> if (old.pkg != pkg) moveToDisplay(old.task, 0) }
+        // One guest at a time: the old one goes to the front, alive — never killed. Not yet:
+        // it stays on the rear, live, while the new one starts and settles on the front, and
+        // leaves under the cover, as the new one comes in.
+        val old = guest?.takeIf { it.pkg != pkg }
+        // A new app coming in — over the panel, or in place of another: covered and revealed.
+        // The same app again moves nothing on the rear.
+        val arriving = guest?.pkg != pkg
         repeat(2) { attempt ->
-            val task = startSettled(component, pkg)
-            if (task == null) { endGuest("never started"); return@synchronized false }
+            val first = attempt == 0
+            // Asked for on the front by name: with the old guest still on the rear, where an
+            // unspecified start lands is not ours to guess. The same app again is left to
+            // land where its task is.
+            val task = startSettled(component, pkg, front = arriving)
+            if (task == null) {
+                // Nothing on the rear has changed yet: an old guest is still the guest.
+                if (first && old != null && guest == old) {
+                    Log.w(TAG, "portal: $pkg never started — ${old.pkg} stays")
+                    return@synchronized false
+                }
+                endGuest("never started"); return@synchronized false
+            }
+            // The rear as it is, over everything (GuestCover), before anything on it moves:
+            // the old guest's leaving, the density's change and the new app's first frames
+            // happen under it. Not on a rear asleep, nor for the same app again. The frame
+            // is in the picture, so the live one goes; it comes back after the reveal.
+            val cover = if (first && arriving && !dozing) coverRear(displayId) else null
+            if (cover != null) frame.hide()
+            if (first && old != null) moveToDisplay(old.task, 0)
             guest = Guest(pkg, task, onTop = false)
             // Before the move, so it lands laid out once at its own DPI (see syncDensity).
             syncDensity("$pkg is landing")
             moveToDisplay(task, displayId)
             wake(displayId)
-            // The frame comes up as the app lands, not after the survive wait; show() is
-            // idempotent, so guestPlaced() below does not start a second one.
-            frame.show()
+            val movedAt = android.os.SystemClock.uptimeMillis()
+            // Uncovered, the frame comes up as the app lands, not after the survive wait;
+            // show() is idempotent, so guestPlaced() below does not start a second one.
+            if (cover == null) frame.show()
             // Landed: the sheet's guest from now, so a pull during the survive wait has its
             // buttons from the first frame (they used to come in when it was placed).
             guest = Guest(pkg, task, onTop = true, landed = true)
             syncSheetGuest()
+            // Covered: revealed once it has drawn, and the frame with it — never before it.
+            if (cover != null) {
+                reveal(cover, pkg, task, displayId)
+                if (guest?.let { it.task == task && it.onTop } == true) frame.show()
+            }
             // A task gone within two seconds of the move was a trampoline the move
             // relaunched (Shazam, measured); once more from the start, then give up.
-            Thread.sleep(GUEST_SURVIVE_MS)
+            Thread.sleep(maxOf(0L, GUEST_SURVIVE_MS - (android.os.SystemClock.uptimeMillis() - movedAt)))
             val entry = GuestTask.byId(exec("am stack list"), task)
             if (entry != null && entry.display == displayId) {
                 guest = Guest(pkg, task, onTop = true, landed = true)
@@ -949,9 +978,78 @@ class RearUserService : IRearService.Stub {
         false
     }
 
-    /** Started on the front; its task once the top activity has held still. Null if none. */
-    private fun startSettled(component: String, pkg: String): Int? {
-        exec("am start -n $component")
+    /** The rear's layer stack for the guests' covers, read once. */
+    private val coverStack by lazy { rearLayerStack() }
+
+    /**
+     * The rear (display [displayId]) as it shows now, on a cover over it (GuestCover); null
+     * when there can be none, and the guest arrives uncovered, as it always did.
+     */
+    private fun coverRear(displayId: Int): GuestCover? {
+        val at = android.os.SystemClock.uptimeMillis()
+        return GuestCover.up(coverStack, displayId) { screencapRear() }
+            ?.also { Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms") }
+    }
+
+    /** The rear by the `screencap` command, for a cover where the in-process capture is missing; null if it cannot be had. */
+    private fun screencapRear(): android.graphics.Bitmap? {
+        val id = rearPhysicalId() ?: return null // without -d it would be the FRONT screen
+        val p = ProcessBuilder("screencap", "-p", "-d", id).start()
+        return try {
+            p.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
+        } finally {
+            runCatching { p.waitFor() }
+            p.destroy()
+        }
+    }
+
+    /**
+     * [cover] off the rear once [pkg]'s [task] has drawn on [displayId] (GuestDrawn, asked of
+     * `dumpsys window <pkg>` as fast as it answers), or GuestReveal.MAX_WAIT_MS has gone by
+     * without a sign of it: slid left and faded on GuestReveal's curve, a transaction a
+     * frame at the display's rate, then removed. On the launch's thread, under [placing].
+     */
+    private fun reveal(cover: GuestCover, pkg: String, task: Int, displayId: Int) {
+        val coveredAt = android.os.SystemClock.uptimeMillis()
+        val r = GuestReveal(coveredAt)
+        try {
+            while (r.waiting(android.os.SystemClock.uptimeMillis())) {
+                if (GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, Panel.WIDTH, Panel.HEIGHT)) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    r.drawn(now)
+                    Log.i(TAG, "portal: $pkg drew on the rear ${now - coveredAt} ms after its move — revealing")
+                    break
+                }
+                Thread.sleep(DRAWN_POLL_MS)
+            }
+            if (r.phase == GuestReveal.Phase.COVERED) {
+                Log.w(TAG, "portal: no sign of $pkg drawing on the rear in ${GuestReveal.MAX_WAIT_MS} ms — revealing anyway")
+            }
+            val frameMs = frameMsOf(displayId)
+            while (true) {
+                val f = r.at(android.os.SystemClock.uptimeMillis())
+                cover.place(f.dx, f.alpha)
+                if (r.phase == GuestReveal.Phase.DONE) break
+                Thread.sleep(frameMs)
+            }
+        } finally {
+            // Interrupted or not, a cover is never left over the rear.
+            cover.remove()
+        }
+    }
+
+    /** One frame of [displayId] in ms, from its refresh rate; 60 Hz's when it does not say. */
+    private fun frameMsOf(displayId: Int): Long = runCatching {
+        val hz = context?.getSystemService(android.hardware.display.DisplayManager::class.java)?.getDisplay(displayId)?.refreshRate
+        if (hz != null && hz >= 24f) Math.round(1000f / hz).toLong().coerceIn(4L, 42L) else 16L
+    }.getOrDefault(16L)
+
+    /**
+     * Started on the front — by name when [front], else wherever `am start` puts it — and its
+     * task once the top activity has held still. Null if none.
+     */
+    private fun startSettled(component: String, pkg: String, front: Boolean): Int? {
+        exec(if (front) "am start --display 0 -n $component" else "am start -n $component")
         val settle = GuestTask.Settle()
         val until = android.os.SystemClock.uptimeMillis() + GUEST_SETTLE_LIMIT_MS
         while (android.os.SystemClock.uptimeMillis() < until) {
@@ -2494,6 +2592,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val GUEST_SURVIVE_MS = 2_000L
         /** The longest a launch waits for an app's startup screens to settle. */
         private const val GUEST_SETTLE_LIMIT_MS = 6_000L
+        /** Between looks for an arriving guest's first draw: each look is a dumpsys of its own (~100 ms). */
+        private const val DRAWN_POLL_MS = 20L
         /** The sheet's settle, a frame at a time. */
         private const val SHEET_FRAME_MS = 16L
         /** No rear touchscreen found: how long before getevent is asked again. */
