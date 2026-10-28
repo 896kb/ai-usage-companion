@@ -83,4 +83,16 @@ class PortalActionTest {
         assertNull(PortalAction.sheetGuest(landed = false, placed = false, onTop = false))
         assertNull(PortalAction.sheetGuest(landed = false, placed = false, onTop = true))
     }
+    @Test fun `an app's icon launches it, unless it is the guest already`() {
+        // No guest, or another app the guest: launched.
+        assertEquals(PortalAction.AppTap.LAUNCH, PortalAction.appTap("a.b", guestPkg = null, guestOnTop = null))
+        assertEquals(PortalAction.AppTap.LAUNCH, PortalAction.appTap("a.b", guestPkg = "c.d", guestOnTop = true))
+        assertEquals(PortalAction.AppTap.LAUNCH, PortalAction.appTap("a.b", guestPkg = "c.d", guestOnTop = false))
+        // The guest itself, on top: nothing to open, the sheet only shuts.
+        assertEquals(PortalAction.AppTap.SHUT, PortalAction.appTap("a.b", guestPkg = "a.b", guestOnTop = true))
+        // The guest itself, behind the panel or hidden on the front: brought back, as Resume.
+        assertEquals(PortalAction.AppTap.RESUME, PortalAction.appTap("a.b", guestPkg = "a.b", guestOnTop = false))
+        // A guest the sheet does not show (none as far as it knows): launched as before.
+        assertEquals(PortalAction.AppTap.LAUNCH, PortalAction.appTap("a.b", guestPkg = "a.b", guestOnTop = null))
+    }
 }

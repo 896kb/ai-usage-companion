@@ -1662,7 +1662,13 @@ class RearUserService : IRearService.Stub {
                 // Pages still sliding: the cell under the finger is not yet where it will be.
                 if (pager.settling) { steady(atMs); return }
                 val pkg = apps.packages.getOrNull(hit.index)
-                shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
+                // The guest's own icon opens nothing new: see PortalAction.appTap.
+                val tapped = pkg?.let { PortalAction.appTap(it, sliderGuest(), onTop) }
+                when (tapped) {
+                    PortalAction.AppTap.SHUT -> { Log.i(TAG, "portal sheet: $pkg is the guest already — only shut"); shutSheet(atMs, null) }
+                    PortalAction.AppTap.RESUME -> { Log.i(TAG, "portal sheet: $pkg is the guest, behind — Resume"); shutSheet(atMs) { onSheetButton(0, false) } }
+                    else -> shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
+                }
             }
             is PortalSheet.Hit.Button -> {
                 // The frame stays as hidden as the open sheet has it while the sheet shuts:

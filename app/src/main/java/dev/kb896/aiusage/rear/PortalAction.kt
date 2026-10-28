@@ -73,4 +73,26 @@ object PortalAction {
      * the phone, 2026-10-28). A guest sent to the back is [placed] at once.
      */
     fun sheetGuest(landed: Boolean, placed: Boolean, onTop: Boolean): Boolean? = if (landed || placed) onTop else null
+    /** What a tap on an app's icon on the sheet comes to. */
+    enum class AppTap {
+        /** Launched as the guest (RearUserService.launchGuest): covered, moved in, revealed. */
+        LAUNCH,
+        /** It is the guest, on top already: the sheet shuts, and nothing else happens. */
+        SHUT,
+        /** It is the guest, behind the panel or hidden on the front: brought back as Resume brings it. */
+        RESUME,
+    }
+
+    /**
+     * A tap on [pkg]'s icon, with the sheet showing [guestPkg] as its guest ([guestOnTop]
+     * as PortalAction.sheetGuest has it; null for none). Opening the app that is already
+     * the guest relaunched it over itself and the rear glitched ("no action should be
+     * taken … just the panel should be closed"): on top, the sheet only shuts; behind,
+     * the tap is its Resume — the one thing opening it could mean.
+     */
+    fun appTap(pkg: String, guestPkg: String?, guestOnTop: Boolean?): AppTap = when {
+        guestOnTop == null || pkg != guestPkg -> AppTap.LAUNCH
+        guestOnTop -> AppTap.SHUT
+        else -> AppTap.RESUME
+    }
 }
