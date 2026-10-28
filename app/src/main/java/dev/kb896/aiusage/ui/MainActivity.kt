@@ -1370,7 +1370,8 @@ class MainActivity : ComponentActivity() {
         shownPortalDpi = config.portalDpi
         SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") {
             AppPicker.show(this, config.portalApps) { pinned ->
-                write { it.copy(portalApps = pinned, portalDpi = it.portalDpi.filterKeys { k -> k in pinned }) }
+                write { it.copy(portalApps = pinned, portalDpi = it.portalDpi.filterKeys { k -> k in pinned },
+                    portalFullscreen = it.portalFullscreen.filter { k -> k in pinned }.toSet()) }
                 buildSettingsRows()
             }
         }
@@ -1387,13 +1388,17 @@ class MainActivity : ComponentActivity() {
                 onMoveUp = { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) }; buildSettingsRows() },
                 onClick = {
                     PortalAppSheet.show(
-                        this, pkg, label, config.portalDpi[pkg],
+                        this, pkg, label, config.portalDpi[pkg], pkg in config.portalFullscreen,
                         onDpi = { dpi ->
                             write { c -> c.copy(portalDpi = if (dpi == null) c.portalDpi - pkg else c.portalDpi + (pkg to dpi)) }
                             buildSettingsRows()
                         },
+                        onFullscreen = { on ->
+                            write { c -> c.copy(portalFullscreen = if (on) c.portalFullscreen + pkg else c.portalFullscreen - pkg) }
+                        },
                         onUnpin = {
-                            write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg), portalDpi = it.portalDpi - pkg) }
+                            write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg), portalDpi = it.portalDpi - pkg,
+                                portalFullscreen = it.portalFullscreen - pkg) }
                             buildSettingsRows()
                         },
                     )

@@ -38,7 +38,8 @@ import java.util.concurrent.TimeUnit
  * touch on the rear while it is up (ShellLayer). Touches go through it to the arriving app.
  */
 internal class GuestCover private constructor(
-    private val layer: SurfaceControl,
+    /** Its layer, for a capture to leave out (the camera strip's sample, taken under it). */
+    val layer: SurfaceControl,
     private val buffer: HardwareBuffer?,
     /** The picture was taken without the layer asked to be left out: the frame may stay up over it. */
     val frameLeftOut: Boolean,
@@ -60,9 +61,6 @@ internal class GuestCover private constructor(
         /** The longest to wait for SurfaceFlinger to take the cover on before what is under it moves. */
         private const val COMMIT_WAIT_MS = 120L
 
-        /** Hidden capture classes, newest first: Android 16's name, then 14–15's. */
-        private val CAPTURE_CLASSES = listOf("android.window.ScreenCaptureInternal", "android.window.ScreenCapture")
-
         /** Once per process per reason, so a firmware without the call does not log every launch. */
         private val logged = java.util.Collections.synchronizedSet(HashSet<String>())
 
@@ -76,7 +74,7 @@ internal class GuestCover private constructor(
          * content in it, or no trusted layer — nothing left behind then.
          */
         fun up(layerStack: Int, displayId: Int, leaveOut: SurfaceControl?, screencap: () -> Bitmap?): GuestCover? {
-            val shot = runCatching { capture(displayId, leaveOut) }
+            val shot = runCatching { RearCapture.capture(displayId, listOfNotNull(leaveOut)) }
                 .onFailure { once("no in-process capture (${(it.cause ?: it).javaClass.simpleName}: ${(it.cause ?: it).message}); screencap instead") }
                 .getOrNull()
             if (shot?.secure == true) {
@@ -118,66 +116,8 @@ internal class GuestCover private constructor(
             }
         }
 
-        private class Shot(val buffer: HardwareBuffer, val space: ColorSpace?, val secure: Boolean, val leftOut: Boolean)
-
         /** The capture's colour space as a layer's dataspace: Display P3 or sRGB, the two the rear composes in. */
         private fun dataSpace(space: ColorSpace?): Int =
             if (space == ColorSpace.get(ColorSpace.Named.DISPLAY_P3)) DataSpace.DATASPACE_DISPLAY_P3 else DataSpace.DATASPACE_SRGB
-
-        /**
-         * IWindowManager.captureDisplay([displayId], args leaving [leaveOut] out, a synchronous
-         * listener), by reflection: null when the window manager answers with no picture;
-         * throws when the calls are not there or are refused. Args that cannot be built, or a
-         * capture refused with them (a layer released meanwhile cannot be sent), are dropped
-         * for the default ones: a picture with the frame in it, and [Shot.leftOut] false.
-         */
-        private fun capture(displayId: Int, leaveOut: SurfaceControl?): Shot? {
-            val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)
-                ?: return null
-            val iwm = Class.forName("android.view.IWindowManager")
-            var missing: Throwable? = null
-            for (name in CAPTURE_CLASSES) {
-                val call: java.lang.reflect.Method
-                val makeListener: java.lang.reflect.Method
-                try {
-                    val args = Class.forName("$name\$CaptureArgs")
-                    val listenerType = Class.forName("$name\$ScreenCaptureListener")
-                    call = iwm.getMethod("captureDisplay", Int::class.javaPrimitiveType, args, listenerType)
-                    makeListener = Class.forName(name).getMethod("createSyncCaptureListener")
-                } catch (e: ReflectiveOperationException) { missing = e; continue }
-                val args = leaveOut?.let { l ->
-                    runCatching { excluding(name, l) }
-                        .onFailure { once("the frame cannot be left out of the picture (${(it.cause ?: it).message}); it fades instead") }
-                        .getOrNull()
-                }
-                var listener = makeListener.invoke(null) ?: return null
-                var leftOut = args != null
-                try {
-                    call.invoke(wm, displayId, args, listener)
-                } catch (e: java.lang.reflect.InvocationTargetException) {
-                    if (args == null) throw e
-                    once("a capture leaving the frame out was refused (${e.targetException.message}); it fades instead")
-                    listener = makeListener.invoke(null) ?: return null
-                    leftOut = false
-                    call.invoke(wm, displayId, null, listener)
-                }
-                val shot = listener.javaClass.getMethod("getBuffer").apply { isAccessible = true }.invoke(listener) ?: return null
-                fun get(method: String) = shot.javaClass.getMethod(method).apply { isAccessible = true }.invoke(shot)
-                val buffer = get("getHardwareBuffer") as? HardwareBuffer ?: return null
-                val secure = runCatching { get("containsSecureLayers") as Boolean }.getOrDefault(false)
-                val space = runCatching { get("getColorSpace") as? ColorSpace }.getOrNull()
-                return Shot(buffer, space, secure, leftOut)
-            }
-            throw missing ?: ClassNotFoundException("no ScreenCapture")
-        }
-
-        /** [name]'s CaptureArgs leaving [layer] out (CaptureArgs.Builder().setExcludeLayers), by reflection. */
-        private fun excluding(name: String, layer: SurfaceControl): Any {
-            val builder = Class.forName("$name\$CaptureArgs\$Builder").getDeclaredConstructor().newInstance()
-            builder.javaClass.getMethod("setExcludeLayers", Array<SurfaceControl>::class.java)
-                .apply { isAccessible = true }.invoke(builder, arrayOf(layer))
-            return builder.javaClass.getMethod("build").apply { isAccessible = true }.invoke(builder)
-                ?: throw IllegalStateException("no CaptureArgs")
-        }
     }
 }

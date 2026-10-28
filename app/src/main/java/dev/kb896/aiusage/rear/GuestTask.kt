@@ -10,9 +10,11 @@ package dev.kb896.aiusage.rear
  */
 object GuestTask {
 
-    data class Entry(val task: Int, val pkg: String, val display: Int, val top: String)
+    /** [bounds]: the task's, as `am stack list` gives them; null where the line has none. */
+    data class Entry(val task: Int, val pkg: String, val display: Int, val top: String, val bounds: GuestShape.Bounds? = null)
 
     private val DISPLAY = Regex("""\bdisplay=(\d+)""")
+    private val BOUNDS = Regex("""\bbounds=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]""")
     private val TASK = Regex("""taskId=(\d+): ([^/\s]+)/\S+(?:.*?topActivity=ComponentInfo\{([^}]+)\})?""")
 
     fun entries(stackList: String): List<Entry> {
@@ -21,7 +23,9 @@ object GuestTask {
         for (line in stackList.lineSequence()) {
             val t = TASK.find(line)
             if (t != null) {
-                out += Entry(t.groupValues[1].toInt(), t.groupValues[2], display, t.groupValues[3])  // "" while no top activity yet
+                val b = BOUNDS.find(line)?.groupValues?.drop(1)?.map { it.toInt() }
+                out += Entry(t.groupValues[1].toInt(), t.groupValues[2], display, t.groupValues[3],  // "" while no top activity yet
+                    b?.let { GuestShape.Bounds(it[0], it[1], it[2], it[3]) })
                 continue
             }
             DISPLAY.find(line)?.let { display = it.groupValues[1].toInt() }

@@ -56,4 +56,10 @@ class GuestDrawnTest {
         assertFalse(drawn(""))
         assertFalse(drawn("Can't find service: window"))
     }
+    @Test fun `a guest kept right of the cameras is drawn at its own size, not the display's`() {
+        val confined = window(w = 608, h = 572)
+        assertTrue(GuestDrawn.drawn(confined, task = 75481, display = 1, width = 608, height = 572))
+        assertFalse(GuestDrawn.drawn(window(), task = 75481, display = 1, width = 608, height = 572))
+        assertFalse(drawn(confined))
+    }
 }

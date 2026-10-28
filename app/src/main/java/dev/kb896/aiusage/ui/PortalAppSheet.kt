@@ -5,7 +5,8 @@ import android.widget.LinearLayout
 import dev.kb896.aiusage.rear.RearDensity
 
 /**
- * A pinned app's own settings, on the front: its density on the back, and Unpin.
+ * A pinned app's own settings, on the front: its density on the back, whether it may use
+ * the camera area there, and Unpin.
  *
  * The slider only writes when the finger lets go (see [SettingsRows.slider]): each write
  * saves the config and pushes it to the shell, which re-applies the density live, so a
@@ -33,7 +34,9 @@ object PortalAppSheet {
         pkg: String,
         label: String,
         currentDpi: Int?,
+        fullscreen: Boolean,
         onDpi: (Int?) -> Unit,
+        onFullscreen: (Boolean) -> Unit,
         onUnpin: () -> Unit,
     ) {
         // Until the slider is touched an unset app reads "Default"; after, the number.
@@ -56,6 +59,9 @@ object PortalAppSheet {
                 if (!untouchedTap) onDpi(dpiOf(it))
             },
         )
+        // Off, as every app starts: kept right of the cameras on the back.
+        SettingsRows.toggle(column, "Use the camera area", fullscreen) { on -> onFullscreen(on) }
+        SettingsRows.note(column, "On, ${label.trim()} fills the whole back, under the cameras too.")
         Modal.show(
             Modal.builder(activity).setTitle(label.trim())
                 .setView(column)

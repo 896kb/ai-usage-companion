@@ -33,6 +33,8 @@ internal object ShellLayer {
     const val Z_BLOCKER = Int.MAX_VALUE - 2
     /** A guest's arrival (GuestCover): over every app, under the sheet, so a pull meanwhile still opens over it. */
     const val Z_COVER = Int.MAX_VALUE - 3
+    /** The camera strip beside a guest kept right of the cameras (CameraStrip): over every app, under the cover. */
+    const val Z_STRIP = Int.MAX_VALUE - 4
 
     /** gui::TrustedOverlay::ENABLED. UNSET is 0 and DISABLED 1, and 1 still has touches dropped. */
     const val TRUSTED_OVERLAY_ENABLED = 2
@@ -41,13 +43,16 @@ internal object ShellLayer {
     class Untrusted(why: String) : Exception(why)
 
     /**
-     * A layer named [name], [Panel.WIDTH] by [Panel.HEIGHT], translucent, on [layerStack]
+     * A layer named [name], [width] by [height] (the whole rear unless said), translucent, on [layerStack]
      * at [z], [trusted] or not, shown at once when [visible], the whole layer at [alpha]
      * (SurfaceFlinger's, on everything drawn into it — nothing to do with trust). Throws [Untrusted] when
      * [trusted] cannot be had, or whatever building it threw; nothing is left behind either way.
      */
-    fun create(name: String, layerStack: Int, z: Int, trusted: Boolean, visible: Boolean = true, alpha: Float = 1f): SurfaceControl {
-        val layer = SurfaceControl.Builder().setName(name).setBufferSize(Panel.WIDTH, Panel.HEIGHT)
+    fun create(
+        name: String, layerStack: Int, z: Int, trusted: Boolean, visible: Boolean = true, alpha: Float = 1f,
+        width: Int = Panel.WIDTH, height: Int = Panel.HEIGHT,
+    ): SurfaceControl {
+        val layer = SurfaceControl.Builder().setName(name).setBufferSize(width, height)
             .setFormat(PixelFormat.TRANSLUCENT).build()
         try {
             SurfaceControl.Transaction().use { t ->

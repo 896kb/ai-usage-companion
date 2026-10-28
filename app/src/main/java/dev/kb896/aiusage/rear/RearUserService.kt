@@ -176,7 +176,9 @@ class RearUserService : IRearService.Stub {
         // not the rear going dark, and the guest on top keeps its frame. A rear that really
         // is dark is seen by the keep-alive (nothing on top) and hides it there.
         val guestOnTop = guest?.onTop == true
-        if (dozing && !guestOnTop) frame.hide() else if (!dozing && guestOnTop) frame.show()
+        if (dozing && !guestOnTop) chromeHide() else if (!dozing && guestOnTop) chromeShow()
+        // A dark rear: the strip's colour is not read.
+        strip.dark = dozing && !guestOnTop
         // A sheet is never left up over a rear going to sleep: its blocker would outlive it.
         if (dozing) closeSheetNow("the panel is asleep")
         syncTouchWatch()
@@ -221,7 +223,7 @@ class RearUserService : IRearService.Stub {
         val g = guest
         if (g != null) {
             if (markOnTop(g.task, false)) syncSheetGuest()
-            frame.hide()
+            chromeHide()
         }
         // Straight onto the rear display first: the manifest's miui.rear.policy makes
         // HyperOS allow it (ActivityStarterImpl logs "allow app"), so the panel never
@@ -649,6 +651,24 @@ class RearUserService : IRearService.Stub {
         get() = guestRef.get()
         set(value) = guestRef.set(value)
     private val frame by lazy { PortalFrame(rearLayerStack()) }
+    /** The camera strip beside a confined guest (CameraStrip), in the guest's edge colour. */
+    private val strip by lazy { CameraStrip(rearLayerStack()) { stripColor() } }
+
+    /**
+     * The guest's chrome up: its frame, and — kept right of the cameras — the camera strip
+     * beside it (else the strip goes). In place of a bare frame.show() everywhere.
+     */
+    private fun chromeShow() {
+        frame.show()
+        val g = guest
+        if (g != null && shapeOf(g.pkg).confined) strip.show(null) else strip.hide()
+    }
+
+    /** The guest's chrome down: frame and strip fade out. */
+    private fun chromeHide() {
+        frame.hide()
+        strip.hide()
+    }
 
     /** [onTop] on whatever guest has [task] now; true if this call changed it. */
     private fun markOnTop(task: Int, onTop: Boolean): Boolean {
@@ -679,6 +699,8 @@ class RearUserService : IRearService.Stub {
 
     /** The apps' names under their icons on the back (PanelConfig.portalAppNames), from the last payload. */
     @Volatile private var portalNames = true
+    /** Apps given the camera area (PanelConfig.portalFullscreen); every other guest is kept right of it. */
+    @Volatile private var portalFullscreen: Set<String> = emptySet()
 
     /**
      * The pinned apps or the grid changed: the pages follow, an open sheet's with them. On
@@ -724,6 +746,14 @@ class RearUserService : IRearService.Stub {
             if (regrid) repage()
             portalNames = config.portalAppNames
             shellSheet?.names(config.portalAppNames)
+            // An app given the camera area, or taken it back, while it is the guest: reshaped now.
+            if (portalFullscreen != config.portalFullscreen) {
+                portalFullscreen = config.portalFullscreen
+                guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g ->
+                    shapeGuest(g.task, g.pkg, "its camera area setting changed")
+                    if (g.onTop) chromeShow()
+                }
+            }
             restyleSheetFace(config.theme to config.font)
         } catch (e: Exception) {
             Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
@@ -856,6 +886,9 @@ class RearUserService : IRearService.Stub {
         else if (curOurs) execChecked("settings put global $DENSITY_MARKER ${DensityDump.marker(wanted!!, baselineDensity)}")
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} at " +
             (if (ours) "$wanted dpi" else "its own ${wanted ?: physicalDensity} dpi") + " — $why")
+        // A guest that is placed on the rear keeps its shape through the relayout. One still
+        // landing is shaped after its move (shaped before, on the front, it lands wrong).
+        guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g -> shapeGuest(g.task, g.pkg, "the density changed") }
     }
 
     /** A step that did not take: logged once per target; an unknown outcome is re-read next time. */
@@ -941,16 +974,18 @@ class RearUserService : IRearService.Stub {
             // and the live one fades out as it goes and back in after the reveal.
             val cover = if (first && arriving && !dozing) coverRear(displayId) else null
             if (cover != null && !cover.frameLeftOut) frame.hide()
-            if (first && old != null) moveToDisplay(old.task, 0)
+            if (first && old != null) { moveToDisplay(old.task, 0); shapeForFront(old.task) }
             guest = Guest(pkg, task, onTop = false)
             // Before the move, so it lands laid out once at its own DPI (see syncDensity).
             syncDensity("$pkg is landing")
             moveToDisplay(task, displayId)
+            // After the move, never before: shaped on the front, it lands at x 0–608.
+            shapeGuest(task, pkg, "it landed")
             wake(displayId)
             val movedAt = android.os.SystemClock.uptimeMillis()
             // Uncovered, the frame comes up as the app lands, not after the survive wait;
             // show() is idempotent, so guestPlaced() below does not start a second one.
-            if (cover == null) frame.show()
+            if (cover == null) chromeShow()
             // Landed: the sheet's guest from now, so a pull during the survive wait has its
             // buttons from the first frame (they used to come in when it was placed).
             guest = Guest(pkg, task, onTop = true, landed = true)
@@ -958,8 +993,8 @@ class RearUserService : IRearService.Stub {
             // Covered: revealed once it has drawn, and the frame faded in after it (still up
             // from the guest before, it stays) — never before the app.
             if (cover != null) {
-                reveal(cover, pkg, task, displayId)
-                if (guest?.let { it.task == task && it.onTop } == true) frame.show()
+                reveal(cover, pkg, task, displayId) { stripFor(pkg) }
+                if (guest?.let { it.task == task && it.onTop } == true) chromeShow()
             }
             // A task gone within two seconds of the move was a trampoline the move
             // relaunched (Shazam, measured); once more from the start, then give up.
@@ -971,7 +1006,7 @@ class RearUserService : IRearService.Stub {
                 guestPlaced(displayId)
                 return@synchronized true
             }
-            frame.hide()
+            chromeHide()
             // Not landed after all: no buttons for a task that is gone.
             guest = Guest(pkg, task, onTop = false)
             syncSheetGuest()
@@ -991,9 +1026,87 @@ class RearUserService : IRearService.Stub {
     private fun coverRear(displayId: Int): GuestCover? {
         val at = android.os.SystemClock.uptimeMillis()
         return GuestCover.up(coverStack, displayId, frame.currentLayer) { screencapRear() }
-            ?.also { Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms" +
-                if (it.frameLeftOut) ", the frame left out" else "") }
+            ?.also {
+                coverLayer = it.layer
+                Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms" +
+                    if (it.frameLeftOut) ", the frame left out" else "")
+            }
     }
+
+    /** The cover up now, if any: left out of the strip's samples. */
+    @Volatile private var coverLayer: android.view.SurfaceControl? = null
+
+    /** [pkg]'s shape on the rear (GuestShape): kept right of the cameras unless given their area. */
+    private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalFullscreen)
+
+    /**
+     * [task] ([pkg]'s, on the rear) given its shape: TaskShaper's transaction, else `am task
+     * resize` — which only a multi-window task takes, as a launch makes it. Only ever on the
+     * rear: shaped on the front first, it lands at x 0–608 (measured). Under [placing].
+     */
+    private fun shapeGuest(task: Int, pkg: String, why: String) {
+        val shape = shapeOf(pkg)
+        val b = shape.bounds
+        val rect = android.graphics.Rect(b.left, b.top, b.right, b.bottom)
+        val how = if (TaskShaper.apply(task, shape.mode, if (shape.confined) rect else null)) "transaction" else {
+            exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}"); "am task resize"
+        }
+        Log.i(TAG, "portal: $pkg (task $task) ${if (shape.confined) "kept right of the cameras" else "on the whole rear"}, by $how — $why")
+    }
+
+    /**
+     * [task], leaving the rear for the front, made an ordinary fullscreen task again: in
+     * multi-window it would keep the rear's bounds there, and the app's next launch would
+     * reuse it so. Else, sized to the front's whole screen.
+     */
+    private fun shapeForFront(task: Int) {
+        if (TaskShaper.apply(task, GuestShape.FULLSCREEN, null)) return
+        val size = runCatching {
+            android.graphics.Point().also { p ->
+                @Suppress("DEPRECATION")
+                context?.getSystemService(android.hardware.display.DisplayManager::class.java)?.getDisplay(0)?.getRealSize(p)
+            }
+        }.getOrNull()?.takeIf { it.x > 0 && it.y > 0 } ?: return
+        exec("am task resize $task 0 0 ${size.x} ${size.y}")
+    }
+
+    /**
+     * The camera strip for [pkg] as it arrives, before its reveal so it is there when the
+     * cover slides: up in the guest's edge colour when it is kept right of the cameras, else
+     * down. Under the cover, which [stripColor] leaves out.
+     */
+    private fun stripFor(pkg: String) {
+        if (shapeOf(pkg).confined) strip.show(stripColor()) else strip.hide()
+    }
+
+    /**
+     * The guest's background colour at its left edge (x 296–302, the whole height) for the
+     * camera strip: a cropped captureDisplay without our layers in it, its pixels in sRGB,
+     * one colour picked (StripColor) — or black: secure content (it comes back black), a
+     * busy edge, a capture that failed.
+     */
+    private fun stripColor(): Int = runCatching {
+        val leaveOut = listOfNotNull(frame.currentLayer, strip.currentLayer, coverLayer)
+        val crop = android.graphics.Rect(Panel.CUTOUT_RIGHT, 0, Panel.CUTOUT_RIGHT + STRIP_SAMPLE_W, Panel.HEIGHT)
+        val shot = RearCapture.capture(rearDisplay(), leaveOut, crop) ?: return@runCatching BLACK
+        try {
+            if (shot.secure) return@runCatching BLACK
+            val hw = android.graphics.Bitmap.wrapHardwareBuffer(shot.buffer, shot.space) ?: return@runCatching BLACK
+            val bmp = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+            hw.recycle()
+            // A crop refused gives the whole rear: the same columns, read out of it.
+            val x0 = if (bmp.width > STRIP_SAMPLE_W) Panel.CUTOUT_RIGHT else 0
+            val w = minOf(STRIP_SAMPLE_W, bmp.width - x0)
+            val srgb = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+            val px = IntArray(w * bmp.height) { i ->
+                bmp.getColor(x0 + i % w, i / w).convert(srgb).toArgb()
+            }
+            bmp.recycle()
+            StripColor.pick(px)
+        } finally {
+            runCatching { shot.buffer.close() }
+        }
+    }.getOrDefault(BLACK)
 
     /** The rear by the `screencap` command, for a cover where the in-process capture is missing; null if it cannot be had. */
     private fun screencapRear(): android.graphics.Bitmap? {
@@ -1011,12 +1124,15 @@ class RearUserService : IRearService.Stub {
      * [cover] off the rear once [pkg]'s [task] has drawn on [displayId] (GuestDrawn, asked of
      * `dumpsys window <pkg>` as fast as it answers): [reveal] with that for its sign.
      */
-    private fun reveal(cover: GuestCover, pkg: String, task: Int, displayId: Int) =
-        reveal(cover, pkg, displayId) { drawnOn(pkg, task, displayId) }
+    private fun reveal(cover: GuestCover, pkg: String, task: Int, displayId: Int, onDrawn: () -> Unit = {}) =
+        reveal(cover, pkg, displayId, onDrawn) { drawnOn(pkg, task, displayId, shapeOf(pkg).bounds) }
 
-    /** [pkg]'s [task] has an app window drawn on [displayId] at the rear's size (GuestDrawn). */
-    private fun drawnOn(pkg: String, task: Int, displayId: Int) =
-        task > 0 && GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, Panel.WIDTH, Panel.HEIGHT)
+    /**
+     * [pkg]'s [task] has an app window drawn on [displayId] at [size] — its shape's, right of
+     * the cameras or the whole rear (GuestDrawn).
+     */
+    private fun drawnOn(pkg: String, task: Int, displayId: Int, size: GuestShape.Bounds = GuestShape.FULL) =
+        task > 0 && GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, size.width, size.height)
 
     /**
      * [cover] off the rear once [drawn] says [what] — the app now on top — has drawn there,
@@ -1024,22 +1140,22 @@ class RearUserService : IRearService.Stub {
      * it: slid left and faded on GuestReveal's curve, a transaction a frame at [displayId]'s
      * rate, then removed. On the caller's thread, under [placing].
      */
-    private fun reveal(cover: GuestCover, what: String, displayId: Int, drawn: () -> Boolean) {
+    private fun reveal(cover: GuestCover, what: String, displayId: Int, onDrawn: () -> Unit = {}, drawn: () -> Boolean) {
         val coveredAt = android.os.SystemClock.uptimeMillis()
         val r = GuestReveal(coveredAt)
         try {
+            var seen = false
             while (r.waiting(android.os.SystemClock.uptimeMillis())) {
-                if (drawn()) {
-                    val now = android.os.SystemClock.uptimeMillis()
-                    r.drawn(now)
-                    Log.i(TAG, "portal: $what drew on the rear ${now - coveredAt} ms after the change — revealing")
-                    break
-                }
+                if (drawn()) { seen = true; break }
                 Thread.sleep(DRAWN_POLL_MS)
             }
-            if (r.phase == GuestReveal.Phase.COVERED) {
-                Log.w(TAG, "portal: no sign of $what drawing on the rear in ${GuestReveal.MAX_WAIT_MS} ms — revealing anyway")
-            }
+            // Whatever goes with the new top before it is seen (the camera strip), still covered.
+            runCatching { onDrawn() }.onFailure { Log.w(TAG, "portal: before the reveal: ${it.message}") }
+            // The slide from now, after that, so it never starts part-way.
+            val now = android.os.SystemClock.uptimeMillis()
+            r.drawn(now)
+            if (seen) Log.i(TAG, "portal: $what drew on the rear ${now - coveredAt} ms after the change — revealing")
+            else Log.w(TAG, "portal: no sign of $what drawing on the rear in ${GuestReveal.MAX_WAIT_MS} ms — revealing anyway")
             val frameMs = frameMsOf(displayId)
             while (true) {
                 val f = r.at(android.os.SystemClock.uptimeMillis())
@@ -1050,6 +1166,7 @@ class RearUserService : IRearService.Stub {
         } finally {
             // Interrupted or not, a cover is never left over the rear.
             cover.remove()
+            coverLayer = null
         }
     }
 
@@ -1062,11 +1179,13 @@ class RearUserService : IRearService.Stub {
      * (a choice runs once it has ended), so it is not in the picture; the frame is left out
      * where it can be, and fades as the change has it. Under [placing].
      */
-    private fun covered(what: String, drawn: () -> Boolean, change: () -> Boolean): Boolean {
+    private fun covered(what: String, drawn: () -> Boolean, onDrawn: () -> Unit = {}, change: () -> Boolean): Boolean {
         val display = rearDisplay()
         val cover = if (!dozing) coverRear(display) else null
-        val changed = try { change() } catch (e: Throwable) { cover?.remove(); throw e }
-        if (cover != null) { if (changed) reveal(cover, what, display, drawn) else cover.remove() }
+        val changed = try { change() } catch (e: Throwable) { cover?.remove(); coverLayer = null; throw e }
+        if (cover != null) {
+            if (changed) reveal(cover, what, display, onDrawn, drawn) else { cover.remove(); coverLayer = null }
+        } else if (changed) onDrawn()
         return changed
     }
 
@@ -1085,7 +1204,9 @@ class RearUserService : IRearService.Stub {
      * task once the top activity has held still. Null if none.
      */
     private fun startSettled(component: String, pkg: String, front: Boolean): Int? {
-        exec(if (front) "am start --display 0 -n $component" else "am start -n $component")
+        // Confined, started in multi-window, so the rear can give it its bounds after the move.
+        val mode = GuestShape.launchFlags(shapeOf(pkg))
+        exec(if (front) "am start --display 0 $mode-n $component" else "am start $mode-n $component")
         val settle = GuestTask.Settle()
         val until = android.os.SystemClock.uptimeMillis() + GUEST_SETTLE_LIMIT_MS
         while (android.os.SystemClock.uptimeMillis() < until) {
@@ -1108,6 +1229,7 @@ class RearUserService : IRearService.Stub {
         guest = Guest(pkg, task, onTop = true)
         syncDensity("$pkg is landing")
         if (!moveToDisplay(task, displayId)) { endGuest("move refused"); return@synchronized "" }
+        shapeGuest(task, pkg, "sent to the back")
         wake(displayId)
         guestPlaced(displayId)
         pkg
@@ -1117,7 +1239,7 @@ class RearUserService : IRearService.Stub {
     private fun guestPlaced(displayId: Int) {
         guest = guest?.copy(placed = true)
         syncDensity("${guest?.pkg} is the guest") // already set as it landed; a no-op then
-        frame.show() // already up from the launch's move; a no-op while running
+        chromeShow() // already up from the launch's move; a no-op while running
         syncTouchWatch()
         syncSheetGuest()
     }
@@ -1126,7 +1248,7 @@ class RearUserService : IRearService.Stub {
     private fun dropGuest(why: String) {
         Log.i(TAG, "portal: guest over — $why")
         guest = null
-        frame.hide()
+        chromeHide()
         syncDensity("the guest is over")
         // Over the panel the watch goes on (it is for the panel too); dozing, it stops.
         syncTouchWatch()
@@ -1145,7 +1267,7 @@ class RearUserService : IRearService.Stub {
             "panel" -> {
                 val g = guest ?: return
                 markOnTop(g.task, false)
-                frame.hide()
+                chromeHide()
                 syncSheetGuest()
             }
             // RearActivity has gone behind (moveTaskToBack); the guest is on top again. One
@@ -1154,7 +1276,7 @@ class RearUserService : IRearService.Stub {
                 val g = guest ?: return
                 if (g.hiddenOnFront) { synchronized(placing) { unhide("the panel's Resume") }; return }
                 markOnTop(g.task, true)
-                frame.show()
+                chromeShow()
                 syncSheetGuest()
                 wake(if (placedDisplayId >= 0) placedDisplayId else Panel.DISPLAY_ID)
             }
@@ -1162,6 +1284,7 @@ class RearUserService : IRearService.Stub {
             "front" -> synchronized(placing) {
                 val g = guest ?: return
                 moveToDisplay(g.task, 0)
+                shapeForFront(g.task)
                 endGuest("sent to the front")
             }
             "close" -> synchronized(placing) {
@@ -1353,7 +1476,7 @@ class RearUserService : IRearService.Stub {
             if (face == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
             val s = ShellSheet(rearLayerStack(), face)
             // The portal frame fades under the sheet, as far as it is open.
-            s.onProgress = { frame.sheetOpen(it) }
+            s.onProgress = { frame.sheetOpen(it); strip.sheetOpen(it) }
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
             s.dpiValues(portalDpi)
@@ -1879,15 +2002,17 @@ class RearUserService : IRearService.Stub {
             PortalAction.Step.UNHIDE -> synchronized(placing) {
                 val g = guest ?: return
                 // The frame after the reveal, not before the guest is seen.
-                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay()) }) { unhide("Resume", showFrame = false) }
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { stripFor(g.pkg) }) {
+                    unhide("Resume", showFrame = false)
+                }
                 if (back) {
-                    if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
+                    if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                     wake(rearDisplay())
                 }
             }
             PortalAction.Step.PANEL_STEPS_BACK -> synchronized(placing) {
                 val g = guest ?: return
-                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay()) }) changed@{
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { stripFor(g.pkg) }) changed@{
                     // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
                     // the guest is on top without leaving the rear, locked or not.
                     exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
@@ -1917,6 +2042,7 @@ class RearUserService : IRearService.Stub {
                         Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
                         moveToDisplay(g.task, 0)
                         if (!moveToDisplay(g.task, rearDisplay())) return@changed false
+                        shapeGuest(g.task, g.pkg, "back from the front")
                     } else if (top != g.pkg) {
                         Log.i(TAG, "portal: after the step back the rear's top is ${top ?: "unknown"} — trusting it")
                     }
@@ -1925,7 +2051,7 @@ class RearUserService : IRearService.Stub {
                     true
                 }
                 if (back) {
-                    if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
+                    if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                     wake(rearDisplay())
                 }
             }
@@ -1944,7 +2070,7 @@ class RearUserService : IRearService.Stub {
 
     /** The guest no longer on top: no frame, and the sheet told. Its DPI stays. Under [placing]. */
     private fun guestBehind(pkg: String) {
-        frame.hide()
+        chromeHide()
         syncDensity("$pkg is behind")
         syncSheetGuest()
     }
@@ -1958,7 +2084,7 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, "portal: ${g.pkg} on top again — $why")
         guest = g.copy(onTop = true, hiddenOnFront = false)
         syncDensity("${g.pkg} is on top")
-        if (showFrame) frame.show()
+        if (showFrame) chromeShow()
         syncTouchWatch()
         syncSheetGuest()
     }
@@ -1970,6 +2096,7 @@ class RearUserService : IRearService.Stub {
     private fun unhide(why: String, showFrame: Boolean = true): Boolean {
         val g = guest?.takeIf { it.hiddenOnFront } ?: return false
         if (!moveToDisplay(g.task, rearDisplay())) return false
+        shapeGuest(g.task, g.pkg, "back from the front")
         guestOnTopAgain(g, "back from the front: $why", showFrame)
         return true
     }
@@ -2028,6 +2155,7 @@ class RearUserService : IRearService.Stub {
             return
         }
         if (!moveToDisplay(g.task, rearDisplay())) return
+        shapeGuest(g.task, g.pkg, "back from the front")
         if (!startPanel("back from the front: $why")) {
             // The panel refused: the guest is on top of the rear, and is shown as such.
             guestOnTopAgain(g, "back from the front: $why")
@@ -2368,7 +2496,12 @@ class RearUserService : IRearService.Stub {
                                 // Every tick, but a comparison unless something changed (or a
                                 // refused command is due a retry).
                                 syncDensity("${g.pkg} is on top")
-                                if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
+                                // Its bounds drifted from its shape (a relayout, the app's own
+                                // doing): shaped again, under the lock, if it is still the guest.
+                                if (GuestShape.drifted(entry?.bounds, shapeOf(g.pkg))) synchronized(placing) {
+                                    if (guest?.task == g.task) shapeGuest(g.task, g.pkg, "its bounds drifted to ${entry?.bounds}")
+                                }
+                                if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                                 continue
                             }
                             GuestGate.Tick.GUEST_BEHIND -> {
@@ -2385,7 +2518,7 @@ class RearUserService : IRearService.Stub {
                                     syncSheetGuest()
                                 }
                                 syncDensity("${g.pkg} is behind")
-                                frame.hide()
+                                chromeHide()
                                 // A dark rear: nobody can see or touch a sheet up there.
                                 if (top == null) closeSheetNow("the rear is dark")
                                 // The panel back in front after the camera was: somebody closed it.
@@ -2420,7 +2553,7 @@ class RearUserService : IRearService.Stub {
                             // Something else has the rear; the usual recovery below puts the
                             // panel over it, and the frame has nothing to frame.
                             GuestGate.Tick.USUAL -> {
-                                frame.hide()
+                                chromeHide()
                                 // And it is shown at the display's own density, not the guest's.
                                 syncDensity("another app has the rear", thirdOnTop = true)
                                 // The usual recovery re-places, which wakes: not on a panel
@@ -2689,6 +2822,9 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val GUEST_SETTLE_LIMIT_MS = 6_000L
         /** Between looks for an arriving guest's first draw: each look is a dumpsys of its own (~100 ms). */
         private const val DRAWN_POLL_MS = 20L
+        /** The guest's columns read for the camera strip's colour, from its left edge. */
+        private const val STRIP_SAMPLE_W = 6
+        private const val BLACK = 0xFF000000.toInt()
         /** The sheet's settle, a frame at a time. */
         private const val SHEET_FRAME_MS = 16L
         /** No rear touchscreen found: how long before getevent is asked again. */

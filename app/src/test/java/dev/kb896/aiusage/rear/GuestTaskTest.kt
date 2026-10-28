@@ -67,4 +67,9 @@ class GuestTaskTest {
         assertFalse(s.feed("", 0))
         assertFalse(s.feed("", 5000))
     }
+    @Test fun `a task's bounds are read with it`() {
+        val d = "  taskId=7: a.b/a.b.Main bounds=[296,0][904,572] userId=0 visible=true topActivity=ComponentInfo{a.b/a.b.Main}"
+        assertEquals(GuestShape.Bounds(296, 0, 904, 572), GuestTask.byId(d, 7)!!.bounds)
+        assertNull(GuestTask.byId("  taskId=7: a.b/a.b.Main userId=0", 7)!!.bounds)
+    }
 }

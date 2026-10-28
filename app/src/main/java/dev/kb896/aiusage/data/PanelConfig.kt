@@ -643,6 +643,12 @@ data class PanelConfig(
      * the names' room (PortalSheet.icon).
      */
     val portalAppNames: Boolean = true,
+    /**
+     * App Portal: apps given the whole rear, the camera area too ("Use the camera area" in the
+     * app's sheet on the front), by package. Every other guest is kept right of the cameras
+     * (GuestShape). Empty: all kept right.
+     */
+    val portalFullscreen: Set<String> = emptySet(),
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */
