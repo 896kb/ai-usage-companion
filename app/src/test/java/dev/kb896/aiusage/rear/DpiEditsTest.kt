@@ -36,13 +36,44 @@ class DpiEditsTest {
         assertEquals(mapOf("b" to 300), e.overlay(mapOf("a" to 450, "b" to 300), 10))
     }
 
-    @Test fun `once the payload agrees the edit is gone, and the config wins after`() {
-        val e = DpiEdits(delayMs = 600, holdMs = 10_000)
+    @Test fun `once the payload has agreed for the grace the edit is gone, and the config wins after`() {
+        val e = DpiEdits(delayMs = 600, holdMs = 10_000, graceMs = 3_000)
         e.put("a", 490, 0)
         e.due(600)
         assertEquals(mapOf("a" to 490), e.overlay(mapOf("a" to 490), 700))
         // The front changes it later: the back follows.
-        assertEquals(mapOf("a" to 400), e.overlay(mapOf("a" to 400), 800))
+        assertEquals(mapOf("a" to 400), e.overlay(mapOf("a" to 400), 3_700))
+    }
+
+    @Test fun `agree, then an older payload within the grace keeps the value`() {
+        val e = DpiEdits(delayMs = 600, holdMs = 10_000, graceMs = 3_000)
+        e.put("a", 490, 0)
+        e.due(600)
+        assertEquals(mapOf("a" to 490), e.overlay(mapOf("a" to 490), 700))
+        // The minute's push, encoded before the save, delivered after it.
+        assertEquals(mapOf("a" to 490), e.overlay(mapOf("a" to 450), 900))
+        assertEquals(mapOf("a" to 490), e.overlay(mapOf("a" to 450), 3_699))
+    }
+
+    @Test fun `an edit that never got there is due again`() {
+        val e = DpiEdits(delayMs = 600, holdMs = 10_000)
+        e.put("a", 490, 0)
+        assertEquals(mapOf("a" to 490), e.due(600))
+        e.unsend("a", 490)
+        assertEquals(600L, e.nextDueAt())
+        assertEquals(mapOf("a" to 490), e.due(5_000))
+        // Not sent, so not held either: an older payload does not undo it.
+        e.unsend("a", 490)
+        assertEquals(mapOf("a" to 490), e.overlay(mapOf("a" to 450), 60_000))
+    }
+
+    @Test fun `unsend leaves a newer edit alone`() {
+        val e = DpiEdits(delayMs = 600, holdMs = 10_000)
+        e.put("a", 490, 0)
+        e.due(600)
+        e.put("a", 510, 700)
+        e.unsend("a", 490)
+        assertEquals(1_300L, e.nextDueAt())
     }
 
     @Test fun `a handed-on edit nobody saved gives way after the hold`() {

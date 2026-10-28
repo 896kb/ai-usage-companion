@@ -97,6 +97,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     @Volatile private var dpiPkg: String? = null
     /** The apps' DPI as the shell has it now (PanelConfig.portalDpi and the back's nudges). */
     @Volatile private var dpiValues: Map<String, Int> = emptyMap()
+    @Volatile private var dpiDefault: Int? = null
     @Volatile private var look = Look(PanelTheme.GLASS, null)
     @Volatile private var face: PanelType.Face = face
     private val version = AtomicInteger()
@@ -295,6 +296,13 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         version.incrementAndGet()
     }
 
+    /** The rear display's own density, shown for an app without one of its own; null while unknown. */
+    fun dpiDefault(dpi: Int?) {
+        if (dpiDefault == dpi) return
+        dpiDefault = dpi
+        version.incrementAndGet()
+    }
+
     /**
      * The panel's theme and Glass settings' style (PanelConfig.theme, .glassStyle): GLASS
      * draws glass, ORIGINAL flat; with a [style] every pane takes its tint, without one the
@@ -437,7 +445,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
                 canvas, p, bent, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, withStrip = onTop != null, pressed = pressed,
                 dpiApp = row?.let { a.snapshot.packages.indexOf(it) } ?: -1,
-                dpiLabel = row?.let { PortalSheet.dpiLabel(dpiValues[it]) }.orEmpty(),
+                dpiLabel = row?.let { PortalSheet.dpiLabel(dpiValues[it], dpiDefault) }.orEmpty(),
             )
         }
 

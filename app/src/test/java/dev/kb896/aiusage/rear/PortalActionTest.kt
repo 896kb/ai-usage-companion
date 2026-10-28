@@ -25,7 +25,7 @@ class PortalActionTest {
         assertEquals(Step.UNHIDE, PortalAction.strip(0, guestOnTop = false, hiddenOnFront = true, frontLocked = notAsked))
     }
 
-    @Test fun `Resume of a guest behind the panel raises it through the front`() {
+    @Test fun `Resume of a guest behind the panel steps the panel back`() {
         assertEquals(Step.PANEL_STEPS_BACK, PortalAction.strip(0, guestOnTop = false, hiddenOnFront = false, frontLocked = notAsked))
     }
 

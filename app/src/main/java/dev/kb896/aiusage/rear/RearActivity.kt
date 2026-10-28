@@ -330,7 +330,14 @@ class RearActivity : Activity() {
                 }
                 // Somebody is using the portal sheet over the panel: not a panel to doze.
                 ACTION_PORTAL_POKE -> if (!inAod) armSleep()
-                ACTION_PORTAL_STEP_BACK -> moveTaskToBack(true)
+                // Never from a guarded panel (lock slider, pocket lock, always-on): stepping
+                // back would hand the rear to the guest past the guard. No sheet opens over a
+                // guarded panel, so this is only a guard come up between Resume and here.
+                ACTION_PORTAL_STEP_BACK -> if (lastMirror?.let { it.locked || it.aod } == true || inAod) {
+                    Log.i(TAG, "portal: step back refused — the panel is guarded")
+                } else {
+                    moveTaskToBack(true)
+                }
                 ACTION_LOCK -> lockPanel()
                 ACTION_NOTIFICATION -> { peekForNotice(); dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),

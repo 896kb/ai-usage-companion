@@ -136,8 +136,9 @@ class PortalSheetTest {
         assertEquals(false, h is Hit.Dpi)
     }
 
-    @Test fun `the row's value says the dpi or Default`() {
-        assertEquals("Default", PortalSheet.dpiLabel(null))
-        assertEquals("380", PortalSheet.dpiLabel(380))
+    @Test fun `the row's value says the dpi, or the display's own without one`() {
+        assertEquals("260", PortalSheet.dpiLabel(null, 260))
+        assertEquals("–", PortalSheet.dpiLabel(null, null))
+        assertEquals("380", PortalSheet.dpiLabel(380, 260))
     }
 }

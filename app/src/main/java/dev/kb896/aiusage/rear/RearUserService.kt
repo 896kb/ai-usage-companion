@@ -318,7 +318,7 @@ class RearUserService : IRearService.Stub {
         if (ok) {
             cameraLaunched = true
             cameraWasOnTop = false
-            cameraLaunchedAt = android.os.SystemClock.uptimeMillis()
+            cameraLaunchedAt = android.os.SystemClock.elapsedRealtime()
             watchBandTaps(displayId)
         }
         return ok
@@ -358,14 +358,14 @@ class RearUserService : IRearService.Stub {
             return
         }
         bandTaps = proc
-        val since = android.os.SystemClock.uptimeMillis()
+        val since = android.os.SystemClock.elapsedRealtime()
         Log.i(TAG, "camera close: watching $path for a tap in the left ${"%.1f".format(band * 100)}%")
         Thread {
             val tap = BandTap(maxX, maxY, band)
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
-                        val now = android.os.SystemClock.uptimeMillis()
+                        val now = android.os.SystemClock.elapsedRealtime()
                         if (now - since > BAND_WATCH_MS) break
                         // NOT OVER AFTER ONE TAP. A Back may only take down something inside
                         // the camera — its pocket warning, a recording it stops first — and
@@ -446,7 +446,11 @@ class RearUserService : IRearService.Stub {
      */
     @Volatile private var cameraLaunched = false
     @Volatile private var cameraWasOnTop = false
-    /** When [cameraLaunched] was set (uptime ms): a launch never seen in front is forgotten after [CAMERA_UNSEEN_MS]. */
+    /**
+     * When [cameraLaunched] was set (elapsedRealtime ms: the camera's clocks run on through
+     * deep sleep, which uptime does not): a launch never seen in front is forgotten after
+     * [CAMERA_UNSEEN_MS].
+     */
     @Volatile private var cameraLaunchedAt = 0L
 
     /**
@@ -456,7 +460,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun forgetUnseenCamera() {
         if (!cameraLaunched || cameraWasOnTop) return
-        if (android.os.SystemClock.uptimeMillis() - cameraLaunchedAt < CAMERA_UNSEEN_MS) return
+        if (android.os.SystemClock.elapsedRealtime() - cameraLaunchedAt < CAMERA_UNSEEN_MS) return
         Log.i(TAG, "camera: launched but never seen in front, and the panel is — forgotten")
         cameraLaunched = false
         stopBandTaps()
@@ -848,6 +852,7 @@ class RearUserService : IRearService.Stub {
         physicalDensity = d.physical
         baselineDensity = start.baseline
         densityDefault = start.baseline ?: d.physical
+        shellSheet?.dpiDefault(densityDefault)
         currentDensity = d.override
         if (!start.ours && DensityDump.parseMarker(marker.out) != null) execChecked("settings delete global $DENSITY_MARKER")
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} is ${d.physical} dpi" +
@@ -1107,6 +1112,10 @@ class RearUserService : IRearService.Stub {
     private var driving = false
     /** Where the current finger landed: a drag is measured from there. Under [sheetLock]. */
     private var touchDownY = 0f
+    /** And across: a press on a DPI row's button that ends in a Cancel is placed there. Under [sheetLock]. */
+    private var touchDownX = 0f
+    /** This finger's long-press already worked a DPI button: its Cancel does not again. Under [sheetLock]. */
+    private var dpiHeldDone = false
     /**
      * And when: a drag is timed from there too. Grabbed at the pull's own time, its first step
      * took "1 ms" and every pull read as a flick. Under [sheetLock].
@@ -1148,7 +1157,12 @@ class RearUserService : IRearService.Stub {
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
             s.dpiValues(portalDpi)
+            s.dpiDefault(densityDefault)
             shellSheet = s
+            // Again, now that it is published: a setPortalDpi between the first and here told
+            // no sheet. The lock makes this one see that write.
+            synchronized(dpiLock) { s.dpiValues(portalDpi) }
+            s.dpiDefault(densityDefault)
             syncSheetGuest()
             return s
         }
@@ -1189,8 +1203,10 @@ class RearUserService : IRearService.Stub {
             val actions = from.feed(e)
             for (a in actions) if (sheetAction(a, e.atMs)) back = true
             if (e is RearTouches.Down) {
+                touchDownX = e.x
                 touchDownY = e.y
                 touchDownAt = e.atMs
+                dpiHeldDone = false
                 if (actions.any { it is EdgeGestures.Action.SheetDown }) {
                     // A finger held so still the touchscreen says nothing still becomes a long-press.
                     runCatching {
@@ -1221,9 +1237,16 @@ class RearUserService : IRearService.Stub {
             if (PortalAction.sendBack(onTop, up, focused, rear)) {
                 // Only to the guest: whatever else holds the rear's focus (a system dialog,
                 // the panel come back in between) gets no Back of ours.
+                // The guest's task counts whoever's window it is: a permission dialog, a chooser
+                // started into it, is the guest's to take the Back.
                 val app = FocusDump.focusedPackage(dump, rear)
-                if (app != g?.pkg) {
-                    Log.i(TAG, "portal: Back — the rear's focused app is ${app ?: "unknown"}, not the guest ${g?.pkg}; none of ours")
+                val task = FocusDump.focusedTask(dump, rear)
+                if (g == null || (app != g.pkg && task != g.task)) {
+                    if (app == null && task == null) {
+                        Log.i(TAG, "portal: Back — the rear's focus is unknown (nothing in the dump); none of ours")
+                    } else {
+                        Log.i(TAG, "portal: Back — the rear's focused app is $app (task $task), not the guest ${g?.pkg} (task ${g?.task}); none of ours")
+                    }
                 } else {
                     Log.i(TAG, "portal: Back — display ${focused ?: "?"} has focus, ours to display $rear")
                     exec("input -d $rear keyevent KEYCODE_BACK")
@@ -1286,10 +1309,21 @@ class RearUserService : IRearService.Stub {
                 if (sheetAlive()) tap(a.x, a.y, atMs)
             }
             is EdgeGestures.Action.LongPress -> if (sheetAlive() && motion.fullyOpen(atMs)) {
-                (hitAt(a.x, a.y) as? PortalSheet.Hit.App)?.let { onSheetLongPress(it.index) }
+                when (val hit = hitAt(a.x, a.y)) {
+                    is PortalSheet.Hit.App -> onSheetLongPress(hit.index)
+                    // A DPI button held is still a press of it: worked once, on the hold.
+                    is PortalSheet.Hit.Dpi -> if (dpiButtonPress(hit)) { dpiHeldDone = true; setPressed(-1) }
+                    else -> Unit
+                }
             }
             EdgeGestures.Action.Cancel -> {
                 setPressed(-1)
+                // A slow tap (past TAP_MS) on a DPI button lifts as a Cancel: still its press,
+                // unless the hold already worked it.
+                if (!dpiHeldDone && sheetAlive() && motion.fullyOpen(atMs)) {
+                    (hitAt(touchDownX, touchDownY) as? PortalSheet.Hit.Dpi)?.let { dpiButtonPress(it) }
+                }
+                dpiHeldDone = false
                 if (sheetAlive() && motion.phase == SheetMotion.Phase.HELD) { motion.resume(atMs); afterMotion(atMs) }
             }
             EdgeGestures.Action.Back -> return PortalAction.sendBack(guest?.onTop == true, sheetUp, null, rearDisplay())
@@ -1355,7 +1389,7 @@ class RearUserService : IRearService.Stub {
      * so a close nobody saw cannot keep the sheet away for good.
      */
     private fun cameraUp() = (bandTaps != null || cameraLaunched) &&
-        android.os.SystemClock.uptimeMillis() - cameraLaunchedAt < BAND_WATCH_MS
+        android.os.SystemClock.elapsedRealtime() - cameraLaunchedAt < BAND_WATCH_MS
 
     private val pokeWorker by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "portal-poke").apply { isDaemon = true } }
@@ -1457,12 +1491,14 @@ class RearUserService : IRearService.Stub {
      * - Resume of a hidden guest: `move-stack <guest> <rear>` and a wake ([unhide]).
      * - Resume of a guest behind the panel on the rear: the panel moves its own task to the
      *   back (a scoped broadcast, [ACTION_PORTAL_STEP_BACK]), locked or not. Only if the
-     *   guest is still not on top [STEP_BACK_SETTLE_MS] later: `move-stack <guest> 0` and
+     *   panel is still what the rear shows on top after [STEP_BACK_LIMIT_MS] (looked at
+     *   every [STEP_BACK_POLL_MS]; nothing read is trusted as done): `move-stack <guest> 0` and
      *   back to the rear (a move to the display a task is already on does not raise it) —
      *   seen on the front for a moment when it is unlocked.
      *
      * Which of Panel / Resume runs is decided from the guest as it is when the button runs,
-     * not as the sheet showed it; a refused `am start` of the panel changes nothing.
+     * not as the sheet showed it — and when the guest is already where the button would
+     * have put it, neither does; a refused `am start` of the panel changes nothing.
      * - Front: `move-stack <guest> 0`, Close: `am force-stop` — either way the guest ends and
      *   the panel comes back ([guestAction]).
      *
@@ -1473,8 +1509,12 @@ class RearUserService : IRearService.Stub {
         // Decided from the guest as it is now, not as the sheet showed it when it opened.
         val step = synchronized(placing) {
             val g = guest ?: return
+            // Panel (shown over a guest on top) or Resume (shown over one behind), and the
+            // guest has since gone where the button would have put it: nothing left to do.
+            // Running the other one instead would undo what was asked for.
             if (index == 0 && g.onTop != guestOnTop) {
-                Log.i(TAG, "portal sheet: the guest is ${if (g.onTop) "on top" else "behind"} now, not as the sheet showed it")
+                Log.i(TAG, "portal sheet: ${if (guestOnTop) "Panel" else "Resume"} — the guest is ${if (g.onTop) "on top" else "behind"} already; nothing to do")
+                return
             }
             PortalAction.strip(index, g.onTop, g.hiddenOnFront) { keyguardShowing() }
         } ?: return
@@ -1504,15 +1544,34 @@ class RearUserService : IRearService.Stub {
                 // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
                 // the guest is on top without leaving the rear, locked or not.
                 exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
-                try { Thread.sleep(STEP_BACK_SETTLE_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+                // Watched until the guest is on top, up to STEP_BACK_LIMIT_MS: the broadcast
+                // reaches the panel when it does, and one look after a fixed wait took a slow
+                // step back for none.
+                val until = android.os.SystemClock.elapsedRealtime() + STEP_BACK_LIMIT_MS
+                var top: String?
+                do {
+                    try { Thread.sleep(STEP_BACK_POLL_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+                    top = rearTop(g)
+                } while (top != g.pkg && android.os.SystemClock.elapsedRealtime() < until)
                 val now = guest?.takeIf { it.task == g.task } ?: return
-                if (!onTopOfRear(now)) {
+                // A guard come up meanwhile is why the panel stayed (RearActivity refuses the
+                // step back then); the fallback would take the guest past it.
+                if (top == PKG && panelGuarded) {
+                    Log.i(TAG, "portal: the panel is guarded — ${g.pkg} stays behind it")
+                    return
+                }
+                // Only the panel itself still on top is a step back that did not happen. Nothing
+                // read (a dark rear composes nothing) or something else is no proof against
+                // it, and the fallback is seen on the front.
+                if (top == PKG) {
                     // The fallback: out to display 0 and back, since a move to the display a
                     // task is already on does not raise it. Seen on the front for a moment
                     // when it is unlocked.
                     Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
                     moveToDisplay(g.task, 0)
                     if (!moveToDisplay(g.task, rearDisplay())) return
+                } else if (top != g.pkg) {
+                    Log.i(TAG, "portal: after the step back the rear's top is ${top ?: "unknown"} — trusting it")
                 }
                 guestOnTopAgain(now, "Resume")
                 wake(rearDisplay())
@@ -1551,27 +1610,36 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * Our panel started over whatever is on the rear; false (logged) when `am start` says
-     * it was refused. Under [placing].
+     * Our panel started over whatever is on the rear, with the last payload as show() starts
+     * it; false (logged) when `am start` says it was refused, or no panel task is there after
+     * it — HyperOS aborts a start under the keyguard without a word (see [show]). Under [placing].
      */
     private fun startPanel(why: String): Boolean {
-        val out = exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY")
-        val refused = out.contains("Error", ignoreCase = true) || out.contains("Exception", ignoreCase = true)
-        if (refused) Log.w(TAG, "portal: $why — the panel's start was refused: ${out.take(200)}")
-        return !refused
+        val out = exec("am start --display ${rearDisplay()} -n $PKG/$ACTIVITY --es state ${shellQuote(lastPayload)}")
+        if (out.contains("Error", ignoreCase = true) || out.contains("Exception", ignoreCase = true)) {
+            Log.w(TAG, "portal: $why — the panel's start was refused: ${out.take(200)}")
+            return false
+        }
+        if (pollTaskId() <= 0) {
+            Log.w(TAG, "portal: $why — no panel task after its start; taken as refused")
+            return false
+        }
+        return true
     }
 
-    /** Whether [g]'s window is what the rear composes on top (SurfaceFlinger, as the keep-alive reads it). */
-    private fun onTopOfRear(g: Guest): Boolean {
+    /**
+     * The package the rear composes on top (SurfaceFlinger, as the keep-alive reads it), with
+     * a window of [g]'s task read as [g]'s own package; null when nothing is read.
+     */
+    private fun rearTop(g: Guest): String? {
         val entry = GuestTask.byId(exec("am stack list"), g.task)
         val taskTop = entry?.top?.substringBefore('/')?.takeIf { it.isNotEmpty() }
         val rear = rearPhysicalId()
-        val top = SurfaceDump.topPackage(
+        return SurfaceDump.topPackage(
             exec("dumpsys SurfaceFlinger"),
             isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
             known = listOfNotNull(g.pkg, PKG, taskTop),
-        )
-        return top != null && (top == g.pkg || top == taskTop)
+        ).let { if (it != null && it == taskTop) g.pkg else it }
     }
 
     /**
@@ -1627,12 +1695,23 @@ class RearUserService : IRearService.Stub {
         if (events != null) scheduleDpiFlush()
     }
 
+    /** [hit] on the open DPI row's −, + or Default worked as a tap; false for its value box or no row. Under [sheetLock]. */
+    private fun dpiButtonPress(hit: PortalSheet.Hit.Dpi): Boolean {
+        val pkg = dpiPkg ?: return false
+        if (hit.part == PortalSheet.DpiPart.VALUE) return false
+        onDpiPart(pkg, hit.part)
+        return true
+    }
+
     /** Under [sheetLock]. A second long-press on another app moves the row to it. */
     private fun onSheetLongPress(index: Int) {
         val pkg = portalApps.packages.getOrNull(index) ?: return
         dpiPkg = pkg
         setPressed(-1)
         shellSheet?.dpiRow(pkg)
+        // The row shows the display's own density for an app without one: read, if it has
+        // not been yet (a panel this service adopted, say), off this thread.
+        if (densityDefault == null) runCatching { densityWorker.execute { syncDensity("the DPI row wants the display's own") } }
         Log.i(TAG, "portal sheet: DPI row for $pkg (${portalDpi[pkg] ?: "default"})")
     }
 
@@ -1683,15 +1762,25 @@ class RearUserService : IRearService.Stub {
     /**
      * The edits that have fallen due ([all]: every one, as the service goes) handed to the
      * app process. With nobody listening they wait — [setEvents] sends them — and on the
-     * way out they are lost: the overlay then lets the config win after its hold.
+     * way out they are lost: the overlay then lets the config win after its hold. One the
+     * listener died under (or was dropped before) is due again ([DpiEdits.unsend]), for the
+     * next [setEvents].
      */
     private fun flushDpi(all: Boolean = false) {
-        val ev = events ?: return
+        if (events == null) return
         val due = synchronized(dpiLock) { dpiEdits.due(if (all) Long.MAX_VALUE else android.os.SystemClock.uptimeMillis()) }
         for ((pkg, dpi) in due) {
+            val ev = events
+            if (ev == null) { synchronized(dpiLock) { dpiEdits.unsend(pkg, dpi) }; continue }
             runCatching { ev.onPortalDpi(pkg, dpi ?: 0) }.onFailure {
-                Log.w(TAG, "portal: DPI for $pkg not handed on: ${it.message}")
-                if (it is android.os.DeadObjectException && events === ev) events = null
+                val dead = it is android.os.DeadObjectException
+                Log.w(TAG, "portal: DPI for $pkg not handed on: ${it.message}" + if (dead) " — kept for the next listener" else "")
+                // Only a dead listener: it is dropped, so this cannot spin; anything else
+                // would be re-sent at once, and fail the same way.
+                if (dead) {
+                    synchronized(dpiLock) { dpiEdits.unsend(pkg, dpi) }
+                    if (events === ev) events = null
+                }
             }
         }
         if (!all) scheduleDpiFlush()
@@ -1966,7 +2055,9 @@ class RearUserService : IRearService.Stub {
                                 // A dark rear: nobody can see or touch a sheet up there.
                                 if (top == null) closeSheetNow("the rear is dark")
                                 // The panel back in front after the camera was: somebody closed it.
-                                if (top == PKG && cameraLaunched && cameraWasOnTop) closeCamera()
+                                // Never seen in front: forgotten, or no sheet opens over a guest
+                                // behind the panel ever again (cameraUp).
+                                if (top == PKG) { if (cameraLaunched && cameraWasOnTop) closeCamera() else forgetUnseenCamera() }
                                 continue
                             }
                             // The front unlocked over a guest hidden there by Panel.
@@ -2254,7 +2345,9 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         /** A camera launch not seen in front of the panel by then, with the panel in front, is over. */
         private const val CAMERA_UNSEEN_MS = 5_000L
         /** How long Resume gives the panel to step back before the guest goes through the front. */
-        private const val STEP_BACK_SETTLE_MS = 400L
+        private const val STEP_BACK_LIMIT_MS = 1_200L
+        /** How often Resume looks at the rear's top while the panel steps back. */
+        private const val STEP_BACK_POLL_MS = 100L
 
         /** How long a moved guest must survive before it counts as placed. */
         private const val GUEST_SURVIVE_MS = 2_000L

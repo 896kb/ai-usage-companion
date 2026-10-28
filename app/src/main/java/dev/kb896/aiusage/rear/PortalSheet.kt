@@ -98,8 +98,11 @@ object PortalSheet {
     fun dpiPress(part: DpiPart): Int = DPI_PRESS + part.ordinal
     const val DPI_PRESS = 10
 
-    /** What the row's middle box says: the app's own DPI, or "Default" without one. */
-    fun dpiLabel(dpi: Int?): String = dpi?.toString() ?: "Default"
+    /**
+     * What the row's middle box says: the app's own DPI, or without one the display's own
+     * ([default]) — the row's last box already says "Default" — and a dash while that is unknown.
+     */
+    fun dpiLabel(dpi: Int?, default: Int?): String = dpi?.toString() ?: default?.toString() ?: "–"
 
     /**
      * Valid only for the fully open sheet: the painter moves everything down by [slide],
