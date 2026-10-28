@@ -1346,6 +1346,7 @@ class RearDialView(context: Context) : View(context) {
         tiltListening = false
         removeCallbacks(redrawTick)
         removeCallbacks(portalShut)
+        cancelPortalLaunch()
         runCatching { context.unregisterReceiver(powerReceiver) }
         runCatching {
             context.getSystemService(android.hardware.SensorManager::class.java)
@@ -9952,6 +9953,24 @@ class RearDialView(context: Context) : View(context) {
     private val portalShut = Runnable { portalSettledShut() }
 
     /**
+     * A pinned app tapped: it is launched once the sheet has slid shut, not as it starts
+     * to — launched at once, it came up (on the front for a flash, then on the rear) while
+     * the sheet was still going. Called off if the portal is taken up again, reopened,
+     * locked or detached before then, as portalShut is.
+     */
+    private var ptLaunchPkg: String? = null
+    private val portalLaunch = Runnable {
+        val pkg = ptLaunchPkg
+        ptLaunchPkg = null
+        if (pkg != null) onPortalApp?.invoke(pkg)
+    }
+
+    private fun cancelPortalLaunch() {
+        removeCallbacks(portalLaunch)
+        ptLaunchPkg = null
+    }
+
+    /**
      * Shut over a guest: the panel goes behind it again. The frame stays drawn until it
      * has (portalHandedBack); with nobody to ask, it goes now.
      */
@@ -9989,6 +10008,7 @@ class RearDialView(context: Context) : View(context) {
     /** Shut at once: a lock, always-on. Over a guest the rear goes back to it, as it was before the pull. */
     private fun closePortalNow() {
         removeCallbacks(portalShut)
+        cancelPortalLaunch()
         ptArmed = false
         if (!ptOpen && ptTo == 0f && ptAt == 0L && !ptDragging && !ptGesture && !ptRelaying && !ptOverGuest) return
         ptOpen = false; ptFrom = 0f; ptTo = 0f; ptAt = 0L; ptDy = 0f
@@ -10006,6 +10026,7 @@ class RearDialView(context: Context) : View(context) {
                 // Never both: the portal comes up over a guest, so the centre goes.
                 closeControlCenterNow()
                 removeCallbacks(portalShut)
+                cancelPortalLaunch()
                 // Pulled again before the last hand-back finished: that frame is stale.
                 if (ptHandingBack) { ptHandingBack = false; dropPortalFrame() }
                 ptOverGuest = true; ptRelaying = true
@@ -10071,6 +10092,7 @@ class RearDialView(context: Context) : View(context) {
                 // Showing: it has the whole surface, from wherever a settle had got to.
                 ptGesture = true
                 removeCallbacks(portalShut)
+                cancelPortalLaunch()
                 if (ptAt != 0L) { ptOpen = portalProgress() > 0.5f; ptAt = 0L; ptTo = if (ptOpen) 1f else 0f }
                 return true
             }
@@ -10125,8 +10147,14 @@ class RearDialView(context: Context) : View(context) {
                     when (val hit = PortalSheet.hit(event.x, event.y, portalLabels.size, portalGuest != null)) {
                         is PortalSheet.Hit.App -> {
                             ptOverGuest = false; portalBackdrop = null
-                            portalPackages.getOrNull(hit.index)?.let { onPortalApp?.invoke(it) }
+                            // Shut first; the app once it is (portalLaunch). The buttons
+                            // below act at once: they are about the guest already there.
                             settlePortal(false, 1f)
+                            portalPackages.getOrNull(hit.index)?.let { pkg ->
+                                cancelPortalLaunch()
+                                ptLaunchPkg = pkg
+                                postDelayed(portalLaunch, ptSettleMs)
+                            }
                         }
                         is PortalSheet.Hit.Button -> {
                             ptOverGuest = false; portalBackdrop = null
