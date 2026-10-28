@@ -9173,11 +9173,11 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * [r] grown into its place about its own middle: from CC_GROW_FROM of its size as the
-     * contents start to arrive, to its whole size when they have.
+     * [r] grown into its place about its own middle: from Arrival.GROW_FROM of its size as
+     * the contents start to arrive, to its whole size when they have.
      */
     private fun grown(r: RectF, progress: Float): RectF {
-        val g = CC_GROW_FROM + (1f - CC_GROW_FROM) * ccArrival(progress)
+        val g = Arrival.scale(progress)
         if (g >= 0.9999f) return r
         val dx = r.width() * (1f - g) / 2f
         val dy = r.height() * (1f - g) / 2f
@@ -9375,16 +9375,13 @@ class RearDialView(context: Context) : View(context) {
      * halfway, then EASED OUT over the rest — quick to show, settling gently — so a push
      * back up plays the same curve in reverse.
      */
-    private fun ccArrival(progress: Float): Float {
-        val c = ((progress - CC_FADE_FROM) / (1f - CC_FADE_FROM)).coerceIn(0f, 1f)
-        return 1f - (1f - c) * (1f - c) * (1f - c)
-    }
+    private fun ccArrival(progress: Float): Float = Arrival.of(progress)
 
     /**
      * How far above its place the control centre's contents are: from a quarter of the
      * panel — half of the half of the pull they are shown for — to nothing as they arrive.
      */
-    private fun ccShift(progress: Float): Float = -(1f - ccArrival(progress)) * Panel.HEIGHT * CC_SLIDE * (1f - CC_FADE_FROM)
+    private fun ccShift(progress: Float): Float = -Arrival.offset(progress, Panel.HEIGHT.toFloat())
 
     private fun drawControlCenter(canvas: Canvas, progress: Float, blurred: Boolean) {
         animating = true // the liquid moves, and the figure's two seconds need a clock
@@ -13113,11 +13110,6 @@ class RearDialView(context: Context) : View(context) {
         /** How long a new brightness reading takes to pour in, and the button's colour to change. */
         private const val BRIGHT_POUR_MS = 600f
         private const val AUTO_FADE_MS = 250f
-        /** The contents slide this share of the pull's travel, and fade in from this far into it. */
-        private const val CC_SLIDE = 0.5f
-        private const val CC_FADE_FROM = 0.5f
-        /** The size the contents grow from into their place. */
-        private const val CC_GROW_FROM = 0.85f
 
         /** The stroke through a muted speaker. */
         /** The waves beside the cone, as fractions of the glyph's height. */
