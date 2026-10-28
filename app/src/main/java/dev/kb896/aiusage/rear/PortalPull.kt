@@ -31,4 +31,17 @@ object PortalPull {
         velocity > ControlCenter.FLING -> false
         else -> progress(open, dy) > 0.5f
     }
+
+    /** How far up the portal is when its own ground over a guest is fully in. */
+    const val GUEST_FADE = 0.35f
+
+    /**
+     * Over a guest, how much of the portal's ground (and dim) shows at [progress]: none
+     * at rest, so the live guest under the translucent window is all there is, and all of
+     * it by [GUEST_FADE] — eased both ends, so it neither cuts in nor stops dead.
+     */
+    fun guestGround(progress: Float): Float {
+        val t = (progress / GUEST_FADE).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
 }

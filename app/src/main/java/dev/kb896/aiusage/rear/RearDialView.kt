@@ -1370,7 +1370,9 @@ class RearDialView(context: Context) : View(context) {
      */
     override fun onDraw(canvas: Canvas) {
         val recorder = canvas as? android.graphics.RecordingCanvas
-        val tube = if (config.crt && recorder != null && width > 0 && height > 0) {
+        // Not over a guest: what shows there is the live guest under this translucent
+        // window, which the tube never touched, and a tube over transparent is not clear.
+        val tube = if (config.crt && recorder != null && width > 0 && height > 0 && !ptOverGuest && !ptHandingBack) {
             CrtScreen.effect(width.toFloat(), height.toFloat(), crtStills())
         } else null
         crtApplied = tube != null
@@ -1448,17 +1450,36 @@ class RearDialView(context: Context) : View(context) {
         // the control centre blurs it. The frame arrives ~240 ms after the pull starts;
         // until it does, the panel's dark ground stands in.
         val pt = portalProgress()
-        // Over a guest it is drawn to the very end, shut included: until the panel has
-        // stepped behind the guest again, the guest's own frame is what should show.
-        // And after it, while the guest is being handed the rear back: the panel must not
-        // show for the frames between asking and the guest being on top again.
+        // Over a guest this branch has the frame to the very end, shut included: until the
+        // panel has stepped behind the guest again, the guest is what should show (live,
+        // through this translucent window, as the portal's ground fades out). And after it,
+        // while the guest is being handed the rear back: the panel must not show for the
+        // frames between asking and the guest being on top again.
         if (pt > 0.001f || ptOverGuest || ptHandingBack) {
             val shot = portalBackdrop
-            // Over a guest the panel is not drawn, so nothing else will say whether this
-            // frame is moving: it starts from still, and only the portal can change that.
-            if (ptOverGuest || ptHandingBack) animating = false
+            val overGuest = ptOverGuest || ptHandingBack
+            // OVER A GUEST IT FADES IN. This window is translucent, and the live guest is
+            // right there under it: at rest nothing is drawn and the guest is what shows,
+            // and the portal's ground (the frozen frame, or the dark ground before it
+            // comes) and its dim come in with the pull, all in by PortalPull.GUEST_FADE.
+            // Drawn at full strength from the first frame, it cut in. Handing back:
+            // nothing at all — the guest is already there to be seen, so no frame is held.
+            val ground = when {
+                ptHandingBack -> 0f
+                ptOverGuest -> PortalPull.guestGround(pt)
+                else -> 1f
+            }
+            if (overGuest) {
+                // Over a guest the panel is not drawn, so nothing else will say whether this
+                // frame is moving: it starts from still, and only the portal can change that.
+                animating = false
+                // Transparent, never the panel's background: what is not drawn is the guest.
+                canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+            }
             val recorder = canvas as? android.graphics.RecordingCanvas
-            if (recorder != null && width > 0 && height > 0) {
+            if (ground <= 0.004f) {
+                // Nothing of it to show.
+            } else if (recorder != null && width > 0 && height > 0) {
                 ptNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
                 val inner = ptNode.beginRecording(Panel.WIDTH, Panel.HEIGHT)
                 try {
@@ -1472,11 +1493,16 @@ class RearDialView(context: Context) : View(context) {
                         blur, blur, android.graphics.Shader.TileMode.CLAMP,
                     ) else null,
                 )
+                // As a whole, so the frame over the ground fades as one picture.
+                ptNode.setAlpha(ground)
                 recorder.drawRenderNode(ptNode)
+            } else if (ground < 1f) {
+                canvas.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * ground).toInt())
+                try { drawPortalBackdrop(canvas, shot) } finally { canvas.restore() }
             } else {
                 drawPortalBackdrop(canvas, shot)
             }
-            ccDim.color = ((CC_DIM * pt * 255).toInt().coerceIn(0, 255)) shl 24
+            ccDim.color = ((CC_DIM * pt * ground * 255).toInt().coerceIn(0, 255)) shl 24
             canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), ccDim)
             PortalSheet.draw(
                 canvas, pt, portalIcons, portalLabels, portalGuest, portalGuestOnTop,
@@ -1524,7 +1550,8 @@ class RearDialView(context: Context) : View(context) {
     /**
      * What the App Portal blurs: over a guest its frozen frame, faded in over the panel's
      * dark ground (which stays if the capture never came, or came back black); otherwise
-     * the panel itself.
+     * the panel itself. Over a guest the whole of it fades in with the pull as well: see
+     * drawPictureInPanelUnits.
      */
     private fun drawPortalBackdrop(canvas: Canvas, shot: android.graphics.Bitmap?) {
         if (!ptOverGuest && !ptHandingBack) {
@@ -9849,8 +9876,9 @@ class RearDialView(context: Context) : View(context) {
     private var ptRelaying = false
     /**
      * Shut over a guest and the rear asked back for it, but this panel may still be on
-     * screen for a frame or two: the guest's frame (or the ground) stays drawn until the
-     * window goes, never the panel. See portalHandedBack.
+     * screen for a frame or two: it draws nothing until the window goes — the window is
+     * translucent, so the live guest shows through — and never the panel. See
+     * portalHandedBack.
      */
     private var ptHandingBack = false
 

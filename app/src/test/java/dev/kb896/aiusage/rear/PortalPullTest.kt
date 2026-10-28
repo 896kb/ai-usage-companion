@@ -36,4 +36,21 @@ class PortalPullTest {
         assertTrue(PortalPull.release(open = false, dy = -10f, velocity = -1f))
         assertFalse(PortalPull.release(open = true, dy = -10f, velocity = 1f))
     }
+
+    @Test fun `over a guest the ground is out at rest and fully in by a third of the way`() {
+        assertEquals(0f, PortalPull.guestGround(0f), 0f)
+        assertEquals(1f, PortalPull.guestGround(PortalPull.GUEST_FADE), 0.0001f)
+        assertEquals(1f, PortalPull.guestGround(0.6f), 0f)
+        assertEquals(1f, PortalPull.guestGround(1f), 0f)
+    }
+
+    @Test fun `over a guest the ground only ever deepens as the portal comes up`() {
+        var last = -1f
+        for (i in 0..200) {
+            val g = PortalPull.guestGround(i / 200f)
+            assertTrue("dropped at ${i / 200f}", g >= last)
+            assertTrue(g in 0f..1f)
+            last = g
+        }
+    }
 }
