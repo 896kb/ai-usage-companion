@@ -100,7 +100,9 @@ interface IRearService {
     boolean launchGuest(String pkg, int displayId) = 18;
     // The app focused on the front, moved to the rear as the guest; its package, or "".
     String sendFocusedToBack(int displayId) = 19;
-    // "panel", "resume", "front" or "close" — see the spec's guest strip.
+    // What to do with the guest: "panel" — the panel stays in front, the guest alive behind
+    // it; "resume" — the guest on top again, the panel behind; "front" — the guest moved to
+    // the main display; "close" — the guest force-stopped. The last two bring the panel back.
     void guestAction(String which) = 20;
     // Where relayed pulls, frames and guest changes go; null when the panel goes away.
     void setPortalCallback(IPortalCallback callback) = 21;

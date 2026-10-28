@@ -6,9 +6,11 @@ import dev.kb896.aiusage.BuildConfig
 import dev.kb896.aiusage.IPortalCallback
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
+import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.SurfaceDump.Where
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
 
 class RearUserService : IRearService.Stub {
@@ -16,7 +18,8 @@ class RearUserService : IRearService.Stub {
     @Suppress("unused") constructor()
     @Suppress("unused") constructor(context: Context)
 
-    private var placedDisplayId = -1
+    /** Volatile: the App Portal's binder calls and the keep-alive read it off the lock. */
+    @Volatile private var placedDisplayId = -1
 
     /** Last payload shown, so the keep-alive can re-place without the app's help. */
     private var lastPayload: String = "{}"
@@ -54,6 +57,12 @@ class RearUserService : IRearService.Stub {
      */
     override fun isAlive(): Boolean {
         if (taskId() <= 0) return false
+        // A guest app in front of the panel is the panel kept behind ON PURPOSE. Read as
+        // DISPLACED it is "dead" to the app's own watchdog, which then re-places the panel
+        // over the guest within twenty seconds. Whether the guest is still really there is
+        // the keep-alive's to check, every tick (GuestGate), and it re-places the panel
+        // itself when the guest goes.
+        if (guest != null) return true
         // NOWHERE counts as alive: an asleep panel is not a broken one, and treating it
         // as dead is what once turned every screen-off into a relaunch. DISPLACED does
         // not — the task existing is exactly what makes that failure invisible.
@@ -74,9 +83,13 @@ class RearUserService : IRearService.Stub {
         // the empty rear display as "taken" and re-place it within a tick.
         keepAlive?.interrupt()
         keepAlive = null
+        // And with the keep-alive gone nothing would ever see a guest leave, so its frame
+        // and its watcher would run on for good. The guest app itself is left where it is.
+        if (guest != null) synchronized(placing) { dropGuest("the panel was hidden") }
     }
 
     override fun update(payload: String) {
+        styleFrame(payload)
         // See hide() — same exported-receiver-plus-shell-sender reasoning.
         exec("am broadcast -p $PKG -a $ACTION_STATE --es state ${shellQuote(payload)}")
     }
@@ -90,6 +103,7 @@ class RearUserService : IRearService.Stub {
 
     override fun setDozing(dozing: Boolean) {
         this.dozing = dozing
+        if (dozing) frame.hide() else if (guest?.onTop == true) frame.show()
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
 
@@ -110,6 +124,7 @@ class RearUserService : IRearService.Stub {
     override fun show(payload: String, displayId: Int) = synchronized(placing) {
         if (displayId < 0) return@synchronized
         lastPayload = payload
+        styleFrame(payload)
         startKeepAlive(displayId)
         // The cheap path — already placed, just push new numbers — must ALSO require
         // that the panel is genuinely composited. Checking only "same display and the
@@ -492,14 +507,281 @@ class RearUserService : IRearService.Stub {
         return "${b(bt)},${b(data)},${b(wifi)}"
     }
 
-    // App Portal — placed by Task 10 of the plan; no-ops until then.
-    override fun launchGuest(pkg: String?, displayId: Int): Boolean = false
+    /**
+     * The App Portal's guest: the app we put on the rear, its task, whether it was last on
+     * top. Null when there is none. Replaced whole under [placing]; only [Guest.onTop] is
+     * changed off the lock, and only by compare-and-set against the guest it was read
+     * from, so a reading that predates a launch can never write the old guest back.
+     */
+    private data class Guest(val pkg: String, val task: Int, val onTop: Boolean)
+    private val guestRef = AtomicReference<Guest?>(null)
+    private var guest: Guest?
+        get() = guestRef.get()
+        set(value) = guestRef.set(value)
+    @Volatile private var portal: IPortalCallback? = null
+    /** True from a relayed pull's start until the panel says the portal shut. */
+    @Volatile private var portalOverGuest = false
+    private val frame by lazy { PortalFrame(rearLayerStack()) }
 
-    override fun sendFocusedToBack(displayId: Int): String = ""
+    /** [onTop] on whatever guest has [task] now; true if this call changed it. */
+    private fun markOnTop(task: Int, onTop: Boolean): Boolean {
+        while (true) {
+            val g = guestRef.get() ?: return false
+            if (g.task != task || g.onTop == onTop) return false
+            if (guestRef.compareAndSet(g, g.copy(onTop = onTop))) return true
+        }
+    }
 
-    override fun guestAction(which: String?) {}
+    override fun setPortalCallback(callback: IPortalCallback?) {
+        portal = callback
+        val g = guest
+        tell { it.onGuest(g?.pkg.orEmpty(), g?.onTop == true) }
+    }
 
-    override fun setPortalCallback(callback: IPortalCallback?) {}
+    /** A call to the panel; a dead one is forgotten, never thrown. */
+    private fun tell(call: (IPortalCallback) -> Unit) {
+        val p = portal ?: return
+        try { call(p) } catch (e: Exception) {
+            Log.w(TAG, "portal callback gone: ${e.message}")
+            if (portal === p) portal = null
+        }
+    }
+
+    /** The rear display's layer stack, from dumpsys display; 1 on the 17 Pro, as measured. */
+    private fun rearLayerStack(): Int {
+        val dump = exec("dumpsys display | grep -iE 'mDisplayId=${Panel.DISPLAY_ID}|layerStack' | head -40")
+        return Regex("""mDisplayId=${Panel.DISPLAY_ID}\b[\s\S]*?[lL]ayerStack[ =](\d+)""").find(dump)
+            ?.groupValues?.get(1)?.toIntOrNull() ?: Panel.DISPLAY_ID
+    }
+
+    /** The frame follows the config's colour and lens geometry. */
+    private fun styleFrame(payload: String) {
+        if (CalibrateMode.isCalibrate(payload)) return
+        try {
+            val config = StatePayload.decode(payload).config
+            frame.style(config.portalFrameColor, config.ringLayout)
+        } catch (e: Exception) {
+            Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
+        }
+    }
+
+    override fun launchGuest(pkg: String?, displayId: Int): Boolean = synchronized(placing) {
+        if (displayId < 0 || pkg == null || !PACKAGE_NAME.matches(pkg)) return@synchronized false
+        // Resolved before anything moves: an app with no launcher activity changes nothing.
+        val component = exec("cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $pkg")
+            .lines().lastOrNull()?.trim()
+        if (component.isNullOrEmpty() || !COMPONENT.matches(component)) {
+            Log.w(TAG, "portal: no launcher activity for $pkg"); return@synchronized false
+        }
+        portalOverGuest = false
+        // One guest at a time: the old one goes to the front, alive — never killed.
+        guest?.let { old -> if (old.pkg != pkg) moveToDisplay(old.task, 0) }
+        repeat(2) { attempt ->
+            val task = startSettled(component, pkg)
+            if (task == null) { endGuest("never started"); return@synchronized false }
+            guest = Guest(pkg, task, onTop = false)
+            moveToDisplay(task, displayId)
+            wake(displayId)
+            // A task gone within two seconds of the move was a trampoline the move
+            // relaunched (Shazam, measured); once more from the start, then give up.
+            Thread.sleep(GUEST_SURVIVE_MS)
+            val entry = GuestTask.byId(exec("am stack list"), task)
+            if (entry != null && entry.display == displayId) {
+                guest = Guest(pkg, task, onTop = true)
+                Log.i(TAG, "portal: $pkg is the guest, task $task")
+                guestPlaced(displayId)
+                return@synchronized true
+            }
+            Log.w(TAG, "portal: $pkg's task $task did not survive the move (try ${attempt + 1})")
+        }
+        endGuest("did not stay on the rear")
+        false
+    }
+
+    /** Started on the front; its task once the top activity has held still. Null if none. */
+    private fun startSettled(component: String, pkg: String): Int? {
+        exec("am start -n $component")
+        val settle = GuestTask.Settle()
+        val until = android.os.SystemClock.uptimeMillis() + GUEST_SETTLE_LIMIT_MS
+        while (android.os.SystemClock.uptimeMillis() < until) {
+            val entry = GuestTask.taskOf(exec("am stack list"), pkg)
+            if (entry != null && settle.feed(entry.top, android.os.SystemClock.uptimeMillis())) return entry.task
+            Thread.sleep(150)
+        }
+        return GuestTask.taskOf(exec("am stack list"), pkg)?.task
+    }
+
+    override fun sendFocusedToBack(displayId: Int): String = synchronized(placing) {
+        if (displayId < 0) return@synchronized ""
+        val dump = exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='")
+        val pkg = FocusDump.focusedPackage(dump, 0) ?: return@synchronized ""
+        val task = FocusDump.focusedTask(dump, 0) ?: return@synchronized ""
+        if (!PACKAGE_NAME.matches(pkg) || !GuestTask.sendable(pkg, PKG)) return@synchronized ""
+        portalOverGuest = false
+        guest?.let { old -> if (old.task != task) moveToDisplay(old.task, 0) }
+        guest = Guest(pkg, task, onTop = true)
+        if (!moveToDisplay(task, displayId)) { endGuest("move refused"); return@synchronized "" }
+        wake(displayId)
+        guestPlaced(displayId)
+        pkg
+    }
+
+    /** A guest is on top: the frame, the watcher, and the panel told. Under [placing]. */
+    private fun guestPlaced(displayId: Int) {
+        if (!dozing) frame.show()
+        watchGuest(displayId)
+        tell { it.onGuest(guest?.pkg.orEmpty(), true) }
+    }
+
+    /** No guest any more: frame, watcher and the panel's strip off. Under [placing]. */
+    private fun dropGuest(why: String) {
+        Log.i(TAG, "portal: guest over — $why")
+        guest = null
+        portalOverGuest = false
+        frame.hide()
+        stopGuestWatch()
+        tell { it.onGuest("", false) }
+    }
+
+    /** [dropGuest], and the panel back in front. Under [placing]. */
+    private fun endGuest(why: String) {
+        dropGuest(why)
+        if (placedDisplayId >= 0) show(lastPayload, placedDisplayId)
+    }
+
+    override fun guestAction(which: String?) {
+        when (which) {
+            // The panel stays over a live guest; the strip then offers Resume.
+            "panel" -> {
+                val g = guest ?: return
+                portalOverGuest = false
+                markOnTop(g.task, false)
+                frame.hide()
+                tell { it.onGuest(g.pkg, false) }
+            }
+            // RearActivity has gone behind (moveTaskToBack); the guest is on top again.
+            "resume" -> {
+                val g = guest ?: return
+                portalOverGuest = false
+                markOnTop(g.task, true)
+                if (!dozing) frame.show()
+                tell { it.onGuest(g.pkg, true) }
+                wake(if (placedDisplayId >= 0) placedDisplayId else Panel.DISPLAY_ID)
+            }
+            // Read under the lock: a launch may have replaced the guest since the panel asked.
+            "front" -> synchronized(placing) {
+                val g = guest ?: return
+                moveToDisplay(g.task, 0)
+                endGuest("sent to the front")
+            }
+            "close" -> synchronized(placing) {
+                val g = guest ?: return
+                exec("am force-stop ${g.pkg}")
+                endGuest("closed")
+            }
+            else -> Log.w(TAG, "portal: unknown guest action '$which'")
+        }
+    }
+
+    /**
+     * Over a guest, the rear touchscreen read as the camera's is: the bottom pull relayed
+     * to the panel, and a right-edge Back sent to the guest. See EdgeGestures.
+     */
+    @Volatile private var guestWatch: Process? = null
+
+    /** One screenshot, started at once when a finger lands in the pull band. */
+    private inner class Shot {
+        @Volatile var png: ByteArray? = null
+        val thread: Thread = Thread { png = captureRear() }.apply { isDaemon = true; name = "portal-shot"; start() }
+    }
+
+    private fun watchGuest(displayId: Int) {
+        stopGuestWatch()
+        val device = BandTap.rearDevice(exec("getevent -pl"))
+        if (device == null) {
+            if (!warnedNoRearTouch) {
+                warnedNoRearTouch = true
+                Log.w(TAG, "portal: no rear touchscreen in getevent — no pull or Back over the guest")
+            }
+            return
+        }
+        val (path, maxX, maxY) = device
+        val proc = try {
+            ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
+        } catch (e: Exception) { Log.w(TAG, "portal: getevent failed: ${e.message}"); return }
+        guestWatch = proc
+        Thread {
+            val touches = RearTouches(maxX, maxY)
+            val gestures = EdgeGestures()
+            var shot: Shot? = null
+            try {
+                proc.inputStream.bufferedReader().useLines { lines ->
+                    for (line in lines) {
+                        val e = touches.feed(line, android.os.SystemClock.uptimeMillis()) ?: continue
+                        for (a in gestures.feed(e)) when (a) {
+                            EdgeGestures.Action.Arm -> shot = if (guest?.onTop == true) Shot() else null
+                            EdgeGestures.Action.Disarm -> shot = null
+                            is EdgeGestures.Action.PullStart -> if (guest?.onTop == true && !keyguardShowing()) {
+                                portalOverGuest = true
+                                exec("am start --display $displayId -n $PKG/$ACTIVITY")
+                                tell { it.onPull(0, a.y) }
+                                val waiting = shot
+                                shot = null
+                                if (waiting != null) Thread {
+                                    // Never holds up the gesture: the backdrop fades in when it lands.
+                                    try { waiting.thread.join(SHOT_WAIT_MS) } catch (_: InterruptedException) { return@Thread }
+                                    waiting.png?.let { sendFrame(it) }
+                                }.apply { isDaemon = true; name = "portal-frame-send"; start() }
+                            }
+                            is EdgeGestures.Action.PullMove -> if (portalOverGuest) tell { it.onPull(1, a.y) }
+                            is EdgeGestures.Action.PullEnd -> if (portalOverGuest) tell { it.onPull(2, a.y) }
+                            EdgeGestures.Action.Back -> if (guest?.onTop == true && !portalOverGuest) {
+                                exec("input -d $displayId keyevent KEYCODE_BACK")
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                if (guestWatch === proc) guestWatch = null
+            }
+        }.apply { isDaemon = true; name = "portal-guest-touches"; start() }
+    }
+
+    private var warnedNoRearTouch = false
+
+    private fun stopGuestWatch() {
+        guestWatch?.let { runCatching { it.destroy() } }
+        guestWatch = null
+    }
+
+    /** The rear as a PNG, from shell's screencap — about 240 ms. Null if it fails. */
+    private fun captureRear(): ByteArray? {
+        val id = rearPhysicalId() ?: return null
+        return try {
+            val p = ProcessBuilder("sh", "-c", "exec screencap -d $id -p").start()
+            p.inputStream.use { it.readBytes() }.takeIf { it.size > 100 }
+        } catch (e: Exception) { null }
+    }
+
+    /** Handed over as a pipe, so no file needs to be readable by both uids. */
+    private fun sendFrame(bytes: ByteArray) {
+        if (portal == null) return
+        val (read, write) = try { android.os.ParcelFileDescriptor.createPipe() } catch (e: Exception) {
+            Log.w(TAG, "portal: no pipe for the frame: ${e.message}"); return
+        }
+        Thread {
+            // A panel that closes its end early is not an error worth a crash: an uncaught
+            // exception here would take the whole shell service down.
+            try {
+                android.os.ParcelFileDescriptor.AutoCloseOutputStream(write).use { it.write(bytes) }
+            } catch (e: Exception) {
+                Log.w(TAG, "portal: frame not taken: ${e.message}")
+            }
+        }.apply { isDaemon = true; name = "portal-frame-pipe"; start() }
+        tell { it.onFrame(read) }
+        runCatching { read.close() }
+    }
 
     override fun setQuick(which: String, on: Boolean) {
         val cmd = when (which) {
@@ -612,6 +894,62 @@ class RearUserService : IRearService.Stub {
                     // panel cannot be in the wrong place on a screen nobody can see, and
                     // the moment anything lights it again this resumes.
                     if (dozing) continue
+
+                    // The App Portal's guest first: its own rule (GuestGate), and the usual
+                    // recovery below only when that rule says so.
+                    val g = guest
+                    if (g != null) {
+                        val entry = GuestTask.byId(exec("am stack list"), g.task)
+                        // The guest's window may belong to another package — a permission
+                        // dialog, a chooser — started into its task; on top, that is still
+                        // the guest, not something that has taken the rear.
+                        val taskTop = entry?.top?.substringBefore('/')?.takeIf { it.isNotEmpty() }
+                        val rear = rearPhysicalId()
+                        // known: SurfaceFlinger shortens long layer names with [...], and a
+                        // shortened one is matched back to whichever of these it starts.
+                        val known = listOfNotNull(g.pkg, PKG, taskTop)
+                        val top = SurfaceDump.topPackage(
+                            exec("dumpsys SurfaceFlinger"),
+                            isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
+                            known = known,
+                        ).let { if (it != null && it == taskTop) g.pkg else it }
+                        when (GuestGate.tick(g.pkg, entry != null, entry?.display == displayId, top, PKG)) {
+                            GuestGate.Tick.GUEST_ON_TOP -> {
+                                // Compare-and-set against this reading: a launch or a guest
+                                // action since it was taken wins.
+                                if (!g.onTop && guestRef.compareAndSet(g, g.copy(onTop = true))) {
+                                    tell { it.onGuest(g.pkg, true) }
+                                }
+                                if (guest?.let { it.task == g.task && it.onTop } == true) frame.show()
+                                continue
+                            }
+                            GuestGate.Tick.GUEST_BEHIND -> {
+                                // Behind the panel, it is no longer on top. On a dark rear
+                                // (top null) only the frame goes: nothing has covered it, and
+                                // it is on top again the moment the display lights.
+                                if (top != null && g.onTop && !portalOverGuest &&
+                                    guestRef.compareAndSet(g, g.copy(onTop = false))) {
+                                    tell { it.onGuest(g.pkg, false) }
+                                }
+                                if (top == null || !portalOverGuest) frame.hide()
+                                continue
+                            }
+                            // Checked again under the lock: this reading may predate a launch
+                            // that has since placed (or replaced) the guest, and ending that
+                            // one would undo it.
+                            GuestGate.Tick.GUEST_GONE -> {
+                                synchronized(placing) {
+                                    val now = guest
+                                    val still = now != null && GuestTask.byId(exec("am stack list"), now.task)?.display == displayId
+                                    if (now != null && !still) endGuest("its task left the rear")
+                                }
+                                continue
+                            }
+                            // Something else has the rear; the usual recovery below puts the
+                            // panel over it, and the frame has nothing to frame.
+                            GuestGate.Tick.USUAL -> frame.hide()
+                        }
+                    }
 
                     // ONE reading per tick. Each call is a full `dumpsys SurfaceFlinger`,
                     // and the old code asked twice per tick for two of its branches —
@@ -800,6 +1138,19 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val BAND_WATCH_MS = 30 * 60_000L
         /** How long Back gets to close the camera before its task is removed instead. */
         private const val BACK_SETTLE_MS = 900L
+
+        /** How long a moved guest must survive before it counts as placed. */
+        private const val GUEST_SURVIVE_MS = 2_000L
+        /** The longest a launch waits for an app's startup screens to settle. */
+        private const val GUEST_SETTLE_LIMIT_MS = 6_000L
+        /** The longest a pull's frame waits for its screenshot before going without. */
+        private const val SHOT_WAIT_MS = 1_000L
+        /**
+         * What may go into a shell command as a package or a component: these come from
+         * the app's config and from dumps, and this service runs them at shell uid.
+         */
+        private val PACKAGE_NAME = Regex("""[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+""")
+        private val COMPONENT = Regex("""[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+/[A-Za-z0-9_.]+""")
 
         /** NEW_TASK | SINGLE_TOP | EXCLUDE_FROM_RECENTS | RESET_TASK_IF_NEEDED | CLEAR_TASK */
         private const val CAMERA_FLAGS = "0x30a08000"
