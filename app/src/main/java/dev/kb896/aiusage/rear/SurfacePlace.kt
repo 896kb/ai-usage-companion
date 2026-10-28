@@ -26,7 +26,11 @@ object SurfacePlace {
         var best: Int? = null
         var bestWidth = -1
         for (line in dump.substring(start).lineSequence().drop(1)) {
-            if (line.isBlank()) break // the list ends at its first blank line
+            // Blank lines come INSIDE each layer's entry (after its geometry), so they end
+            // nothing. The list ends at the next section's heading ("Input list"): the first
+            // line at the margin that is neither a layer stack nor the time.
+            if (line.isBlank()) continue
+            if (!line[0].isWhitespace() && !line.startsWith("LayerStack=") && !line.startsWith("Current time")) break
             stackLine.find(line)?.let { stack = it.groupValues[1].toInt(); ours = false; return@let }
             val layer = layerLine.find(line)
             if (layer != null) { ours = stack == layerStack && layer.groupValues[1].startsWith("VRI-$pkg/"); continue }

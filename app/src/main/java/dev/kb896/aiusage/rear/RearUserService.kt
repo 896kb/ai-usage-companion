@@ -1194,7 +1194,7 @@ class RearUserService : IRearService.Stub {
                 Thread.sleep(DRAWN_POLL_MS)
             }
             // Whatever goes with the new top before it is seen (the camera strip), still covered.
-            runCatching { onDrawn() }.onFailure { Log.w(TAG, "portal: before the reveal: ${it.message}") }
+            runCatching { onDrawn() }.onFailure { Log.w(TAG, "portal: before the reveal: $it", it) }
             // The slide from now, after that, so it never starts part-way.
             val now = android.os.SystemClock.uptimeMillis()
             r.drawn(now)

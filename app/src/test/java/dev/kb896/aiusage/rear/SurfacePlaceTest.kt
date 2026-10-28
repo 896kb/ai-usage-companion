@@ -50,6 +50,42 @@ class SurfacePlaceTest {
         assertNull(SurfacePlace.left("", 1, "dev.kb896.store"))
     }
 
+    @Test fun `the real list has blank lines inside each layer's entry, and goes on past them`() {
+        // As the phone prints it (23:17): a geometry block, then a blank line, inside every
+        // entry — the guest is the fourth layer, after three blank lines.
+        val real = """
+            Composition list (top to bottom)
+            Current time: 10-28-23:17:38.969
+            LayerStack=1
+              Layer [34833] [BBQ] portal-frame#34832#34833
+                visible reason= buffer=30039001268278 frame=43 alpha=0.5 contentDirty
+                bounds={0,0,572,904}
+                  isSecure=false privateLayer=0
+
+                  geomBufferSize=[0 0 904 572]
+              Layer [34835] [BBQ] portal-strip#34834#34835
+                bounds={0,0,572,296}
+
+                  geomBufferSize=[0 0 296 572]
+              Layer [30529] VRI-SubScreenGestureHome#30529
+                bounds={0,479,572,904} toDisplayTransform={ tx=0.0000 ty=479.0000 }
+
+                  geomBufferSize=[0 0 904 93]
+              Layer [34830] VRI-com.google.android.googlequicksearchbox/com.google.android.googlequicksearchbox.SearchActivity#34830
+                bounds={0,0,572,608}
+
+            LayerStack=0
+              Layer [7] VRI-com.google.android.googlequicksearchbox/x.Main#7
+                bounds={300,0,2656,1220}
+
+            Input list
+            LayerStack=1
+              Layer [34830] VRI-com.google.android.googlequicksearchbox/com.google.android.googlequicksearchbox.SearchActivity#34830
+                bounds={296,0,572,904}
+        """.trimIndent()
+        assertEquals(0, SurfacePlace.left(real, 1, "com.google.android.googlequicksearchbox"))
+    }
+
     @Test fun `misplaced only when read and not at the shape's left`() {
         val confined = GuestShape.of(false)
         assertTrue(SurfacePlace.misplaced(0, confined))
