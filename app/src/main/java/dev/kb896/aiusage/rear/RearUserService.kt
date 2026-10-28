@@ -604,6 +604,9 @@ class RearUserService : IRearService.Stub {
             guest = Guest(pkg, task, onTop = false)
             moveToDisplay(task, displayId)
             wake(displayId)
+            // The frame comes up as the app lands, not after the survive wait; show() is
+            // idempotent, so guestPlaced() below does not start a second one.
+            frame.show()
             // A task gone within two seconds of the move was a trampoline the move
             // relaunched (Shazam, measured); once more from the start, then give up.
             Thread.sleep(GUEST_SURVIVE_MS)
@@ -614,6 +617,7 @@ class RearUserService : IRearService.Stub {
                 guestPlaced(displayId)
                 return@synchronized true
             }
+            frame.hide()
             Log.w(TAG, "portal: $pkg's task $task did not survive the move (try ${attempt + 1})")
         }
         endGuest("did not stay on the rear")
@@ -653,7 +657,7 @@ class RearUserService : IRearService.Stub {
     /** A guest is on top: the frame, the watcher, and the panel told. Under [placing]. */
     private fun guestPlaced(displayId: Int) {
         guest = guest?.copy(placed = true)
-        frame.show()
+        frame.show() // already up from the launch's move; a no-op while running
         watchGuest(displayId)
         tell { it.onGuest(guest?.pkg.orEmpty(), true) }
     }
