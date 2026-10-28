@@ -23,6 +23,7 @@ import dev.kb896.aiusage.data.Account
 import androidx.core.view.doOnLayout
 import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.data.PanelConfig
+import dev.kb896.aiusage.data.PortalApps
 import dev.kb896.aiusage.data.ArtConfig
 import dev.kb896.aiusage.data.ArtImport
 import android.widget.LinearLayout
@@ -1318,6 +1319,27 @@ class MainActivity : ComponentActivity() {
                 allowed -> { write { it.copy(weatherUseDevice = true) }; WeatherPoll.nudge() }
                 else -> askLocation.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
             }
+        }
+        // APP PORTAL: other apps on the back, opened from a pull up from the bottom edge.
+        SettingsRows.note(generalRows, "App Portal — pull up from the bottom of the back to open apps there")
+        SettingsRows.navigation(generalRows, "Apps in the portal (${config.portalApps.size})") {
+            AppPicker.show(this, config.portalApps) { pinned ->
+                write { it.copy(portalApps = pinned) }
+                buildSettingsRows()
+            }
+        }
+        config.portalApps.forEachIndexed { i, pkg ->
+            // One lookup per pinned app, not the whole launcher list: this runs on every rebuild.
+            val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
+                .getOrDefault(pkg)
+            SettingsRows.reorderable(
+                generalRows, "  $label", canMoveUp = i > 0,
+                onMoveUp = { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) }; buildSettingsRows() },
+                onClick = { write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg)) }; buildSettingsRows() },
+            )
+        }
+        SettingsRows.colorRow(generalRows, "Portal frame colour", config.portalFrameColor) { c ->
+            write { it.copy(portalFrameColor = c) }
         }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
         // notifications with written ones — which is exactly right for filming and would
