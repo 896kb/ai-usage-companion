@@ -31,7 +31,8 @@ class PortalFrame(private val layerStack: Int) {
 
     @Volatile private var color = 0xFF28FF85.toInt()
     @Volatile private var shapes: List<ElectricBorder.Shape> = shapesFor(RingLayout.forDevice())
-    private var thread: Thread? = null
+    /** Volatile: [showing] reads it from threads that do not hold the lock. */
+    @Volatile private var thread: Thread? = null
     /** Bumped by every show(); a render thread of an older generation stops. */
     @Volatile private var gen = 0
     @Volatile private var failedAt = 0L
@@ -123,6 +124,9 @@ class PortalFrame(private val layerStack: Int) {
         } catch (_: InterruptedException) {
         } catch (e: Throwable) {
             Log.w(TAG, "portal frame stopped: ${e.message}")
+            // A loop that died is a failure like a refused layer: without this, every
+            // keep-alive tick's show() would start it again, only for it to die again.
+            failedAt = System.nanoTime()
         } finally {
             runCatching { SurfaceControl.Transaction().use { it.reparent(sc, null).apply() } }
             runCatching { surface.release() }
