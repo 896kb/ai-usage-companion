@@ -200,6 +200,21 @@ data class GlassStyle(
     }
 }
 
+/**
+ * The App Portal's grid on the back: [rows] by [columns] apps a page. Pinned apps past one
+ * page go on further pages, swiped sideways. Fewer cells are bigger cells (PortalSheet.layout).
+ * Stored by name; [R3C4] — three rows of four — is the grid the portal was born with.
+ */
+@Serializable
+enum class PortalGrid(val rows: Int, val columns: Int) {
+    R3C4(3, 4), R3C3(3, 3), R2C3(2, 3), R2C2(2, 2);
+
+    val perPage: Int get() = rows * columns
+
+    /** As the front's choice says it: rows × columns. */
+    val label: String get() = "$rows × $columns"
+}
+
 /** What the panel's background is. See PanelConfig.effectiveBackdrop. */
 @Serializable
 enum class BackdropKind { COLOR, IMAGE, VIDEO, SHADER }
@@ -619,6 +634,8 @@ data class PanelConfig(
      * No entry means the default. See RearDensity for the bounds.
      */
     val portalDpi: Map<String, Int> = emptyMap(),
+    /** App Portal: how many apps a page of the back's grid holds. See PortalGrid. */
+    val portalGrid: PortalGrid = PortalGrid.R3C4,
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */

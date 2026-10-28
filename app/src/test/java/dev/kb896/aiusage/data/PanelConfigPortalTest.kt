@@ -21,4 +21,21 @@ class PanelConfigPortalTest {
         val c = PanelConfig(portalApps = listOf("org.mozilla.firefox", "com.reddit.frontpage"))
         assertEquals(c.portalApps, PanelConfig.decode(PanelConfig.encode(c)).portalApps)
     }
+
+    @Test fun `a config saved before the grid choice has three rows of four`() {
+        val old = PanelConfig.encode(PanelConfig()).replace(Regex(""","portalGrid":"[A-Z0-9]+""""), "")
+        assertFalse("portalGrid" in old)
+        assertEquals(PortalGrid.R3C4, PanelConfig.decode(old).portalGrid)
+    }
+
+    @Test fun `the grid keeps its choice through a save`() {
+        for (g in PortalGrid.entries) {
+            assertEquals(g, PanelConfig.decode(PanelConfig.encode(PanelConfig(portalGrid = g))).portalGrid)
+        }
+    }
+
+    @Test fun `each grid says its rows and columns, and holds their product`() {
+        assertEquals(listOf("3 × 4", "3 × 3", "2 × 3", "2 × 2"), PortalGrid.entries.map { it.label })
+        assertEquals(listOf(12, 9, 6, 4), PortalGrid.entries.map { it.perPage })
+    }
 }

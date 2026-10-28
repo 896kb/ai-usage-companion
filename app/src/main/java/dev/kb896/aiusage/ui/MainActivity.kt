@@ -24,6 +24,7 @@ import androidx.core.view.doOnLayout
 import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.PortalApps
+import dev.kb896.aiusage.data.PortalGrid
 import dev.kb896.aiusage.data.ArtConfig
 import dev.kb896.aiusage.data.ArtImport
 import android.widget.LinearLayout
@@ -1340,6 +1341,10 @@ class MainActivity : ComponentActivity() {
                 buildSettingsRows()
             }
         }
+        // Rows × columns a page; more pinned apps than that go on further pages on the back.
+        SettingsRows.choice(
+            portalRows, "Apps per page", PortalGrid.entries.map { it.label }, config.portalGrid.ordinal,
+        ) { i -> write { it.copy(portalGrid = PortalGrid.entries[i]) } }
         config.portalApps.forEachIndexed { i, pkg ->
             // One lookup per pinned app, not the whole launcher list: this runs on every rebuild.
             val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
