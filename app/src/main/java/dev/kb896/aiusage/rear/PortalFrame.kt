@@ -220,18 +220,21 @@ class PortalFrame(private val layerStack: Int) {
          * margin ray should be less visible"), so it is drawn at half.
          */
         internal const val ALPHA = 0.5f
-        /** Edge inset and the display's corner radius (dumpsys display: RoundedCorner radius=97). */
-        private const val INSET = 10f
+        /** The display's corner radius (dumpsys display: RoundedCorner radius=97). */
         private const val CORNER = 97f
 
         /**
          * The usable screen's edge only, right of the lenses (Panel.CUTOUT_RIGHT): the frame
          * neither runs round the lenses nor along the strip beside them. Square on the left,
          * where the screen meets the strip; round on the right, as the glass is.
+         *
+         * The line's middle runs ON the app's edge, not inside it ("the center of the electric
+         * lines should fall exactly on the edge of the apps"): half of it, and of its glow, is
+         * off the glass at the display's edges, and over the lens strip on the left.
          */
         fun shapesFor(): List<ElectricBorder.Shape> = listOf(
             ElectricBorder.Shape.Rounded(
-                Panel.CUTOUT_RIGHT + INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET,
+                Panel.CUTOUT_RIGHT.toFloat(), 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), CORNER,
                 leftR = 0f,
             ),
         )
