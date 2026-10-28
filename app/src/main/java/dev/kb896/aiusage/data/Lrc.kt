@@ -76,8 +76,9 @@ class Lrc(val lines: List<Line>) {
          * Anchored at the start: a bracket in the middle of a line is part of the lyric —
          * `[Chorus]`, or a bracketed aside — and must survive as text.
          */
-        private val LEADING = Regex("""^((?:\[[^]]*])+)(.*)$""")
-        private val TAG = Regex("""\[([^]]*)]""")
+        // Every ] escaped: the phone's regex is ICU's, stricter than the JVM's (IcuRegexTest).
+        private val LEADING = Regex("""^((?:\[[^\]]*\])+)(.*)$""")
+        private val TAG = Regex("""\[([^\]]*)\]""")
 
         /**
          * `mm:ss`, with an optional fraction. Minutes are not capped at 59: a
