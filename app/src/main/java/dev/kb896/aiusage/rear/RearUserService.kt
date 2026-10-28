@@ -750,7 +750,17 @@ class RearUserService : IRearService.Stub {
                             EdgeGestures.Action.Disarm -> { shot = null; relaying = false }
                             is EdgeGestures.Action.PullStart -> when {
                                 guest?.onTop != true || portalOverGuest -> shot = null
-                                portal == null -> { shot = null; Log.d(TAG, "portal: pull over the guest refused — no panel callback") }
+                                // No callback means the panel's process is gone: no portal to
+                                // relay to, but the pull still asks for the panel, so it comes back.
+                                portal == null -> {
+                                    shot = null
+                                    if (keyguardShowing()) {
+                                        Log.d(TAG, "portal: pull over the guest refused — no panel callback, keyguard")
+                                    } else {
+                                        Log.i(TAG, "portal: pull over the guest with no panel callback — bringing the panel back")
+                                        exec("am start --display $displayId -n $PKG/$ACTIVITY")
+                                    }
+                                }
                                 keyguardShowing() -> { shot = null; Log.d(TAG, "portal: pull over the guest refused — keyguard") }
                                 else -> {
                                     portalOverGuest = true
@@ -902,6 +912,8 @@ class RearUserService : IRearService.Stub {
      * is meant to be there, and it keeps asking for as long as the app is running.
      */
     private fun replace(displayId: Int, why: String) {
+        // A keep-alive interrupted by hide() mid-tick must not re-place the hidden panel.
+        if (Thread.currentThread().isInterrupted) return
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastReplaceAt < REPLACE_COOLDOWN_MS) return
         lastReplaceAt = now
@@ -994,7 +1006,12 @@ class RearUserService : IRearService.Stub {
                                 synchronized(placing) {
                                     val now = guest
                                     val still = now != null && GuestTask.byId(exec("am stack list"), now.task)?.display == displayId
-                                    if (now != null && !still) endGuest("its task left the rear")
+                                    // Asleep on purpose, the rear stays dark: the panel's task is
+                                    // already behind, and is simply revealed. Gone too, it is
+                                    // relaunched on the next tick that is not asleep.
+                                    if (now != null && !still) {
+                                        if (dozing) dropGuest("its task left the rear") else endGuest("its task left the rear")
+                                    }
                                 }
                                 continue
                             }
