@@ -163,6 +163,11 @@ class UsagePollService : Service() {
     private var portalApps: PortalAppsLoader? = null
     private var stopConfigWatch: (() -> Unit)? = null
 
+    /** Installs, updates, removals and a language change all alter the pinned apps' icons or names. */
+    private val portalAppsReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) { portalApps?.refresh() }
+    }
+
     override fun onCreate() {
         super.onCreate()
         // The type must be passed here as well as declared in the manifest — they are
@@ -179,6 +184,14 @@ class UsagePollService : Service() {
         // The pinned apps' icons and names go to the shell: now, and on every config write.
         val loader = PortalAppsLoader(this) { app.bridge.setPortalApps(it) }.also { portalApps = it }
         stopConfigWatch = ConfigStore(this).listen { loader.refresh() }
+        ContextCompat.registerReceiver(this, portalAppsReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, portalAppsReceiver,
+            IntentFilter(Intent.ACTION_LOCALE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         loader.refresh()
         app.repository.onFetchCompleted = {
             val current = app.repository.state.value
@@ -790,6 +803,7 @@ class UsagePollService : Service() {
     override fun onDestroy() {
         stopConfigWatch?.invoke()
         stopConfigWatch = null
+        runCatching { unregisterReceiver(portalAppsReceiver) }
         portalApps?.stop()
         displays.unregisterDisplayListener(displayListener)
         media?.stop()

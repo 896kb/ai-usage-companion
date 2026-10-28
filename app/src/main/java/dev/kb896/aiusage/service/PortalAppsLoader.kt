@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
  * Loads the pinned apps' labels and icons in the main app's process and hands them to
  * [send] (the shell service's setPortalApps, via the bridge). Everything runs on one
  * background thread; [refresh] is cheap enough to call on every config write, because a
- * load that would equal the last one sent (same apps, same install times) sends nothing.
+ * load that would equal the last one sent (same apps, same install times, same language) sends nothing.
  * The bridge re-sends the last bundle itself when the shell service reconnects.
  */
 class PortalAppsLoader(private val context: Context, private val send: (android.os.Bundle) -> Unit) {
@@ -36,7 +36,8 @@ class PortalAppsLoader(private val context: Context, private val send: (android.
             runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()?.let { pkg to it }
         }.toMap()
         val shown = PortalApps.present(pinned, infos.keys).take(PortalSheet.MAX_APPS)
-        val signature = shown.map { pkg ->
+        // The locale too: the labels are in the language they were loaded in.
+        val signature = listOf(context.resources.configuration.locales.toLanguageTags()) + shown.map { pkg ->
             "$pkg@${runCatching { pm.getPackageInfo(pkg, 0).lastUpdateTime }.getOrDefault(0L)}"
         }
         if (signature == lastSignature) return
