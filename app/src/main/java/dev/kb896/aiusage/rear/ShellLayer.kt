@@ -9,10 +9,21 @@ import dev.kb896.aiusage.Panel
  * and the portal sheet stand on. See PortalFrame for why a layer and not a window, and
  * for why a layer that should let touches through must be a trusted overlay.
  *
- * [create] builds the layer, puts it on the rear's layer stack (hidden, by reflection;
- * shell may call it and the frame's spike proved it on OS4.0.5.0), marks it a trusted
- * overlay or not, and sets its Z and its visibility — all in one transaction, so it
- * either arrives whole or not at all.
+ * [create] builds the layer as a CHILD of this process's one container on the rear's layer
+ * stack ([container]), marks it a trusted overlay or not, and sets its Z (among its siblings)
+ * and its visibility — all in one transaction, so it either arrives whole or not at all.
+ *
+ * ONE CONTAINER, AND NOTHING ELSE AT THE ROOT. On this firmware a ROOT layer (no parent, only
+ * a layer stack) is never taken out of SurfaceFlinger's tree: reparent(null) does nothing to
+ * a root, release() only drops our handle, and SurfaceFlinger keeps the layer — composed at
+ * whatever alpha it last had — after its handle and even its process have died. Seen on the
+ * phone: thirty frame, strip and cover layers of a service that had exited cleanly, still
+ * listed, the latest still faintly drawn over the panel. So there is one root per process
+ * (setLayerStack, hidden, by reflection — shell may call it), a container with nothing of its
+ * own to draw and NOT trusted (so the untrusted blocker under it stays untrusted); every
+ * layer of ours is its child, and a child reparented to null goes offscreen and is freed.
+ * The container itself is hidden and emptied when the process ends ([removeAll]); a kill
+ * that runs no code leaves it, with whatever children were showing at that moment.
  *
  * FAIL CLOSED. A layer asked to be trusted that cannot be is never shown: the transaction
  * is not applied, the layer is released, and [Untrusted] is thrown so the caller can say
@@ -21,7 +32,8 @@ import dev.kb896.aiusage.Panel
 internal object ShellLayer {
 
     /**
-     * Z on the rear's layer stack, top-level. The frame stays on top of everything of
+     * Z among the container's children (the container itself is at the top of the rear's
+     * layer stack). The frame stays on top of everything of
      * ours; the sheet goes under it, the sheet's blocker under the sheet, and a guest's
      * arrival cover under them all. For touches the order between blocker and sheet does
      * not matter: the InputDispatcher checks every window above the touched one, so the
@@ -47,20 +59,58 @@ internal object ShellLayer {
      */
     private val live: MutableSet<SurfaceControl> = java.util.Collections.synchronizedSet(LinkedHashSet())
 
+    /** Set by [removeAll], as the process ends: [create] makes nothing more. */
+    @Volatile private var closed = false
+
+    /** The container on each layer stack ([container]), made once per process. Under [containers]' lock. */
+    private val containers = HashMap<Int, SurfaceControl>()
+
+    /**
+     * This process's root on [layerStack], made the first time: a container layer (hidden
+     * Builder.setContainerLayer; a layer with no buffer where there is none) at the top of the
+     * stack, shown, not trusted.
+     */
+    fun container(layerStack: Int): SurfaceControl = synchronized(containers) {
+        containers[layerStack]?.let { return it }
+        val b = SurfaceControl.Builder().setName("ai-usage-shell")
+        runCatching { SurfaceControl.Builder::class.java.getMethod("setContainerLayer").invoke(b) }
+        val c = b.build()
+        try {
+            SurfaceControl.Transaction().use { t ->
+                SurfaceControl.Transaction::class.java
+                    .getMethod("setLayerStack", SurfaceControl::class.java, Int::class.javaPrimitiveType)
+                    .invoke(t, c, layerStack)
+                t.setLayer(c, Int.MAX_VALUE).setVisibility(c, true).apply()
+            }
+        } catch (e: Throwable) {
+            runCatching { c.release() }
+            throw e
+        }
+        containers[layerStack] = c
+        c
+    }
+
     /**
      * Every live layer off the rear in one transaction, then let go — synchronously, as the
-     * last thing a dying process does. Quiet: there is nobody left to tell.
+     * last thing a dying process does: each child hidden, at alpha 0 and reparented to null
+     * (offscreen); each container hidden and at alpha 0, since SurfaceFlinger keeps a root
+     * after its handle dies — empty and hidden, then. Quiet: there is nobody left to tell.
      */
     fun removeAll() {
+        // Nothing new after this: a render thread still running as the process ends makes no layer.
+        closed = true
         val all = synchronized(live) { live.toList().also { live.clear() } }
-        if (all.isEmpty()) return
+        val roots = synchronized(containers) { containers.values.toList().also { containers.clear() } }
+        if (all.isEmpty() && roots.isEmpty()) return
         runCatching {
             SurfaceControl.Transaction().use { t ->
-                for (l in all) runCatching { t.setVisibility(l, false).reparent(l, null) }
+                for (l in all) runCatching { t.setVisibility(l, false).setAlpha(l, 0f).reparent(l, null) }
+                for (r in roots) runCatching { t.setVisibility(r, false).setAlpha(r, 0f) }
                 t.apply()
             }
         }
         for (l in all) runCatching { l.release() }
+        for (r in roots) runCatching { r.release() }
     }
 
     /** A layer that had to be trusted could not be; [message] says why. */
@@ -76,13 +126,12 @@ internal object ShellLayer {
         name: String, layerStack: Int, z: Int, trusted: Boolean, visible: Boolean = true, alpha: Float = 1f,
         width: Int = Panel.WIDTH, height: Int = Panel.HEIGHT,
     ): SurfaceControl {
+        check(!closed) { "the shell's layers are closed: the process is ending" }
+        // A child of this process's container, never a root of its own (see the class comment).
         val layer = SurfaceControl.Builder().setName(name).setBufferSize(width, height)
-            .setFormat(PixelFormat.TRANSLUCENT).build()
+            .setFormat(PixelFormat.TRANSLUCENT).setParent(container(layerStack)).build()
         try {
             SurfaceControl.Transaction().use { t ->
-                SurfaceControl.Transaction::class.java
-                    .getMethod("setLayerStack", SurfaceControl::class.java, Int::class.javaPrimitiveType)
-                    .invoke(t, layer, layerStack)
                 if (trusted) trust(t, layer)?.let { throw Untrusted(it) }
                 if (alpha < 1f) t.setAlpha(layer, alpha)
                 t.setLayer(layer, z).setVisibility(layer, visible).apply()
@@ -95,11 +144,15 @@ internal object ShellLayer {
         }
     }
 
-    /** Takes [layer] off the screen and lets it go. Safe on a layer already gone. */
+    /**
+     * Takes [layer] off the screen and lets it go: hidden, at alpha 0 and reparented to null
+     * (offscreen, so freed once released) in one transaction — each of them on its own would
+     * do, and none is left to chance. Safe on a layer already gone.
+     */
     fun remove(layer: SurfaceControl?) {
         if (layer == null) return
         live.remove(layer)
-        runCatching { SurfaceControl.Transaction().use { it.reparent(layer, null).apply() } }
+        runCatching { SurfaceControl.Transaction().use { it.setVisibility(layer, false).setAlpha(layer, 0f).reparent(layer, null).apply() } }
         runCatching { layer.release() }
     }
 

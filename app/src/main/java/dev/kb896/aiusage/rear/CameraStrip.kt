@@ -75,7 +75,7 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
         var sc: SurfaceControl? = null
         var surface: Surface? = null
         try {
-            sc = ShellLayer.create("portal-strip", layerStack, ShellLayer.Z_STRIP, trusted = true, alpha = 0f,
+            sc = ShellLayer.create("portal-strip", layerStack, ShellLayer.Z_STRIP, trusted = true, visible = false, alpha = 0f,
                 width = Panel.CUTOUT_RIGHT, height = Panel.HEIGHT)
             surface = Surface(sc)
             currentLayer = sc
@@ -107,7 +107,8 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
                     drawn = color
                 }
                 if (level != alpha) {
-                    SurfaceControl.Transaction().use { it.setAlpha(sc, level).apply() }
+                    // Hidden, not only clear, while it shows nothing (ShellLayer).
+                    SurfaceControl.Transaction().use { it.setAlpha(sc, level).setVisibility(sc, level > 0f).apply() }
                     alpha = level
                 }
                 // Frames while it fades or eases; otherwise only until the next sample.

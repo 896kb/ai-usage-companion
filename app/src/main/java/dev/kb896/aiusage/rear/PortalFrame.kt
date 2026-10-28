@@ -160,7 +160,7 @@ class PortalFrame(private val layerStack: Int) {
             // see the class comment. Not trusted, not shown — ShellLayer never applies it.
             // At [ALPHA] as a whole: one number on the layer, where paint alphas would be four.
             // Made out of sight: the first frame sets its alpha, faded in from nothing.
-            val made = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true, alpha = 0f)
+            val made = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true, visible = false, alpha = 0f)
             sc = made
             surface = Surface(made)
         } catch (e: ShellLayer.Untrusted) {
@@ -207,7 +207,9 @@ class PortalFrame(private val layerStack: Int) {
                 }
                 // The whole layer, with the frame it goes with, and only when it moves.
                 if (a != alpha) {
-                    SurfaceControl.Transaction().use { it.setAlpha(sc, a).apply() }
+                    // Hidden, not only clear, while it shows nothing: a kill that runs no code
+                    // leaves a hidden layer hidden (ShellLayer).
+                    SurfaceControl.Transaction().use { it.setAlpha(sc, a).setVisibility(sc, a > 0f).apply() }
                     alpha = a
                 }
                 val took = (System.nanoTime() - began) / 1_000_000
