@@ -198,9 +198,12 @@ class PortalFrame(private val layerStack: Int) {
         private const val INSET = 10f
         private const val CORNER = 97f
 
-        /** The display edge only; the frame does not run round the lenses. */
+        /**
+         * The usable screen's edge only, right of the lenses (Panel.CUTOUT_RIGHT): the frame
+         * neither runs round the lenses nor along the strip beside them.
+         */
         fun shapesFor(): List<ElectricBorder.Shape> = listOf(
-            ElectricBorder.Shape.Rounded(INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET),
+            ElectricBorder.Shape.Rounded(Panel.CUTOUT_RIGHT + INSET, INSET, Panel.WIDTH - INSET, Panel.HEIGHT - INSET, CORNER - INSET),
         )
     }
 }
