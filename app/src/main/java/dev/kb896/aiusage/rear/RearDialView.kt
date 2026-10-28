@@ -1516,7 +1516,6 @@ class RearDialView(context: Context) : View(context) {
                 backdrop = if (recorder != null && ground > 0.004f && width > 0 && height > 0) ptNode else ptNoBackdrop,
                 icons = portalIcons, labels = portalLabels,
                 guestOnTop = portalGuestOnTop, withStrip = portalGuest != null,
-                rootWidth = width, rootHeight = height,
             )
             // Another frame while it settles or the guest's frame fades in; a finger's
             // drag asks for its own with every move.

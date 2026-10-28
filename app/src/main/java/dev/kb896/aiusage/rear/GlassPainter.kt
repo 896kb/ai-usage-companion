@@ -17,6 +17,9 @@ import android.graphics.RenderNode
  *
  * One per drawing surface: it holds that surface's node pool and lens cache. Call
  * [beginFrame] at the start of every frame.
+ *
+ * Not thread-safe; all painters in a process must draw on one thread — they share
+ * Glass's shaders (uniforms, highlight matrix).
  */
 class GlassPainter {
 
@@ -128,6 +131,12 @@ class GlassPainter {
         held: Boolean = false,
         /** How hard this pane splits light. See Glass.ABERRATION. */
         aberration: Float = Glass.ABERRATION,
+        /**
+         * [source] is in the canvas's current space, as [rect] is, and is never mapped to
+         * root space even when it spans the root canvas from its origin (see [rootSpace]).
+         * For a backdrop drawn in the same space as the panes over it — the portal sheet's.
+         */
+        local: Boolean = false,
     ): Boolean {
         val w = rect.width()
         val h = rect.height()
@@ -182,7 +191,7 @@ class GlassPainter {
             // see layered — so a pane drawn inside a transform and sampling one of THOSE
             // had the same frozen backdrop this branch exists to prevent. A node that
             // spans the panel from its origin is root-space whatever it is called.
-            if (rootSpace(source)) {
+            if (!local && rootSpace(source)) {
                 canvas.getMatrix().mapRect(paneAbs, rect)
                 pane.translate(-paneAbs.left, -paneAbs.top)
             } else {

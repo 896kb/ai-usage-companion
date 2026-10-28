@@ -23,6 +23,9 @@ import dev.kb896.aiusage.data.PanelTheme
  * filled, in the critical red.
  *
  * Laid out by PortalSheet, in panel pixels.
+ *
+ * Not thread-safe; all painters in a process must draw on one thread — they share
+ * Glass's shaders (uniforms, highlight matrix).
  */
 class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
 
@@ -67,11 +70,13 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
      * standing straight on the blur with nothing behind them; [withStrip] puts the guest's
      * three buttons above them, [guestOnTop] picking Panel or Resume for the first.
      *
-     * [backdrop] is what the glass bends — the blurred ground drawn under the sheet. A
-     * node with nothing recorded in it gives glass without a lens. Every rect is moved by
-     * the slide rather than the canvas, so a pane of glass bends the blur where it
-     * actually stands. A backdrop spanning [rootWidth] by [rootHeight] from the origin is
-     * sampled in root space (see GlassPainter.rootSpace).
+     * [backdrop] is what the glass bends — the blurred ground drawn under the sheet, in
+     * the canvas's current space. A node with nothing recorded in it gives glass without a
+     * lens. Every rect is moved by the slide rather than the canvas, so a pane of glass
+     * bends the blur where it actually stands. Always sampled in local space (the panes'
+     * and the backdrop's are the same), never in root space: on the 17 Pro the panel's
+     * canvas is the root at identity and both mappings agree, and the shell's surface has
+     * no root of anyone else's to agree with.
      *
      * [pressed] (0 to 2, -1 none) is a button under a finger: half lit, as a control
      * centre tile coming on. Close is lit already.
@@ -80,10 +85,9 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
         canvas: Canvas, progress: Float, backdrop: RenderNode,
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, withStrip: Boolean, pressed: Int = -1,
-        rootWidth: Int = canvas.width, rootHeight: Int = canvas.height,
     ) {
         if (progress <= 0.004f) return
-        glass.beginFrame(rootWidth, rootHeight)
+        glass.beginFrame(canvas.width, canvas.height)
         val dy = PortalSheet.slide(progress)
         val alpha = (255 * progress).toInt().coerceIn(0, 255)
         // Faded as one picture, as the control centre is: glass cannot take a paint's alpha.
@@ -127,7 +131,7 @@ class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
         val close = i == 2
         val on = if (close) 1f else if (pressed) 0.5f else 0f
         val tint = if (close) Panel.Palette.CRIT and 0x00FFFFFF else 0x00FFFFFF
-        val glassy = theme.isGlass && glass.drawPane(canvas, rect, radius, paneTint(rect), shape = buttonShape, source = backdrop)
+        val glassy = theme.isGlass && glass.drawPane(canvas, rect, radius, paneTint(rect), shape = buttonShape, source = backdrop, local = true)
         // No mark: the name is the button's, drawn over it in the ink.
         CcButton.drawBody(canvas, buttonShape, on, tint, glassy, background = 0, paint = buttonPaint) { _, _ -> }
     }
