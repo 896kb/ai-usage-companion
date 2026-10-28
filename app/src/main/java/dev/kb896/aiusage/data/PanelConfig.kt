@@ -612,6 +612,13 @@ data class PanelConfig(
     val portalApps: List<String> = emptyList(),
     /** The portal frame's colour (see PortalFrame). Default the original Electric Border's green. */
     val portalFrameColor: Int = 0xFF28FF85.toInt(),
+    /**
+     * App Portal: a density of its own for an app on the back, by package, in dpi. Some apps
+     * are unreadable at the rear's default density; the shell applies an entry only while
+     * that app is the guest on top, and the display goes back to its default otherwise.
+     * No entry means the default. See RearDensity for the bounds.
+     */
+    val portalDpi: Map<String, Int> = emptyMap(),
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */
