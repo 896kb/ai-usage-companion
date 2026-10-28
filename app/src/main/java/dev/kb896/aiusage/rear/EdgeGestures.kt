@@ -23,13 +23,14 @@ import kotlin.math.abs
  * - [Action.SheetDown] at once (the caller stops a settle there and shows a press);
  * - a drag up or down past [SLOP], more vertical than sideways, is [Action.PullStart] /
  *   [Action.PullMove] / [Action.PullEnd], as a pull — the caller moves the sheet from
- *   wherever it was when the finger landed (a drag down closes an open sheet);
- * - [Action.LongPress] once, while still down, after [LONG_PRESS_MS] within [SLOP] of
- *   where it landed — from a move, or from [tick] when the finger holds so still that the
- *   touchscreen sends nothing;
+ *   wherever it was when the finger landed (a drag down lowers it a stop, or shuts it);
+ * - a drag sideways past [SLOP], more sideways than vertical, is [Action.SlideStart] /
+ *   [Action.SlideMove] / [Action.SlideEnd] — the caller decides by where it landed what
+ *   it moves (the DPI slider, the grid's pages, or nothing). Which way a drag goes is
+ *   decided once, by the first [SLOP] it travels, and kept to its lift;
  * - the lift: [Action.Tap] if it stayed within [SLOP] for no more than [TAP_MS] (at the
- *   landing point, where the press was shown), [Action.PullEnd] for a drag, otherwise
- *   [Action.Cancel]. Every sheet gesture ends in exactly one of the three.
+ *   landing point, where the press was shown), [Action.PullEnd] / [Action.SlideEnd] for a
+ *   drag, otherwise [Action.Cancel]. Every sheet gesture ends in exactly one of these.
  * [sheet] is read when a finger lands: a gesture keeps the kind it started with, so the
  * pull that opens the sheet runs to its own lift as a pull.
  *
@@ -53,9 +54,11 @@ class EdgeGestures {
         data class SheetDown(val x: Float, val y: Float) : Action
         /** A quick touch on the sheet, where it landed. */
         data class Tap(val x: Float, val y: Float) : Action
-        /** A finger held still on the sheet, where it landed; the gesture goes on to its lift. */
-        data class LongPress(val x: Float, val y: Float) : Action
-        /** A sheet gesture that came to nothing: wandered, held too long, or lost. */
+        /** A sideways drag on the sheet, the finger now at [x]. */
+        data class SlideStart(val x: Float) : Action
+        data class SlideMove(val x: Float) : Action
+        data class SlideEnd(val x: Float) : Action
+        /** A sheet gesture that came to nothing: held too long, or lost. */
         data object Cancel : Action
     }
 
@@ -69,22 +72,22 @@ class EdgeGestures {
     private var downX = 0f
     private var downY = 0f
     private var downAt = 0L
+    private var lastX = 0f
     private var lastY = 0f
-    /** A sheet finger that went past the slop without becoming a drag. */
-    private var wandered = false
-    private var longFired = false
+    /** A committed sheet drag is sideways (a slide), not a pull. */
+    private var sideways = false
 
     fun feed(e: RearTouches.Event): List<Action> = when (e) {
         is RearTouches.Down -> {
             val stale = when {
                 kind == Kind.PULL && committed -> listOf(Action.PullEnd(lastY))
                 kind == Kind.PULL -> listOf(Action.Disarm)
-                kind == Kind.SHEET && committed -> listOf(Action.PullEnd(lastY))
+                kind == Kind.SHEET && committed -> listOf(if (sideways) Action.SlideEnd(lastX) else Action.PullEnd(lastY))
                 kind == Kind.SHEET -> listOf(Action.Cancel)
                 else -> emptyList()
             }
-            downX = e.x; downY = e.y; lastY = e.y; downAt = e.atMs
-            committed = false; wandered = false; longFired = false
+            downX = e.x; downY = e.y; lastX = e.x; lastY = e.y; downAt = e.atMs
+            committed = false; sideways = false
             kind = when {
                 sheet -> Kind.SHEET
                 PortalPull.startsPull(e.x, e.y) -> Kind.PULL
@@ -97,7 +100,7 @@ class EdgeGestures {
                 else -> emptyList()
             }
         }
-        is RearTouches.Move -> { lastY = e.y; when (kind) {
+        is RearTouches.Move -> { lastX = e.x; lastY = e.y; when (kind) {
             Kind.PULL -> when {
                 committed -> listOf(Action.PullMove(e.y))
                 downY - e.y >= SLOP && downY - e.y > abs(e.x - downX) -> { committed = true; listOf(Action.PullStart(e.y)) }
@@ -119,34 +122,23 @@ class EdgeGestures {
         }
     }
 
-    /**
-     * The long-press, for a finger held so still that no move comes: call it once
-     * [LONG_PRESS_MS] after a [Action.SheetDown] (a later call is harmless).
-     */
-    fun tick(nowMs: Long): List<Action> =
-        if (kind == Kind.SHEET && !committed && !wandered && !longFired && nowMs - downAt >= LONG_PRESS_MS) {
-            longFired = true
-            listOf(Action.LongPress(downX, downY))
-        } else emptyList()
-
     private fun sheetMove(e: RearTouches.Event): List<Action> {
-        if (committed) return listOf(Action.PullMove(e.y))
+        if (committed) return listOf(if (sideways) Action.SlideMove(e.x) else Action.PullMove(e.y))
         val dx = abs(e.x - downX)
         val dy = abs(e.y - downY)
-        if (!wandered && dy >= SLOP && dy > dx) { committed = true; return listOf(Action.PullStart(e.y)) }
-        if (maxOf(dx, dy) >= SLOP) wandered = true
-        return tick(e.atMs)
+        if (maxOf(dx, dy) < SLOP) return emptyList()
+        committed = true
+        sideways = dx > dy
+        return listOf(if (sideways) Action.SlideStart(e.x) else Action.PullStart(e.y))
     }
 
     private fun sheetUp(e: RearTouches.Event): List<Action> {
-        if (committed) return listOf(Action.PullEnd(e.y))
-        if (maxOf(abs(e.x - downX), abs(e.y - downY)) >= SLOP) wandered = true
-        val held = e.atMs - downAt
+        if (committed) return listOf(if (sideways) Action.SlideEnd(e.x) else Action.PullEnd(e.y))
+        val moved = maxOf(abs(e.x - downX), abs(e.y - downY)) >= SLOP
         return when {
-            wandered -> listOf(Action.Cancel)
-            !longFired && held <= TAP_MS -> listOf(Action.Tap(downX, downY))
-            // Held long enough, but lifted before anyone looked: the long-press, then its end.
-            else -> tick(e.atMs) + Action.Cancel
+            moved -> listOf(Action.Cancel)
+            e.atMs - downAt <= TAP_MS -> listOf(Action.Tap(downX, downY))
+            else -> listOf(Action.Cancel)
         }
     }
 
@@ -158,7 +150,5 @@ class EdgeGestures {
         const val BACK_TRAVEL = 60f
         /** The longest touch that is still a tap. */
         const val TAP_MS = 300L
-        /** How long a still finger takes to become a long-press. */
-        const val LONG_PRESS_MS = 450L
     }
 }

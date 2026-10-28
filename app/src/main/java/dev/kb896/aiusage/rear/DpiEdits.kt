@@ -1,13 +1,13 @@
 package dev.kb896.aiusage.rear
 
 /**
- * The DPI nudges made on the back, between the tap and the config agreeing (pure; the shell
- * holds one under a lock of its own).
+ * The DPI changes made on the back (its slider), between the change and the config agreeing
+ * (pure; the shell holds one under a lock of its own).
  *
- * The shell cannot write the config: it shows and applies each nudge at once, and hands the
- * app's latest value to the main process only once the taps have stopped for [delayMs]
- * ([due]), so a run of taps is one config write. Until a payload comes back carrying that
- * value, an older payload (the minute's usage push, say) must not undo the nudge on the
+ * The shell cannot write the config: it shows and applies each change at once, and hands the
+ * app's latest value to the main process only once the changes have stopped for [delayMs]
+ * ([due]), so a run of them is one config write. Until a payload comes back carrying that
+ * value, an older payload (the minute's usage push, say) must not undo the change on the
  * back: [overlay] lays the edits over the payload's map. An edit is dropped [graceMs] after
  * a payload first agrees with it — not on that payload: an older one (pushed before the save,
  * delivered after) can still follow it — or [holdMs] after it was handed on with no payload

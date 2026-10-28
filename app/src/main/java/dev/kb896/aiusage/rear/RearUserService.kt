@@ -57,7 +57,7 @@ class RearUserService : IRearService.Stub {
                 if (currentDensity != baselineDensity || !densityKnown) applyDensity(null, "the service is going (retry)")
             }
         }
-        // Nudges not yet handed on go now, or they are lost with us.
+        // DPI changes not yet handed on go now, or they are lost with us.
         flushDpi(all = true)
         exitProcess(0)
     }
@@ -630,7 +630,7 @@ class RearUserService : IRearService.Stub {
      * changed off the lock, and only by compare-and-set against the guest it was read
      * from, so a reading that predates a launch can never write the old guest back.
      * [Guest.placed] is false until [guestPlaced]: while a launch waits to see whether the
-     * task survives its move, the keep-alive leaves the frame and the sheet's strip alone.
+     * task survives its move, the keep-alive leaves the frame and the sheet's buttons alone.
      * [Guest.hiddenOnFront]: the sheet's Panel moved it to display 0 behind the keyguard
      * (see [onSheetButton]); it is still the guest, behind, and Resume brings it back.
      */
@@ -665,6 +665,16 @@ class RearUserService : IRearService.Stub {
     override fun setPortalApps(apps: android.os.Bundle?) {
         portalApps = PortalAppsSnapshot.fromBundle(apps)
         shellSheet?.apps(portalApps)
+        repage()
+    }
+
+    /** The portal grid's size (PanelConfig.portalGrid), from the last payload. */
+    @Volatile private var portalGrid = dev.kb896.aiusage.data.PortalGrid.R3C4
+
+    /** The pinned apps or the grid changed: the pages follow, an open sheet's with them. Any thread. */
+    private fun repage() = synchronized(sheetLock) {
+        pager.pages = sheetLayout().pages
+        if (sheetUp) shellSheet?.page(pager.position(android.os.SystemClock.uptimeMillis()))
     }
 
     /** The rear display's layer stack, from dumpsys display; 1 on the 17 Pro, as measured. */
@@ -686,6 +696,11 @@ class RearUserService : IRearService.Stub {
             setPortalDpi { dpiEdits.overlay(config.portalDpi, android.os.SystemClock.uptimeMillis()) }
             sheetLook = config.theme to config.glassStyle
             shellSheet?.theme(config.theme, config.glassStyle)
+            if (portalGrid != config.portalGrid) {
+                portalGrid = config.portalGrid
+                shellSheet?.grid(config.portalGrid)
+                repage()
+            }
             restyleSheetFace(config.theme to config.font)
         } catch (e: Exception) {
             Log.w(TAG, "portal frame: no style from the payload: ${e.message}")
@@ -750,7 +765,7 @@ class RearUserService : IRearService.Stub {
     /** Display 1's physical density, for the log. */
     private var physicalDensity = DensityDump.FALLBACK
     /**
-     * The config's per-app DPI, from the latest payload, with the nudges made on the back
+     * The config's per-app DPI, from the latest payload, with the changes made on the back
      * laid over it until a payload carries them ([dpiEdits]). Written under [dpiLock].
      */
     @Volatile private var portalDpi: Map<String, Int> = emptyMap()
@@ -943,7 +958,7 @@ class RearUserService : IRearService.Stub {
         syncSheetGuest()
     }
 
-    /** No guest any more: frame, watcher and the sheet's strip off. Under [placing]. */
+    /** No guest any more: frame, watcher and the sheet's buttons off. Under [placing]. */
     private fun dropGuest(why: String) {
         Log.i(TAG, "portal: guest over — $why")
         guest = null
@@ -962,7 +977,7 @@ class RearUserService : IRearService.Stub {
 
     override fun guestAction(which: String?) {
         when (which) {
-            // The panel stays over a live guest; the strip then offers Resume.
+            // The panel stays over a live guest; the sheet then offers Resume.
             "panel" -> {
                 val g = guest ?: return
                 markOnTop(g.task, false)
@@ -1009,7 +1024,7 @@ class RearUserService : IRearService.Stub {
     //
     // THE SHEET: [sheetLock] guards the gestures, [motion] and the flags below. The reader
     // thread feeds touches; [sheetClock], one thread, runs begin()/end() (end() may block
-    // for its join, never on the reader), the settle's frames and the long-press tick — so
+    // for its join, never on the reader), the settle's frames and the pages' — so
     // begin and end are applied in the order they were asked for.
 
     private val touchWatch = AtomicReference<Process?>(null)
@@ -1113,21 +1128,27 @@ class RearUserService : IRearService.Stub {
     private var driving = false
     /** Where the current finger landed: a drag is measured from there. Under [sheetLock]. */
     private var touchDownY = 0f
-    /** And across: a press on a DPI row's button that ends in a Cancel is placed there. Under [sheetLock]. */
+    /** And across: a sideways drag is measured from there. Under [sheetLock]. */
     private var touchDownX = 0f
-    /** This finger's long-press already worked a DPI button: its Cancel does not again. Under [sheetLock]. */
-    private var dpiHeldDone = false
+    /** The grid's pages: which shows, and their slide. Under [sheetLock]. */
+    private val pager = SheetPager()
+    /** What this finger's sideways drag moves (PortalSheet.swipe), decided as it starts. Under [sheetLock]. */
+    private var slide = PortalSheet.Swipe.NONE
+    /** A slider drag's app, the DPI its thumb started at, and where it is now. Under [sheetLock]. */
+    private var sliderPkg: String? = null
+    private var sliderFrom = 0
+    private var sliderAt = 0
     /**
      * And when: a drag is timed from there too. Grabbed at the pull's own time, its first step
      * took "1 ms" and every pull read as a flick. Under [sheetLock].
      */
     private var touchDownAt = 0L
-    /** Run once the sheet is down: the tapped app's launch, a strip button. Under [sheetLock]. */
+    /** Run once the sheet is down: the tapped app's launch, a button's choice. Under [sheetLock]. */
     private var afterShut: (() -> Unit)? = null
     private var anim: java.util.concurrent.ScheduledFuture<*>? = null
-    /** The strip button shown pressed, or -1. Under [sheetLock]. */
+    /** The button (or the slider's part, PortalSheetPainter.PRESS_*) shown pressed, or -1. Under [sheetLock]. */
     private var pressed = -1
-    /** The guest as the sheet shows it: null none (no strip), true on top (Panel), false behind (Resume). */
+    /** The guest as the sheet shows it: null none (no buttons), true on top (Panel, and the DPI strip), false behind (Resume). */
     @Volatile private var sheetGuestOnTop: Boolean? = null
     @Volatile private var sheetLook: Pair<dev.kb896.aiusage.data.PanelTheme, dev.kb896.aiusage.data.GlassStyle?>? = null
 
@@ -1159,6 +1180,7 @@ class RearUserService : IRearService.Stub {
             s.apps(portalApps)
             s.dpiValues(portalDpi)
             s.dpiDefault(densityDefault)
+            s.grid(portalGrid)
             shellSheet = s
             // Again, now that it is published: a setPortalDpi between the first and here told
             // no sheet. The lock makes this one see that write.
@@ -1192,10 +1214,25 @@ class RearUserService : IRearService.Stub {
 
     private fun syncSheetGuest() {
         val g = guest?.takeIf { it.placed }
+        val was = sheetGuestOnTop
         sheetGuestOnTop = g?.onTop
-        shellSheet?.guest(sheetGuestOnTop)
+        shellSheet?.guest(sheetGuestOnTop, g?.pkg)
         shellSheet?.guestIcon(g?.pkg?.let { guestIconOf(it) })
+        // An open sheet's stops follow: the strip comes with a guest on top and goes with it.
+        // On the clock, with the settle frames it may start, not on whichever thread this is.
+        if (was != sheetGuestOnTop) runCatching { sheetClock.execute { restop() } }
     }
+
+    /** An open sheet's stops, its pages and its buttons as the guest now has them. On [sheetClock]. */
+    private fun restop() = runCatching {
+        synchronized(sheetLock) {
+            if (!sheetUp) return@synchronized
+            val now = android.os.SystemClock.uptimeMillis()
+            motion.setDetents(PortalSheet.detents(sheetGuestOnTop), now)
+            pager.pages = sheetLayout().pages
+            afterMotion(now)
+        }
+    }.onFailure { Log.w(TAG, "portal sheet: restop failed: ${it.message}") }
 
     /** The last guest whose icon was looked up off the pinned apps, and what came of it (null while loading or none). */
     @Volatile private var guestIconCache: Pair<String, android.graphics.Bitmap?>? = null
@@ -1232,13 +1269,6 @@ class RearUserService : IRearService.Stub {
                 touchDownX = e.x
                 touchDownY = e.y
                 touchDownAt = e.atMs
-                dpiHeldDone = false
-                if (actions.any { it is EdgeGestures.Action.SheetDown }) {
-                    // A finger held so still the touchscreen says nothing still becomes a long-press.
-                    runCatching {
-                        sheetClock.schedule({ longPressTick(from) }, EdgeGestures.LONG_PRESS_MS + 5, java.util.concurrent.TimeUnit.MILLISECONDS)
-                    }
-                }
             }
         }
         if (back) sendBackOnce()
@@ -1283,13 +1313,6 @@ class RearUserService : IRearService.Stub {
         }.apply { isDaemon = true; name = "portal-back"; start() }
     }
 
-    private fun longPressTick(from: EdgeGestures) = runCatching {
-        synchronized(sheetLock) {
-            if (from !== gestures) return@synchronized
-            for (a in from.tick(android.os.SystemClock.uptimeMillis())) sheetAction(a, android.os.SystemClock.uptimeMillis())
-        }
-    }.onFailure { Log.w(TAG, "portal sheet: long-press tick failed: ${it.message}") }
-
     private fun rearDisplay() = placedDisplayId.takeIf { it >= 0 } ?: Panel.DISPLAY_ID
 
     /** Under [sheetLock]. True: send Back to the guest. */
@@ -1304,8 +1327,10 @@ class RearUserService : IRearService.Stub {
                 pokePanel()
                 stopAnim()
                 motion.hold(atMs)
-                pushProgress(atMs)
-                setPressed(if (motion.fullyOpen(atMs)) pressOf(hitAt(a.x, a.y)) else -1)
+                pushHeight(atMs)
+                // The pages keep sliding under a finger that has not moved yet.
+                if (pager.settling) startAnim()
+                setPressed(motion.settled(atMs)?.let { pressOf(PortalSheet.hit(sheetLayout(), a.x, a.y, it, pager.page)) } ?: -1)
             }
             is EdgeGestures.Action.PullStart -> if (sheetUp) {
                 if (!sheetAlive()) return false
@@ -1314,34 +1339,23 @@ class RearUserService : IRearService.Stub {
                 setPressed(-1)
                 motion.grab(touchDownY, touchDownAt)
                 driving = true
-                shellSheet?.progress(motion.drag(a.y, atMs))
+                shellSheet?.height(motion.drag(a.y, atMs))
             } else openSheet(a.y, atMs)
-            is EdgeGestures.Action.PullMove -> if (driving && sheetAlive()) shellSheet?.progress(motion.drag(a.y, atMs))
+            is EdgeGestures.Action.PullMove -> if (driving && sheetAlive()) shellSheet?.height(motion.drag(a.y, atMs))
             is EdgeGestures.Action.PullEnd -> if (driving) {
                 driving = false
                 if (sheetAlive()) { motion.release(a.y, atMs); afterMotion(atMs) }
             }
+            is EdgeGestures.Action.SlideStart -> if (sheetAlive()) slideStart(a.x, atMs)
+            is EdgeGestures.Action.SlideMove -> if (sheetAlive()) slideMove(a.x, atMs)
+            is EdgeGestures.Action.SlideEnd -> if (sheetAlive()) slideEnd(a.x, atMs)
             is EdgeGestures.Action.Tap -> {
                 setPressed(-1)
                 if (sheetAlive()) tap(a.x, a.y, atMs)
             }
-            is EdgeGestures.Action.LongPress -> if (sheetAlive() && motion.fullyOpen(atMs)) {
-                when (val hit = hitAt(a.x, a.y)) {
-                    is PortalSheet.Hit.App -> onSheetLongPress(hit.index)
-                    // A DPI button held is still a press of it: worked once, on the hold.
-                    is PortalSheet.Hit.Dpi -> if (dpiButtonPress(hit)) { dpiHeldDone = true; setPressed(-1) }
-                    else -> Unit
-                }
-            }
             EdgeGestures.Action.Cancel -> {
                 setPressed(-1)
-                // A slow tap (past TAP_MS) on a DPI button lifts as a Cancel: still its press,
-                // unless the hold already worked it.
-                if (!dpiHeldDone && sheetAlive() && motion.fullyOpen(atMs)) {
-                    (hitAt(touchDownX, touchDownY) as? PortalSheet.Hit.Dpi)?.let { dpiButtonPress(it) }
-                }
-                dpiHeldDone = false
-                if (sheetAlive() && motion.phase == SheetMotion.Phase.HELD) { motion.resume(atMs); afterMotion(atMs) }
+                if (sheetAlive()) steady(atMs)
             }
             EdgeGestures.Action.Back -> return PortalAction.sendBack(guest?.onTop == true, sheetUp, null, rearDisplay())
         }
@@ -1359,20 +1373,29 @@ class RearUserService : IRearService.Stub {
         val s = sheetOrNull() ?: return
         syncSheetGuest()
         motion.reset()
+        motion.setDetents(PortalSheet.detents(sheetGuestOnTop), atMs)
         motion.grab(touchDownY, touchDownAt)
         motion.drag(y, atMs)
+        pager.reset()
+        pager.pages = sheetLayout().pages
+        slide = PortalSheet.Swipe.NONE
         sheetUp = true
         beginPending = true
         driving = true
         gestures.sheet = true
         afterShut = null
         pressed = -1
-        dpiPkg = null
-        s.dpiRow(null)
-        s.progress(motion.progress(atMs))
+        s.page(0f)
+        s.sliderDrag(null)
+        s.height(motion.height(atMs))
         pokePanel()
+        // The slider's thumb stands at the display's own density for an app without one:
+        // read, if it has not been yet (a panel this service adopted, say), off this thread.
+        if (sheetGuestOnTop == true && densityDefault == null) {
+            runCatching { densityWorker.execute { syncDensity("the DPI slider wants the display's own") } }
+        }
         sheetClock.execute {
-            val p = synchronized(sheetLock) { if (!sheetUp || !beginPending) return@execute; motion.progress(android.os.SystemClock.uptimeMillis()) }
+            val p = synchronized(sheetLock) { if (!sheetUp || !beginPending) return@execute; motion.height(android.os.SystemClock.uptimeMillis()) }
             val ok = runCatching { s.begin(p) }.getOrElse { Log.w(TAG, "portal sheet: begin threw: ${it.message}"); false }
             synchronized(sheetLock) {
                 beginPending = false
@@ -1440,18 +1463,14 @@ class RearUserService : IRearService.Stub {
         return false
     }
 
-    private fun hitAt(x: Float, y: Float): PortalSheet.Hit {
-        val apps = portalApps
-        return PortalSheet.hit(x, y, apps.size, withStrip = sheetGuestOnTop != null, dpiApp = dpiIndex(apps))
-    }
+    /** The sheet's boxes as they are now: the grid, the pinned apps, the guest. */
+    private fun sheetLayout() = PortalSheet.layout(portalGrid, portalApps.size, sheetGuestOnTop)
 
-    /** Where [dpiPkg]'s cell is in [apps], or -1. Under [sheetLock]. */
-    private fun dpiIndex(apps: PortalAppsSnapshot) = dpiPkg?.let { apps.packages.indexOf(it) } ?: -1
-
-    /** What a finger landing on [hit] shows pressed: a strip button, a DPI row's button, or nothing. */
+    /** What a finger landing on [hit] shows pressed: a button, the slider's thumb or value, or nothing. */
     private fun pressOf(hit: PortalSheet.Hit) = when (hit) {
         is PortalSheet.Hit.Button -> hit.index
-        is PortalSheet.Hit.Dpi -> if (hit.part == PortalSheet.DpiPart.VALUE) -1 else PortalSheet.dpiPress(hit.part)
+        PortalSheet.Hit.Slider -> PortalSheetPainter.PRESS_THUMB
+        PortalSheet.Hit.SliderValue -> PortalSheetPainter.PRESS_VALUE
         else -> -1
     }
 
@@ -1461,41 +1480,133 @@ class RearUserService : IRearService.Stub {
         shellSheet?.press(i)
     }
 
+    /** A sheet a finger held but did not move, let go: on to where it was going, or still where it stands. Under [sheetLock]. */
+    private fun steady(atMs: Long) {
+        if (motion.phase == SheetMotion.Phase.HELD) { motion.resume(atMs); afterMotion(atMs) }
+    }
+
     /**
      * A tap: on the settled sheet a choice — the app (its launch once the sheet is down),
-     * a strip button ([onSheetButton]), outside the boxes to shut it; on a sheet still
-     * moving, it carries on where it was going. Under [sheetLock].
+     * a button ([onSheetButton]), a page's dot, the slider (the DPI there, applied) or its
+     * value (Default), and off the sheet's boxes — above the strip in PEEK too — a shut; on
+     * a sheet still moving, it carries on where it was going. Under [sheetLock].
      */
     private fun tap(x: Float, y: Float, atMs: Long) {
-        if (!motion.fullyOpen(atMs) || !motion.heading) { motion.resume(atMs); afterMotion(atMs); return }
+        val at = motion.settled(atMs)
+        if (at == null || !motion.heading) { motion.resume(atMs); afterMotion(atMs); return }
         val apps = portalApps
         val onTop = sheetGuestOnTop
-        val hit = PortalSheet.hit(x, y, apps.size, withStrip = onTop != null, dpiApp = dpiIndex(apps))
-        // A DPI row open: its boxes are its own, and a tap anywhere else only closes it.
-        dpiPkg?.let { pkg ->
-            if (hit is PortalSheet.Hit.Dpi) onDpiPart(pkg, hit.part) else closeDpiRow()
-            return
-        }
-        when (hit) {
-            is PortalSheet.Hit.Dpi -> Unit
+        val layout = sheetLayout()
+        when (val hit = PortalSheet.hit(layout, x, y, at, pager.page)) {
             is PortalSheet.Hit.App -> {
+                // Pages still sliding: the cell under the finger is not yet where it will be.
+                if (pager.settling) { steady(atMs); return }
                 val pkg = apps.packages.getOrNull(hit.index)
                 shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
             }
             is PortalSheet.Hit.Button -> shutSheet(atMs) { onSheetButton(hit.index, onTop ?: false) }
+            is PortalSheet.Hit.Page -> {
+                steady(atMs)
+                pager.show(hit.index, atMs)
+                startAnim()
+            }
+            PortalSheet.Hit.Slider -> {
+                steady(atMs)
+                val pkg = sliderGuest() ?: return
+                val dpi = layout.slider?.let { PortalSheet.sliderDpi(it.track, x) } ?: return
+                if (dpi != thumbOf(pkg)) setAppDpi(pkg, dpi)
+            }
+            PortalSheet.Hit.SliderValue -> {
+                steady(atMs)
+                val pkg = sliderGuest() ?: return
+                if (portalDpi.containsKey(pkg)) setAppDpi(pkg, null)
+            }
+            PortalSheet.Hit.Strip -> steady(atMs)
             PortalSheet.Hit.Outside -> shutSheet(atMs, null)
         }
     }
 
+    /** The guest on top, whose DPI the slider is: null without one. */
+    private fun sliderGuest(): String? = guest?.takeIf { it.placed && it.onTop }?.pkg
+
+    /** The thumb's DPI for [pkg] as it stands: its own, else the display's. */
+    private fun thumbOf(pkg: String) = portalDpi[pkg] ?: densityDefault ?: DensityDump.FALLBACK
+
+    /**
+     * A sideways drag begins: on the settled sheet's strip it drags the slider's thumb, on
+     * the full sheet above the strip it turns the pages (PortalSheet.swipe), else nothing.
+     * The sheet itself stays where it is either way. Under [sheetLock].
+     */
+    private fun slideStart(x: Float, atMs: Long) {
+        setPressed(-1)
+        val at = motion.settled(atMs)
+        steady(atMs)
+        val layout = sheetLayout()
+        slide = if (at == null || !motion.heading) PortalSheet.Swipe.NONE else PortalSheet.swipe(layout, touchDownY, at)
+        when (slide) {
+            PortalSheet.Swipe.SLIDER -> {
+                val pkg = sliderGuest()
+                val track = layout.slider?.track
+                if (pkg == null || track == null) { slide = PortalSheet.Swipe.NONE; return }
+                sliderPkg = pkg
+                sliderFrom = thumbOf(pkg)
+                sliderAt = PortalSheet.sliderDrag(track, sliderFrom, x - touchDownX)
+                setPressed(PortalSheetPainter.PRESS_THUMB)
+                shellSheet?.sliderDrag(sliderAt)
+            }
+            PortalSheet.Swipe.PAGES -> {
+                stopAnim()
+                pager.grab(touchDownX, touchDownAt)
+                shellSheet?.page(pager.drag(x, atMs))
+            }
+            PortalSheet.Swipe.NONE -> Unit
+        }
+    }
+
+    /** The slide's finger at [x]: the thumb or the pages follow. Under [sheetLock]. */
+    private fun slideMove(x: Float, atMs: Long) {
+        when (slide) {
+            PortalSheet.Swipe.SLIDER -> {
+                val track = sheetLayout().slider?.track ?: return
+                val dpi = PortalSheet.sliderDrag(track, sliderFrom, x - touchDownX)
+                // Drawn only: each DPI change relayouts the whole display, so none is applied mid-drag.
+                if (dpi != sliderAt) { sliderAt = dpi; shellSheet?.sliderDrag(dpi) }
+            }
+            PortalSheet.Swipe.PAGES -> shellSheet?.page(pager.drag(x, atMs))
+            PortalSheet.Swipe.NONE -> Unit
+        }
+    }
+
+    /** The slide let go at [x]: the slider's value applied, or the pages settling. Under [sheetLock]. */
+    private fun slideEnd(x: Float, atMs: Long) {
+        when (slide) {
+            PortalSheet.Swipe.SLIDER -> {
+                slideMove(x, atMs)
+                setPressed(-1)
+                val pkg = sliderPkg
+                // Still the guest it was dragged for, and moved: applied, once, now.
+                if (pkg != null && pkg == sliderGuest() && sliderAt != thumbOf(pkg)) setAppDpi(pkg, sliderAt)
+                shellSheet?.sliderDrag(null)
+                sliderPkg = null
+            }
+            PortalSheet.Swipe.PAGES -> {
+                pager.release(x, atMs)
+                startAnim()
+            }
+            PortalSheet.Swipe.NONE -> Unit
+        }
+        slide = PortalSheet.Swipe.NONE
+    }
+
     /** Settles it shut, then [then] on a thread of its own. Under [sheetLock]. */
     private fun shutSheet(atMs: Long, then: (() -> Unit)?) {
-        motion.settle(false, atMs)
+        motion.settle(0f, atMs)
         afterShut = then
         afterMotion(atMs)
     }
 
     /**
-     * The strip's choice, run once the sheet is down, on a thread of its own. [index] 0 is
+     * A button's choice, run once the sheet is down, on a thread of its own. [index] 0 is
      * Panel when the guest was on top ([guestOnTop], as the sheet showed it), else Resume;
      * 1 Front; 2 Close. Each is a [PortalAction.Step] (spec "Settled on the device" 1):
      *
@@ -1605,7 +1716,7 @@ class RearUserService : IRearService.Stub {
         syncSheetGuest()
     }
 
-    /** [g] on top of the rear again, not hidden: frame, density, touches, the sheet's strip. Under [placing]. */
+    /** [g] on top of the rear again, not hidden: frame, density, touches, the sheet's buttons. Under [placing]. */
     private fun guestOnTopAgain(g: Guest, why: String) {
         Log.i(TAG, "portal: ${g.pkg} on top again — $why")
         guest = g.copy(onTop = true, hiddenOnFront = false)
@@ -1692,14 +1803,12 @@ class RearUserService : IRearService.Stub {
 
     // -- DPI from the back ----------------------------------------------------------------
     //
-    // A long-press on an app in the open sheet opens its DPI row (PortalSheet.dpiRow): - and
-    // + nudge it (RearDensity.nudge, from the display's own density when it has none),
-    // Default clears it. Each tap shows at once, and applies at once if that app is the
-    // guest; the config is the app process's to write, so the value goes there through
-    // IRearEvents once the taps pause ([DpiEdits]), and comes back with the next payload.
+    // While a guest is on top, the sheet's strip has its DPI slider (PortalSheet.layout):
+    // dragged, it only shows the value; let go, tapped on its track, or its value tapped
+    // (Default), the value is applied at once — the guest relayouts — and saved: the config
+    // is the app process's to write, so the value goes there through IRearEvents once
+    // changes pause ([DpiEdits]), and comes back with the next payload.
 
-    /** The app whose DPI row is open; one at a time. Under [sheetLock]. */
-    private var dpiPkg: String? = null
     /** Guards [dpiEdits] and the writes to [portalDpi]. A leaf, taken under [sheetLock] or alone. */
     private val dpiLock = Any()
     private val dpiEdits = DpiEdits()
@@ -1708,34 +1817,8 @@ class RearUserService : IRearService.Stub {
 
     override fun setEvents(events: IRearEvents?) {
         this.events = events
-        // Nudges made while nobody listened go now.
+        // Changes made while nobody listened go now.
         if (events != null) scheduleDpiFlush()
-    }
-
-    /** [hit] on the open DPI row's −, + or Default worked as a tap; false for its value box or no row. Under [sheetLock]. */
-    private fun dpiButtonPress(hit: PortalSheet.Hit.Dpi): Boolean {
-        val pkg = dpiPkg ?: return false
-        if (hit.part == PortalSheet.DpiPart.VALUE) return false
-        onDpiPart(pkg, hit.part)
-        return true
-    }
-
-    /** Under [sheetLock]. A second long-press on another app moves the row to it. */
-    private fun onSheetLongPress(index: Int) {
-        val pkg = portalApps.packages.getOrNull(index) ?: return
-        dpiPkg = pkg
-        setPressed(-1)
-        shellSheet?.dpiRow(pkg)
-        // The row shows the display's own density for an app without one: read, if it has
-        // not been yet (a panel this service adopted, say), off this thread.
-        if (densityDefault == null) runCatching { densityWorker.execute { syncDensity("the DPI row wants the display's own") } }
-        Log.i(TAG, "portal sheet: DPI row for $pkg (${portalDpi[pkg] ?: "default"})")
-    }
-
-    /** Under [sheetLock]. The row goes; the sheet stays. */
-    private fun closeDpiRow() {
-        dpiPkg = null
-        shellSheet?.dpiRow(null)
     }
 
     /** [portalDpi] set to what [make] returns (under [dpiLock]), and the sheet told. Any thread. */
@@ -1746,22 +1829,16 @@ class RearUserService : IRearService.Stub {
         }
     }
 
-    /** A tap on [part] of [pkg]'s row. Under [sheetLock], on the reader thread: nothing here waits. */
-    private fun onDpiPart(pkg: String, part: PortalSheet.DpiPart) {
-        val dpi: Int? = when (part) {
-            PortalSheet.DpiPart.VALUE -> return
-            PortalSheet.DpiPart.MINUS, PortalSheet.DpiPart.PLUS ->
-                RearDensity.nudge(portalDpi[pkg], densityDefault ?: DensityDump.FALLBACK, up = part == PortalSheet.DpiPart.PLUS)
-            PortalSheet.DpiPart.DEFAULT -> null
-        }
+    /** [pkg]'s DPI set to [dpi] (null: Default) from the back. Under [sheetLock], on the reader thread: nothing here waits. */
+    private fun setAppDpi(pkg: String, dpi: Int?) {
         setPortalDpi {
             dpiEdits.put(pkg, dpi, android.os.SystemClock.uptimeMillis())
             if (dpi == null) portalDpi - pkg else portalDpi + (pkg to dpi)
         }
         Log.i(TAG, "portal sheet: $pkg's DPI ${dpi ?: "back to default"} from the back")
         // Live if it is the guest. `wm density` takes a moment: off this thread, one at a
-        // time; each run reads the latest map, so a quick run of taps ends at the last one.
-        if (guest?.pkg == pkg) runCatching { densityWorker.execute { syncDensity("$pkg nudged on the back") } }
+        // time; each run reads the latest map, so a quick run of changes ends at the last one.
+        if (guest?.pkg == pkg) runCatching { densityWorker.execute { syncDensity("$pkg set on the back") } }
         scheduleDpiFlush()
     }
 
@@ -1806,13 +1883,14 @@ class RearUserService : IRearService.Stub {
     /** Whatever [motion] now says, carried out. Under [sheetLock]. */
     private fun afterMotion(nowMs: Long) {
         when (motion.phase) {
-            SheetMotion.Phase.SETTLING -> { pushProgress(nowMs); if (!beginPending) startAnim() }
+            SheetMotion.Phase.SETTLING -> { pushHeight(nowMs); if (!beginPending) startAnim() }
             SheetMotion.Phase.SHUT -> sheetDown()
-            else -> { stopAnim(); pushProgress(nowMs) }
+            // Still: no frames for the sheet, but pages still sliding keep theirs.
+            else -> { if (!pager.settling) stopAnim(); pushHeight(nowMs) }
         }
     }
 
-    private fun pushProgress(nowMs: Long) { shellSheet?.progress(motion.progress(nowMs)) }
+    private fun pushHeight(nowMs: Long) { shellSheet?.height(motion.height(nowMs)) }
 
     private fun startAnim() {
         if (anim != null) return
@@ -1826,15 +1904,18 @@ class RearUserService : IRearService.Stub {
         anim = null
     }
 
-    /** One frame of a settle, on [sheetClock]. */
+    /** One frame of a settle — the sheet's, the pages', or both — on [sheetClock]. */
     private fun animStep() {
         try {
             synchronized(sheetLock) {
-                if (!sheetUp || motion.phase != SheetMotion.Phase.SETTLING) { stopAnim(); return }
+                if (!sheetUp || (motion.phase != SheetMotion.Phase.SETTLING && !pager.settling)) { stopAnim(); return }
                 if (!sheetAlive()) return
                 val now = android.os.SystemClock.uptimeMillis()
-                shellSheet?.progress(motion.at(now))
-                if (motion.phase != SheetMotion.Phase.SETTLING) afterMotion(now)
+                if (pager.settling) shellSheet?.page(pager.at(now))
+                if (motion.phase == SheetMotion.Phase.SETTLING) {
+                    shellSheet?.height(motion.at(now))
+                    if (motion.phase != SheetMotion.Phase.SETTLING) afterMotion(now)
+                } else if (!pager.settling) stopAnim()
             }
         } catch (e: Throwable) {
             Log.w(TAG, "portal sheet: settle frame failed: ${e.message}")
@@ -1853,9 +1934,11 @@ class RearUserService : IRearService.Stub {
         beginPending = false
         driving = false
         pressed = -1
-        dpiPkg = null
+        slide = PortalSheet.Swipe.NONE
+        sliderPkg = null
         gestures.sheet = false
         motion.reset()
+        pager.reset()
         val then = afterShut
         afterShut = null
         val s = shellSheet ?: return

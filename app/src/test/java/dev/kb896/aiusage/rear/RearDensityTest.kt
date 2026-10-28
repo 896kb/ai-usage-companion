@@ -34,19 +34,4 @@ class RearDensityTest {
         assertEquals(240, RearDensity.clamp(-5))
         assertEquals(600, RearDensity.clamp(900))
     }
-
-    @Test fun `nudge starts from the default when unset`() {
-        assertEquals(380, RearDensity.nudge(null, 360, up = true))
-        assertEquals(340, RearDensity.nudge(null, 360, up = false))
-    }
-
-    @Test fun `nudge starts from a set value`() {
-        assertEquals(340, RearDensity.nudge(320, 360, up = true))
-        assertEquals(300, RearDensity.nudge(320, 360, up = false))
-    }
-
-    @Test fun `nudge stays within bounds`() {
-        assertEquals(600, RearDensity.nudge(590, 360, up = true))
-        assertEquals(240, RearDensity.nudge(250, 360, up = false))
-    }
 }

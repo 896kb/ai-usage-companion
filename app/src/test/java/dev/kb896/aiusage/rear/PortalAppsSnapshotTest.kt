@@ -9,7 +9,7 @@ class PortalAppsSnapshotTest {
     }
 
     @Test fun capsAtTheSheetsMaximumAndDropsDuplicates() {
-        val pkgs = (1..20).map { "p$it" } + "p1"
+        val pkgs = (1..60).map { "p$it" } + "p1"
         val s = PortalAppsSnapshot.of(pkgs, pkgs, emptyMap())
         assertEquals(PortalSheet.MAX_APPS, s.size)
         assertEquals("p1", s.packages.first())

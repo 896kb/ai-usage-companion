@@ -107,13 +107,6 @@ class EdgeGesturesTest {
         assertEquals(listOf(Action.SheetDown(400f, 200f), Action.Cancel), sheet(Down(400f, 200f, 0), Up(400f, 200f, 380)))
     }
 
-    @Test fun `a finger that wanders and comes back is not a tap`() {
-        assertEquals(
-            listOf(Action.SheetDown(400f, 200f), Action.Cancel),
-            sheet(Down(400f, 200f, 0), Move(440f, 205f, 40), Move(401f, 200f, 80), Up(400f, 200f, 120)),
-        )
-    }
-
     @Test fun `a lift past the slop is not a tap`() {
         assertEquals(listOf(Action.SheetDown(400f, 200f), Action.Cancel), sheet(Down(400f, 200f, 0), Up(430f, 200f, 60)))
     }
@@ -132,49 +125,35 @@ class EdgeGesturesTest {
         )
     }
 
-    @Test fun `a sideways drag on the sheet is neither a pull nor a tap`() {
+    @Test fun `a sideways drag on the sheet is a slide, followed to its lift`() {
         assertEquals(
-            listOf(Action.SheetDown(400f, 200f), Action.Cancel),
-            sheet(Down(400f, 200f, 0), Move(430f, 205f, 10), Move(430f, 260f, 20), Up(430f, 300f, 30)),
+            listOf(Action.SheetDown(400f, 200f), Action.SlideStart(430f), Action.SlideMove(470f), Action.SlideEnd(480f)),
+            sheet(Down(400f, 200f, 0), Move(410f, 202f, 10), Move(430f, 205f, 20), Move(470f, 260f, 30), Up(480f, 300f, 40)),
         )
     }
 
-    @Test fun `a still finger becomes a long-press once, from the tick, and its lift ends it`() {
-        val g = EdgeGestures().apply { sheet = true }
-        assertEquals(listOf(Action.SheetDown(400f, 200f)), g.feed(Down(400f, 200f, 1_000)))
-        assertEquals(emptyList<Action>(), g.tick(1_449))
-        assertEquals(listOf(Action.LongPress(400f, 200f)), g.tick(1_450))
-        assertEquals(emptyList<Action>(), g.tick(1_600))
-        assertEquals(listOf(Action.Cancel), g.feed(Up(401f, 200f, 1_700)))
-    }
-
-    @Test fun `a long-press can come from a jittering move`() {
+    @Test fun `a slide is a slide to its lift, however far it then goes up or down`() {
         assertEquals(
-            listOf(Action.SheetDown(400f, 200f), Action.LongPress(400f, 200f), Action.Cancel),
-            sheet(Down(400f, 200f, 0), Move(402f, 201f, 200), Move(403f, 199f, 460), Move(401f, 200f, 500), Up(401f, 200f, 600)),
+            listOf(Action.SheetDown(400f, 500f), Action.SlideStart(380f), Action.SlideMove(370f), Action.SlideEnd(370f)),
+            sheet(Down(400f, 500f, 0), Move(380f, 495f, 10), Move(370f, 300f, 20), Up(370f, 200f, 30)),
         )
     }
 
-    @Test fun `held long and lifted before the tick came, it is still a long-press`() {
+    @Test fun `a pull is a pull to its lift, however far it then goes sideways`() {
         assertEquals(
-            listOf(Action.SheetDown(400f, 200f), Action.LongPress(400f, 200f), Action.Cancel),
-            sheet(Down(400f, 200f, 0), Up(400f, 200f, 500)),
+            listOf(Action.SheetDown(400f, 300f), Action.PullStart(320f), Action.PullMove(330f), Action.PullEnd(330f)),
+            sheet(Down(400f, 300f, 0), Move(405f, 320f, 10), Move(600f, 330f, 20), Up(700f, 330f, 30)),
         )
     }
 
-    @Test fun `no long-press for a finger that wandered or is dragging`() {
-        val g = EdgeGestures().apply { sheet = true }
-        g.feed(Down(400f, 200f, 0)); g.feed(Move(400f, 260f, 20))
-        assertEquals(emptyList<Action>(), g.tick(1_000))
-        val h = EdgeGestures().apply { sheet = true }
-        h.feed(Down(400f, 200f, 0)); h.feed(Move(440f, 200f, 20))
-        assertEquals(emptyList<Action>(), h.tick(1_000))
+    @Test fun `a finger that wanders past the slop is a drag, not a tap`() {
+        val out = sheet(Down(400f, 200f, 0), Move(440f, 205f, 40), Move(401f, 200f, 80), Up(400f, 200f, 120))
+        assertEquals(Action.SlideStart(440f), out[1])
+        assertEquals(Action.SlideEnd(400f), out.last())
     }
 
-    @Test fun `no tick does anything with the sheet shut`() {
-        val g = EdgeGestures()
-        g.feed(Down(400f, 200f, 0))
-        assertEquals(emptyList<Action>(), g.tick(1_000))
+    @Test fun `a still finger held past the tap's time is nothing`() {
+        assertEquals(listOf(Action.SheetDown(400f, 200f), Action.Cancel), sheet(Down(400f, 200f, 0), Up(401f, 200f, 900)))
     }
 
     @Test fun `the sheet's state is read when a finger lands, so the opening pull runs to its lift`() {
@@ -194,7 +173,7 @@ class EdgeGesturesTest {
 
     @Test fun `with the sheet up the right edge is not Back`() {
         assertEquals(
-            listOf(Action.SheetDown(880f, 300f), Action.Cancel),
+            listOf(Action.SheetDown(880f, 300f), Action.SlideStart(840f), Action.SlideEnd(780f)),
             sheet(Down(880f, 300f, 0), Move(840f, 305f, 10), Up(780f, 310f, 20)),
         )
     }
@@ -207,6 +186,10 @@ class EdgeGesturesTest {
         assertEquals(
             listOf(Action.SheetDown(400f, 200f), Action.PullStart(250f), Action.PullEnd(250f), Action.SheetDown(500f, 300f)),
             sheet(Down(400f, 200f, 0), Move(400f, 250f, 10), Down(500f, 300f, 50)),
+        )
+        assertEquals(
+            listOf(Action.SheetDown(400f, 200f), Action.SlideStart(450f), Action.SlideEnd(450f), Action.SheetDown(500f, 300f)),
+            sheet(Down(400f, 200f, 0), Move(450f, 200f, 10), Down(500f, 300f, 50)),
         )
     }
 }

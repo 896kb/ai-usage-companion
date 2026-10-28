@@ -8,7 +8,7 @@ package dev.kb896.aiusage.rear
  *
  * Values are kept between [MIN] and [MAX] dpi, in steps of [STEP]: below 240 everything is
  * huge and above 600 nothing is legible on the small rear panel, and a coarse step keeps the
- * back's nudge buttons from producing a hundred nearly identical values.
+ * sliders (the front's, the back's) from producing a hundred nearly identical values.
  */
 object RearDensity {
     const val MIN = 240
@@ -21,7 +21,4 @@ object RearDensity {
 
     /** [v] rounded to the nearest [STEP] and held within [MIN]..[MAX]. */
     fun clamp(v: Int): Int = (Math.round(v / STEP.toFloat()) * STEP).coerceIn(MIN, MAX)
-
-    /** One nudge from the back's - / +: ±20, from [current] or the default when unset. */
-    fun nudge(current: Int?, default: Int, up: Boolean): Int = clamp((current ?: default) + if (up) 20 else -20)
 }
