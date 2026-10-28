@@ -16,6 +16,12 @@ import kotlin.math.abs
  *   lines up with what happens: [Action.Back] on a lift that travelled left at least
  *   [BACK_TRAVEL] further than it travelled vertically.
  *
+ * Where the two bands meet (the bottom-right corner), the pull wins.
+ *
+ * A Down while the previous gesture never got its Up (a lost lift) closes that gesture
+ * first, so the panel is never left following a finger that is gone, and an armed
+ * screenshot is never leaked.
+ *
  * The guest sees every one of these touches too; reading is all shell can do.
  */
 class EdgeGestures {
@@ -35,24 +41,30 @@ class EdgeGestures {
     private var committed = false
     private var downX = 0f
     private var downY = 0f
+    private var lastY = 0f
 
     fun feed(e: RearTouches.Event): List<Action> = when (e) {
         is RearTouches.Down -> {
-            downX = e.x; downY = e.y; committed = false
+            val stale = when {
+                kind == Kind.PULL && committed -> listOf(Action.PullEnd(lastY))
+                kind == Kind.PULL -> listOf(Action.Disarm)
+                else -> emptyList()
+            }
+            downX = e.x; downY = e.y; lastY = e.y; committed = false
             kind = when {
                 PortalPull.startsPull(e.x, e.y) -> Kind.PULL
                 e.x >= BACK_LEFT -> Kind.BACK
                 else -> Kind.NONE
             }
-            if (kind == Kind.PULL) listOf(Action.Arm) else emptyList()
+            stale + if (kind == Kind.PULL) listOf(Action.Arm) else emptyList()
         }
-        is RearTouches.Move -> when {
+        is RearTouches.Move -> { lastY = e.y; when {
             kind != Kind.PULL -> emptyList()
             committed -> listOf(Action.PullMove(e.y))
             downY - e.y >= SLOP && downY - e.y > abs(e.x - downX) -> { committed = true; listOf(Action.PullStart(e.y)) }
             abs(e.x - downX) >= SLOP -> { kind = Kind.NONE; listOf(Action.Disarm) }
             else -> emptyList()
-        }
+        } }
         is RearTouches.Up -> {
             val out = when (kind) {
                 Kind.PULL -> if (committed) listOf(Action.PullEnd(e.y)) else listOf(Action.Disarm)

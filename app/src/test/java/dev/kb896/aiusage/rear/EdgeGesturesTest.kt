@@ -43,4 +43,42 @@ class EdgeGesturesTest {
     @Test fun `a tap in the middle is nobody's`() {
         assertEquals(emptyList<Action>(), run(Down(600f, 300f, 0), Up(600f, 300f, 80)))
     }
+
+    @Test fun `a new finger closes a pull that never lifted`() {
+        val actions = run(Down(600f, 560f, 0), Move(600f, 500f, 10), Move(600f, 450f, 20), Down(100f, 300f, 30))
+        assertEquals(
+            listOf(Action.Arm, Action.PullStart(500f), Action.PullMove(450f), Action.PullEnd(450f)),
+            actions,
+        )
+    }
+
+    @Test fun `a new finger disarms a band touch that never lifted`() {
+        assertEquals(
+            listOf(Action.Arm, Action.Disarm, Action.Arm),
+            run(Down(600f, 560f, 0), Down(610f, 560f, 10)),
+        )
+    }
+
+    @Test fun `a tap in the band arms and disarms`() {
+        assertEquals(listOf(Action.Arm, Action.Disarm), run(Down(600f, 560f, 0), Up(600f, 560f, 10)))
+    }
+
+    @Test fun `a committed pull stays a pull to the lift, even back down`() {
+        val actions = run(Down(600f, 560f, 0), Move(600f, 500f, 10), Move(600f, 570f, 20), Up(600f, 570f, 30))
+        assertEquals(
+            listOf(Action.Arm, Action.PullStart(500f), Action.PullMove(570f), Action.PullEnd(570f)),
+            actions,
+        )
+    }
+
+    @Test fun `the bottom-right corner is the pull's, not Back's`() {
+        assertEquals(
+            listOf(Action.Arm, Action.Disarm),
+            run(Down(880f, 540f, 0), Move(840f, 541f, 10), Up(780f, 545f, 20)),
+        )
+    }
+
+    @Test fun `a scroll down the right edge is not Back`() {
+        assertEquals(emptyList<Action>(), run(Down(880f, 300f, 0), Move(870f, 100f, 10), Up(860f, 100f, 20)))
+    }
 }
