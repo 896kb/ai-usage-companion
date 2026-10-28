@@ -1505,10 +1505,31 @@ class RearDialView(context: Context) : View(context) {
             }
             ccDim.color = ((CC_DIM * pt * ground * 255).toInt().coerceIn(0, 255)) shl 24
             canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), ccDim)
-            PortalSheet.draw(
-                canvas, pt, portalIcons, portalLabels, portalGuest, portalGuestOnTop,
-                accent = config.titleColor, ink = Panel.Palette.FG,
-            )
+            // ITS BUTTONS ARE THE CONTROL CENTRE'S: glass under GLASS, bending the blurred
+            // ground they stand on — ptNode, as the centre's bend ccNode — and under ORIGINAL
+            // outlined as its tiles are. Close is the one filled, in the critical red. With no
+            // ground recorded this frame there is nothing true to bend, so the glass goes
+            // without (an unrecorded node): the panel's scene is not what is behind it.
+            val wasBackdrop = paneBackdrop
+            paneBackdrop = if (recorder != null && ground > 0.004f && width > 0 && height > 0) ptNode else ptNoBackdrop
+            try {
+                PortalSheet.draw(
+                    canvas, pt, portalIcons, portalLabels, portalGuest, portalGuestOnTop,
+                    ink = Panel.Palette.FG, typeface = label.typeface,
+                ) { c, rect, i ->
+                    val radius = minOf(rect.width(), rect.height()) * TILE_CORNER
+                    val shape = android.graphics.Path().apply {
+                        addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW)
+                    }
+                    val close = i == 2
+                    drawCcButton(
+                        c, rect, radius, shape, on = if (close) 1f else 0f,
+                        tint = if (close) Panel.Palette.CRIT and 0x00FFFFFF else 0x00FFFFFF,
+                    ) { _, _ -> }
+                }
+            } finally {
+                paneBackdrop = wasBackdrop
+            }
             // Another frame while it settles or the guest's frame fades in; a finger's
             // drag asks for its own with every move.
             if (ptAt != 0L || (ptOverGuest && shot != null && frameNowMs - ptBackdropAt < PORTAL_FADE_MS)) animating = true
@@ -9866,6 +9887,8 @@ class RearDialView(context: Context) : View(context) {
     private var ptLastY = 0f
     private var ptLastAt = 0L
     private val ptNode = android.graphics.RenderNode("app-portal")
+    /** Never recorded: the portal's glass when it has no ground this frame — see drawGlassPane. */
+    private val ptNoBackdrop = android.graphics.RenderNode("app-portal-none")
     private val ptShotPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     /**
      * This opening came over a guest app (a relayed pull), so shutting it must hand the
@@ -10213,24 +10236,27 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun drawCcButton(
         canvas: Canvas, rect: RectF, radius: Float, shape: android.graphics.Path, on: Float,
+        /** What "on" fills it with, and ORIGINAL's outline: white, as RGB with no alpha. */
+        tint: Int = 0x00FFFFFF,
         mark: (Canvas, Int) -> Unit,
     ) {
         val white = 0x00FFFFFF
+        val fill = tint and 0x00FFFFFF
         val glassy = config.theme.isGlass && drawGlassPane(canvas, rect, radius, clearReactive(rect), shape = shape)
         if (glassy) {
             sunPaint.style = Paint.Style.FILL
-            sunPaint.color = white or ((CHARGE_LIQUID_ALPHA * on).toInt() shl 24)
+            sunPaint.color = fill or ((CHARGE_LIQUID_ALPHA * on).toInt() shl 24)
             canvas.drawPath(shape, sunPaint)
             val alpha = Math.round(0x59 + (0xFF - 0x59) * on)
             mark(canvas, white or (alpha shl 24))
             return
         }
         sunPaint.style = Paint.Style.FILL
-        sunPaint.color = white or ((0xFF * on).toInt().coerceIn(0, 255) shl 24)
+        sunPaint.color = fill or ((0xFF * on).toInt().coerceIn(0, 255) shl 24)
         canvas.drawPath(shape, sunPaint)
         sunPaint.style = Paint.Style.STROKE
         sunPaint.strokeWidth = CHARGE_RIM
-        sunPaint.color = 0xFFFFFFFF.toInt()
+        sunPaint.color = fill or (0xFF shl 24)
         canvas.drawPath(shape, sunPaint)
         sunPaint.style = Paint.Style.FILL
         val bg = colorFor("bg", config.background or (0xFF shl 24))

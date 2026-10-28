@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
 import dev.kb896.aiusage.Panel
 
 /**
@@ -70,7 +71,17 @@ object PortalSheet {
 
     // Lazy: the unit tests load this object on the JVM, where android.graphics cannot be built.
     private val pane by lazy { Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) }
-    private val text by lazy { Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 20f } }
+    /**
+     * Names over the blur. Light ink alone vanished on a light backdrop, so every word on
+     * the sheet carries a soft dark shadow: it reads over a white page and a black one.
+     */
+    private val text by lazy {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER; textSize = 20f
+            setShadowLayer(4f, 0f, 1.5f, SHADOW)
+        }
+    }
+    private const val SHADOW = 0xCC000000.toInt()
 
     private fun ellipsize(s: String, width: Float): String {
         if (text.measureText(s) <= width) return s
@@ -78,46 +89,58 @@ object PortalSheet {
         return s.take(n).trimEnd() + "…"
     }
 
+    /** The first button's name, and the other two's. */
+    fun buttonNames(guestOnTop: Boolean) = listOf(if (guestOnTop) "Panel" else "Resume", "Front", "Close")
+
     /**
      * The sheet at [progress] (0 shut, 1 open): it slides up by what is left to open and
-     * fades in, as the control centre arrives. [icons] and [labels] are the pinned apps';
-     * [guestOnTop] picks Panel or Resume for the first button.
+     * fades in, as the control centre arrives. [icons] and [labels] are the pinned apps',
+     * standing straight on the blur with nothing behind them; [guestOnTop] picks Panel or
+     * Resume for the first button.
+     *
+     * [button] draws a button's body — the theme's own, glass or ORIGINAL, as the control
+     * centre's — at its place this frame (index 0 to 2, 2 Close); the name goes over it
+     * here, in [ink]. Every rect is moved by the slide rather than the canvas, so a pane of
+     * glass bends the blur where it actually stands.
      */
     fun draw(
         canvas: Canvas, progress: Float, icons: List<Bitmap?>, labels: List<String>,
-        guest: String?, guestOnTop: Boolean, accent: Int, ink: Int,
+        guest: String?, guestOnTop: Boolean, ink: Int, typeface: Typeface? = null,
+        button: (Canvas, RectF, Int) -> Unit,
     ) {
         if (progress <= 0.004f) return
         val withStrip = guest != null
-        canvas.save()
-        canvas.translate(0f, (1f - progress) * Panel.HEIGHT * 0.4f)
+        val dy = (1f - progress) * Panel.HEIGHT * 0.4f
         val alpha = (255 * progress).toInt().coerceIn(0, 255)
-        if (labels.isEmpty() && !withStrip) {
-            text.color = ink; text.alpha = alpha
-            canvas.drawText("Pin apps in the app on the front", LEFT + (COLUMNS * CELL + (COLUMNS - 1) * GAP) / 2f, Panel.HEIGHT / 2f, text)
-        }
-        if (withStrip) {
-            val names = listOf(if (guestOnTop) "Panel" else "Resume", "Front", "Close")
-            buttons().forEachIndexed { i, b ->
-                pane.color = if (i == 2) Panel.Palette.CRIT else accent
-                pane.alpha = (alpha * 0.85f).toInt()
-                canvas.drawRoundRect(b.rect(), 20f, 20f, pane)
-                text.color = Panel.Palette.BG; text.alpha = alpha
-                canvas.drawText(names[i], b.centerX, b.centerY + 7f, text)
+        // Faded as one picture, as the control centre is: glass cannot take a paint's alpha.
+        val layer = if (alpha < 255) canvas.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), alpha) else -1
+        try {
+            if (typeface != null && text.typeface != typeface) text.typeface = typeface
+            text.color = ink
+            val m = text.fontMetrics
+            val middle = -(m.ascent + m.descent) / 2f
+            if (labels.isEmpty() && !withStrip) {
+                canvas.drawText("Pin apps in the app on the front", LEFT + (COLUMNS * CELL + (COLUMNS - 1) * GAP) / 2f, Panel.HEIGHT / 2f + dy, text)
             }
-        }
-        val shown = labels.take(MAX_APPS)
-        cells(shown.size, withStrip).forEachIndexed { i, c ->
-            pane.color = ink; pane.alpha = (alpha * 0.12f).toInt()
-            canvas.drawRoundRect(c.rect(), 24f, 24f, pane)
-            icons.getOrNull(i)?.let { bmp ->
-                val s = 72f; val l = c.centerX - s / 2; val t = c.top + 14f
-                pane.alpha = alpha
-                canvas.drawBitmap(bmp, null, RectF(l, t, l + s, t + s), pane)
+            if (withStrip) {
+                val names = buttonNames(guestOnTop)
+                buttons().forEachIndexed { i, b ->
+                    val r = RectF(b.left, b.top + dy, b.right, b.bottom + dy)
+                    button(canvas, r, i)
+                    canvas.drawText(ellipsize(names[i], r.width() - 12f), r.centerX(), r.centerY() + middle, text)
+                }
             }
-            text.color = ink; text.alpha = alpha
-            canvas.drawText(ellipsize(shown[i], CELL - 8f), c.centerX, c.bottom - 12f, text)
+            val shown = labels.take(MAX_APPS)
+            pane.alpha = 255
+            cells(shown.size, withStrip).forEachIndexed { i, c ->
+                icons.getOrNull(i)?.let { bmp ->
+                    val s = 72f; val l = c.centerX - s / 2; val t = c.top + 14f + dy
+                    canvas.drawBitmap(bmp, null, RectF(l, t, l + s, t + s), pane)
+                }
+                canvas.drawText(ellipsize(shown[i], CELL - 8f), c.centerX, c.bottom - 12f + dy, text)
+            }
+        } finally {
+            if (layer >= 0) canvas.restoreToCount(layer)
         }
-        canvas.restore()
     }
 }
