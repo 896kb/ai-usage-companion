@@ -30,6 +30,12 @@ object ControlCenter {
     const val MIN_LEVEL = 0.01f
     /** How long the figure stays after the last change. */
     const val FIGURE_HOLD_MS = 2_000L
+    /** How often a drag on the cell writes the setting, at most. */
+    const val SEND_MS = 50L
+    /** How long a new brightness reading takes to pour in. */
+    const val POUR_MS = 600f
+    /** How long a button or a tile takes to change colour, on to off and back. */
+    const val SWITCH_MS = 250f
 
     private val PULL_LEFT = Panel.CUTOUT_RIGHT.toFloat()
     private val PULL_RIGHT = Panel.CUTOUT_RIGHT + (Panel.WIDTH - Panel.CUTOUT_RIGHT) / 2f
