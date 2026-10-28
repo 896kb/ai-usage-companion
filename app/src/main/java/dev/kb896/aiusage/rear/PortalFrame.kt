@@ -20,9 +20,20 @@ import dev.kb896.aiusage.data.RingLayout
  * NOT A WINDOW. HyperOS refuses windows on the rear to apps outside its list, and a
  * window over a guest would take or block its touches. This runs in the shell service,
  * which holds ACCESS_SURFACE_FLINGER, and makes a SurfaceFlinger layer of its own on the
- * rear display's layer stack, at the top. A bare layer has no input window: touches go to
- * the guest as if it were not there. Measured with tools/spikes/PortalFrameSpike: it
+ * rear display's layer stack, at the top. Measured with tools/spikes/PortalFrameSpike: it
  * composites over everything on the rear, and goes when released.
+ *
+ * TRUSTED, OR NOT AT ALL. A bare layer has no input window, and that was taken to mean
+ * touches pass straight through to the guest. They do not: since Android 12 the input
+ * dispatcher checks what covers a touched window, and a layer owned by another uid (this
+ * one is shell's, 2000) occludes it. On the phone (OS4.0.5.0, Android 17) every touch on
+ * the rear — the guest's and the panel's own — was logged "Untrusted touch due to occlusion
+ * by /2000/[BBQ] portal-frame" and dropped while the frame was up. The fix, measured with a
+ * spike the same day, is the hidden Transaction.setTrustedOverlay(layer, ENABLED = 2):
+ * a trusted overlay never occludes (1, DISABLED, still drops). Shell may set it because
+ * it holds ACCESS_SURFACE_FLINGER. Older firmware has a boolean overload instead. Where
+ * neither exists or the call is refused there is no frame: one that blocks every touch is
+ * far worse than none.
  *
  * Drawn through Surface.lockHardwareCanvas on a thread of its own at [FRAME_MS], halving
  * its pace if it runs over [BUDGET_MS] (see ElectricBorder for where the budget went).
@@ -37,6 +48,8 @@ class PortalFrame(private val layerStack: Int) {
     @Volatile private var gen = 0
     @Volatile private var failedAt = 0L
     private var refusalLogged = false
+    /** Once per process: the firmware gives no way to make the layer a trusted overlay. */
+    @Volatile private var untrustedLogged = false
 
     /** The colour and the lens geometry, from the panel's config. Takes effect next frame. */
     @Synchronized
@@ -82,6 +95,16 @@ class PortalFrame(private val layerStack: Int) {
                 SurfaceControl.Transaction::class.java
                     .getMethod("setLayerStack", SurfaceControl::class.java, Int::class.javaPrimitiveType)
                     .invoke(t, layer, layerStack)
+                // Without it the layer occludes the rear and every touch there is dropped:
+                // see the class comment. Not trusted, not shown — the transaction is never
+                // applied, and the layer goes below.
+                val why = trust(t, layer)
+                if (why != null) {
+                    if (!untrustedLogged) { untrustedLogged = true; Log.w(TAG, "portal frame: not shown, no trusted overlay: $why") }
+                    failedAt = System.nanoTime()
+                    runCatching { layer.release() }
+                    return
+                }
                 t.setLayer(layer, Int.MAX_VALUE).setVisibility(layer, true).apply()
             }
             surface = Surface(layer)
@@ -131,6 +154,19 @@ class PortalFrame(private val layerStack: Int) {
             runCatching { SurfaceControl.Transaction().use { it.reparent(sc, null).apply() } }
             runCatching { surface.release() }
             runCatching { sc.release() }
+        }
+    }
+
+    /** Marks [layer] a trusted overlay in [t]; null when done, else why it could not be. */
+    private fun trust(t: SurfaceControl.Transaction, layer: SurfaceControl): String? {
+        val call = trustedOverlayCall(SurfaceControl.Transaction::class.java, SurfaceControl::class.java)
+            ?: return "no setTrustedOverlay on this firmware"
+        return try {
+            call.first.invoke(t, layer, call.second)
+            null
+        } catch (e: Throwable) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+            "${cause.javaClass.simpleName}: ${cause.message}"
         }
     }
 
@@ -186,6 +222,22 @@ class PortalFrame(private val layerStack: Int) {
         /** Edge inset and the display's corner radius (dumpsys display: RoundedCorner radius=97). */
         private const val INSET = 10f
         private const val CORNER = 97f
+
+        /** gui::TrustedOverlay::ENABLED. UNSET is 0 and DISABLED 1, and 1 still has touches dropped. */
+        internal const val TRUSTED_OVERLAY_ENABLED = 2
+
+        /**
+         * The hidden setTrustedOverlay on [txClass] and the value that turns it on: the
+         * (layer, int) overload with [TRUSTED_OVERLAY_ENABLED] where there is one, else the
+         * older (layer, boolean) with true; null for neither. [layerClass] is SurfaceControl,
+         * a parameter so a test can hand it stand-ins.
+         */
+        internal fun trustedOverlayCall(txClass: Class<*>, layerClass: Class<*>): Pair<java.lang.reflect.Method, Any>? {
+            fun find(arg: Class<*>) = runCatching { txClass.getMethod("setTrustedOverlay", layerClass, arg) }.getOrNull()
+            find(Int::class.javaPrimitiveType!!)?.let { return it to TRUSTED_OVERLAY_ENABLED }
+            find(Boolean::class.javaPrimitiveType!!)?.let { return it to true }
+            return null
+        }
 
         /** The edge, and a circle just outside each ring, concentric with its lens. */
         fun shapesFor(rings: RingLayout): List<ElectricBorder.Shape> {
