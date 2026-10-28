@@ -9123,6 +9123,12 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** How far down it is now: under a finger, settling, or at rest. */
+    /**
+     * The control centre is up, or coming or going. It covers the whole panel, and two quick
+     * presses anywhere in it — a tile and back, the auto button — are its own, never a sleep.
+     */
+    val controlCenterUp: Boolean get() = ccOpen || ccTo > 0f || drag == Drag.CC
+
     private fun controlCenterProgress(): Float {
         if (drag == Drag.CC) return ControlCenter.progress(ccOpen, ccDy)
         if (ccAt == 0L) return ccTo
