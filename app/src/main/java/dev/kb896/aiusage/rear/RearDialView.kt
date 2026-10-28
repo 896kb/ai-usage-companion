@@ -1018,6 +1018,9 @@ class RearDialView(context: Context) : View(context) {
      * along on the minute tick before this.
      */
     private fun frozen(now: Long): Boolean =
+        // Never under the App Portal: a pull relayed into a sleeping or locked panel still
+        // has to follow its finger, settle, and hand the rear back.
+        !ptRelaying && !ptOverGuest && !ptHandingBack && ptAt == 0L &&
         aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating() && now >= clockRollUntil
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
@@ -1342,6 +1345,7 @@ class RearDialView(context: Context) : View(context) {
         context.getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(tiltListener)
         tiltListening = false
         removeCallbacks(redrawTick)
+        removeCallbacks(portalShut)
         runCatching { context.unregisterReceiver(powerReceiver) }
         runCatching {
             context.getSystemService(android.hardware.SensorManager::class.java)
@@ -1446,11 +1450,13 @@ class RearDialView(context: Context) : View(context) {
         val pt = portalProgress()
         // Over a guest it is drawn to the very end, shut included: until the panel has
         // stepped behind the guest again, the guest's own frame is what should show.
-        if (pt > 0.001f || ptOverGuest) {
+        // And after it, while the guest is being handed the rear back: the panel must not
+        // show for the frames between asking and the guest being on top again.
+        if (pt > 0.001f || ptOverGuest || ptHandingBack) {
             val shot = portalBackdrop
             // Over a guest the panel is not drawn, so nothing else will say whether this
             // frame is moving: it starts from still, and only the portal can change that.
-            if (ptOverGuest) animating = false
+            if (ptOverGuest || ptHandingBack) animating = false
             val recorder = canvas as? android.graphics.RecordingCanvas
             if (recorder != null && width > 0 && height > 0) {
                 ptNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
@@ -1521,7 +1527,7 @@ class RearDialView(context: Context) : View(context) {
      * the panel itself.
      */
     private fun drawPortalBackdrop(canvas: Canvas, shot: android.graphics.Bitmap?) {
-        if (!ptOverGuest) {
+        if (!ptOverGuest && !ptHandingBack) {
             drawPanelPicture(canvas)
             return
         }
@@ -4686,6 +4692,7 @@ class RearDialView(context: Context) : View(context) {
             displayAwake = true
         }
         if (!interactive) return false
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) panelDeclined = false
         // The control centre, when it is open or being pulled: it has the whole surface.
         if (controlCenterTouch(event)) return true
         // The App Portal, from the bottom edge, as the control centre is from the top.
@@ -4695,17 +4702,30 @@ class RearDialView(context: Context) : View(context) {
             // transport press would carry on under the portal.
             if (ptStole) {
                 ptStole = false
-                val cancel = android.view.MotionEvent.obtain(event)
-                cancel.action = android.view.MotionEvent.ACTION_CANCEL
-                try { panelTouch(cancel) } finally { cancel.recycle() }
+                if (!panelDeclined) {
+                    val cancel = android.view.MotionEvent.obtain(event)
+                    cancel.action = android.view.MotionEvent.ACTION_CANCEL
+                    try { panelTouch(cancel) } finally { cancel.recycle() }
+                }
             }
             return true
         }
-        val took = panelTouch(event)
-        // A finger in the bottom band is watched for a pull even where nothing on the
-        // panel wants it, or the portal would never see it move.
-        return took || (event.actionMasked == android.view.MotionEvent.ACTION_DOWN && ptArmed)
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            val took = panelTouch(event)
+            panelDeclined = !took
+            // A finger in the bottom band is watched for a pull even where nothing on the
+            // panel wants it, or the portal would never see it move.
+            return took || ptArmed
+        }
+        // The panel turned this finger down when it landed, and only the portal's watch
+        // kept it coming: the rest is not the panel's either, or an UP that happened to be
+        // on a target would fire it with no DOWN behind it.
+        if (panelDeclined) return true
+        return panelTouch(event)
     }
+
+    /** The panel said no to this gesture's DOWN (it is here only for the portal's watch). */
+    private var panelDeclined = false
 
     /** The panel's own share of the touches: everything but the control centre and the portal. */
     private fun panelTouch(event: android.view.MotionEvent): Boolean {
@@ -9827,6 +9847,12 @@ class RearDialView(context: Context) : View(context) {
     private var ptOverGuest = false
     /** A relayed finger has it, from phase 0 to its lift: the panel's own touches wait. */
     private var ptRelaying = false
+    /**
+     * Shut over a guest and the rear asked back for it, but this panel may still be on
+     * screen for a frame or two: the guest's frame (or the ground) stays drawn until the
+     * window goes, never the panel. See portalHandedBack.
+     */
+    private var ptHandingBack = false
 
     /** The pinned apps, as RearActivity loaded them. */
     var portalIcons: List<android.graphics.Bitmap?> = emptyList()
@@ -9863,6 +9889,8 @@ class RearDialView(context: Context) : View(context) {
         if (t >= 1f) {
             // Arrived: at rest from here, so nothing reads it as still settling.
             ptAt = 0L
+            // Shut on the panel: the recording of the panel under it goes with it.
+            if (ptTo == 0f && !ptOverGuest && !ptHandingBack) ptNode.discardDisplayList()
             return ptTo
         }
         animating = true
@@ -9871,8 +9899,11 @@ class RearDialView(context: Context) : View(context) {
         return ptFrom + (ptTo - ptFrom) * e
     }
 
-    /** Up, being pulled, or over a guest (shut but not yet handed back): it has the panel. */
-    private fun portalShowing(): Boolean = ptRelaying || ptOverGuest || portalProgress() > 0.01f
+    /**
+     * Up, being pulled, or over a guest (shut but not yet handed back): it has the panel.
+     * RearActivity lets touches through to the view while this holds.
+     */
+    fun portalShowing(): Boolean = ptRelaying || ptOverGuest || ptHandingBack || portalProgress() > 0.01f
 
     /** Go [open] from [from], carrying on at [velocity] (down positive) if it was moving that way. */
     private fun settlePortal(open: Boolean, from: Float, velocity: Float = 0f) {
@@ -9892,13 +9923,39 @@ class RearDialView(context: Context) : View(context) {
 
     private val portalShut = Runnable { portalSettledShut() }
 
-    /** Shut over a guest: the frame goes, and the panel goes behind it again. */
+    /**
+     * Shut over a guest: the panel goes behind it again. The frame stays drawn until it
+     * has (portalHandedBack); with nobody to ask, it goes now.
+     */
     private fun portalSettledShut() {
         // Taken up again, or opened, before the settle finished: not shut after all.
         if (ptOpen || ptDragging || ptGesture || ptRelaying || !ptOverGuest) return
         ptOverGuest = false
+        val handBack = onPortalShutOverGuest
+        if (portalGuest != null && handBack != null) {
+            ptHandingBack = true
+            handBack()
+        } else {
+            dropPortalFrame()
+        }
+        invalidate()
+    }
+
+    /**
+     * The guest has the rear again — this panel's window has gone (onWindowVisibilityChanged)
+     * or RearActivity has stopped — so its frame can go.
+     */
+    fun portalHandedBack() {
+        if (!ptHandingBack) return
+        ptHandingBack = false
+        dropPortalFrame()
+        invalidate()
+    }
+
+    /** The guest's frame, and the recording that blurred it: ~2 MB not kept for nothing. */
+    private fun dropPortalFrame() {
         portalBackdrop = null
-        if (portalGuest != null) onPortalShutOverGuest?.invoke()
+        ptNode.discardDisplayList()
     }
 
     /** Shut at once: a lock, always-on. Over a guest the rear goes back to it, as it was before the pull. */
@@ -9909,6 +9966,7 @@ class RearDialView(context: Context) : View(context) {
         ptOpen = false; ptFrom = 0f; ptTo = 0f; ptAt = 0L; ptDy = 0f
         ptDragging = false; ptGesture = false; ptRelaying = false
         portalSettledShut()
+        if (!ptHandingBack) dropPortalFrame()
         invalidate()
     }
 
@@ -9920,6 +9978,8 @@ class RearDialView(context: Context) : View(context) {
                 // Never both: the portal comes up over a guest, so the centre goes.
                 closeControlCenterNow()
                 removeCallbacks(portalShut)
+                // Pulled again before the last hand-back finished: that frame is stale.
+                if (ptHandingBack) { ptHandingBack = false; dropPortalFrame() }
                 ptOverGuest = true; ptRelaying = true
                 ptGesture = false; ptArmed = false
                 // The finger landed SLOP lower than where the service committed the pull.
@@ -9955,15 +10015,19 @@ class RearDialView(context: Context) : View(context) {
         if (ptRelaying) {
             // A relayed finger is driving it: the rest of another one's gesture is nobody's.
             if (event.actionMasked != android.view.MotionEvent.ACTION_DOWN) return true
-            // But a finger landing on the panel means the relayed one is off the glass,
-            // whether or not its lift ever came through (the service gone mid-pull): let it
-            // go where it was, and this finger has the portal from there.
+            // But a finger landing on the panel ends it: either the relayed one is off the
+            // glass and its lift never came through (the service gone mid-pull), or this
+            // is a second finger. Either way the relayed pull lets go where it was, and
+            // this finger has the portal from there, rather than two driving it at once.
             portalRelay(2, ptLastY)
         }
         val now = SystemClock.uptimeMillis()
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 ptArmed = false; ptStole = false
+                // Still on screen to be touched, so the hand-back never happened (or the
+                // guest went): show the panel rather than a frame nobody can leave.
+                portalHandedBack()
                 val shown = portalShowing()
                 ptDownX = event.x; ptDownY = event.y
                 ptLastY = event.y; ptLastAt = now; ptVelocity = 0f
@@ -10045,8 +10109,14 @@ class RearDialView(context: Context) : View(context) {
                     }
                 } else if (!ptOpen) {
                     // Caught on its way shut: it carries on shutting (and, over a guest,
-                    // hands the rear back when it is down).
-                    settlePortal(false, portalProgress())
+                    // hands the rear back when it is down) — at once if it already was.
+                    val from = portalProgress()
+                    if (from <= 0.001f && ptOverGuest) {
+                        ptTo = 0f; ptAt = 0L
+                        portalSettledShut()
+                    } else {
+                        settlePortal(false, from)
+                    }
                 }
                 return true
             }
@@ -12639,6 +12709,8 @@ class RearDialView(context: Context) : View(context) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         val shown = visibility == VISIBLE
+        // Gone from the screen: if that was the rear going back to a guest, it is back.
+        if (!shown) portalHandedBack()
         if (shown == windowShown) return
         windowShown = shown
         syncVideo(fresh = shown)
