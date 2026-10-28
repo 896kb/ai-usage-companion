@@ -24,8 +24,8 @@ import dev.kb896.aiusage.data.PanelTheme
  *
  * Laid out by PortalSheet, in panel pixels.
  *
- * Not thread-safe; all painters in a process must draw on one thread — they share
- * Glass's shaders (uniforms, highlight matrix).
+ * Not thread-safe; all painters in a process must draw one at a time (ShellSheet
+ * serialises with its DRAW lock) — they share Glass's shaders (uniforms, highlight matrix).
  */
 class PortalSheetPainter(var theme: PanelTheme, typeface: Typeface) {
 

@@ -44,13 +44,15 @@ import java.util.concurrent.atomic.AtomicInteger
  * screen shows through and the ground comes in with the pull; the dim, as the control
  * centre's; then PortalSheetPainter, its glass bending that node and tinted by SheetTint.
  *
- * THREADING. Setters may be called from any thread; they publish and bump a version.
- * One render thread per opening draws while the version moves and sleeps [FRAME_MS]
- * between looks (~60 fps while anything changes, nothing redrawn while nothing does —
- * the last buffer stays on screen). [begin] and [end] are synchronized; the render thread
- * never takes that lock, so [end] may join it. All painting in this process happens
- * under [DRAW]: the painters share Glass's shaders, and a run outliving its join (a
- * render thread stuck in the driver) must not paint over the next one's uniforms.
+ * THREADING. [begin] makes both layers and shows them on the caller's thread, under the
+ * instance lock, so when it says true they are there. Setters may be called from any
+ * thread; they publish and bump a version. One render thread per opening only draws:
+ * while the version moves, sleeping [FRAME_MS] between looks (~60 fps while anything
+ * changes, nothing redrawn while nothing does — the last buffer stays on screen). The
+ * render thread never takes the instance lock, so [end] may join it. All painting in
+ * this process happens under [DRAW]: the painters share Glass's shaders, and a run
+ * outliving its join (a render thread stuck in the driver) must not paint over the next
+ * one's uniforms.
  *
  * @param layerStack the rear display's layer stack (RearUserService.rearLayerStack).
  * @param typeface the panel's font, for every word on the sheet. The shell (app_process)
@@ -70,23 +72,39 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
 
     private class Look(val theme: PanelTheme, val style: GlassStyle?)
 
-    /** One opening's layers. Guarded by its own monitor: [end] hides them, the run releases them. */
-    private class Run(val gen: Int) {
-        var blocker: SurfaceControl? = null
-        var sheet: SurfaceControl? = null
-        @Volatile var ended = false
+    /** The pinned apps with their icons already decoded, so drawing never decodes. */
+    private class Apps(val snapshot: PortalAppsSnapshot, val icons: List<Bitmap?>)
+
+    /**
+     * One opening: its layers, made by [begin]. The layers are guarded by the Run's own
+     * monitor — [end] hides them, the render thread takes them away and releases them.
+     * The surfaces are the render thread's from the moment it starts.
+     */
+    private class Run(
+        val gen: Int,
+        var blocker: SurfaceControl?,
+        var sheet: SurfaceControl?,
+        val blockerSurface: Surface,
+        val surface: Surface,
+    ) {
+        /** Between a successful [begin] and [end], and not after the render loop died. */
+        @Volatile var live = true
     }
 
     @Volatile private var progress = 0f
     @Volatile private var backdrop: Backdrop? = null
-    @Volatile private var apps: PortalAppsSnapshot = PortalAppsSnapshot.EMPTY
+    @Volatile private var apps = Apps(PortalAppsSnapshot.EMPTY, emptyList())
     /** Null: no guest, so no Panel/Resume · Front · Close strip. */
     @Volatile private var guestOnTop: Boolean? = null
     @Volatile private var pressed = -1
     @Volatile private var look = Look(PanelTheme.GLASS, null)
     private val version = AtomicInteger()
 
-    /** Volatile: [showing] reads them from threads that do not hold the lock. */
+    /** The current screencap's id ([newShot]); a backdrop for any other is dropped. Guarded by [shotLock]. */
+    private var shot = 0
+    private val shotLock = Any()
+
+    /** Volatile: [up] reads it from threads that do not hold the lock. */
     @Volatile private var thread: Thread? = null
     @Volatile private var run: Run? = null
     /** Bumped by every begin() and end(); a render thread of another generation stops. */
@@ -95,31 +113,72 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
     /** Once per process: the firmware gives no way to make the sheet a trusted overlay. */
     @Volatile private var untrustedLogged = false
 
-    /** Up, or coming up: a render thread is running for an opening not yet ended. */
-    val showing get() = thread?.isAlive == true && run?.ended == false
+    /**
+     * The sheet and its blocker are on the rear: true from a [begin] that returned true
+     * until [end], false at once if the render loop dies (its layers are then gone).
+     * Callers must gate hit-testing on it — a tap is the sheet's only while it is up;
+     * otherwise it went to whatever is under it.
+     */
+    val up: Boolean get() = run?.live == true
+
+    /** The same as [up]. */
+    val showing: Boolean get() = up
 
     /**
-     * Shows the blocker and the sheet at [progressStart] and starts drawing. False when it
-     * cannot — a failure in the last [RETRY_NS] (no trusted overlay, no layer, a loop that
-     * died) — and then there is no sheet and no blocker: the caller must not act as if
-     * one were up. Already up: just the progress.
+     * Makes the blocker and the sheet, shows both in one transaction at [progressStart],
+     * and starts the render thread — all before returning, so true means they are up.
+     * False when it cannot (no trusted overlay, no layer, the blocker's buffer refused, or
+     * any of these in the last [RETRY_NS]); then there is no sheet and no blocker and the
+     * caller must not act as if one were up. Already up: just the progress.
      */
     @Synchronized
     fun begin(progressStart: Float = 0f): Boolean {
         progress(progressStart)
-        if (showing) return true
+        if (up) return true
         if (failedAt != 0L && System.nanoTime() - failedAt < RETRY_NS) return false
-        val r = Run(++gen)
-        run = r
-        thread = Thread({ render(r) }, "portal-sheet").apply { isDaemon = true; start() }
-        return true
+        var blocker: SurfaceControl? = null
+        var sheet: SurfaceControl? = null
+        var blockerSurface: Surface? = null
+        var surface: Surface? = null
+        try {
+            // Both made hidden, and shown together below.
+            blocker = ShellLayer.create("portal-sheet-blocker", layerStack, ShellLayer.Z_BLOCKER, trusted = false, visible = false)
+            sheet = ShellLayer.create("portal-sheet", layerStack, ShellLayer.Z_SHEET, trusted = true, visible = false)
+            // A layer with no buffer has no input window and occludes nothing: the blocker
+            // gets one, transparent, once. Assigned first, so a refused post still releases it.
+            blockerSurface = Surface(blocker)
+            clear(blockerSurface)
+            surface = Surface(sheet)
+            SurfaceControl.Transaction().use { t ->
+                t.setVisibility(blocker, true).setVisibility(sheet, true).apply()
+            }
+            val r = Run(++gen, blocker, sheet, blockerSurface, surface)
+            run = r
+            thread = Thread({ render(r) }, "portal-sheet").apply { isDaemon = true; start() }
+            return true
+        } catch (e: Throwable) {
+            if (e is ShellLayer.Untrusted) {
+                if (!untrustedLogged) { untrustedLogged = true; Log.w(TAG, "portal sheet: not shown, no trusted overlay: ${e.message}") }
+            } else {
+                Log.w(TAG, "portal sheet: no layer: ${e.message}")
+            }
+            failedAt = System.nanoTime()
+            run = null
+            thread = null
+            hide(blocker, sheet)
+            runCatching { surface?.release() }
+            runCatching { blockerSurface?.release() }
+            ShellLayer.remove(sheet)
+            ShellLayer.remove(blocker)
+            return false
+        }
     }
 
     /**
      * Hides the blocker and the sheet at once — in one transaction, on this thread, so the
      * blocker is gone no later than the sheet even if the render thread is stuck — stops
-     * the render thread, and forgets the backdrop and the press: every opening brings its
-     * own screencap.
+     * the render thread, and forgets the backdrop (and any screencap still on its way)
+     * and the press: every opening brings its own screencap.
      */
     @Synchronized
     fun end() {
@@ -127,7 +186,7 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
         run = null
         gen++
         if (r != null) synchronized(r) {
-            r.ended = true
+            r.live = false
             hide(r.blocker, r.sheet)
         }
         thread?.let { t ->
@@ -138,7 +197,10 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             runCatching { t.join(JOIN_MS) }
         }
         thread = null
-        backdrop = null
+        synchronized(shotLock) {
+            shot++
+            backdrop = null
+        }
         pressed = -1
         progress = 0f
         version.incrementAndGet()
@@ -151,21 +213,41 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
     }
 
     /**
-     * The rear's screencap as PNG [png] (null forgets it). Decoded here, on the caller's
-     * thread, at half size, and measured for the glass's tint; drawn from the next frame.
-     * A picture that does not decode leaves the one before.
+     * A new screencap is being taken: forgets the backdrop shown now and returns the new
+     * one's id, for [backdrop]. Any screencap taken before it is dropped when it lands.
      */
-    fun backdrop(png: ByteArray?) {
-        if (png == null) {
+    fun newShot(): Int {
+        val id = synchronized(shotLock) {
             backdrop = null
-            version.incrementAndGet()
-            return
+            ++shot
         }
+        version.incrementAndGet()
+        return id
+    }
+
+    /**
+     * Screencap [shot] (from [newShot]) as PNG [png]; null forgets it. Dropped unless
+     * [shot] is still the current one — a late screenshot stays out of the next opening.
+     * Decoded here, on the caller's thread, at half size, and measured for the glass's
+     * tint (5–15 ms): call it from the capture thread, never the getevent reader. A
+     * picture that does not decode leaves the one before.
+     */
+    fun backdrop(png: ByteArray?, shot: Int) {
+        if (shot != synchronized(shotLock) { this.shot }) return
+        val b = png?.let { decode(it) ?: return }
+        synchronized(shotLock) {
+            if (shot != this.shot) return
+            backdrop = b
+        }
+        version.incrementAndGet()
+    }
+
+    private fun decode(png: ByteArray): Backdrop? {
         val bmp = runCatching {
             BitmapFactory.decodeByteArray(png, 0, png.size, BitmapFactory.Options().apply { inSampleSize = 2 })
         }.getOrNull() ?: run {
             Log.w(TAG, "portal sheet: backdrop of ${png.size} bytes did not decode")
-            return
+            return null
         }
         val cells = runCatching {
             val side = GlassLuminance.SIDE
@@ -175,13 +257,12 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             if (small !== bmp) small.recycle()
             SheetTint.cells(px)
         }.getOrNull()
-        backdrop = Backdrop(bmp, cells ?: FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE) { SheetTint.MIDDLING })
-        version.incrementAndGet()
+        return Backdrop(bmp, cells ?: FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE) { SheetTint.MIDDLING })
     }
 
-    /** The pinned apps, in grid order. */
+    /** The pinned apps, in grid order. Their icons are decoded here, on the caller's thread. */
     fun apps(snapshot: PortalAppsSnapshot) {
-        apps = snapshot
+        apps = Apps(snapshot, List(snapshot.size) { snapshot.icon(it) })
         version.incrementAndGet()
     }
 
@@ -210,80 +291,60 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
         version.incrementAndGet()
     }
 
+    /** Draws [r] until it ends, then takes its layers off the rear and lets everything go. */
     private fun render(r: Run) {
-        var blocker: SurfaceControl? = null
-        var sheet: SurfaceControl? = null
-        var blockerSurface: Surface? = null
-        var surface: Surface? = null
         try {
-            try {
-                // Both made hidden, and shown together below.
-                blocker = ShellLayer.create("portal-sheet-blocker", layerStack, ShellLayer.Z_BLOCKER, trusted = false, visible = false)
-                sheet = ShellLayer.create("portal-sheet", layerStack, ShellLayer.Z_SHEET, trusted = true, visible = false)
-                // A layer with no buffer has no input window and occludes nothing: the
-                // blocker gets one, transparent, once.
-                blockerSurface = Surface(blocker).also { clear(it) }
-                surface = Surface(sheet)
-            } catch (e: ShellLayer.Untrusted) {
-                if (!untrustedLogged) { untrustedLogged = true; Log.w(TAG, "portal sheet: not shown, no trusted overlay: ${e.message}") }
-                failedAt = System.nanoTime()
-                return
-            } catch (e: Throwable) {
-                Log.w(TAG, "portal sheet: no layer: ${e.message}")
-                failedAt = System.nanoTime()
-                return
-            }
-            synchronized(r) {
-                if (r.ended || gen != r.gen) return
-                SurfaceControl.Transaction().use { t ->
-                    t.setVisibility(blocker, true).setVisibility(sheet, true).apply()
-                }
-                r.blocker = blocker
-                r.sheet = sheet
-            }
-            loop(r, surface)
+            loop(r)
         } catch (_: InterruptedException) {
         } catch (e: Throwable) {
             Log.w(TAG, "portal sheet stopped: ${e.message}")
             failedAt = System.nanoTime()
         } finally {
             // Taken out of [end]'s reach first, then let go: end() never touches a released layer.
+            val blocker: SurfaceControl?
+            val sheet: SurfaceControl?
             synchronized(r) {
-                r.blocker = null
-                r.sheet = null
+                r.live = false
+                blocker = r.blocker; sheet = r.sheet
+                r.blocker = null; r.sheet = null
             }
-            runCatching { surface?.release() }
-            runCatching { blockerSurface?.release() }
+            runCatching { r.surface.release() }
+            runCatching { r.blockerSurface.release() }
             ShellLayer.remove(sheet)
             ShellLayer.remove(blocker)
         }
     }
 
-    private fun loop(r: Run, surface: Surface) {
+    private fun loop(r: Run) {
+        val surface = r.surface
         val painter = Renderer()
         var drawn = -1
         // As the frame: if the hardware canvas is refused, the software one (no blur, flat buttons).
         var hardware = true
-        while (!Thread.currentThread().isInterrupted && gen == r.gen) {
-            val began = System.nanoTime()
-            val v = version.get()
-            if (v != drawn) {
-                val canvas = if (hardware) {
-                    try { surface.lockHardwareCanvas() } catch (e: Throwable) {
-                        Log.w(TAG, "portal sheet: hardware canvas refused (${e.message}); software")
-                        hardware = false; continue
+        try {
+            while (!Thread.currentThread().isInterrupted && gen == r.gen) {
+                val began = System.nanoTime()
+                val v = version.get()
+                if (v != drawn) {
+                    val canvas = if (hardware) {
+                        try { surface.lockHardwareCanvas() } catch (e: Throwable) {
+                            Log.w(TAG, "portal sheet: hardware canvas refused (${e.message}); software")
+                            hardware = false; continue
+                        }
+                    } else surface.lockCanvas(null)
+                    try {
+                        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+                        synchronized(DRAW) { painter.draw(canvas) }
+                    } finally {
+                        surface.unlockCanvasAndPost(canvas)
                     }
-                } else surface.lockCanvas(null)
-                try {
-                    canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-                    synchronized(DRAW) { painter.draw(canvas) }
-                } finally {
-                    surface.unlockCanvasAndPost(canvas)
+                    drawn = v
                 }
-                drawn = v
+                val took = (System.nanoTime() - began) / 1_000_000
+                Thread.sleep(maxOf(FRAME_MS - took, 1L))
             }
-            val took = (System.nanoTime() - began) / 1_000_000
-            Thread.sleep(maxOf(FRAME_MS - took, 1L))
+        } finally {
+            painter.release()
         }
     }
 
@@ -298,8 +359,6 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
         private val full = RectF(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         private var recordedFor: Backdrop? = null
         private var blurFor = -1f
-        private var appsFor: PortalAppsSnapshot? = null
-        private var icons: List<Bitmap?> = emptyList()
 
         /** This frame's, for the pane tint below. */
         private var cells: FloatArray? = null
@@ -351,20 +410,24 @@ class ShellSheet(private val layerStack: Int, private val typeface: Typeface) {
             }
             dim.color = dimColor(p, ground)
             canvas.drawRect(full, dim)
-            if (appsFor !== a) {
-                icons = List(a.size) { a.icon(it) }
-                appsFor = a
-            }
             sheetPainter.theme = frameLook.theme
             sheetPainter.draw(
-                canvas, p, bent, icons, a.labels,
+                canvas, p, bent, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, withStrip = onTop != null, pressed = pressed,
             )
         }
+
+        /** Lets go of what the nodes hold (the screencap's texture among it). */
+        fun release() {
+            runCatching { groundNode.discardDisplayList() }
+            runCatching { none.discardDisplayList() }
+            recordedFor = null
+        }
     }
 
+    /** One transparent buffer, from the software canvas: no hardware renderer for a buffer posted once. */
     private fun clear(s: Surface) {
-        val c = try { s.lockHardwareCanvas() } catch (_: Throwable) { s.lockCanvas(null) }
+        val c = s.lockCanvas(null)
         try { c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR) } finally { s.unlockCanvasAndPost(c) }
     }
 

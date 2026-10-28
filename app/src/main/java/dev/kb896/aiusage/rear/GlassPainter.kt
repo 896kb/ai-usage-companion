@@ -18,8 +18,8 @@ import android.graphics.RenderNode
  * One per drawing surface: it holds that surface's node pool and lens cache. Call
  * [beginFrame] at the start of every frame.
  *
- * Not thread-safe; all painters in a process must draw on one thread — they share
- * Glass's shaders (uniforms, highlight matrix).
+ * Not thread-safe; all painters in a process must draw one at a time (ShellSheet
+ * serialises with its DRAW lock) — they share Glass's shaders (uniforms, highlight matrix).
  */
 class GlassPainter {
 

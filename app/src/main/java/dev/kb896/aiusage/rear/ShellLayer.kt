@@ -22,8 +22,10 @@ internal object ShellLayer {
 
     /**
      * Z on the rear's layer stack, top-level. The frame stays on top of everything of
-     * ours; the sheet goes under it, and the sheet's blocker under the sheet — so a touch
-     * is judged against the blocker (untrusted, dropped) and never against the sheet.
+     * ours; the sheet goes under it, and the sheet's blocker under the sheet. For touches
+     * the order between blocker and sheet does not matter: the InputDispatcher checks
+     * every window above the touched one, so the untrusted blocker occludes the windows
+     * below wherever it stands, and the trusted sheet and frame occlude nothing.
      */
     const val Z_FRAME = Int.MAX_VALUE
     const val Z_SHEET = Int.MAX_VALUE - 1
