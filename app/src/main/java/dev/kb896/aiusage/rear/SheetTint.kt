@@ -9,9 +9,10 @@ import dev.kb896.aiusage.data.GlassStyle
  * is behind it (GlassLuminance.clearTint) — the panel's styledTint and clearReactive,
  * read off the sheet's backdrop instead of the panel's.
  *
- * The backdrop is the rear's screencap, so its brightness is measured once per screencap
- * ([cells], from the picture scaled down to GlassLuminance.SIDE square) and every pane
- * then reads a handful of array cells, as the panel's do.
+ * Given a picture of what is behind ([cells], from it scaled down to GlassLuminance.SIDE
+ * square), every pane reads a handful of array cells, as the panel's do. The shell sheet
+ * now has none — SurfaceFlinger blurs the live rear under it, and no picture of it ever
+ * reaches this process — so it passes null: clear glass over a middling ground.
  */
 object SheetTint {
 

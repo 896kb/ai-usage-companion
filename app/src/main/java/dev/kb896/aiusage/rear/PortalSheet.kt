@@ -6,8 +6,8 @@ import dev.kb896.aiusage.Panel
 /**
  * The App Portal's sheet: the pinned apps as a grid of icons, and — while a guest app is
  * up — a strip above it with the guest's three actions. It rises from the bottom over the
- * blurred panel (or the guest's frozen frame) as the pull opens it; RearDialView owns the
- * pull and the blur, this owns where things are on the sheet, and PortalSheetPainter
+ * blurred rear — our panel or the guest, live — as the pull opens it; the shell's
+ * RearUserService and ShellSheet own the pull and the blur, this owns where things are on the sheet, and PortalSheetPainter
  * paints them.
  *
  * Laid out right of the lens column, in panel pixels, as plain numbers: the hit tests are

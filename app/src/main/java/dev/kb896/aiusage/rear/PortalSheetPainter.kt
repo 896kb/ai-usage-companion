@@ -15,10 +15,10 @@ import dev.kb896.aiusage.data.PanelTheme
  * uses it, and so can the shell, which draws into a surface's hardware canvas from
  * app_process. Everything comes in: the [theme], the panel's [face] (app_process has no
  * default typeface, and text drawn without one aborts), the icons as bitmaps, and the
- * node the glass bends.
+ * node the glass bends, if any.
  *
- * Its buttons are the control centre's (see CcButton): glass under GLASS, bending the
- * backdrop they stand on, and under ORIGINAL outlined as its tiles are. Close is the one
+ * Its buttons are the control centre's (see CcButton): glass under GLASS — bending the
+ * backdrop they stand on when there is one to bend, else unbacked panes — and under ORIGINAL outlined as its tiles are. Close is the one
  * filled, in the critical red.
  *
  * Laid out by PortalSheet, in panel pixels.
@@ -93,8 +93,9 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * three buttons above them, [guestOnTop] picking Panel or Resume for the first.
      *
      * [backdrop] is what the glass bends — the blurred ground drawn under the sheet, in
-     * the canvas's current space. A node with nothing recorded in it gives glass without a
-     * lens. Every rect is moved by the slide rather than the canvas, so a pane of glass
+     * the canvas's current space. Null, or a node with nothing recorded in it, gives glass
+     * without a lens (the shell's sheet: SurfaceFlinger blurs the live rear under it, and
+     * this process has no picture of it to bend). Every rect is moved by the slide rather than the canvas, so a pane of glass
      * bends the blur where it actually stands. Always sampled in local space (the panes'
      * and the backdrop's are the same), never in root space: on the 17 Pro the panel's
      * canvas is the root at identity and both mappings agree, and the shell's surface has
@@ -114,7 +115,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * brings back, as a small rounded icon; the dashboard glyph without one.
      */
     fun draw(
-        canvas: Canvas, progress: Float, backdrop: RenderNode,
+        canvas: Canvas, progress: Float, backdrop: RenderNode?,
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, withStrip: Boolean, pressed: Int = -1,
         dpiApp: Int = -1, dpiLabel: String = "",
@@ -214,7 +215,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * A button at [rect], lit [on] (0 off, 0.5 pressed, 1 on): the control centre's, its
      * name drawn over it by [draw]. [close] is Close's, filled in the critical red.
      */
-    private fun drawButton(canvas: Canvas, rect: RectF, on: Float, close: Boolean, backdrop: RenderNode) {
+    private fun drawButton(canvas: Canvas, rect: RectF, on: Float, close: Boolean, backdrop: RenderNode?) {
         val radius = minOf(rect.width(), rect.height()) * CcButton.CORNER
         buttonShape.rewind()
         buttonShape.addRoundRect(rect, radius, radius, Path.Direction.CW)

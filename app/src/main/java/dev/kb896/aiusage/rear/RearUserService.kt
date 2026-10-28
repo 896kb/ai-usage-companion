@@ -1295,17 +1295,8 @@ class RearUserService : IRearService.Stub {
     /** Under [sheetLock]. True: send Back to the guest. */
     private fun sheetAction(a: EdgeGestures.Action, atMs: Long): Boolean {
         when (a) {
-            // The screenshot starts as the finger lands; ShellSheet drops it if another
-            // opening's shot has been asked for since.
-            EdgeGestures.Action.Arm -> if (!sheetUp && !cameraUp() && pullOpens()) sheetOrNull()?.let { s ->
-                val shot = s.newShot()
-                Thread {
-                    val png = captureRear()
-                    if (png != null) runCatching { s.backdrop(png, shot) }
-                        .onFailure { Log.w(TAG, "portal sheet: backdrop failed: ${it.message}") }
-                }.apply { isDaemon = true; name = "portal-shot"; start() }
-            }
-            EdgeGestures.Action.Disarm -> Unit
+            // Nothing to fetch as the finger lands: the sheet blurs the live rear under it.
+            EdgeGestures.Action.Arm, EdgeGestures.Action.Disarm -> Unit
             is EdgeGestures.Action.SheetDown -> {
                 if (!sheetAlive()) return false
                 // Not the end of a pending launch or button: a touch that lifts again lets the
@@ -1892,15 +1883,6 @@ class RearUserService : IRearService.Stub {
             shellSheet
         }
         if (sync) runCatching { s?.end() }
-    }
-
-    /** The rear as a PNG, from shell's screencap — about 240 ms. Null if it fails. */
-    private fun captureRear(): ByteArray? {
-        val id = rearPhysicalId() ?: return null
-        return try {
-            val p = ProcessBuilder("sh", "-c", "exec screencap -d $id -p").start()
-            p.inputStream.use { it.readBytes() }.takeIf { it.size > 100 }
-        } catch (e: Exception) { null }
     }
 
     override fun setQuick(which: String, on: Boolean) {

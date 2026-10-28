@@ -1,16 +1,11 @@
 package dev.kb896.aiusage.rear
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
-import android.graphics.RecordingCanvas
 import android.graphics.RectF
-import android.graphics.RenderEffect
-import android.graphics.RenderNode
-import android.graphics.Shader
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceControl
@@ -27,8 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * TWO LAYERS, made with ShellLayer:
  * - the SHEET ([ShellLayer.Z_SHEET], under the frame), a trusted overlay — fail closed, as
  *   the frame: if it cannot be trusted nothing is shown — drawn through
- *   Surface.lockHardwareCanvas, a RecordingCanvas (measured on the 17 Pro), so the
- *   backdrop's RenderEffect blur and the glass's lenses work;
+ *   Surface.lockHardwareCanvas (a RecordingCanvas, measured on the 17 Pro), and asking
+ *   SurfaceFlinger to blur whatever is under it ([blurPx]);
  * - the BLOCKER ([ShellLayer.Z_BLOCKER], under the sheet), full screen, one fully
  *   transparent buffer, and NOT trusted. Its whole job is Android's untrusted-touch
  *   occlusion: while it is up, every touch to the windows below — the guest, our panel —
@@ -37,11 +32,19 @@ import java.util.concurrent.atomic.AtomicInteger
  * Both appear in one transaction and go in one transaction: a blocker without its sheet
  * would be an invisible wall over the rear, so there is never one without the other.
  *
- * WHAT IS DRAWN, per frame: cleared; the [backdrop] — the rear's screencap, decoded at
- * half size and stretched back to the panel — through a RenderNode with a blur of
- * [BLUR] × progress and an alpha of PortalPull.guestGround(progress), so at rest the live
- * screen shows through and the ground comes in with the pull; the dim, as the control
- * centre's; then PortalSheetPainter, its glass bending that node and tinted by SheetTint.
+ * THE BLUR IS SURFACEFLINGER'S, OF THE LIVE REAR. The sheet layer's background blur
+ * radius (the hidden Transaction.setBackgroundBlurRadius) follows the pull, [blurPx] — so
+ * whatever is under it, the guest or our panel, is blurred as it is NOW, every frame. It
+ * used to be a screencap of the rear (~240 ms) taken as the finger landed: on a fast pull
+ * it came late or stale, and the sheet blocked the picture instead of blurring it. Measured on the 17 Pro
+ * (ro.surface_flinger.supports_background_blur=1): a shell layer with a translucent buffer
+ * blurs what is under it, smoothly ramped 0→80 over 61 frames. Where the call is missing
+ * or refused, the sheet is drawn with the dim alone, and that is logged once.
+ *
+ * WHAT IS DRAWN, per frame: cleared; the dim over the whole layer (so the blur has the
+ * whole rear to cover); then PortalSheetPainter, its glass panes unbacked — there is no
+ * picture in this process for them to bend — and tinted as clear glass over a middling
+ * ground (SheetTint with no cells), or in Glass settings' style.
  *
  * THREADING. [begin] makes both layers and shows them on the caller's thread, under the
  * instance lock, so when it says true they are there. Setters may be called from any
@@ -62,9 +65,6 @@ import java.util.concurrent.atomic.AtomicInteger
  *   out of our APK when they cannot. Never Typeface.DEFAULT.
  */
 class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
-
-    /** The backdrop as drawn and as measured: decoded once, read by every frame after. */
-    private class Backdrop(val bitmap: Bitmap, val cells: FloatArray)
 
     private class Look(val theme: PanelTheme, val style: GlassStyle?)
 
@@ -88,7 +88,6 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     }
 
     @Volatile private var progress = 0f
-    @Volatile private var backdrop: Backdrop? = null
     @Volatile private var apps = Apps(PortalAppsSnapshot.EMPTY, emptyList())
     /** The guest's own icon, for Resume; null shows the Panel glyph there instead. */
     @Volatile private var guestIcon: Bitmap? = null
@@ -103,10 +102,6 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     @Volatile private var look = Look(PanelTheme.GLASS, null)
     @Volatile private var face: PanelType.Face = face
     private val version = AtomicInteger()
-
-    /** The current screencap's id ([newShot]); a backdrop for any other is dropped. Guarded by [shotLock]. */
-    private var shot = 0
-    private val shotLock = Any()
 
     /** Volatile: [up] reads it from threads that do not hold the lock. */
     @Volatile private var thread: Thread? = null
@@ -181,8 +176,7 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     /**
      * Hides the blocker and the sheet at once — in one transaction, on this thread, so the
      * blocker is gone no later than the sheet even if the render thread is stuck — stops
-     * the render thread, and forgets the backdrop (and any screencap still on its way)
-     * and the press: every opening brings its own screencap.
+     * the render thread, and forgets the press and the DPI row.
      */
     @Synchronized
     fun end() {
@@ -201,10 +195,6 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
             runCatching { t.join(JOIN_MS) }
         }
         thread = null
-        synchronized(shotLock) {
-            shot++
-            backdrop = null
-        }
         pressed = -1
         dpiPkg = null
         progress = 0f
@@ -215,54 +205,6 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
     fun progress(p: Float) {
         progress = p.coerceIn(0f, 1f)
         version.incrementAndGet()
-    }
-
-    /**
-     * A new screencap is being taken: forgets the backdrop shown now and returns the new
-     * one's id, for [backdrop]. Any screencap taken before it is dropped when it lands.
-     */
-    fun newShot(): Int {
-        val id = synchronized(shotLock) {
-            backdrop = null
-            ++shot
-        }
-        version.incrementAndGet()
-        return id
-    }
-
-    /**
-     * Screencap [shot] (from [newShot]) as PNG [png]; null forgets it. Dropped unless
-     * [shot] is still the current one — a late screenshot stays out of the next opening.
-     * Decoded here, on the caller's thread, at half size, and measured for the glass's
-     * tint (5–15 ms): call it from the capture thread, never the getevent reader. A
-     * picture that does not decode leaves the one before.
-     */
-    fun backdrop(png: ByteArray?, shot: Int) {
-        if (shot != synchronized(shotLock) { this.shot }) return
-        val b = png?.let { decode(it) ?: return }
-        synchronized(shotLock) {
-            if (shot != this.shot) return
-            backdrop = b
-        }
-        version.incrementAndGet()
-    }
-
-    private fun decode(png: ByteArray): Backdrop? {
-        val bmp = runCatching {
-            BitmapFactory.decodeByteArray(png, 0, png.size, BitmapFactory.Options().apply { inSampleSize = 2 })
-        }.getOrNull() ?: run {
-            Log.w(TAG, "portal sheet: backdrop of ${png.size} bytes did not decode")
-            return null
-        }
-        val cells = runCatching {
-            val side = GlassLuminance.SIDE
-            val small = Bitmap.createScaledBitmap(bmp, side, side, true)
-            val px = IntArray(side * side)
-            small.getPixels(px, 0, side, 0, 0, side, side)
-            if (small !== bmp) small.recycle()
-            SheetTint.cells(px)
-        }.getOrNull()
-        return Backdrop(bmp, cells ?: FloatArray(GlassLuminance.SIDE * GlassLuminance.SIDE) { SheetTint.MIDDLING })
     }
 
     /** The pinned apps, in grid order. Their icons are decoded here, on the caller's thread. */
@@ -314,8 +256,8 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
 
     /**
      * The panel's theme and Glass settings' style (PanelConfig.theme, .glassStyle): GLASS
-     * draws glass, ORIGINAL flat; with a [style] every pane takes its tint, without one the
-     * clear glass reacts to the backdrop. Takes effect next frame.
+     * draws glass, ORIGINAL flat; with a [style] every pane takes its tint, without one
+     * clear glass. Takes effect next frame.
      */
     fun theme(theme: PanelTheme, style: GlassStyle?) {
         look = Look(theme, style)
@@ -356,114 +298,91 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         val surface = r.surface
         val painter = Renderer()
         var drawn = -1
-        // As the frame: if the hardware canvas is refused, the software one (no blur, flat buttons).
+        // As the frame: if the hardware canvas is refused, the software one (flat buttons).
         var hardware = true
-        try {
-            while (!Thread.currentThread().isInterrupted && gen == r.gen) {
-                val began = System.nanoTime()
-                val v = version.get()
-                if (v != drawn) {
-                    val canvas = if (hardware) {
-                        try { surface.lockHardwareCanvas() } catch (e: Throwable) {
-                            Log.w(TAG, "portal sheet: hardware canvas refused (${e.message}); software")
-                            hardware = false; continue
-                        }
-                    } else surface.lockCanvas(null)
-                    try {
-                        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-                        synchronized(DRAW) { painter.draw(canvas) }
-                    } finally {
-                        surface.unlockCanvasAndPost(canvas)
+        var blurred = -1
+        while (!Thread.currentThread().isInterrupted && gen == r.gen) {
+            val began = System.nanoTime()
+            val v = version.get()
+            if (v != drawn) {
+                val canvas = if (hardware) {
+                    try { surface.lockHardwareCanvas() } catch (e: Throwable) {
+                        Log.w(TAG, "portal sheet: hardware canvas refused (${e.message}); software")
+                        hardware = false; continue
                     }
-                    drawn = v
+                } else surface.lockCanvas(null)
+                val p = progress
+                try {
+                    canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+                    synchronized(DRAW) { painter.draw(canvas, p) }
+                } finally {
+                    surface.unlockCanvasAndPost(canvas)
                 }
-                val took = (System.nanoTime() - began) / 1_000_000
-                Thread.sleep(maxOf(FRAME_MS - took, 1L))
+                // With the frame it goes with, and only when it moves.
+                val radius = blurPx(p)
+                if (radius != blurred && blur(r, radius)) blurred = radius
+                drawn = v
             }
-        } finally {
-            painter.release()
+            val took = (System.nanoTime() - began) / 1_000_000
+            Thread.sleep(maxOf(FRAME_MS - took, 1L))
         }
     }
 
-    /** One run's paints, nodes and painter, so an overlapping run shares nothing mutable of ours. */
+    /** One run's paints and painter, so an overlapping run shares nothing mutable of ours. */
     private inner class Renderer {
         private val sheetPainter = PortalSheetPainter(PanelTheme.GLASS, face)
-        private val groundNode = RenderNode("portal-sheet-backdrop")
-        /** Never recorded: the glass's source when there is no ground this frame. */
-        private val none = RenderNode("portal-sheet-none")
-        private val shotPaint = Paint(Paint.FILTER_BITMAP_FLAG)
         private val dim = Paint()
         private val full = RectF(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
-        private var recordedFor: Backdrop? = null
-        private var blurFor = -1f
-
-        /** This frame's, for the pane tint below. */
-        private var cells: FloatArray? = null
         private var frameLook = look
 
         init {
+            // No picture of what is under the sheet to measure: clear glass over a middling
+            // ground, or the chosen style.
             sheetPainter.paneTint = { rect ->
-                SheetTint.of(cells, rect.left, rect.top, rect.right, rect.bottom, frameLook.theme.isGlass, frameLook.style)
+                SheetTint.of(null, rect.left, rect.top, rect.right, rect.bottom, frameLook.theme.isGlass, frameLook.style)
             }
         }
 
-        fun draw(canvas: Canvas) {
-            val p = progress
-            val b = backdrop
+        /** The sheet at [p] (read once by the loop, so the blur goes with what is drawn). */
+        fun draw(canvas: Canvas, p: Float) {
             val a = apps
             val onTop = guestOnTop
             val row = dpiPkg
             frameLook = look
-            cells = b?.cells
-            val ground = PortalPull.guestGround(p)
-            val recorder = canvas as? RecordingCanvas
-            var bent = none
-            if (b != null && ground > 0.004f) {
-                if (recorder != null) {
-                    if (recordedFor !== b) {
-                        groundNode.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
-                        val inner = groundNode.beginRecording(Panel.WIDTH, Panel.HEIGHT)
-                        try { inner.drawBitmap(b.bitmap, null, full, shotPaint) } finally { groundNode.endRecording() }
-                        recordedFor = b
-                    }
-                    val blur = blurRadius(p)
-                    // A new effect only when the radius moves: each is a small object in front
-                    // of a large native one (see GlassPainter.lensFor), and a settled sheet
-                    // keeps its own.
-                    if (blur != blurFor) {
-                        groundNode.setRenderEffect(
-                            if (blur > 0.5f) RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP) else null,
-                        )
-                        blurFor = blur
-                    }
-                    // As a whole, so the ground fades as one picture.
-                    groundNode.setAlpha(ground)
-                    recorder.drawRenderNode(groundNode)
-                    bent = groundNode
-                } else {
-                    shotPaint.alpha = (255 * ground).toInt().coerceIn(0, 255)
-                    canvas.drawBitmap(b.bitmap, null, full, shotPaint)
-                    shotPaint.alpha = 255
-                }
-            }
-            dim.color = dimColor(p, ground)
+            // Over the whole layer: SurfaceFlinger blurs under it, and the dim is the sheet's ground.
+            dim.color = dimColor(p)
             canvas.drawRect(full, dim)
             sheetPainter.theme = frameLook.theme
             sheetPainter.face = face
             sheetPainter.draw(
-                canvas, p, bent, a.icons, a.snapshot.labels,
+                canvas, p, null, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, withStrip = onTop != null, pressed = pressed,
                 dpiApp = row?.let { a.snapshot.packages.indexOf(it) } ?: -1,
                 dpiLabel = row?.let { PortalSheet.dpiLabel(dpiValues[it], dpiDefault) }.orEmpty(),
                 guestIcon = guestIcon,
             )
         }
+    }
 
-        /** Lets go of what the nodes hold (the screencap's texture among it). */
-        fun release() {
-            runCatching { groundNode.discardDisplayList() }
-            runCatching { none.discardDisplayList() }
-            recordedFor = null
+    /**
+     * Sets [r]'s sheet layer's background blur to [radius] SurfaceFlinger px. True when
+     * done; false when the layer is gone or the firmware has no such call — then never
+     * again (logged once): the sheet keeps its dim and goes without.
+     */
+    private fun blur(r: Run, radius: Int): Boolean {
+        val call = backgroundBlur ?: return false
+        if (blurBroken) return false
+        return synchronized(r) {
+            val sheet = r.sheet ?: return@synchronized false
+            try {
+                SurfaceControl.Transaction().use { t -> call.invoke(t, sheet, radius); t.apply() }
+                true
+            } catch (e: Throwable) {
+                val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+                blurBroken = true
+                Log.w(TAG, "portal sheet: no background blur (${cause.javaClass.simpleName}: ${cause.message}); the dim alone")
+                false
+            }
         }
     }
 
@@ -492,11 +411,16 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         /** After a failure, pulls do not try again for this long. */
         private const val RETRY_NS = 5_000_000_000L
 
-        /** The backdrop's blur when fully open, in panel pixels: the control centre's (RearDialView.CC_BLUR). */
-        const val BLUR = 22f
+        /**
+         * SurfaceFlinger's blur radius under the sheet when fully open, in its px. Meant to
+         * read as the control centre's 22-unit RenderEffect blur over the panel
+         * (RearDialView.CC_BLUR), but the two are not the same scale: picked from the
+         * spike's 0–80 ramp on the phone, and the number to tune by eye.
+         */
+        const val BLUR_MAX = 64
 
         /**
-         * The dim over the backdrop when fully open: the control centre's (RearDialView.CC_DIM),
+         * The dim over the blurred rear when fully open: the control centre's (RearDialView.CC_DIM),
          * repeated here rather than reached for — that one is private to the panel's view.
          */
         const val DIM = 0.25f
@@ -504,12 +428,25 @@ class ShellSheet(private val layerStack: Int, face: PanelType.Face) {
         /** Every painter in the process paints under this: they share Glass's shaders. */
         private val DRAW = Any()
 
-        /** The blur at [progress], in half pixels, so a settled sheet asks for no new effect. */
-        internal fun blurRadius(progress: Float): Float =
-            Math.round(BLUR * progress.coerceIn(0f, 1f) * 2f) / 2f
+        /** The blur at [progress], in whole SurfaceFlinger px, so a settled sheet sends no new transaction. */
+        internal fun blurPx(progress: Float): Int = Math.round(BLUR_MAX * progress.coerceIn(0f, 1f))
 
-        /** The dim's colour at [progress] over a ground [ground] in: as the panel's portal dims. */
-        internal fun dimColor(progress: Float, ground: Float): Int =
-            ((DIM * progress.coerceIn(0f, 1f) * ground.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)) shl 24
+        /** The dim's colour at [progress]: as the control centre's, coming in with the pull. */
+        internal fun dimColor(progress: Float): Int =
+            ((DIM * progress.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)) shl 24
+
+        /**
+         * The hidden Transaction.setBackgroundBlurRadius(SurfaceControl, int), looked up once
+         * as ShellLayer looks up setLayerStack; null where the firmware has none (logged once).
+         */
+        private val backgroundBlur: java.lang.reflect.Method? by lazy {
+            runCatching {
+                SurfaceControl.Transaction::class.java
+                    .getMethod("setBackgroundBlurRadius", SurfaceControl::class.java, Int::class.javaPrimitiveType)
+            }.onFailure { Log.w(TAG, "portal sheet: no setBackgroundBlurRadius on this firmware; the dim alone") }.getOrNull()
+        }
+
+        /** The call threw once: no more tries in this process. */
+        @Volatile private var blurBroken = false
     }
 }
