@@ -1335,7 +1335,17 @@ class MainActivity : ComponentActivity() {
             SettingsRows.reorderable(
                 generalRows, "  $label", canMoveUp = i > 0,
                 onMoveUp = { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) }; buildSettingsRows() },
-                onClick = { write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg)) }; buildSettingsRows() },
+                onClick = {
+                    Modal.show(
+                        Modal.builder(this).setTitle(label.trim())
+                            .setPositiveButton("Unpin") { _, _ ->
+                                write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg)) }
+                                buildSettingsRows()
+                            }
+                            .setNegativeButton("Cancel", null),
+                        danger = true,
+                    )
+                },
             )
         }
         SettingsRows.colorRow(generalRows, "Portal frame colour", config.portalFrameColor) { c ->
