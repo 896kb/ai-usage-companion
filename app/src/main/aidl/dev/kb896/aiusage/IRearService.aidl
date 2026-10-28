@@ -1,5 +1,7 @@
 package dev.kb896.aiusage;
 
+import dev.kb896.aiusage.IPortalCallback;
+
 /** Runs inside Shizuku's shell-privileged process (uid 2000). */
 interface IRearService {
     // Shizuku-reserved destroy transaction id.
@@ -94,6 +96,14 @@ interface IRearService {
     // one ("bluetooth", "data" or "wifi").
     String quickStates() = 16;
     void setQuick(String which, boolean on) = 17;
+    // App Portal. Launch [pkg] onto the rear as the guest; false if it could not be placed.
+    boolean launchGuest(String pkg, int displayId) = 18;
+    // The app focused on the front, moved to the rear as the guest; its package, or "".
+    String sendFocusedToBack(int displayId) = 19;
+    // "panel", "resume", "front" or "close" — see the spec's guest strip.
+    void guestAction(String which) = 20;
+    // Where relayed pulls, frames and guest changes go; null when the panel goes away.
+    void setPortalCallback(IPortalCallback callback) = 21;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
 
 }

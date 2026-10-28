@@ -3,6 +3,7 @@ package dev.kb896.aiusage.rear
 import android.content.Context
 import android.util.Log
 import dev.kb896.aiusage.BuildConfig
+import dev.kb896.aiusage.IPortalCallback
 import dev.kb896.aiusage.IRearService
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.SurfaceDump.Where
@@ -490,6 +491,15 @@ class RearUserService : IRearService.Stub {
         fun b(v: Boolean) = if (v) "1" else "0"
         return "${b(bt)},${b(data)},${b(wifi)}"
     }
+
+    // App Portal — placed by Task 10 of the plan; no-ops until then.
+    override fun launchGuest(pkg: String?, displayId: Int): Boolean = false
+
+    override fun sendFocusedToBack(displayId: Int): String = ""
+
+    override fun guestAction(which: String?) {}
+
+    override fun setPortalCallback(callback: IPortalCallback?) {}
 
     override fun setQuick(which: String, on: Boolean) {
         val cmd = when (which) {
