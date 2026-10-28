@@ -85,7 +85,9 @@ class RearUserService : IRearService.Stub {
         keepAlive = null
         // And with the keep-alive gone nothing would ever see a guest leave, so its frame
         // and its watcher would run on for good. The guest app itself is left where it is.
-        if (guest != null) synchronized(placing) { dropGuest("the panel was hidden") }
+        // Always under the lock, so a launch in flight finishes first and is then undone,
+        // rather than placing its guest after this looked and found none.
+        synchronized(placing) { if (guest != null) dropGuest("the panel was hidden") }
     }
 
     override fun update(payload: String) {
@@ -103,7 +105,11 @@ class RearUserService : IRearService.Stub {
 
     override fun setDozing(dozing: Boolean) {
         this.dozing = dozing
-        if (dozing) frame.hide() else if (guest?.onTop == true) frame.show()
+        // The panel's own sleep timer can run out while it sits behind a guest; that is
+        // not the rear going dark, and the guest on top keeps its frame. A rear that really
+        // is dark is seen by the keep-alive (nothing on top) and hides it there.
+        val guestOnTop = guest?.onTop == true
+        if (dozing && !guestOnTop) frame.hide() else if (!dozing && guestOnTop) frame.show()
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
 
@@ -138,6 +144,13 @@ class RearUserService : IRearService.Stub {
             update(payload)
             if (!dozing) wake(displayId)
             return
+        }
+        // About to come up over the guest, if there is one: it is no longer on top. (Not
+        // while a portal is open over it — the panel is already there for that.)
+        val g = guest
+        if (g != null && !portalOverGuest) {
+            if (markOnTop(g.task, false)) tell { it.onGuest(g.pkg, false) }
+            frame.hide()
         }
         // Straight onto the rear display first: the manifest's miui.rear.policy makes
         // HyperOS allow it (ActivityStarterImpl logs "allow app"), so the panel never
@@ -512,8 +525,10 @@ class RearUserService : IRearService.Stub {
      * top. Null when there is none. Replaced whole under [placing]; only [Guest.onTop] is
      * changed off the lock, and only by compare-and-set against the guest it was read
      * from, so a reading that predates a launch can never write the old guest back.
+     * [Guest.placed] is false until [guestPlaced]: while a launch waits to see whether the
+     * task survives its move, the keep-alive leaves the frame and the panel's strip alone.
      */
-    private data class Guest(val pkg: String, val task: Int, val onTop: Boolean)
+    private data class Guest(val pkg: String, val task: Int, val onTop: Boolean, val placed: Boolean = false)
     private val guestRef = AtomicReference<Guest?>(null)
     private var guest: Guest?
         get() = guestRef.get()
@@ -521,6 +536,8 @@ class RearUserService : IRearService.Stub {
     @Volatile private var portal: IPortalCallback? = null
     /** True from a relayed pull's start until the panel says the portal shut. */
     @Volatile private var portalOverGuest = false
+    /** When [portalOverGuest] was last set, so a portal that never reported back is let go. */
+    @Volatile private var portalAt = 0L
     private val frame by lazy { PortalFrame(rearLayerStack()) }
 
     /** [onTop] on whatever guest has [task] now; true if this call changed it. */
@@ -566,7 +583,12 @@ class RearUserService : IRearService.Stub {
     }
 
     override fun launchGuest(pkg: String?, displayId: Int): Boolean = synchronized(placing) {
-        if (displayId < 0 || pkg == null || !PACKAGE_NAME.matches(pkg)) return@synchronized false
+        if (displayId < 0 || pkg == null || !PACKAGE_NAME.matches(pkg) || !GuestTask.sendable(pkg, PKG)) {
+            return@synchronized false
+        }
+        // No panel placed means no keep-alive running, and nothing would ever see the
+        // guest leave: its frame and watcher would outlive it.
+        if (placedDisplayId < 0) { Log.w(TAG, "portal: no panel placed — not launching $pkg"); return@synchronized false }
         // Resolved before anything moves: an app with no launcher activity changes nothing.
         val component = exec("cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $pkg")
             .lines().lastOrNull()?.trim()
@@ -613,6 +635,8 @@ class RearUserService : IRearService.Stub {
 
     override fun sendFocusedToBack(displayId: Int): String = synchronized(placing) {
         if (displayId < 0) return@synchronized ""
+        // As in launchGuest: without a placed panel no keep-alive would watch the guest.
+        if (placedDisplayId < 0) { Log.w(TAG, "portal: no panel placed — not sending to back"); return@synchronized "" }
         val dump = exec("dumpsys window displays | grep -E 'mDisplayId=|mFocusedApp='")
         val pkg = FocusDump.focusedPackage(dump, 0) ?: return@synchronized ""
         val task = FocusDump.focusedTask(dump, 0) ?: return@synchronized ""
@@ -628,7 +652,8 @@ class RearUserService : IRearService.Stub {
 
     /** A guest is on top: the frame, the watcher, and the panel told. Under [placing]. */
     private fun guestPlaced(displayId: Int) {
-        if (!dozing) frame.show()
+        guest = guest?.copy(placed = true)
+        frame.show()
         watchGuest(displayId)
         tell { it.onGuest(guest?.pkg.orEmpty(), true) }
     }
@@ -664,7 +689,7 @@ class RearUserService : IRearService.Stub {
                 val g = guest ?: return
                 portalOverGuest = false
                 markOnTop(g.task, true)
-                if (!dozing) frame.show()
+                frame.show()
                 tell { it.onGuest(g.pkg, true) }
                 wake(if (placedDisplayId >= 0) placedDisplayId else Panel.DISPLAY_ID)
             }
@@ -687,7 +712,7 @@ class RearUserService : IRearService.Stub {
      * Over a guest, the rear touchscreen read as the camera's is: the bottom pull relayed
      * to the panel, and a right-edge Back sent to the guest. See EdgeGestures.
      */
-    @Volatile private var guestWatch: Process? = null
+    private val guestWatch = AtomicReference<Process?>(null)
 
     /** One screenshot, started at once when a finger lands in the pull band. */
     private inner class Shot {
@@ -709,41 +734,54 @@ class RearUserService : IRearService.Stub {
         val proc = try {
             ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
         } catch (e: Exception) { Log.w(TAG, "portal: getevent failed: ${e.message}"); return }
-        guestWatch = proc
+        guestWatch.set(proc)
         Thread {
             val touches = RearTouches(maxX, maxY)
             val gestures = EdgeGestures()
             var shot: Shot? = null
+            // Set only by a pull this thread accepted, so a refused one relays nothing.
+            var relaying = false
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
                         val e = touches.feed(line, android.os.SystemClock.uptimeMillis()) ?: continue
                         for (a in gestures.feed(e)) when (a) {
                             EdgeGestures.Action.Arm -> shot = if (guest?.onTop == true) Shot() else null
-                            EdgeGestures.Action.Disarm -> shot = null
-                            is EdgeGestures.Action.PullStart -> if (guest?.onTop == true && !keyguardShowing()) {
-                                portalOverGuest = true
-                                exec("am start --display $displayId -n $PKG/$ACTIVITY")
-                                tell { it.onPull(0, a.y) }
-                                val waiting = shot
-                                shot = null
-                                if (waiting != null) Thread {
-                                    // Never holds up the gesture: the backdrop fades in when it lands.
-                                    try { waiting.thread.join(SHOT_WAIT_MS) } catch (_: InterruptedException) { return@Thread }
-                                    waiting.png?.let { sendFrame(it) }
-                                }.apply { isDaemon = true; name = "portal-frame-send"; start() }
+                            EdgeGestures.Action.Disarm -> { shot = null; relaying = false }
+                            is EdgeGestures.Action.PullStart -> when {
+                                guest?.onTop != true || portalOverGuest -> shot = null
+                                portal == null -> { shot = null; Log.d(TAG, "portal: pull over the guest refused — no panel callback") }
+                                keyguardShowing() -> { shot = null; Log.d(TAG, "portal: pull over the guest refused — keyguard") }
+                                else -> {
+                                    portalOverGuest = true
+                                    portalAt = android.os.SystemClock.uptimeMillis()
+                                    relaying = true
+                                    exec("am start --display $displayId -n $PKG/$ACTIVITY")
+                                    tell { it.onPull(0, a.y) }
+                                    val waiting = shot
+                                    shot = null
+                                    if (waiting != null) Thread {
+                                        // Never holds up the gesture: the backdrop fades in when it lands.
+                                        try { waiting.thread.join(SHOT_WAIT_MS) } catch (_: InterruptedException) { return@Thread }
+                                        waiting.png?.let { sendFrame(it) }
+                                    }.apply { isDaemon = true; name = "portal-frame-send"; start() }
+                                }
                             }
-                            is EdgeGestures.Action.PullMove -> if (portalOverGuest) tell { it.onPull(1, a.y) }
-                            is EdgeGestures.Action.PullEnd -> if (portalOverGuest) tell { it.onPull(2, a.y) }
+                            is EdgeGestures.Action.PullMove -> if (relaying) tell { it.onPull(1, a.y) }
+                            is EdgeGestures.Action.PullEnd -> if (relaying) { relaying = false; tell { it.onPull(2, a.y) } }
                             EdgeGestures.Action.Back -> if (guest?.onTop == true && !portalOverGuest) {
                                 exec("input -d $displayId keyevent KEYCODE_BACK")
                             }
                         }
                     }
                 }
-            } catch (_: Exception) {
+            } catch (_: java.io.IOException) {
+                // The stream closing under us is how stopGuestWatch() ends this.
+            } catch (e: Exception) {
+                Log.w(TAG, "portal: guest watcher stopped", e)
             } finally {
-                if (guestWatch === proc) guestWatch = null
+                guestWatch.compareAndSet(proc, null)
+                runCatching { proc.destroy() }
             }
         }.apply { isDaemon = true; name = "portal-guest-touches"; start() }
     }
@@ -751,8 +789,7 @@ class RearUserService : IRearService.Stub {
     private var warnedNoRearTouch = false
 
     private fun stopGuestWatch() {
-        guestWatch?.let { runCatching { it.destroy() } }
-        guestWatch = null
+        guestWatch.getAndSet(null)?.let { runCatching { it.destroy() } }
     }
 
     /** The rear as a PNG, from shell's screencap — about 240 ms. Null if it fails. */
@@ -893,7 +930,10 @@ class RearUserService : IRearService.Stub {
                     // re-placing wakes it. Skipping the tick is also simply correct: the
                     // panel cannot be in the wrong place on a screen nobody can see, and
                     // the moment anything lights it again this resumes.
-                    if (dozing) continue
+                    // Except over a guest on top: the panel's own sleep timer runs out behind
+                    // it, and skipping would stop the guest being watched at all. A rear that
+                    // is really dark shows here as nothing on top (GUEST_BEHIND).
+                    if (dozing && guest?.onTop != true) continue
 
                     // The App Portal's guest first: its own rule (GuestGate), and the usual
                     // recovery below only when that rule says so.
@@ -913,8 +953,19 @@ class RearUserService : IRearService.Stub {
                             isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
                             known = known,
                         ).let { if (it != null && it == taskTop) g.pkg else it }
-                        when (GuestGate.tick(g.pkg, entry != null, entry?.display == displayId, top, PKG)) {
+                        val tick = GuestGate.tick(g.pkg, entry != null, entry?.display == displayId, top, PKG)
+                        // Mid-launch, the guest is the launch's: only a gone one is acted on,
+                        // and that is checked again under the lock, after the launch.
+                        if (!g.placed && tick != GuestGate.Tick.GUEST_GONE) continue
+                        when (tick) {
                             GuestGate.Tick.GUEST_ON_TOP -> {
+                                // The guest composited on top means no portal is over it. A
+                                // pull that started one and never heard back (refused start,
+                                // no callback, a recreated panel) is let go after a moment.
+                                if (portalOverGuest && android.os.SystemClock.uptimeMillis() - portalAt > PORTAL_STALE_MS) {
+                                    Log.i(TAG, "portal: the guest is on top — no portal over it any more")
+                                    portalOverGuest = false
+                                }
                                 // Compare-and-set against this reading: a launch or a guest
                                 // action since it was taken wins.
                                 if (!g.onTop && guestRef.compareAndSet(g, g.copy(onTop = true))) {
@@ -932,6 +983,8 @@ class RearUserService : IRearService.Stub {
                                     tell { it.onGuest(g.pkg, false) }
                                 }
                                 if (top == null || !portalOverGuest) frame.hide()
+                                // The panel back in front after the camera was: somebody closed it.
+                                if (top == PKG && cameraLaunched && cameraWasOnTop) closeCamera()
                                 continue
                             }
                             // Checked again under the lock: this reading may predate a launch
@@ -947,7 +1000,12 @@ class RearUserService : IRearService.Stub {
                             }
                             // Something else has the rear; the usual recovery below puts the
                             // panel over it, and the frame has nothing to frame.
-                            GuestGate.Tick.USUAL -> frame.hide()
+                            GuestGate.Tick.USUAL -> {
+                                frame.hide()
+                                // The usual recovery re-places, which wakes: not on a panel
+                                // asleep on purpose.
+                                if (dozing) continue
+                            }
                         }
                     }
 
@@ -1035,6 +1093,9 @@ class RearUserService : IRearService.Stub {
         val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }
         p.waitFor()
         out.trim()
+    } catch (e: InterruptedException) {
+        // Kept, so the keep-alive's next sleep sees it and the thread ends as asked.
+        Thread.currentThread().interrupt(); ""
     } catch (e: Exception) {
         Log.e(TAG, "exec failed: $cmd", e); ""
     }
@@ -1143,6 +1204,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val GUEST_SURVIVE_MS = 2_000L
         /** The longest a launch waits for an app's startup screens to settle. */
         private const val GUEST_SETTLE_LIMIT_MS = 6_000L
+        /** How long a pull's portal may go unreported before the guest on top ends it. */
+        private const val PORTAL_STALE_MS = 2_000L
         /** The longest a pull's frame waits for its screenshot before going without. */
         private const val SHOT_WAIT_MS = 1_000L
         /**
