@@ -1654,8 +1654,52 @@ class RearUserService : IRearService.Stub {
                     else -> "no back navigation given — nothing to do"
                 }
                 Log.i(TAG, "portal: Back ${o.type} for ${now.pkg} (task ${now.task}): $what, ${o.ms} ms")
+                if (o.step == PortalAction.BackStep.INVOKE) afterBack(now, o.typeCode)
             }
         }.onFailure { Log.w(TAG, "portal: Back not queued: ${it.message}") }
+    }
+
+    /**
+     * After a Back invoked on [g]: at its root the app closes its task, and the rear falls
+     * back to our panel — the guest is over, its frame and camera strip round nothing. That
+     * used to wait for the keep-alive's next tick (two seconds, seen on the phone). Now the
+     * task is looked for at PortalAction.BACK_CHECKS_MS (`am stack list`), and once it has
+     * left the rear the guest ends at once, as the keep-alive would end it. A Back the
+     * navigation says closes the task (PortalAction.backMayClose) fades the chrome out as it
+     * is invoked, in step with the system's close; if the task stays after all, back in.
+     * On a thread of its own, so the next Back does not wait for the checks.
+     */
+    private fun afterBack(g: Guest, type: Int) {
+        val closing = PortalAction.backMayClose(type)
+        if (closing) chromeHide()
+        Thread {
+            val began = android.os.SystemClock.uptimeMillis()
+            for (at in PortalAction.BACK_CHECKS_MS) {
+                val wait = began + at - android.os.SystemClock.uptimeMillis()
+                if (wait > 0) try { Thread.sleep(wait) } catch (_: InterruptedException) { return@Thread }
+                if (guest?.task != g.task) return@Thread // replaced or ended meanwhile
+                if (!guestStillOnRear(g)) {
+                    synchronized(placing) {
+                        // Checked again under the lock: a launch since may have moved things.
+                        val cur = guest
+                        if (cur?.task == g.task && !guestStillOnRear(cur)) {
+                            val ms = android.os.SystemClock.uptimeMillis() - began
+                            if (dozing) dropGuest("its task closed on Back, $ms ms after it")
+                            else endGuest("its task closed on Back, $ms ms after it")
+                        }
+                    }
+                    return@Thread
+                }
+            }
+            // Still there: a Back within the app, or one it kept (moveTaskToBack on the rear).
+            if (closing && guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
+        }.apply { isDaemon = true; name = "portal-back-check"; start() }
+    }
+
+    /** [g]'s task still on the rear — or on the front behind the keyguard, as Panel hides it. */
+    private fun guestStillOnRear(g: Guest): Boolean {
+        val at = GuestTask.byId(exec("am stack list"), g.task)?.display
+        return at == rearDisplay() || (at == 0 && g.hiddenOnFront)
     }
 
     private fun rearDisplay() = placedDisplayId.takeIf { it >= 0 } ?: Panel.DISPLAY_ID

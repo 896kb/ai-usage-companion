@@ -113,4 +113,25 @@ object PortalAction {
         guestOnTop -> AppTap.SHUT
         else -> AppTap.RESUME
     }
+    /** BackNavigationInfo's types (TYPE_*), as the navigation reports them. */
+    const val BACK_DIALOG_CLOSE = 0
+    const val BACK_RETURN_TO_HOME = 1
+    const val BACK_CROSS_ACTIVITY = 2
+    const val BACK_CROSS_TASK = 3
+    const val BACK_CALLBACK = 4
+
+    /**
+     * Whether a Back of [type] closes the guest's task: to home, or across to another task —
+     * the system plays its close as it is invoked, and the frame and the camera strip fade
+     * with it. An app's own callback (CALLBACK) may finish it at its root or may not, and
+     * says nothing in advance: the checks after it ([BACK_CHECKS_MS]) tell.
+     */
+    fun backMayClose(type: Int): Boolean = type == BACK_RETURN_TO_HOME || type == BACK_CROSS_TASK
+
+    /**
+     * After a Back invoked on the guest, when (ms) to look whether its task is still on the
+     * rear: soon, then less soon. Gone, the guest is over at once — not at the keep-alive's
+     * next tick, two seconds of a frame and a strip round nothing (seen on the phone).
+     */
+    val BACK_CHECKS_MS = listOf(120L, 300L, 700L)
 }

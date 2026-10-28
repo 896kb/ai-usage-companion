@@ -38,7 +38,11 @@ import java.lang.reflect.Method
 internal object SystemBack {
 
     /** One Back's outcome, for the log: the step taken, the navigation's type, and how long it took. */
-    data class Outcome(val step: PortalAction.BackStep?, val type: String, val focusedTask: Int, val ms: Long, val error: String? = null)
+    data class Outcome(
+        val step: PortalAction.BackStep?, val type: String, val focusedTask: Int, val ms: Long, val error: String? = null,
+        /** The navigation's type as given (PortalAction.BACK_*), -1 for none. */
+        val typeCode: Int = -1,
+    )
 
     private class Api(
         val atm: Any,
@@ -111,7 +115,8 @@ internal object SystemBack {
         try {
             info = a.start.invoke(a.atm, observer(a), adapter(a))
             val focused = info?.let { a.getFocusedTask.invoke(it) as Int } ?: -1
-            val type = info?.let { typeName(a.getType.invoke(it) as Int) } ?: "-"
+            val code = info?.let { a.getType.invoke(it) as Int } ?: -1
+            val type = if (info != null) typeName(code) else "-"
             val cb = info?.let { a.getCallback.invoke(it) }
             val step = PortalAction.backStep(info != null, focused, guestTask, cb != null)
             if (step == PortalAction.BackStep.INVOKE) {
@@ -124,7 +129,7 @@ internal object SystemBack {
                 a.onInvoked.invoke(cb)
                 done = true
             }
-            return Outcome(step, type, focused, took())
+            return Outcome(step, type, focused, took(), typeCode = code)
         } catch (e: Throwable) {
             val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
             return Outcome(null, "-", -1, took(), "${cause.javaClass.simpleName}: ${cause.message}")

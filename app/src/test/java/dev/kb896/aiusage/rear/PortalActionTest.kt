@@ -98,4 +98,22 @@ class PortalActionTest {
         // A guest the sheet does not show (none as far as it knows): launched as before.
         assertEquals(PortalAction.AppTap.LAUNCH, PortalAction.appTap("a.b", guestPkg = "a.b", guestOnTop = null))
     }
+    @Test fun `a Back to home or to another task closes the guest's task - the fade starts at once`() {
+        assertTrue(PortalAction.backMayClose(PortalAction.BACK_RETURN_TO_HOME))
+        assertTrue(PortalAction.backMayClose(PortalAction.BACK_CROSS_TASK))
+    }
+
+    @Test fun `a Back within the app, or its own callback, says nothing in advance - only the checks tell`() {
+        assertFalse(PortalAction.backMayClose(PortalAction.BACK_CALLBACK))
+        assertFalse(PortalAction.backMayClose(PortalAction.BACK_CROSS_ACTIVITY))
+        assertFalse(PortalAction.backMayClose(PortalAction.BACK_DIALOG_CLOSE))
+        assertFalse(PortalAction.backMayClose(-1))
+    }
+
+    @Test fun `after a Back the guest is looked for soon, then less soon, within a second`() {
+        val at = PortalAction.BACK_CHECKS_MS
+        assertEquals(listOf(120L, 300L, 700L), at)
+        assertTrue(at.zipWithNext().all { (a, b) -> b > a })
+        assertTrue(at.last() < 1_000)
+    }
 }
