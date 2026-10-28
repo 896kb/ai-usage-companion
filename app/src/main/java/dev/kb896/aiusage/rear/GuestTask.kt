@@ -44,6 +44,7 @@ object GuestTask {
         private var top: String? = null
         private var since = 0L
         fun feed(top: String, nowMs: Long): Boolean {
+            if (top.isEmpty()) { this.top = null; return false }
             if (top != this.top) { this.top = top; since = nowMs; return false }
             return nowMs - since >= SETTLE_MS
         }

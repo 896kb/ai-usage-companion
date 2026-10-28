@@ -61,4 +61,10 @@ class GuestTaskTest {
         val d = "  taskId=7: a.b/a.b.Main bounds=[0,0][1,1] topActivity=ComponentInfo{a.b/a.b.Main\$Inner}"
         assertEquals("a.b/a.b.Main\$Inner", GuestTask.byId(d, 7)!!.top)
     }
+
+    @Test fun `no top activity is never settled`() {
+        val s = GuestTask.Settle()
+        assertFalse(s.feed("", 0))
+        assertFalse(s.feed("", 5000))
+    }
 }
