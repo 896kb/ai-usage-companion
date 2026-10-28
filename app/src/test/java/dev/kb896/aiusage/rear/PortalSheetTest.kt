@@ -59,4 +59,15 @@ class PortalSheetTest {
         val h = PortalSheet.hit(b.centerX, b.centerY, 7, withStrip = false)
         assertEquals(false, h is Hit.Button)
     }
+
+    @Test fun `the sheet slides up as it opens, and stands in place when open`() {
+        assertEquals(dev.kb896.aiusage.Panel.HEIGHT * 0.4f, PortalSheet.slide(0f), 0.01f)
+        assertEquals(0f, PortalSheet.slide(1f), 0.01f)
+        assertEquals(true, PortalSheet.slide(0.5f) < PortalSheet.slide(0.25f))
+    }
+
+    @Test fun `an empty sheet's words stand in the middle of the full grid`() {
+        val row = PortalSheet.cells(4, withStrip = false)
+        assertEquals((row.first().left + row.last().right) / 2f, PortalSheet.gridCenterX, 0.01f)
+    }
 }

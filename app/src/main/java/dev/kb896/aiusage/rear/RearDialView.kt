@@ -370,7 +370,7 @@ class RearDialView(context: Context) : View(context) {
         val top = centreY - h / 2f
         sdfRect.set(left, top, left + w, top + h)
 
-        val node = nextNode()
+        val node = glassPainter.nextNode()
         node.setPosition(
             Math.round(sdfRect.left), Math.round(sdfRect.top),
             Math.round(sdfRect.right), Math.round(sdfRect.bottom),
@@ -383,7 +383,7 @@ class RearDialView(context: Context) : View(context) {
             // ground from where the glyph WOULD be at rest. The picture inside the glass
             // then travelled with the numeral instead of staying where the picture is,
             // which is the frozen backdrop the panes were cured of and the clock was not.
-            if (rootSpace(source)) {
+            if (glassPainter.rootSpace(source)) {
                 canvas.getMatrix().mapRect(sdfAbs, sdfRect)
                 into.translate(-sdfAbs.left, -sdfAbs.top)
             } else {
@@ -1441,8 +1441,8 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun drawPictureInPanelUnits(canvas: Canvas) {
-        // Every pane this frame gets its own node — see nodePool.
-        nodesUsed = 0
+        // Every pane this frame gets its own node — see GlassPainter.
+        glassPainter.beginFrame(width, height)
         lab?.let { drawLab(canvas, it); return }
         // The frame clock, now rather than at drawFrame: the portal and the centre read it
         // before the panel draws, and over a guest's frame the panel does not draw at all.
@@ -1510,26 +1510,14 @@ class RearDialView(context: Context) : View(context) {
             // outlined as its tiles are. Close is the one filled, in the critical red. With no
             // ground recorded this frame there is nothing true to bend, so the glass goes
             // without (an unrecorded node): the panel's scene is not what is behind it.
-            val wasBackdrop = paneBackdrop
-            paneBackdrop = if (recorder != null && ground > 0.004f && width > 0 && height > 0) ptNode else ptNoBackdrop
-            try {
-                PortalSheet.draw(
-                    canvas, pt, portalIcons, portalLabels, portalGuest, portalGuestOnTop,
-                    ink = Panel.Palette.FG, typeface = label.typeface,
-                ) { c, rect, i ->
-                    val radius = minOf(rect.width(), rect.height()) * TILE_CORNER
-                    val shape = android.graphics.Path().apply {
-                        addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW)
-                    }
-                    val close = i == 2
-                    drawCcButton(
-                        c, rect, radius, shape, on = if (close) 1f else 0f,
-                        tint = if (close) Panel.Palette.CRIT and 0x00FFFFFF else 0x00FFFFFF,
-                    ) { _, _ -> }
-                }
-            } finally {
-                paneBackdrop = wasBackdrop
-            }
+            portalPainter.theme = config.theme
+            portalPainter.draw(
+                canvas, pt,
+                backdrop = if (recorder != null && ground > 0.004f && width > 0 && height > 0) ptNode else ptNoBackdrop,
+                icons = portalIcons, labels = portalLabels,
+                guestOnTop = portalGuestOnTop, withStrip = portalGuest != null,
+                rootWidth = width, rootHeight = height,
+            )
             // Another frame while it settles or the guest's frame fades in; a finger's
             // drag asks for its own with every move.
             if (ptAt != 0L || (ptOverGuest && shot != null && frameNowMs - ptBackdropAt < PORTAL_FADE_MS)) animating = true
@@ -1787,31 +1775,11 @@ class RearDialView(context: Context) : View(context) {
     /** The ground's colour, held between being worked out and being drawn. */
     private var groundColor = 0
 
-    /**
-     * Render nodes for this frame's panes, handed out in order and reused next frame.
-     *
-     * ONE SHARED NODE IS A BUG, and a quiet one. `drawRenderNode` puts a REFERENCE in the
-     * display list rather than a copy, so a node recorded again before the frame is
-     * rasterised shows its last contents at its last position — everywhere it was drawn.
-     * With one node and six bars, five of the six vanished and the sixth appeared six
-     * times in the same place. It was there from the first pane too and simply could not
-     * be seen: two notification cards over a black panel refract black either way.
-     *
-     * Nodes are cheap to keep and expensive to churn, so the pool grows to the busiest
-     * frame and then stops.
-     */
-    private val nodePool = ArrayList<android.graphics.RenderNode>(16)
-    private var nodesUsed = 0
+    /** This view's panes: their node pool and lenses. See GlassPainter. */
+    private val glassPainter = GlassPainter()
 
     /** Whether the scene is mid-recording, and therefore not something to sample. */
     private var recordingScene = false
-
-    private fun nextNode(): android.graphics.RenderNode {
-        if (nodesUsed == nodePool.size) {
-            nodePool.add(android.graphics.RenderNode("glass-${nodePool.size}"))
-        }
-        return nodePool[nodesUsed++]
-    }
 
     /**
      * The three things drawn over the panel rather than in it.
@@ -1957,7 +1925,7 @@ class RearDialView(context: Context) : View(context) {
         backdrop: android.graphics.RenderNode,
         body: (Canvas) -> Unit,
     ): android.graphics.RenderNode {
-        val out = nextNode()
+        val out = glassPainter.nextNode()
         out.setRenderEffect(null)
         out.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
         val into = out.beginRecording(Panel.WIDTH, Panel.HEIGHT)
@@ -1979,90 +1947,26 @@ class RearDialView(context: Context) : View(context) {
     private var noticeSlideHeld = 0f
 
     /**
-     * Draw a rounded rectangle as a piece of glass over the panel.
-     *
-     * Returns false when it cannot — no scene to sample, or a canvas with no render nodes
-     * — so the caller can fall back to drawing the element flat rather than to drawing
-     * nothing at all. Every pane on this panel is something the user needs to see.
-     *
-     * WHAT ACTUALLY HAPPENS, in order: the scene is drawn into a node the size of the
-     * pane and shifted so the pane's own top-left is that node's origin; the node is given
-     * a blur and then the refraction, so the bending acts on softened content rather than
-     * on hard edges; and the result is drawn clipped to the pane's shape. Then a tint for
-     * body and a lit rim for an edge, because a lens over a mostly-black panel is
-     * otherwise invisible — see Glass.
+     * Draw a rounded rectangle as a piece of glass over the panel: see GlassPainter.drawPane,
+     * whose parameters these are. [source] is what it bends, the panel unless it is given
+     * something of its own.
      */
     private fun drawGlassPane(
         canvas: Canvas,
         rect: android.graphics.RectF,
         radius: Float,
         tint: Int = Glass.TINT,
-        /**
-         * The shape to fill, when it is not the rounded rectangle itself.
-         *
-         * For a ring or a partly-filled bar, [rect] is still what the lens is computed
-         * against — it is the pane's extent — but only part of it is glass. A ring's
-         * annulus cannot be expressed as a rounded rect, and giving one its bounding box
-         * would put a pane of glass across both camera lenses.
-         */
         shape: android.graphics.Path? = null,
-        /**
-         * Whether to bend the backdrop as well as blur and tint it.
-         *
-         * Off for shapes that are not rounded rectangles. The lens is a rounded-rect
-         * distance field — that is the whole of how it knows where its edges are — so on
-         * an arc it bends toward edges the shape does not have, and the result is a smear
-         * rather than a lens. Blur and tint alone still read as glass; they are most of
-         * what glass over a dark panel does anyway.
-         */
         refract: Boolean = true,
-        /** The lit rim. Off where the shape's own outline is not the pane's outline. */
         rim: Boolean = true,
-        /**
-         * What the pane bends, when it is not the whole panel.
-         *
-         * THE REFERENCE SLIDER DOES EXACTLY THIS. Its track is published as its own
-         * backdrop layer and the thumb's backdrop is that layer combined with the page
-         * behind — because a thumb is not lensing the wallpaper, it is lensing the track
-         * it is riding. Which also solves the ordering problem here: a bar is drawn inside
-         * the scene recording, so it can never sample the scene, but it can perfectly well
-         * sample a node holding its own track.
-         */
         source: android.graphics.RenderNode = paneBackdrop,
-        /**
-         * The HELD look, for thumbs.
-         *
-         * In the reference a thumb at rest is blurred and barely lensed; pressed and held,
-         * the blur goes to nothing and the lens comes fully on with chromatic aberration
-         * and an ambient rim. That is the state borrowed here, at rest, because these
-         * thumbs are never actually held — they are readings. One that permanently looked
-         * mid-gesture would be a lie; one that permanently looks like the control's most
-         * solid state is simply what the control is.
-         */
         held: Boolean = false,
-        /** How hard this pane splits light. See Glass.ABERRATION. */
         aberration: Float = Glass.ABERRATION,
     ): Boolean {
-        val w = rect.width()
-        val h = rect.height()
-        if (w < 1f || h < 1f) return false
         // The glass chosen in Glass settings, when it has been: one tint for every piece,
         // reacting as asked. Until then each piece keeps the tint it was given.
         @Suppress("NAME_SHADOWING")
         val tint = config.glassStyle?.let { styledTint(it, rect) } ?: tint
-
-        // GLASS WITH NOTHING BEHIND IT IS STILL GLASS, and this is the common case rather
-        // than a failure. Only the OVERLAYS can bend the panel: the scene is recorded and
-        // then drawn, so anything drawn inside that recording — the bars, the rings, the
-        // discs behind the transport — is being drawn INTO the very node a pane would have
-        // to sample, and it does not exist yet.
-        //
-        // Rather than dropping those back to flat paint, they get what a pane looks like
-        // over nothing: a translucent body and a lit edge. That is not a consolation
-        // prize — it is most of what glass over a dark panel does anyway, since bending
-        // black gives you black. The refraction is worth having where there is something
-        // to bend, and that is exactly where it happens: the notification cards and the
-        // unlock slider, both overlays, both lying over the readout and the record.
         // A NODE INSIDE THE SCENE CANNOT SAMPLE THE SCENE. That is a cycle — the node is
         // in the scene's display list and the scene would be in its — and the renderer
         // does not detect it: it walks the tree to prepare it and recurses until the
@@ -2074,261 +1978,9 @@ class RearDialView(context: Context) : View(context) {
         // when they have none. That fallback is the trap, so it is caught here rather
         // than at four call sites: no layer means no lens, and no lens is a look this
         // already has.
-        val recorder = canvas as? android.graphics.RecordingCanvas
-        if (recorder == null || !source.hasDisplayList() ||
-            (source === sceneNode && recordingScene)
-        ) {
-            return drawUnbackedGlass(canvas, rect, radius, tint, shape, rim)
-        }
-
-        val paneNode = nextNode()
-        paneNode.setPosition(
-            Math.round(rect.left), Math.round(rect.top),
-            Math.round(rect.right), Math.round(rect.bottom),
-        )
-        val pane = paneNode.beginRecording()
-        try {
-            // The backdrop, shifted so that the pane's top-left is this node's origin —
-            // which is the coordinate space the shader works in.
-            //
-            // WHOSE top-left, though. A pane's rect is in whatever space the canvas is in
-            // when it is drawn, and its source may be in a different one. The overlay
-            // panes are drawn at the top level, so the two agree and this never mattered;
-            // a pane drawn INSIDE a transform does not, and the difference is not subtle.
-            //
-            // An account card is drawn inside the page scroll. Shifted by its local rect,
-            // it samples the ground at the position it WOULD have without the scroll — so
-            // the picture inside the glass travels with the card instead of staying where
-            // the picture is, and the card looks like a photograph pasted into it rather
-            // than a window onto one. It stops being glass the moment anything moves.
-            //
-            // Only for the root-space sources. A local backdrop is recorded in the pane's
-            // own space by definition, and mapping it would break the thing that works.
-            //
-            // ASKED OF THE NODE, not listed by name. This named the two root-space nodes
-            // it knew about, and missed the ones the overlay pass builds: every layer in
-            // that chain covers the whole panel at the origin exactly as the scene does —
-            // see layered — so a pane drawn inside a transform and sampling one of THOSE
-            // had the same frozen backdrop this branch exists to prevent. A node that
-            // spans the panel from its origin is root-space whatever it is called.
-            if (rootSpace(source)) {
-                canvas.getMatrix().mapRect(paneAbs, rect)
-                pane.translate(-paneAbs.left, -paneAbs.top)
-            } else {
-                pane.translate(-rect.left, -rect.top)
-            }
-            pane.drawRenderNode(source)
-        } finally {
-            paneNode.endRecording()
-        }
-
-        val short = minOf(w, h)
-        // ONE LENS, EVERY PANE — see Glass. Sized as a fraction of the short side and
-        // then capped, because a fraction alone is right for a twenty-unit thumb and a
-        // fisheye on a card six times that.
-        //
-        // THE PLAIN LENS WHEN NOTHING IS BEING SPLIT. The dispersion shader takes seven
-        // samples of the backdrop per pixel and, with the aberration at zero, they all
-        // land on the same coordinate — the same answer for seven times the sampling, on
-        // an always-on display that redraws at 120Hz whenever anything moves.
-
-        // Blur FIRST, then bend. createChainEffect applies its second argument first, so
-        // this reads backwards and is the right way round: bending a sharp backdrop
-        // smears whatever it lands on into a streak, where bending a soft one is a lens.
-        // CLEAR GLASS, NEVER FROSTED. There was a blur under the lens at first, which is
-        // what the reference does to a thumb at REST — and it is the wrong half of that
-        // component to have copied. A blur is what a surface does when you cannot see
-        // through it; this panel's whole appeal is that you can, and the readout bending
-        // through a notification card is worth more than the card looking soft. The
-        // reference itself fades the blur out the moment its thumb is held, which is the
-        // state everything here is drawn in.
-        //
-        // It also costs nothing to remove: the blur was a second full-size pass over
-        // every pane, on a display that redraws at 120Hz while anything is moving.
-        paneNode.setRenderEffect(if (refract) lensFor(w, h, radius, aberration) else null)
-
-        canvas.save()
-        if (shape != null) {
-            canvas.clipPath(shape)
-        } else {
-            paneClip.rewind()
-            paneClip.addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW)
-            canvas.clipPath(paneClip)
-        }
-        recorder.drawRenderNode(paneNode)
-
-        // Body. Glass is not clear, and a wholly clear pane on a panel that is largely
-        // black is an invisible one — this is what a notification's text is read against.
-        // A pane with no body draws none. Thumbs and buttons are held glass — see
-        // Glass.THUMB_TINT — and painting a transparent rectangle over the lens is not
-        // free on a display that redraws at 120Hz.
-        if (tint ushr 24 != 0) {
-            panePaint.style = Paint.Style.FILL
-            panePaint.shader = null
-            panePaint.color = tint
-            if (shape != null) canvas.drawPath(shape, panePaint)
-            else canvas.drawRoundRect(rect, radius, radius, panePaint)
-        }
-        canvas.restore()
-
-        if (!rim) return true
-
-        // The rim, over the top and outside the clip so it is not cut in half by it.
-        //
-        // AMBIENT when held: lit on one side and shaded on the other, with no colour of
-        // its own. That is the difference between a sheet of glass, which has an edge,
-        // and a bevelled object, which has a lit side.
-        val edge = if (held) Glass.ambient else Glass.highlight
-        edge.setFloatUniform("size", w, h)
-        edge.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-        if (!held) edge.setColorUniform("color", Glass.LIGHT_COLOR)
-        edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
-        edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
-        panePaint.shader = edge
-        panePaint.alpha = if (held) (255 * Glass.AMBIENT_ALPHA).toInt() else 255
-        panePaint.style = Paint.Style.STROKE
-        val rw = if (held) Glass.THUMB_RIM_WIDTH else Glass.RIM_WIDTH
-        panePaint.strokeWidth = rw
-        if (shape != null) {
-            // Stroked round the shape itself, so a pane with a corner of its own — the
-            // notification card's, which follows the display's curve — is edged where it
-            // actually is rather than round the rounded rectangle it is not.
-            //
-            // THE SHADER MOVES, NOT THE CANVAS. The rim is computed in the pane's own
-            // space (0..w, 0..h) while the path is in the panel's, so translating the
-            // canvas would move both and change nothing. A local matrix on the shader
-            // offsets one without the other.
-            rimShift.setTranslate(rect.left, rect.top)
-            edge.setLocalMatrix(rimShift)
-            canvas.drawPath(shape, panePaint)
-            edge.setLocalMatrix(null)
-        } else {
-            canvas.save()
-            canvas.translate(rect.left, rect.top)
-            canvas.drawRoundRect(
-                rw / 2f, rw / 2f, w - rw / 2f, h - rw / 2f, radius, radius, panePaint,
-            )
-            canvas.restore()
-        }
-        panePaint.shader = null
-        panePaint.alpha = 255
-        panePaint.style = Paint.Style.FILL
-        return true
+        val sampled = source.takeUnless { it === sceneNode && recordingScene }
+        return glassPainter.drawPane(canvas, rect, radius, tint, shape, refract, rim, sampled, held, aberration)
     }
-
-    /**
-     * A pane with no backdrop to sample: body and edge, no lens.
-     *
-     * Returns false only on a canvas that cannot draw the rim's shader at all, which
-     * leaves the caller to paint the element flat — a bar nobody can see is worse than a
-     * bar that is not glass.
-     */
-    private fun drawUnbackedGlass(
-        canvas: Canvas,
-        rect: android.graphics.RectF,
-        radius: Float,
-        tint: Int,
-        shape: android.graphics.Path?,
-        rim: Boolean,
-    ): Boolean {
-        if (!canvas.isHardwareAccelerated) return false
-        if (tint ushr 24 != 0) {
-            panePaint.shader = null
-            panePaint.style = Paint.Style.FILL
-            panePaint.color = tint
-            if (shape != null) canvas.drawPath(shape, panePaint)
-            else canvas.drawRoundRect(rect, radius, radius, panePaint)
-        }
-        if (!rim) return true
-
-        val edge = Glass.highlight
-        edge.setFloatUniform("size", rect.width(), rect.height())
-        edge.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-        edge.setColorUniform("color", Glass.LIGHT_COLOR)
-        edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
-        edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
-        canvas.save()
-        canvas.translate(rect.left, rect.top)
-        panePaint.shader = edge
-        panePaint.style = Paint.Style.STROKE
-        panePaint.strokeWidth = Glass.RIM_WIDTH
-        canvas.drawRoundRect(
-            Glass.RIM_WIDTH / 2f, Glass.RIM_WIDTH / 2f,
-            rect.width() - Glass.RIM_WIDTH / 2f, rect.height() - Glass.RIM_WIDTH / 2f,
-            radius, radius, panePaint,
-        )
-        canvas.restore()
-        panePaint.shader = null
-        panePaint.style = Paint.Style.FILL
-        return true
-    }
-
-    /**
-     * The lens for a pane of this shape, built once and kept.
-     *
-     * THIS WAS THE LEAK. RenderEffect.createRuntimeShaderEffect was called per pane per
-     * frame — fifteen panes at up to 120Hz, so getting on for two thousand a second. Each
-     * one is a tiny Java object in front of a large native allocation, which is the worst
-     * shape an object can have: the collector sees almost nothing worth collecting and
-     * lets them accumulate, so the native heap climbed by roughly a hundred megabytes
-     * every fifteen seconds and the phone got hot holding them.
-     *
-     * It was never necessary. Every uniform the lens takes — size, corner radii,
-     * refraction height and amount, aberration — is a function of the pane's SHAPE. None
-     * of them is a function of where it is. A bar's thumb is the same lens at every
-     * reading; it simply gets drawn somewhere else. So one effect per distinct shape is
-     * all this ever needed, and in a steady frame every lookup is a hit.
-     *
-     * Quantised to whole units because a lens a fraction of a unit wider is the same lens
-     * to look at, and because a swelling thumb would otherwise mint a new one per frame
-     * of its own animation — which is the leak again, wearing a hat.
-     */
-    private fun lensFor(
-        w: Float,
-        h: Float,
-        radius: Float,
-        aberration: Float,
-    ): android.graphics.RenderEffect {
-        val key = (Math.round(w).toLong() shl 40) or
-            (Math.round(h).toLong() shl 24) or
-            (Math.round(radius).toLong() shl 8) or
-            Math.round(aberration * 8f).toLong().coerceIn(0L, 255L)
-        lensCache[key]?.let { return it }
-
-        val short = minOf(w, h)
-        // ONE LENS, EVERY PANE — see Glass. Sized as a fraction of the short side and
-        // then capped, because a fraction alone is right for a twenty-unit thumb and a
-        // fisheye on a card six times that.
-        //
-        // THE PLAIN LENS WHEN NOTHING IS BEING SPLIT. The dispersion shader takes seven
-        // samples of the backdrop per pixel and, with the aberration at zero, they all
-        // land on the same coordinate — the same answer for seven times the sampling, on
-        // an always-on display that redraws at 120Hz whenever anything moves.
-        val shader = if (aberration > 0f) Glass.dispersion else Glass.refraction
-        shader.setFloatUniform("size", w, h)
-        shader.setFloatUniform("offset", 0f, 0f)
-        shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
-        shader.setFloatUniform(
-            "refractionHeight", minOf(short * Glass.HEIGHT, Glass.HEIGHT_MAX),
-        )
-        // Negative: the library negates the amount on the way in, and the sign is which
-        // way the backdrop is pushed. Positive here turns a lens into a pinch.
-        shader.setFloatUniform(
-            "refractionAmount", -minOf(short * Glass.AMOUNT, Glass.AMOUNT_MAX),
-        )
-        shader.setFloatUniform("depthEffect", Glass.DEPTH)
-        if (aberration > 0f) shader.setFloatUniform("chromaticAberration", aberration)
-
-        val lens = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-        // A CEILING, and a blunt one. The panel has a few dozen distinct pane shapes in
-        // normal use; anything past that is a control mid-animation minting shapes it
-        // will not ask for again, and holding those is the same mistake in slow motion.
-        if (lensCache.size >= LENS_CACHE_MAX) lensCache.clear()
-        lensCache[key] = lens
-        return lens
-    }
-
-    private val lensCache = HashMap<Long, android.graphics.RenderEffect>()
 
     /**
      * Magnify the panel through a body of liquid, clipped to the liquid's own shape.
@@ -2358,7 +2010,7 @@ class RearDialView(context: Context) : View(context) {
         // sample the scene. See drawGlassPane.
         if (!source.hasDisplayList() || (source === sceneNode && recordingScene)) return false
 
-        val node = nextNode()
+        val node = glassPainter.nextNode()
         node.setPosition(
             Math.round(rect.left), Math.round(rect.top),
             Math.round(rect.right), Math.round(rect.bottom),
@@ -2389,7 +2041,7 @@ class RearDialView(context: Context) : View(context) {
         shader.setFloatUniform("size", w, h)
         shader.setFloatUniform("zoom", zoom)
         val effect = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-        if (magnifierCache.size >= LENS_CACHE_MAX) magnifierCache.clear()
+        if (magnifierCache.size >= GlassPainter.LENS_CACHE_MAX) magnifierCache.clear()
         magnifierCache[key] = effect
         return effect
     }
@@ -2424,7 +2076,7 @@ class RearDialView(context: Context) : View(context) {
     ): android.graphics.RenderNode? {
         val recorder = canvas as? android.graphics.RecordingCanvas ?: return null
         if (bounds.width() < 1f || bounds.height() < 1f) return null
-        val backdropNode = nextNode()
+        val backdropNode = glassPainter.nextNode()
         // Cleared, because this node may have been a PANE last frame and a render effect
         // outlives the recording. A track drawn through a leftover refraction is a track
         // that bends for no reason.
@@ -2444,7 +2096,6 @@ class RearDialView(context: Context) : View(context) {
         return backdropNode
     }
 
-    private val paneClip = android.graphics.Path()
     private val panePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /**
@@ -2717,7 +2368,7 @@ class RearDialView(context: Context) : View(context) {
             // Room for the feathered edge on both sides — see the shader.
             val outer = r.radius + half + RING_FEATHER
             ringRect.set(r.cx - outer, r.cy - outer, r.cx + outer, r.cy + outer)
-            val node = nextNode()
+            val node = glassPainter.nextNode()
             node.setPosition(
                 Math.round(ringRect.left), Math.round(ringRect.top),
                 Math.round(ringRect.right), Math.round(ringRect.bottom),
@@ -2788,7 +2439,7 @@ class RearDialView(context: Context) : View(context) {
         shader.setColorUniform("tint", tint)
         val effect =
             android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-        if (ringLensCache.size >= LENS_CACHE_MAX) ringLensCache.clear()
+        if (ringLensCache.size >= GlassPainter.LENS_CACHE_MAX) ringLensCache.clear()
         ringLensCache[key] = effect
         return effect
     }
@@ -2797,14 +2448,6 @@ class RearDialView(context: Context) : View(context) {
 
     private val cardRect = android.graphics.RectF()
     private val extrasRect = android.graphics.RectF()
-
-    /** A pane's rect in root coordinates, for sampling a root-space backdrop. */
-    private val paneAbs = android.graphics.RectF()
-
-    /** Whether [node] covers the whole panel from its origin, and so is in root space. */
-    private fun rootSpace(node: android.graphics.RenderNode): Boolean =
-        node.left == 0 && node.top == 0 &&
-            node.width == width && node.height == height
 
     private val discRect = android.graphics.RectF()
     private val barRect = android.graphics.RectF()
@@ -8544,7 +8187,6 @@ class RearDialView(context: Context) : View(context) {
 
     private val lockThumb = android.graphics.RectF()
     private val noticeShape = android.graphics.Path()
-    private val rimShift = android.graphics.Matrix()
 
     /**
      * The band the media row occupies: the artwork slot, plus the corner the close
@@ -9634,7 +9276,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private fun quickTileShape(i: Int, rect: RectF): android.graphics.Path {
-        val base = minOf(rect.width(), rect.height()) * TILE_CORNER
+        val base = minOf(rect.width(), rect.height()) * CcButton.CORNER
         val screen = (cornerRadius() - ChargeOverlay.MARGIN).coerceAtLeast(base)
         // top-left, top-right, bottom-right, bottom-left — x and y for each.
         val tr = if (i == 1) screen else base
@@ -9654,7 +9296,7 @@ class RearDialView(context: Context) : View(context) {
             // Silent is the app's own; the others need Shizuku, and are faint without it.
             val usable = i == 0 || quickReachable
             val on = if (usable) quickShown(i) else 0f
-            drawCcButton(canvas, rect, minOf(rect.width(), rect.height()) * TILE_CORNER, shape, on) { c, color ->
+            drawCcButton(canvas, rect, minOf(rect.width(), rect.height()) * CcButton.CORNER, shape, on) { c, color ->
                 extras.color = if (usable) color else (color and 0x00FFFFFF) or (0x40 shl 24)
                 val h = minOf(rect.width(), rect.height()) * 0.34f
                 drawIcon(c, quickIcons[i], rect.centerX() - h / 2f, rect.centerY() - h / 2f, h, smooth = config.theme.isGlass)
@@ -9887,8 +9529,17 @@ class RearDialView(context: Context) : View(context) {
     private var ptLastY = 0f
     private var ptLastAt = 0L
     private val ptNode = android.graphics.RenderNode("app-portal")
-    /** Never recorded: the portal's glass when it has no ground this frame — see drawGlassPane. */
+    /** Never recorded: the portal's glass when it has no ground this frame — see GlassPainter.drawPane. */
     private val ptNoBackdrop = android.graphics.RenderNode("app-portal-none")
+    /**
+     * The portal's sheet, painted as the shell paints it. Its clear panes take the tint the
+     * panel's own would: Glass settings' style, or the clear glass reacting to the panel.
+     */
+    private val portalPainter by lazy {
+        PortalSheetPainter(config.theme, label.typeface).apply {
+            paneTint = { r -> config.glassStyle?.let { styledTint(it, r) } ?: clearReactive(r) }
+        }
+    }
     private val ptShotPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     /**
      * This opening came over a guest app (a relayed pull), so shutting it must hand the
@@ -10229,10 +9880,8 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /**
-     * One of the control centre's buttons, [on] 0 to 1 (eased). Under GLASS a pane, a white
-     * tint coming in with "on" and its mark from faint to white. Under ORIGINAL a white
-     * outline, and with "on" a white fill coming in and its mark turning to the background's
-     * colour to stand out of it. [mark] draws the mark in the colour it is given.
+     * One of the control centre's buttons, [on] 0 to 1 (eased): its pane of glass under
+     * GLASS, and over it what CcButton draws. [mark] draws the mark in the colour it is given.
      */
     private fun drawCcButton(
         canvas: Canvas, rect: RectF, radius: Float, shape: android.graphics.Path, on: Float,
@@ -10240,27 +9889,9 @@ class RearDialView(context: Context) : View(context) {
         tint: Int = 0x00FFFFFF,
         mark: (Canvas, Int) -> Unit,
     ) {
-        val white = 0x00FFFFFF
-        val fill = tint and 0x00FFFFFF
         val glassy = config.theme.isGlass && drawGlassPane(canvas, rect, radius, clearReactive(rect), shape = shape)
-        if (glassy) {
-            sunPaint.style = Paint.Style.FILL
-            sunPaint.color = fill or ((CHARGE_LIQUID_ALPHA * on).toInt() shl 24)
-            canvas.drawPath(shape, sunPaint)
-            val alpha = Math.round(0x59 + (0xFF - 0x59) * on)
-            mark(canvas, white or (alpha shl 24))
-            return
-        }
-        sunPaint.style = Paint.Style.FILL
-        sunPaint.color = fill or ((0xFF * on).toInt().coerceIn(0, 255) shl 24)
-        canvas.drawPath(shape, sunPaint)
-        sunPaint.style = Paint.Style.STROKE
-        sunPaint.strokeWidth = CHARGE_RIM
-        sunPaint.color = fill or (0xFF shl 24)
-        canvas.drawPath(shape, sunPaint)
-        sunPaint.style = Paint.Style.FILL
-        val bg = colorFor("bg", config.background or (0xFF shl 24))
-        mark(canvas, RampColor.lerp(0xFFFFFFFF.toInt(), bg, on))
+        val bg = if (glassy) 0 else colorFor("bg", config.background or (0xFF shl 24))
+        CcButton.drawBody(canvas, shape, on, tint, glassy, bg, sunPaint, mark)
     }
 
     /**
@@ -13702,9 +13333,6 @@ class RearDialView(context: Context) : View(context) {
         private const val VINYL_WOBBLE_MIN = 0.12f
         private const val VINYL_WOBBLE_MAX = 0.34f
 
-        /** How many distinct pane shapes to keep lenses for. See lensFor. */
-        private const val LENS_CACHE_MAX = 96
-
 
         /** The overlay groups, in the order they stack over the panel. See drawOverlays. */
         private const val GROUP_RINGS = 4
@@ -13857,7 +13485,7 @@ class RearDialView(context: Context) : View(context) {
         // what survives a wash — and a cell you can read the panel through looks like a
         // tint laid over the panel rather than an object in front of it.
         private const val CHARGE_GROUND_ALPHA = 0xF7
-        private const val CHARGE_LIQUID_ALPHA = 0x66
+        internal const val CHARGE_LIQUID_ALPHA = 0x66
         private const val CHARGE_RIM_ALPHA = 0x99
 
         /** Drops are drawn this much larger than they are simulated, so they merge. */
@@ -13872,7 +13500,7 @@ class RearDialView(context: Context) : View(context) {
 
         /** How far the core is pushed toward white. */
         private const val SURGE_WHITEN = 0.72f
-        private const val CHARGE_RIM = 2f
+        internal const val CHARGE_RIM = 2f
 
         private const val NOTICE_MS = 5_000L
 
@@ -14053,8 +13681,6 @@ class RearDialView(context: Context) : View(context) {
         /** How long a new brightness reading takes to pour in, and the button's colour to change. */
         private const val BRIGHT_POUR_MS = 600f
         private const val AUTO_FADE_MS = 250f
-        /** A tile's corner, as a share of its shorter side: rounded, never a circle. */
-        private const val TILE_CORNER = 0.22f
         /** The contents slide this share of the pull's travel, and fade in from this far into it. */
         private const val CC_SLIDE = 0.5f
         private const val CC_FADE_FROM = 0.5f
