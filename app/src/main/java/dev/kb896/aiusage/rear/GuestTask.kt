@@ -13,7 +13,7 @@ object GuestTask {
     data class Entry(val task: Int, val pkg: String, val display: Int, val top: String)
 
     private val DISPLAY = Regex("""\bdisplay=(\d+)""")
-    private val TASK = Regex("""taskId=(\d+): ([^/\s]+)/\S+.*?topActivity=ComponentInfo\{([^}]+)\}""")
+    private val TASK = Regex("""taskId=(\d+): ([^/\s]+)/\S+(?:.*?topActivity=ComponentInfo\{([^}]+)\})?""")
 
     fun entries(stackList: String): List<Entry> {
         val out = mutableListOf<Entry>()
@@ -21,7 +21,7 @@ object GuestTask {
         for (line in stackList.lineSequence()) {
             val t = TASK.find(line)
             if (t != null) {
-                out += Entry(t.groupValues[1].toInt(), t.groupValues[2], display, t.groupValues[3])
+                out += Entry(t.groupValues[1].toInt(), t.groupValues[2], display, t.groupValues[3])  // "" while no top activity yet
                 continue
             }
             DISPLAY.find(line)?.let { display = it.groupValues[1].toInt() }
@@ -29,6 +29,7 @@ object GuestTask {
         return out
     }
 
+    /** The first match in dump order (top of the stack first). */
     fun taskOf(stackList: String, pkg: String): Entry? = entries(stackList).firstOrNull { it.pkg == pkg }
 
     fun byId(stackList: String, task: Int): Entry? = entries(stackList).firstOrNull { it.task == task }
@@ -38,7 +39,7 @@ object GuestTask {
 
     private val NEVER = setOf("com.miui.home", "com.android.systemui", "com.android.launcher3")
 
-    /** True once [feed] has seen the same top activity for [SETTLE_MS]. */
+    /** Per guest task (make a new one per launch); expects a monotonic clock. True once [feed] has seen the same top activity for [SETTLE_MS]. */
     class Settle {
         private var top: String? = null
         private var since = 0L

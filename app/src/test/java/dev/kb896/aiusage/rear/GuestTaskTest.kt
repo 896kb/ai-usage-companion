@@ -44,4 +44,21 @@ class GuestTaskTest {
         assertFalse(GuestTask.sendable("dev.kb896.aiusage", "dev.kb896.aiusage"))
         assertTrue(GuestTask.sendable("org.mozilla.firefox", "dev.kb896.aiusage"))
     }
+
+    @Test fun `a task line with no top activity yet is still the task`() {
+        val d = "  configuration={x display=0 y}\n  taskId=7: a.b/a.b.Main bounds=[0,0][1,1] userId=0 visible=true"
+        val e = GuestTask.byId(d, 7)!!
+        assertEquals("a.b", e.pkg)
+        assertEquals("", e.top)
+    }
+
+    @Test fun `a task line before any configuration line has no display`() {
+        val d = "  taskId=7: a.b/a.b.Main bounds=[0,0][1,1] topActivity=ComponentInfo{a.b/a.b.Main}"
+        assertEquals(-1, GuestTask.byId(d, 7)!!.display)
+    }
+
+    @Test fun `an activity name with a dollar sign is read`() {
+        val d = "  taskId=7: a.b/a.b.Main bounds=[0,0][1,1] topActivity=ComponentInfo{a.b/a.b.Main\$Inner}"
+        assertEquals("a.b/a.b.Main\$Inner", GuestTask.byId(d, 7)!!.top)
+    }
 }
