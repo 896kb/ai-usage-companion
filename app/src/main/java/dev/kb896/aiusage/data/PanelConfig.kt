@@ -604,6 +604,14 @@ data class PanelConfig(
     /** Appearance per account, by index. Short lists are fine — a missing entry is
      *  the same as an entry of all-nulls: use the built-ins. */
     val accounts: List<AccountStyle> = listOf(AccountStyle(), AccountStyle()),
+    /**
+     * App Portal: the apps pinned to the portal's grid on the back, in order, by package.
+     * Packages rather than components: the launcher activity is asked for at launch time,
+     * so an app that renames its main activity in an update still opens.
+     */
+    val portalApps: List<String> = emptyList(),
+    /** The portal frame's colour (see PortalFrame). Default the original Electric Border's green. */
+    val portalFrameColor: Int = 0xFF28FF85.toInt(),
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */
