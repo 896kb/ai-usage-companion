@@ -35,6 +35,13 @@ import dev.kb896.aiusage.Panel
  *
  * Drawn through Surface.lockHardwareCanvas on a thread of its own at [FRAME_MS], halving
  * its pace if it runs over [BUDGET_MS] (see ElectricBorder for where the budget went).
+ *
+ * FADED, NEVER CUT. [show] and [hide] turn a FrameFade; the render thread sets the layer's
+ * alpha to [ALPHA] times its level every frame it changes, so the bolt keeps moving while it
+ * fades. A hide lets the thread run on until the fade is done, and then it takes its layer
+ * away and ends; a show meanwhile turns the same fade back from where it is. The thread
+ * decides to end under this instance's lock, the same lock show takes — so a show either
+ * turns a fade the thread will see, or finds the thread gone and starts another.
  */
 class PortalFrame(private val layerStack: Int) {
 
@@ -50,6 +57,16 @@ class PortalFrame(private val layerStack: Int) {
     @Volatile private var untrustedLogged = false
     /** Wanted (a guest on top) and allowed (the front's Portal border switch). Under this instance's lock. */
     private val gate = FrameGate()
+    /** How much of it shows. Under this instance's lock. */
+    private val fade = FrameFade()
+    /** The running thread's layer, for a capture to leave out (GuestCover); null while there is none. */
+    @Volatile private var layer: SurfaceControl? = null
+
+    /**
+     * The frame's layer as it is now, or null: for a picture of the rear without the frame
+     * in it. It may be released at any moment after, so a user must survive that.
+     */
+    val currentLayer: SurfaceControl? get() = layer
 
     /** The colour, from the panel's config. Takes effect next frame. */
     fun style(color: Int) {
@@ -58,26 +75,33 @@ class PortalFrame(private val layerStack: Int) {
 
     val showing get() = thread?.isAlive == true
 
-    /** Up, if the Portal border switch allows it: wanted either way, for when it does. */
+    /** Fades in, if the Portal border switch allows it: wanted either way, for when it does. */
     @Synchronized
     fun show() {
-        if (gate.want(true)) start()
+        if (gate.want(true)) up()
     }
 
+    /** Fades out, and is gone when the fade is. */
     @Synchronized
     fun hide() {
         gate.want(false)
-        stop()
+        fade.hide(now())
     }
 
     /**
-     * The front's Portal border switch (PanelConfig.portalBorder): off, the frame goes at
-     * once and stays down; back on while a guest is on top, it is up again at once.
+     * The front's Portal border switch (PanelConfig.portalBorder): off, the frame fades out
+     * and stays down; back on while a guest is on top, it fades in again at once.
      */
     @Synchronized
     fun allow(on: Boolean) {
         if (gate.allowed == on) return
-        if (gate.allow(on)) start() else stop()
+        if (gate.allow(on)) up() else fade.hide(now())
+    }
+
+    /** Fading in, and a thread to draw it if none is running. Under the lock. */
+    private fun up() {
+        fade.show(now())
+        start()
     }
 
     private fun start() {
@@ -92,12 +116,17 @@ class PortalFrame(private val layerStack: Int) {
         thread = Thread({ run(myGen) }, "portal-frame").apply { isDaemon = true; start() }
     }
 
-    private fun stop() {
-        val t = thread ?: return
-        t.interrupt()
-        // The render thread never takes this lock, so waiting for it here is safe.
-        runCatching { t.join(300) }
-        thread = null
+    /**
+     * This frame's level, and whether [myGen]'s thread should carry on: false, and the thread
+     * forgotten, once the fade has gone all the way out (or another thread has taken over).
+     * Under the lock, so a show cannot slip between the decision and the thread's end.
+     */
+    @Synchronized
+    private fun level(myGen: Int): Float? {
+        if (gen != myGen) return null
+        val now = now()
+        if (fade.gone(now)) { thread = null; return null }
+        return fade.level(now)
     }
 
     private fun run(myGen: Int) {
@@ -107,9 +136,10 @@ class PortalFrame(private val layerStack: Int) {
             // Without trust the layer occludes the rear and every touch there is dropped:
             // see the class comment. Not trusted, not shown — ShellLayer never applies it.
             // At [ALPHA] as a whole: one number on the layer, where paint alphas would be four.
-            val layer = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true, alpha = ALPHA)
-            sc = layer
-            surface = Surface(layer)
+            // Made out of sight: the first frame sets its alpha, faded in from nothing.
+            val made = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true, alpha = 0f)
+            sc = made
+            surface = Surface(made)
         } catch (e: ShellLayer.Untrusted) {
             if (!untrustedLogged) { untrustedLogged = true; Log.w(TAG, "portal frame: not shown, no trusted overlay: ${e.message}") }
             failedAt = System.nanoTime()
@@ -127,8 +157,11 @@ class PortalFrame(private val layerStack: Int) {
         var throttled = false
         // As the spike: if the hardware canvas is refused, fall back to the software one.
         var hardware = true
+        var alpha = -1f
+        layer = sc
         try {
-            while (!Thread.currentThread().isInterrupted && gen == myGen) {
+            while (!Thread.currentThread().isInterrupted) {
+                val level = level(myGen) ?: break
                 val began = System.nanoTime()
                 val canvas = if (hardware) {
                     try { surface.lockHardwareCanvas() } catch (e: Throwable) {
@@ -141,6 +174,12 @@ class PortalFrame(private val layerStack: Int) {
                     r.draw(canvas, shapes, color, (began - start) / 1e9f)
                 } finally {
                     surface.unlockCanvasAndPost(canvas)
+                }
+                // The whole layer, with the frame it goes with, and only when it moves.
+                val a = ALPHA * level
+                if (a != alpha) {
+                    SurfaceControl.Transaction().use { it.setAlpha(sc, a).apply() }
+                    alpha = a
                 }
                 val took = (System.nanoTime() - began) / 1_000_000
                 // Over budget three frames running: halve the pace; back to full only
@@ -157,8 +196,11 @@ class PortalFrame(private val layerStack: Int) {
             // keep-alive tick's show() would start it again, only for it to die again.
             failedAt = System.nanoTime()
         } finally {
+            if (layer === sc) layer = null
             runCatching { surface.release() }
             ShellLayer.remove(sc)
+            // Died rather than faded out: forgotten, so the next show starts one.
+            synchronized(this) { if (gen == myGen && thread === Thread.currentThread()) thread = null }
         }
     }
 
@@ -215,6 +257,8 @@ class PortalFrame(private val layerStack: Int) {
         private const val FRAME_MS = 16L
         private const val BUDGET_MS = 8L
         private const val RETRY_NS = 30_000_000_000L
+
+        private fun now() = android.os.SystemClock.uptimeMillis()
         /**
          * The whole frame's opacity: at full it was louder than the app it frames ("the
          * margin ray should be less visible"), so it is drawn at half.
