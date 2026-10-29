@@ -87,10 +87,10 @@ class SurfacePlaceTest {
     }
 
     @Test fun `misplaced only when read and not at the shape's left`() {
-        val confined = GuestShape.of(false)
+        val confined = GuestShape.of(false, RearGeometry.PRO17)
         assertTrue(SurfacePlace.misplaced(0, confined))
         assertFalse(SurfacePlace.misplaced(296, confined))
         assertFalse(SurfacePlace.misplaced(null, confined))
-        assertFalse(SurfacePlace.misplaced(0, GuestShape.of(true)))
+        assertFalse(SurfacePlace.misplaced(0, GuestShape.of(true, RearGeometry.PRO17)))
     }
 }

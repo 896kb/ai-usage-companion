@@ -1094,7 +1094,7 @@ class RearUserService : IRearService.Stub {
     @Volatile private var coverLayer: android.view.SurfaceControl? = null
 
     /** [pkg]'s shape on the rear (GuestShape): kept right of the cameras unless given their area. */
-    private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalConfined)
+    private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalConfined, geometry)
 
     /**
      * [task] ([pkg]'s, on the rear) given its shape: TaskShaper's transaction, else `am task
@@ -1237,7 +1237,7 @@ class RearUserService : IRearService.Stub {
      * [pkg]'s [task] has an app window drawn on [displayId] at [size] — its shape's, right of
      * the cameras or the whole rear (GuestDrawn).
      */
-    private fun drawnOn(pkg: String, task: Int, displayId: Int, size: GuestShape.Bounds = GuestShape.FULL) =
+    private fun drawnOn(pkg: String, task: Int, displayId: Int, size: GuestShape.Bounds = GuestShape.full(geometry)) =
         task > 0 && GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, size.width, size.height)
 
     /**
@@ -1264,7 +1264,7 @@ class RearUserService : IRearService.Stub {
             else Log.w(TAG, "portal: no sign of $what drawing on the rear in ${GuestReveal.MAX_WAIT_MS} ms — revealing anyway")
             val frameMs = frameMsOf(displayId)
             while (true) {
-                val f = r.at(android.os.SystemClock.uptimeMillis())
+                val f = r.at(android.os.SystemClock.uptimeMillis(), geometry.widthPx.toFloat())
                 cover.place(f.dx, f.alpha)
                 if (r.phase == GuestReveal.Phase.DONE) break
                 Thread.sleep(frameMs)
@@ -1714,7 +1714,7 @@ class RearUserService : IRearService.Stub {
             backWorker.execute {
                 // Still the guest it was swiped for, on top.
                 val now = guest?.takeIf { it.task == g.task && it.onTop } ?: return@execute
-                val o = SystemBack.invoke(now.task)
+                val o = SystemBack.invoke(now.task, geometry)
                 val what = when {
                     o.error != null -> "failed — ${o.error}"
                     o.step == PortalAction.BackStep.INVOKE -> "the guest's callback invoked"

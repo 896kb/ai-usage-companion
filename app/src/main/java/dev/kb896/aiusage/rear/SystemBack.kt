@@ -3,7 +3,6 @@ package dev.kb896.aiusage.rear
 import android.os.IBinder
 import android.os.SystemClock
 import android.window.BackEvent
-import dev.kb896.aiusage.Panel
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 
@@ -105,8 +104,11 @@ internal object SystemBack {
     }
     @Volatile private var missing: String? = null
 
-    /** Back for the guest's [guestTask], from the rear's right edge. Never throws. */
-    fun invoke(guestTask: Int): Outcome {
+    /** Where the Back's gesture is said to begin on [rear]: its last column, halfway down, in its pixels. */
+    fun touchPoint(rear: RearGeometry): Pair<Float, Float> = (rear.widthPx - 1).toFloat() to rear.heightPx / 2f
+
+    /** Back for the guest's [guestTask], from [rear]'s right edge. Never throws. */
+    fun invoke(guestTask: Int, rear: RearGeometry): Outcome {
         val began = SystemClock.uptimeMillis()
         fun took() = SystemClock.uptimeMillis() - began
         val a = api ?: return Outcome(null, "-", -1, took(), "no system back on this firmware ($missing)")
@@ -120,9 +122,8 @@ internal object SystemBack {
             val cb = info?.let { a.getCallback.invoke(it) }
             val step = PortalAction.backStep(info != null, focused, guestTask, cb != null)
             if (step == PortalAction.BackStep.INVOKE) {
-                val event = a.motion.newInstance(
-                    (Panel.WIDTH - 1).toFloat(), Panel.HEIGHT / 2f, SystemClock.uptimeMillis(), 0f, false, BackEvent.EDGE_RIGHT,
-                )
+                val (x, y) = touchPoint(rear)
+                val event = a.motion.newInstance(x, y, SystemClock.uptimeMillis(), 0f, false, BackEvent.EDGE_RIGHT)
                 // Started and triggered as the gesture would have them; their failure does not stop the Back itself.
                 runCatching { a.onStarted.invoke(cb, event) }
                 runCatching { a.setTrigger.invoke(cb, true) }
