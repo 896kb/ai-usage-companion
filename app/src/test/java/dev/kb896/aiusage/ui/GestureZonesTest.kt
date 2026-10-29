@@ -68,7 +68,7 @@ class GestureZonesTest {
 
     @Test fun `the lenses sit inside the camera band, one above the other, apart`() {
         val lenses = GestureZones.lenses
-        assertTrue(lenses.size >= 2)
+        assertEquals(2, lenses.size) // the 17 Pro's back has two
         for (l in lenses) assertTrue(GestureZones.cameras.holds(GestureZones.Box(l.x - l.r, l.y - l.r, l.x + l.r, l.y + l.r)))
         for ((a, b) in lenses.zipWithNext()) assertTrue(b.y - a.y > a.r + b.r)
     }

@@ -46,8 +46,8 @@ object GestureZones {
 
     val cameras = Box(0f, 0f, CAMERAS, HEIGHT)
 
-    /** Three lenses down the column's middle, as the phone's are. */
-    val lenses: List<Lens> = listOf(106f, 286f, 466f).map { Lens(CAMERAS / 2f, it, 68f) }
+    /** Two lenses down the column's middle, as the phone's are — where the panel rings them. */
+    val lenses: List<Lens> = listOf(144f, 428f).map { Lens(CAMERAS / 2f, it, 104f) }
 
     private val usableMidX = CAMERAS + (WIDTH - CAMERAS) / 2f
 
