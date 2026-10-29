@@ -11,8 +11,13 @@ interface IRearService {
     /** Place RearActivity on displayId with an initial payload, then wake the panel. */
     void show(String payload, int displayId) = 1;
 
-    /** Push a new payload to the already-placed activity. Never relaunches. */
-    void update(String payload) = 2;
+    /**
+     * Push a new payload to the already-placed activity. Never relaunches. Oneway: the app
+     * calls it from its main thread and nothing waits on it, while the shell runs execs for it
+     * (the broadcast, a density change). Oneway calls from one client run in order; a show()
+     * (not oneway) may overtake one still queued, and both carry the whole payload.
+     */
+    oneway void update(String payload) = 2;
 
     /** Wake the panel. Required: FLAG_TURN_SCREEN_ON does not cover this. */
     void wake(int displayId) = 3;

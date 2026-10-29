@@ -196,6 +196,10 @@ class RearUserService : IRearService.Stub {
         syncDensity("the panel was hidden")
     }
 
+    /**
+     * Oneway (IRearService): the app calls it from its main thread, and this runs execs (the
+     * broadcast, perhaps `am stack list`, perhaps `wm density`) that took that thread with it.
+     */
     override fun update(payload: String) {
         // Kept like show()'s, so a later show(lastPayload) — endGuest's — does not bring
         // back an older config (its portalDpi with it).
@@ -817,13 +821,11 @@ class RearUserService : IRearService.Stub {
             if (regrid) repage()
             portalNames = config.portalAppNames
             shellSheet?.names(config.portalAppNames)
-            // An app kept right of the cameras, or let back, while it is the guest: reshaped now.
+            // An app kept right of the cameras, or let back, while it is the guest: reshaped —
+            // on the shape worker, not this binder thread (update() is the app's).
             if (portalConfined != config.portalConfined) {
                 portalConfined = config.portalConfined
-                guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g ->
-                    shapeGuest(g.task, g.pkg, "its camera area setting changed")
-                    if (g.onTop) chromeShow()
-                }
+                reshapeLater("its camera area setting changed", full = true)
             }
             restyleSheetFace(config.theme to config.font)
         } catch (e: Exception) {
@@ -958,8 +960,13 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} at " +
             (if (ours) "$wanted dpi" else "its own ${wanted ?: physicalDensity} dpi") + " — $why")
         // A guest that is placed on the rear keeps its shape through the relayout. One still
-        // landing is shaped after its move (shaped before, on the front, it lands wrong).
-        guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g -> shapeGuest(g.task, g.pkg, "the density changed") }
+        // landing is shaped after its move (shaped before, on the front, it lands wrong). Here
+        // only the one transaction, under [densityLock]; where it is drawn is checked on the
+        // shape worker, under [placing] — not here, holding this lock for a second.
+        guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g ->
+            shapeGuest(g.task, g.pkg, "the density changed", verify = false)
+            reshapeLater("the density changed", full = false)
+        }
     }
 
     /** A step that did not take: logged once per target; an unknown outcome is re-read next time. */
@@ -1136,7 +1143,8 @@ class RearUserService : IRearService.Stub {
     /**
      * [task] ([pkg]'s, on the rear) given its shape: TaskShaper's transaction, else `am task
      * resize` — which only a multi-window task takes, as a launch makes it. Only ever on the
-     * rear: shaped on the front first, it lands at x 0–608 (measured). Under [placing].
+     * rear: shaped on the front first, it lands at x 0–608 (measured). With [verify] — where it
+     * is drawn read, and nudged — under [placing]; without, one transaction, from anywhere.
      */
     private fun shapeGuest(task: Int, pkg: String, why: String, verify: Boolean = true) {
         val shape = shapeOf(pkg)
@@ -1192,6 +1200,35 @@ class RearUserService : IRearService.Stub {
             Thread.sleep(PLACE_SETTLE_MS)
             sf = exec("dumpsys SurfaceFlinger")
         }
+    }
+
+    /**
+     * One thread for the reshapes asked for off [placing] — a payload's camera-area change
+     * (on update()'s binder thread), a density change (under [densityLock]) — each run under
+     * [placing], so it never races a launch's, Resume's or the keep-alive's, and never holds
+     * up the thread that asked.
+     */
+    private val shapeWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-shape", r) }
+    }
+
+    /**
+     * The guest, if it is placed on the rear, shaped again ([full]: shapeGuest, and the chrome
+     * after it if it is on top) or only checked where it is drawn (ensurePlaced, a settle
+     * after the shape just sent), on [shapeWorker]. Read afresh when it runs.
+     */
+    private fun reshapeLater(why: String, full: Boolean) {
+        runCatching {
+            shapeWorker.execute {
+                if (!full) Thread.sleep(PLACE_SETTLE_MS)
+                synchronized(placing) {
+                    val g = guest?.takeIf { it.placed && !it.hiddenOnFront } ?: return@synchronized
+                    if (!full) { ensurePlaced(g.task, g.pkg, why); return@synchronized }
+                    shapeGuest(g.task, g.pkg, why)
+                    if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
+                }
+            }
+        }.onFailure { Log.w(TAG, "portal: reshape not queued: ${it.message}") }
     }
 
     /** Until [pkg]'s [task] has drawn on [displayId] within its shape, or GuestReveal.MAX_WAIT_MS. */
