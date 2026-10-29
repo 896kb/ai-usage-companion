@@ -377,11 +377,8 @@ class RearUserService : IRearService.Stub {
         }
         val (path, maxX, maxY) = device
         // The zone is the display's own left inset, the lens column, as the system reports
-        // it for this model; the 17 Pro's, as a fraction, when it does not say.
-        val band = rearPhysicalId()
-            ?.let { DisplayDump.leftInsetFraction(exec("dumpsys display | grep 'DisplayDeviceInfo'"), it) }
-            ?.let { it + BandTap.EDGE_ALLOW / Panel.WIDTH }
-            ?: BandTap.BAND
+        // it for this model (RearGeometry); the 17 Pro's when it does not say.
+        val band = BandTap.band(geometry)
         val proc = try {
             ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
         } catch (e: Exception) {
@@ -553,6 +550,29 @@ class RearUserService : IRearService.Stub {
         val rear = rearPhysicalId()
         return SurfaceDump.where(exec("dumpsys SurfaceFlinger")) { id ->
             if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX)
+        }
+    }
+
+    /**
+     * The rear display as it really is (RearGeometry): its size, lens column, corner and
+     * density, the one source the shell takes any of them from. Read once, the first time
+     * anything needs it — it belongs to the panel, so it never changes: display 1 as the
+     * window manager has it first (the frame task bounds and layers are in), `dumpsys
+     * display`'s device line for what that does not say and for the density (the Display's
+     * is the override a guest may have set), the 17 Pro's for the rest. Logged with what
+     * each said, so a Pro Max's first run says what it read.
+     */
+    private val geometry: RearGeometry by lazy {
+        val display = runCatching {
+            context?.getSystemService(android.hardware.display.DisplayManager::class.java)
+                ?.getDisplay(Panel.DISPLAY_ID)?.let(RearGeometry::reading)
+        }.onFailure { Log.w(TAG, "rear geometry: display ${Panel.DISPLAY_ID} unreadable: ${it.message}") }.getOrNull()
+        val dump = runCatching {
+            rearPhysicalId()?.let { DisplayDump.device(exec("dumpsys display | grep 'DisplayDeviceInfo'"), it) }
+        }.getOrNull()
+        RearGeometry.resolve(display, dump).also {
+            Log.i(TAG, "rear geometry: ${it.widthPx}x${it.heightPx}, lenses to x ${it.cutoutPx}, corner ${it.cornerPx}, " +
+                "${it.dpi} dpi (fit ${"%.4f".format(it.fitX)} x ${"%.4f".format(it.fitY)}) — display said $display, dumpsys $dump")
         }
     }
 

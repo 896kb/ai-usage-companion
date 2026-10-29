@@ -89,4 +89,9 @@ class BandTapTest {
     @Test fun `no landscape touchscreen, no device`() {
         assertNull(BandTap.rearDevice("add device 1: /dev/input/event0\n  name:     \"gpio-keys\"\n"))
     }
+
+    @Test fun `the band from the rear's geometry - the 17 Pro's is the constant, a Pro Max's its own lenses`() {
+        assertEquals(BandTap.BAND, BandTap.band(RearGeometry.PRO17), 1e-6f)
+        assertEquals(296f / 976f + 48f / 904f, BandTap.band(RearGeometry(976, 596, 296, 110, 450)), 1e-6f)
+    }
 }

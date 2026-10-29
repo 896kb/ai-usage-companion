@@ -95,21 +95,30 @@ class DisplayDumpTest {
         assertNull(DisplayDump.physicalId("mDisplayId=1\nmPrimaryDisplayDevice=Cast(virtual:x)", 1))
     }
 
-    // The two DisplayDeviceInfo lines of the 17 Pro, cut down to what is read.
+    // The two DisplayDeviceInfo lines of the 17 Pro, cut down to what is read: off the phone
+    // (OS4.0.5.0, 2026-10-29), the rear's 904 x 572 at 450 dpi, its 296 inset and 97 corners.
     private val devices = """
         DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4630946949513469331", 1220 x 2656, modeId 2, density 520, cutout DisplayCutout{insets=Rect(0, 150 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0}}, touch INTERNAL}
-        DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4630946949513469332", 904 x 572, modeId 7, density 450, cutout DisplayCutout{insets=Rect(296, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0}}, touch INTERNAL}
+        DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4630946949513469332", 904 x 572, modeId 7, renderFrameRate 120.00001, density 450, 400.02786 x 400.24243 dpi, cutout DisplayCutout{insets=Rect(296, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0}}, roundedCorners RoundedCorners{[RoundedCorner{position=TopLeft, radius=97, center=Point(97, 97)}, RoundedCorner{position=TopRight, radius=97, center=Point(807, 97)}]}, touch INTERNAL}
     """.trimIndent()
 
-    @Test fun `the rear display's left inset, as a fraction of its width`() {
-        assertEquals(296f / 904f, DisplayDump.leftInsetFraction(devices, "4630946949513469332")!!, 1e-6f)
+    @Test fun `the rear display's size, lenses, corner and density`() {
+        assertEquals(RearGeometry.Reading(904, 572, 296, 97, 450), DisplayDump.device(devices, "4630946949513469332"))
     }
 
-    @Test fun `no left inset on the front display`() {
-        assertNull(DisplayDump.leftInsetFraction(devices, "4630946949513469331"))
+    @Test fun `the front display - no left inset, no corners`() {
+        assertEquals(RearGeometry.Reading(1220, 2656, null, null, 520), DisplayDump.device(devices, "4630946949513469331"))
     }
 
-    @Test fun `no line for the display, no inset`() {
-        assertNull(DisplayDump.leftInsetFraction(devices, "1"))
+    @Test fun `a Pro Max-shaped line`() {
+        val line = "DisplayDeviceInfo{\"Built-in Screen\": uniqueId=\"local:4630947037102180609\", 976 x 596, modeId 7, density 450, " +
+            "cutout DisplayCutout{insets=Rect(296, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0}}, " +
+            "roundedCorners RoundedCorners{[RoundedCorner{position=TopLeft, radius=110, center=Point(110, 110)}]}, touch INTERNAL}"
+        assertEquals(RearGeometry.Reading(976, 596, 296, 110, 450), DisplayDump.device(line, "4630947037102180609"))
+    }
+
+    @Test fun `no line for the display, nothing read`() {
+        assertNull(DisplayDump.device(devices, "1"))
+        assertNull(DisplayDump.device("", "4630946949513469332"))
     }
 }

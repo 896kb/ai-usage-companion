@@ -39,22 +39,28 @@ object DisplayDump {
     }
 
     private val deviceSize = Regex("""uniqueId="local:(\d+)", (\d+) x (\d+),""")
+    private val density = Regex(""", density (\d+),""")
     private val cutoutInsets = Regex("""cutout DisplayCutout\{insets=Rect\((\d+), (\d+) - (\d+), (\d+)\)""")
+    private val topLeftCorner = Regex("""RoundedCorner\{position=TopLeft, radius=(\d+)""")
 
     /**
-     * The left edge of the usable area on physical display [physicalId], as a fraction of
-     * its width: the left inset of the cutout the display reports — on the rear display,
-     * the lens column (296 of 904 on the 17 Pro). Read from its DisplayDeviceInfo line,
-     * which carries the id, the size and the cutout together. Null when the dump does not
-     * say, or reports no left inset.
+     * What physical display [physicalId]'s DisplayDeviceInfo line says of it: its size, the
+     * cutout's left inset (on the rear display the lens column, 296 of 904 on the 17 Pro), its
+     * top-left corner's radius and its own density — one line carries them all, with the id.
+     * In the panel's natural orientation; RearGeometry.resolve only takes the inset and the
+     * corner from it when its size is the display's. Null when no line is that display's.
      */
-    fun leftInsetFraction(dump: String, physicalId: String): Float? {
+    fun device(dump: String, physicalId: String): RearGeometry.Reading? {
         for (line in dump.lineSequence()) {
             val size = deviceSize.find(line) ?: continue
             if (size.groupValues[1] != physicalId) continue
-            val width = size.groupValues[2].toInt()
-            val left = cutoutInsets.find(line)?.groupValues?.get(1)?.toInt() ?: return null
-            return if (width > 0 && left > 0) left / width.toFloat() else null
+            return RearGeometry.Reading(
+                width = size.groupValues[2].toInt(),
+                height = size.groupValues[3].toInt(),
+                cutout = cutoutInsets.find(line)?.groupValues?.get(1)?.toInt()?.takeIf { it > 0 },
+                corner = topLeftCorner.find(line)?.groupValues?.get(1)?.toInt(),
+                dpi = density.find(line)?.groupValues?.get(1)?.toInt(),
+            )
         }
         return null
     }
