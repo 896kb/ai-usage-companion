@@ -2,7 +2,6 @@ package dev.kb896.aiusage.rear
 
 import android.graphics.PixelFormat
 import android.view.SurfaceControl
-import dev.kb896.aiusage.Panel
 
 /**
  * One way to make a layer of the shell's own on the rear display: what the portal frame
@@ -117,14 +116,17 @@ internal object ShellLayer {
     class Untrusted(why: String) : Exception(why)
 
     /**
-     * A layer named [name], [width] by [height] (the whole rear unless said), translucent, on [layerStack]
+     * A layer named [name], [width] by [height] real pixels, translucent, on [layerStack]
      * at [z], [trusted] or not, shown at once when [visible], the whole layer at [alpha]
      * (SurfaceFlinger's, on everything drawn into it — nothing to do with trust). Throws [Untrusted] when
      * [trusted] cannot be had, or whatever building it threw; nothing is left behind either way.
      */
     fun create(
-        name: String, layerStack: Int, z: Int, trusted: Boolean, visible: Boolean = true, alpha: Float = 1f,
-        width: Int = Panel.WIDTH, height: Int = Panel.HEIGHT,
+        name: String, layerStack: Int, z: Int,
+        // No default: the 17 Pro's 904x572 was one, and on a bigger rear it left a strip
+        // uncovered at the right and the bottom. The size is the caller's, from RearGeometry.
+        width: Int, height: Int,
+        trusted: Boolean, visible: Boolean = true, alpha: Float = 1f,
     ): SurfaceControl {
         check(!closed) { "the shell's layers are closed: the process is ending" }
         // A child of this process's container, never a root of its own (see the class comment).

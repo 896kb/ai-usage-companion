@@ -13,6 +13,7 @@ import dev.kb896.aiusage.rear.PanelType
 import dev.kb896.aiusage.rear.PortalFrame
 import dev.kb896.aiusage.rear.PortalSheet
 import dev.kb896.aiusage.rear.PortalSheetPainter
+import dev.kb896.aiusage.rear.RearGeometry
 import dev.kb896.aiusage.rear.SheetTint
 import dev.kb896.aiusage.rear.ShellOverlay
 
@@ -59,7 +60,8 @@ internal class PortalSheetPreview(context: Context) : View(context) {
         paneTint = { SheetTint.of(config.theme.isGlass, config.glassStyle) }
     }
     private val border = PortalFrame.Renderer()
-    private val shapes = PortalFrame.shapesFor()
+    /** The back's own frame, in panel units as everything here is: its lenses and corner scaled with the panel. */
+    private val shapes = PortalFrame.shapesFor(RearGeometry.of(context).inPanelUnits())
     private val dim = Paint().apply { color = ShellOverlay.dimColor(1f) }
     /** The border's clock starts with the view; only its motion shows, not where it began. */
     private val born = AnimationUtils.currentAnimationTimeMillis()

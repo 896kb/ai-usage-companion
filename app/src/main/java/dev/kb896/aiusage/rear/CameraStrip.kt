@@ -3,10 +3,9 @@ package dev.kb896.aiusage.rear
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceControl
-import dev.kb896.aiusage.Panel
 
 /**
- * The camera strip (x < Panel.CUTOUT_RIGHT) beside a guest kept right of the cameras
+ * The camera strip (x < RearGeometry.cutoutPx) beside a guest kept right of the cameras
  * (GuestShape): a solid layer of the shell's own over it, so whatever task lies under the
  * strip — a stale app, our panel — does not show there. In the guest's own background
  * colour where it has one, black where not (StripColor), read off the guest's leftmost
@@ -19,10 +18,11 @@ import dev.kb896.aiusage.Panel
  * on a thread of its own that lives while it is up or fading and ends once faded out —
  * decided under this instance's lock, which [show] takes too, as in PortalFrame.
  *
+ * @param rear the rear display as it is (RearGeometry): the strip is its lens column, its whole height.
  * @param sample the guest's edge colour now (StripColor.pick), or null when it cannot be read
  *   (the strip then keeps the colour it has).
  */
-class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
+class CameraStrip(private val layerStack: Int, private val rear: RearGeometry, private val sample: () -> Int?) {
 
     private val fade = FrameFade()
     @Volatile private var thread: Thread? = null
@@ -75,8 +75,9 @@ class CameraStrip(private val layerStack: Int, private val sample: () -> Int?) {
         var sc: SurfaceControl? = null
         var surface: Surface? = null
         try {
-            sc = ShellLayer.create("portal-strip", layerStack, ShellLayer.Z_STRIP, trusted = true, visible = false, alpha = 0f,
-                width = Panel.CUTOUT_RIGHT, height = Panel.HEIGHT)
+            // The lens column, the whole height, in the rear's own pixels (StripColor.stripSize).
+            val (w, h) = StripColor.stripSize(rear)
+            sc = ShellLayer.create("portal-strip", layerStack, ShellLayer.Z_STRIP, w, h, trusted = true, visible = false, alpha = 0f)
             surface = Surface(sc)
             currentLayer = sc
             val ease = StripColor.Ease()

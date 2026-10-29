@@ -47,6 +47,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * WHAT IS DRAWN, per frame: cleared; the dim over the whole layer, by how far open (so the
  * blur has the whole rear to cover); then the content.
  *
+ * IN PANEL UNITS, STRETCHED TO THE REAR. Both layers are the rear's real size ([rear]) — a
+ * 904x572 layer on a Pro Max's 976x596 left its right and bottom unblurred and, the blocker
+ * being that size too, let touches there through to the app. The content draws in the 17
+ * Pro's 904x572 panel units, as the panel does, under one canvas scale by the rear's fit
+ * (RearGeometry.fitX, fitY): the touches come in panel units (RearTouches), so what is
+ * drawn under a finger is what its hit test finds there.
+ *
  * THREADING. [begin] makes both layers and shows them on the caller's thread, under the
  * instance lock, so when it says true they are there. The content's setters may be called
  * from any thread; they publish and call [changed]. One render thread per opening only
@@ -58,11 +65,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * driver) must not paint over the next one's uniforms.
  *
  * @param layerStack the rear display's layer stack (RearUserService.rearLayerStack).
+ * @param rear the rear display as it is (RearGeometry): the layers' size and the content's scale.
  * @param layer the layers' and the render thread's name ("portal-sheet").
  * @param what what the log calls it ("portal sheet").
  */
 class ShellOverlay(
     private val layerStack: Int,
+    private val rear: RearGeometry,
     private val layer: String,
     private val what: String,
     private val content: Content,
@@ -162,8 +171,8 @@ class ShellOverlay(
         var surface: Surface? = null
         try {
             // Both made hidden, and shown together below.
-            blocker = ShellLayer.create("$layer-blocker", layerStack, ShellLayer.Z_BLOCKER, trusted = false, visible = false)
-            sheet = ShellLayer.create(layer, layerStack, ShellLayer.Z_SHEET, trusted = true, visible = false)
+            blocker = ShellLayer.create("$layer-blocker", layerStack, ShellLayer.Z_BLOCKER, rear.widthPx, rear.heightPx, trusted = false, visible = false)
+            sheet = ShellLayer.create(layer, layerStack, ShellLayer.Z_SHEET, rear.widthPx, rear.heightPx, trusted = true, visible = false)
             // A layer with no buffer has no input window and occludes nothing: the blocker
             // gets one, transparent, once. Assigned first, so a refused post still releases it.
             blockerSurface = Surface(blocker)
@@ -249,6 +258,7 @@ class ShellOverlay(
         val surface = r.surface
         val painter = synchronized(DRAW) { content.painter() }
         val dim = Paint()
+        // In panel units, under the fit's scale: the whole layer.
         val full = RectF(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
         var drawn = -1
         var moving = false
@@ -268,6 +278,8 @@ class ShellOverlay(
                 var p = 0f
                 try {
                     canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+                    // Panel units from here on, stretched to the rear (see the class comment).
+                    canvas.scale(rear.fitX, rear.fitY)
                     synchronized(DRAW) {
                         p = content.frame().coerceIn(0f, 1f)
                         // Over the whole layer: SurfaceFlinger blurs under it, and the dim is the sheet's ground.

@@ -41,11 +41,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * asked, so the reader never waits for a render thread's join; [io] runs the commands.
  *
  * @param layerStack the rear display's layer stack, asked once, when the sheet is first made.
+ * @param geometry the rear display as it is (RearGeometry), asked then too: the sheet's size and scale.
  * @param onProgress how far it is drawn open, each frame, and 0 once down (the portal frame
  *   fades under it: PortalFrame.controlCenterOpen).
  */
 class ShellControlCenter(
     private val layerStack: () -> Int,
+    private val geometry: () -> RearGeometry,
     private val rear: Rear,
     private val events: () -> dev.kb896.aiusage.IRearEvents?,
     private val onProgress: (Float) -> Unit,
@@ -204,7 +206,7 @@ class ShellControlCenter(
         overlay?.let { return it }
         synchronized(making) {
             overlay?.let { return it }
-            val made = runCatching { ShellOverlay(layerStack(), "control-centre", "control centre", Drawing()) }
+            val made = runCatching { ShellOverlay(layerStack(), geometry(), "control-centre", "control centre", Drawing()) }
                 .onFailure { Log.w(TAG, "control centre: no sheet: ${it.message}") }.getOrNull() ?: return null
             made.onProgress = onProgress
             overlay = made

@@ -18,6 +18,15 @@ object StripColor {
 
     private const val BLACK = 0xFF000000.toInt()
 
+    /** The guest's columns read for the colour, from its left edge. */
+    const val SAMPLE_W = 6
+
+    /** Where on [rear] the colour is read: the guest's first [SAMPLE_W] columns right of the lenses, the whole height. */
+    fun sample(rear: RearGeometry) = GuestShape.Bounds(rear.cutoutPx, 0, rear.cutoutPx + SAMPLE_W, rear.heightPx)
+
+    /** The strip's own size on [rear], in its pixels: the lens column, the whole height. */
+    fun stripSize(rear: RearGeometry): Pair<Int, Int> = rear.cutoutPx to rear.heightPx
+
     /** The strip's colour for [pixels] (ARGB, alpha ignored): opaque, or black. */
     fun pick(pixels: IntArray): Int {
         if (pixels.isEmpty()) return BLACK

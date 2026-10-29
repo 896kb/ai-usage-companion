@@ -71,9 +71,10 @@ internal class GuestCover private constructor(
          * and taken on by SurfaceFlinger (or [COMMIT_WAIT_MS] gone by) before this returns,
          * so what is under it may move, the layer [leaveOut] (the frame's) left out of the
          * picture where that can be done. Null when there can be no cover: no picture, secure
-         * content in it, or no trusted layer — nothing left behind then.
+         * content in it, or no trusted layer — nothing left behind then. The layer is [rear]'s
+         * whole size, so a picture drawn into it (the screencap's) is not cut to the 17 Pro's.
          */
-        fun up(layerStack: Int, displayId: Int, leaveOut: SurfaceControl?, screencap: () -> Bitmap?): GuestCover? {
+        fun up(layerStack: Int, rear: RearGeometry, displayId: Int, leaveOut: SurfaceControl?, screencap: () -> Bitmap?): GuestCover? {
             val shot = runCatching { RearCapture.capture(displayId, listOfNotNull(leaveOut)) }
                 .onFailure { once("no in-process capture (${(it.cause ?: it).javaClass.simpleName}: ${(it.cause ?: it).message}); screencap instead") }
                 .getOrNull()
@@ -86,7 +87,9 @@ internal class GuestCover private constructor(
             if (shot == null && picture == null) { once("no picture of the rear — guests arrive uncovered"); return null }
             var layer: SurfaceControl? = null
             try {
-                layer = ShellLayer.create("portal-cover", layerStack, ShellLayer.Z_COVER, trusted = true, visible = false)
+                layer = ShellLayer.create(
+                    "portal-cover", layerStack, ShellLayer.Z_COVER, rear.widthPx, rear.heightPx, trusted = true, visible = false,
+                )
                 val t = SurfaceControl.Transaction()
                 if (shot != null) {
                     t.setBuffer(layer, shot.buffer).setDataSpace(layer, dataSpace(shot.space))

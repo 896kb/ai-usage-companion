@@ -22,6 +22,7 @@ import dev.kb896.aiusage.data.PortalGrid
  * ([ShellOverlay.changed]).
  *
  * @param layerStack the rear display's layer stack (RearUserService.rearLayerStack).
+ * @param rear the rear display as it is: the sheet's layers are its size, its content in panel units stretched to it (ShellOverlay).
  * @param face the panel's face, for every word on the sheet — PanelType.face for the
  *   panel's theme and font, so the sheet speaks as the panel does; [face] swaps it when
  *   either changes. The shell (app_process) has NO default typeface — text drawn without
@@ -29,7 +30,7 @@ import dev.kb896.aiusage.data.PortalGrid
  *   the system's fonts loaded first, then through our Resources, or Departure Mono read
  *   out of our APK when they cannot. Never Typeface.DEFAULT.
  */
-class ShellSheet(layerStack: Int, face: PanelType.Face) {
+class ShellSheet(layerStack: Int, rear: RearGeometry, face: PanelType.Face) {
 
     private class Look(val theme: PanelTheme, val style: GlassStyle?)
 
@@ -62,7 +63,7 @@ class ShellSheet(layerStack: Int, face: PanelType.Face) {
     /** Where the frame being drawn stands, read once per frame ([Drawing.frame]). Render thread only. */
     private var frameAt = 0f
 
-    private val overlay = ShellOverlay(layerStack, "portal-sheet", "portal sheet", Drawing())
+    private val overlay = ShellOverlay(layerStack, rear, "portal-sheet", "portal sheet", Drawing())
 
     /**
      * Told how far open the sheet is drawn, 0 to 1 (PortalSheet.progress: scrolled to the

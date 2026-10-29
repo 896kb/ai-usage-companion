@@ -9,7 +9,6 @@ import android.graphics.PorterDuff
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceControl
-import dev.kb896.aiusage.Panel
 
 /**
  * The portal frame: the electric border round the rear display's edge only (not the lenses),
@@ -48,10 +47,10 @@ import dev.kb896.aiusage.Panel
  * times the fade times what the sheet leaves. Nothing new wakes for it: the render thread
  * draws every frame while the frame is up anyway, and reads the latest value.
  */
-class PortalFrame(private val layerStack: Int) {
+class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
 
     @Volatile private var color = 0xFF28FF85.toInt()
-    private val shapes: List<ElectricBorder.Shape> = shapesFor()
+    private val shapes: List<ElectricBorder.Shape> = shapesFor(rear)
     /** Volatile: [showing] reads it from threads that do not hold the lock. */
     @Volatile private var thread: Thread? = null
     /** Bumped by every show(); a render thread of an older generation stops. */
@@ -160,7 +159,11 @@ class PortalFrame(private val layerStack: Int) {
             // see the class comment. Not trusted, not shown — ShellLayer never applies it.
             // At [ALPHA] as a whole: one number on the layer, where paint alphas would be four.
             // Made out of sight: the first frame sets its alpha, faded in from nothing.
-            val made = ShellLayer.create("portal-frame", layerStack, ShellLayer.Z_FRAME, trusted = true, visible = false, alpha = 0f)
+            // The whole rear, in its own pixels: the frame is the display's edge, not the panel's.
+            val made = ShellLayer.create(
+                "portal-frame", layerStack, ShellLayer.Z_FRAME, rear.widthPx, rear.heightPx,
+                trusted = true, visible = false, alpha = 0f,
+            )
             sc = made
             surface = Surface(made)
         } catch (e: ShellLayer.Untrusted) {
@@ -173,7 +176,7 @@ class PortalFrame(private val layerStack: Int) {
             ShellLayer.remove(sc)
             return
         }
-        val r = try { Renderer() } catch (e: Throwable) {
+        val r = try { Renderer(cssPx(rear)) } catch (e: Throwable) {
             Log.w(TAG, "portal frame: no renderer: ${e.message}")
             failedAt = System.nanoTime()
             runCatching { surface.release() }
@@ -238,16 +241,17 @@ class PortalFrame(private val layerStack: Int) {
     /**
      * One run's paints and cached outlines, so an overlapping run shares nothing mutable.
      * The front's portal preview (ui.PortalSheetPreview) draws the border with one of its
-     * own, so the two cannot drift; the caller sets the frame's [ALPHA].
+     * own, so the two cannot drift; the caller sets the frame's [ALPHA]. [d] is one of the
+     * original's CSS px in the canvas's units ([cssPx] on the rear; the 17 Pro's [D] by default).
      */
-    class Renderer {
+    class Renderer(private val d: Float = D) {
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
         }
-        private val halo = BlurMaskFilter(32f * D, BlurMaskFilter.Blur.NORMAL)
-        private val soft = BlurMaskFilter(4f * D, BlurMaskFilter.Blur.NORMAL)
-        private val fine = BlurMaskFilter(1f * D, BlurMaskFilter.Blur.NORMAL)
+        private val halo = BlurMaskFilter(32f * d, BlurMaskFilter.Blur.NORMAL)
+        private val soft = BlurMaskFilter(4f * d, BlurMaskFilter.Blur.NORMAL)
+        private val fine = BlurMaskFilter(1f * d, BlurMaskFilter.Blur.NORMAL)
         private var cachedFor: List<ElectricBorder.Shape>? = null
         private var cleanPaths: List<Path> = emptyList()
 
@@ -261,16 +265,16 @@ class PortalFrame(private val layerStack: Int) {
 
         // The original's layers: a 32px-blurred halo at 30%, a 2px stroke blurred 4px, a 2px
         // stroke at 60% blurred 1px, and over them the 1px noise-displaced line. CSS px are
-        // rear px times D. The clean outline is cached; the bolt is rebuilt every frame.
+        // rear px times d. The clean outline is cached; the bolt is rebuilt every frame.
         private fun one(canvas: Canvas, shape: ElectricBorder.Shape, clean: Path, color: Int, time: Float) {
             glow.color = color
-            glow.strokeWidth = 14f * D; glow.alpha = 77; glow.maskFilter = halo
+            glow.strokeWidth = 14f * d; glow.alpha = 77; glow.maskFilter = halo
             canvas.drawPath(clean, glow)
-            glow.strokeWidth = 2f * D; glow.alpha = 255; glow.maskFilter = soft
+            glow.strokeWidth = 2f * d; glow.alpha = 255; glow.maskFilter = soft
             canvas.drawPath(clean, glow)
             glow.alpha = 153; glow.maskFilter = fine
             canvas.drawPath(clean, glow)
-            line.color = color; line.strokeWidth = 1f * D
+            line.color = color; line.strokeWidth = 1f * d
             canvas.drawPath(path(ElectricBorder.bolt(shape, time)), line)
         }
 
@@ -283,33 +287,39 @@ class PortalFrame(private val layerStack: Int) {
 
     companion object {
         private const val TAG = "AiUsageRear"
-        /** The rear's density over CSS's 160: one of the original's px. */
+        /** The 17 Pro rear's density over CSS's 160: one of the original's px there. */
         internal const val D = 450f / 160f
         private const val FRAME_MS = 16L
         private const val BUDGET_MS = 8L
         private const val RETRY_NS = 30_000_000_000L
 
         private fun now() = android.os.SystemClock.uptimeMillis()
+
+        /** One of the original's px on [rear]: its own density over CSS's 160. */
+        fun cssPx(rear: RearGeometry): Float = rear.dpi / 160f
+
         /**
          * The whole frame's opacity: at full it was louder than the app it frames ("the
          * margin ray should be less visible"), so it is drawn at half.
          */
         internal const val ALPHA = 0.5f
-        /** The display's corner radius (dumpsys display: RoundedCorner radius=97). */
-        private const val CORNER = 97f
-
         /**
-         * The usable screen's edge only, right of the lenses (Panel.CUTOUT_RIGHT): the frame
+         * The usable screen's edge only, right of the lenses ([RearGeometry.cutoutPx]): the frame
          * neither runs round the lenses nor along the strip beside them. Square on the left,
          * where the screen meets the strip; round on the right, as the glass is.
          *
          * The line's middle runs ON the app's edge, not inside it ("the center of the electric
          * lines should fall exactly on the edge of the apps"): half of it, and of its glow, is
          * off the glass at the display's edges, and over the lens strip on the left.
+         *
+         * In [rear]'s own pixels, rounded by its own corner (dumpsys display: RoundedCorner
+         * radius=97 on the 17 Pro): on a wider display the edge is that display's, not the
+         * panel's 904x572 drawn where it would be. The front's preview passes the rear in panel
+         * units (RearGeometry.inPanelUnits).
          */
-        fun shapesFor(): List<ElectricBorder.Shape> = listOf(
+        fun shapesFor(rear: RearGeometry): List<ElectricBorder.Shape> = listOf(
             ElectricBorder.Shape.Rounded(
-                Panel.CUTOUT_RIGHT.toFloat(), 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), CORNER,
+                rear.cutoutPx.toFloat(), 0f, rear.widthPx.toFloat(), rear.heightPx.toFloat(), rear.cornerPx.toFloat(),
                 leftR = 0f,
             ),
         )

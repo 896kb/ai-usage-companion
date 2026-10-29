@@ -698,9 +698,9 @@ class RearUserService : IRearService.Stub {
     private var guest: Guest?
         get() = guestRef.get()
         set(value) = guestRef.set(value)
-    private val frame by lazy { PortalFrame(rearLayerStack()) }
+    private val frame by lazy { PortalFrame(rearLayerStack(), geometry) }
     /** The camera strip beside a confined guest (CameraStrip), in the guest's edge colour. */
-    private val strip by lazy { CameraStrip(rearLayerStack()) { stripColor() } }
+    private val strip by lazy { CameraStrip(rearLayerStack(), geometry) { stripColor() } }
 
     /**
      * The guest's chrome up: its frame, and — kept right of the cameras — the camera strip
@@ -1082,7 +1082,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun coverRear(displayId: Int): GuestCover? {
         val at = android.os.SystemClock.uptimeMillis()
-        return GuestCover.up(coverStack, displayId, frame.currentLayer) { screencapRear() }
+        return GuestCover.up(coverStack, geometry, displayId, frame.currentLayer) { screencapRear() }
             ?.also {
                 coverLayer = it.layer
                 Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms" +
@@ -1183,14 +1183,16 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * The guest's background colour at its left edge (x 296–302, the whole height) for the
+     * The guest's background colour at its left edge (StripColor.sample: x 296–302 on the 17
+     * Pro, the whole height) for the
      * camera strip: a cropped captureDisplay without our layers in it, its pixels in sRGB,
      * one colour picked (StripColor) — or black: secure content (it comes back black), a
      * busy edge, a capture that failed.
      */
     private fun stripColor(): Int = runCatching {
         val leaveOut = listOfNotNull(frame.currentLayer, strip.currentLayer, coverLayer)
-        val crop = android.graphics.Rect(Panel.CUTOUT_RIGHT, 0, Panel.CUTOUT_RIGHT + STRIP_SAMPLE_W, Panel.HEIGHT)
+        val at = StripColor.sample(geometry)
+        val crop = android.graphics.Rect(at.left, at.top, at.right, at.bottom)
         // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
         val shot = RearCapture.capture(rearDisplay(), leaveOut, crop, scaleY = STRIP_SAMPLE_SCALE) ?: return@runCatching BLACK
         try {
@@ -1199,8 +1201,8 @@ class RearUserService : IRearService.Stub {
             val bmp = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
             hw.recycle()
             // A crop refused gives the whole rear: the same columns, read out of it.
-            val x0 = if (bmp.width > STRIP_SAMPLE_W) Panel.CUTOUT_RIGHT else 0
-            val w = minOf(STRIP_SAMPLE_W, bmp.width - x0)
+            val x0 = if (bmp.width > StripColor.SAMPLE_W) at.left else 0
+            val w = minOf(StripColor.SAMPLE_W, bmp.width - x0)
             val srgb = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
             val px = IntArray(w * bmp.height) { i ->
                 bmp.getColor(x0 + i % w, i / w).convert(srgb).toArgb()
@@ -1580,7 +1582,7 @@ class RearUserService : IRearService.Stub {
             if (android.os.SystemClock.uptimeMillis() < sheetFontRetryAt) return null
             val face = sheetFace(sheetType)
             if (face == null) { sheetFontRetryAt = android.os.SystemClock.uptimeMillis() + SHEET_FONT_RETRY_MS; return null }
-            val s = ShellSheet(rearLayerStack(), face)
+            val s = ShellSheet(rearLayerStack(), geometry, face)
             controlCenter.face(face)
             // The portal frame fades under the sheet, as far as it is open.
             s.onProgress = { frame.sheetOpen(it); strip.sheetOpen(it) }
@@ -2516,6 +2518,7 @@ class RearUserService : IRearService.Stub {
     private val controlCenter: ShellControlCenter by lazy {
         ShellControlCenter(
             layerStack = ::rearLayerStack,
+            geometry = { geometry },
             rear = object : ShellControlCenter.Rear {
                 override fun brightness() = rearBrightness()
                 override fun auto() = rearAutoBrightness()
@@ -3036,8 +3039,6 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val PLACE_SETTLE_MS = 120L
         /** Nudges of a guest drawn out of place, at most, before it is left as it is (logged). */
         private const val PLACE_TRIES = 3
-        /** The guest's columns read for the camera strip's colour, from its left edge. */
-        private const val STRIP_SAMPLE_W = 6
         private const val STRIP_SAMPLE_SCALE = 0.25f
         private const val BLACK = 0xFF000000.toInt()
         /** The sheet's settle, a frame at a time. */
