@@ -3,8 +3,8 @@ package dev.kb896.aiusage.rear
 import dev.kb896.aiusage.Panel
 
 /**
- * Where a guest app sits on the rear: right of the cameras, or — for an app given "Use the
- * camera area" (PanelConfig.portalFullscreen) — the whole display. Pure; RearUserService
+ * Where a guest app sits on the rear: the whole display, or — for an app asked to "Keep
+ * right of the cameras" (PanelConfig.portalConfined, experimental) — right of the lenses. Pure; RearUserService
  * applies it (TaskShaper, else `am task resize`) after every move onto the rear.
  *
  * Fullscreen, an app drew under the lenses ("my store app shows fullscreen", "the map runs
@@ -37,8 +37,14 @@ object GuestShape {
 
     fun of(fullscreen: Boolean): Shape = if (fullscreen) Shape(FULLSCREEN, FULL) else Shape(MULTI_WINDOW, CONFINED)
 
-    /** [pkg]'s shape, given the apps allowed the camera area. */
-    fun forApp(pkg: String, fullscreenApps: Set<String>): Shape = of(pkg in fullscreenApps)
+    /**
+     * [pkg]'s shape, given the apps asked to keep right of the cameras: fullscreen unless it is
+     * one of them. Opt-in, not the default (2026-10-29): a confined guest's task reads
+     * [CONFINED] but HyperOS composes it at x 0–608 — the multi-window task is organised by
+     * its split screen, which never offsets it on display 1 — and no nudge (resize, CHANGE
+     * transition, freeform) moved it reliably.
+     */
+    fun forApp(pkg: String, confinedApps: Set<String>): Shape = of(pkg !in confinedApps)
 
     /** The task's bounds as read ([current], null when unread) are not [shape]'s: it is to be shaped again. */
     fun drifted(current: Bounds?, shape: Shape): Boolean = current != null && current != shape.bounds

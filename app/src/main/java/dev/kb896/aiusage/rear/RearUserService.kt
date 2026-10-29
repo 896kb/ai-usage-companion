@@ -727,8 +727,8 @@ class RearUserService : IRearService.Stub {
 
     /** The apps' names under their icons on the back (PanelConfig.portalAppNames), from the last payload. */
     @Volatile private var portalNames = true
-    /** Apps given the camera area (PanelConfig.portalFullscreen); every other guest is kept right of it. */
-    @Volatile private var portalFullscreen: Set<String> = emptySet()
+    /** Apps kept right of the cameras (PanelConfig.portalConfined); every other guest is fullscreen. */
+    @Volatile private var portalConfined: Set<String> = emptySet()
 
     /**
      * The pinned apps or the grid changed: the pages follow, an open sheet's with them. On
@@ -775,9 +775,9 @@ class RearUserService : IRearService.Stub {
             if (regrid) repage()
             portalNames = config.portalAppNames
             shellSheet?.names(config.portalAppNames)
-            // An app given the camera area, or taken it back, while it is the guest: reshaped now.
-            if (portalFullscreen != config.portalFullscreen) {
-                portalFullscreen = config.portalFullscreen
+            // An app kept right of the cameras, or let back, while it is the guest: reshaped now.
+            if (portalConfined != config.portalConfined) {
+                portalConfined = config.portalConfined
                 guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g ->
                     shapeGuest(g.task, g.pkg, "its camera area setting changed")
                     if (g.onTop) chromeShow()
@@ -1074,7 +1074,7 @@ class RearUserService : IRearService.Stub {
     @Volatile private var coverLayer: android.view.SurfaceControl? = null
 
     /** [pkg]'s shape on the rear (GuestShape): kept right of the cameras unless given their area. */
-    private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalFullscreen)
+    private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalConfined)
 
     /**
      * [task] ([pkg]'s, on the rear) given its shape: TaskShaper's transaction, else `am task

@@ -644,11 +644,12 @@ data class PanelConfig(
      */
     val portalAppNames: Boolean = true,
     /**
-     * App Portal: apps given the whole rear, the camera area too ("Use the camera area" in the
-     * app's sheet on the front), by package. Every other guest is kept right of the cameras
-     * (GuestShape). Empty: all kept right.
+     * App Portal: apps kept right of the cameras on the rear ("Keep right of the cameras" in
+     * the app's sheet on the front, experimental), by package. Every other guest has the whole
+     * display (GuestShape). Empty: all fullscreen. Replaces the opt-out portalFullscreen, which
+     * an older config may still carry — ignored.
      */
-    val portalFullscreen: Set<String> = emptySet(),
+    val portalConfined: Set<String> = emptySet(),
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */

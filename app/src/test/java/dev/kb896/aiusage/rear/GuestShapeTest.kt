@@ -22,9 +22,11 @@ class GuestShapeTest {
         assertEquals(GuestShape.Bounds(0, 0, Panel.WIDTH, Panel.HEIGHT), s.bounds)
     }
 
-    @Test fun `by package, from the config's set`() {
-        assertEquals(GuestShape.of(false), GuestShape.forApp("a.b", setOf("c.d")))
-        assertEquals(GuestShape.of(true), GuestShape.forApp("a.b", setOf("a.b")))
+    @Test fun `by package - fullscreen unless the app was asked to keep right of the cameras`() {
+        // Confining is opt-in for now: on the 17 Pro a confined guest is composed at x 0, not 296.
+        assertEquals(GuestShape.of(true), GuestShape.forApp("a.b", emptySet()))
+        assertEquals(GuestShape.of(true), GuestShape.forApp("a.b", setOf("c.d")))
+        assertEquals(GuestShape.of(false), GuestShape.forApp("a.b", setOf("a.b")))
     }
 
     @Test fun `drifted only when the task's bounds are read and are not the shape's`() {
