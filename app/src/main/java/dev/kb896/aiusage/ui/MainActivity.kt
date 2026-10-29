@@ -1425,7 +1425,7 @@ class MainActivity : ComponentActivity() {
                             write { c -> c.copy(portalConfined = if (on) c.portalConfined + pkg else c.portalConfined - pkg) }
                         },
                         onUnpin = {
-                            write { it.copy(portalApps = PortalApps.toggled(it.portalApps, pkg), portalDpi = it.portalDpi - pkg,
+                            write { it.copy(portalApps = PortalApps.pinned(it.portalApps, pkg, on = false), portalDpi = it.portalDpi - pkg,
                                 portalConfined = it.portalConfined - pkg) }
                             buildSettingsRows()
                         },

@@ -316,8 +316,8 @@ class RearUserService : IRearService.Stub {
         // teardown paths left after verifyPlacement's and the activity's own eviction
         // guard were removed. They fired in the normal case, not an exceptional one:
         // immediately after `am start` the layer is often not composited yet, so
-        // panelWhere() answers NOWHERE rather than MAIN, which fell through to
-        // isOnDisplay() — the `dumpsys window displays` read that has lied in every
+        // panelWhere() answers NOWHERE rather than MAIN, which fell through to a
+        // `dumpsys window displays` read (since removed) — the one that has lied in every
         // stranding incident in this project and also simply lags a fresh placement.
         // A false reading there destroyed the panel we had just created, and the
         // watchdog then rebuilt it, which is the panel dying for no reason.
@@ -336,20 +336,6 @@ class RearUserService : IRearService.Stub {
         wake(displayId) // and the touch watch with it (syncTouchWatch)
     }
 
-    /**
-     * Pulls a stranded panel back onto the rear display. See the AIDL doc for why this
-     * cannot live inside show().
-     *
-     * Deliberately does nothing unless the panel is definitely on the MAIN display. An
-     * unknown answer (panel asleep, layer not drawn, unparseable dump) must not move a
-     * task: this runs every watchdog tick, and a check that acts on uncertainty would
-     * shove a correctly-placed panel around the display topology every 20 seconds.
-     *
-     * DISPLACED is not this function's problem either, and that is not an oversight: the
-     * task is already on the rear display, merely behind something, and moving a task to
-     * the display it is already on does not raise it. That case needs a full placement —
-     * see the keep-alive.
-     */
     /**
      * Launch the system camera onto the rear display.
      *
@@ -537,6 +523,20 @@ class RearUserService : IRearService.Stub {
         exec("am kill $CAMERA_PACKAGE")
     }
 
+    /**
+     * Pulls a stranded panel back onto the rear display. See the AIDL doc for why this
+     * cannot live inside show().
+     *
+     * Deliberately does nothing unless the panel is definitely on the MAIN display. An
+     * unknown answer (panel asleep, layer not drawn, unparseable dump) must not move a
+     * task: this runs every watchdog tick, and a check that acts on uncertainty would
+     * shove a correctly-placed panel around the display topology every 20 seconds.
+     *
+     * DISPLACED is not this function's problem either, and that is not an oversight: the
+     * task is already on the rear display, merely behind something, and moving a task to
+     * the display it is already on does not raise it. That case needs a full placement —
+     * see the keep-alive.
+     */
     override fun ensureOnRear(displayId: Int): Boolean = synchronized(placing) {
         if (displayId < 0) return@synchronized false
         // Run on USER_PRESENT too: a guest hidden behind the keyguard is on the front now.
@@ -652,32 +652,6 @@ class RearUserService : IRearService.Stub {
             Log.w(TAG, "no physical id for display ${Panel.DISPLAY_ID} in dumpsys display — matching the 17 Pro's")
         }
         return id
-    }
-
-    /**
-     * Asks the window manager which display actually owns the activity.
-     *
-     * Do NOT check this with `am stack list` bounds. A correctly placed panel and a
-     * 904x572 box stranded at (0,0) on the main display report the SAME bounds, and
-     * `grep RearActivity` discards the `Stack id=` header that would disambiguate
-     * them. That ambiguity is what let a failed move strand the activity on the
-     * user's main screen, fullscreen and immersive, until it was force-stopped.
-     *
-     * This is still a weak signal, not proof — `dumpsys` has been observed reporting
-     * `mDisplayId=1` continuously while the activity visibly rendered on the front
-     * screen. It is better than nothing as this service's own self-check, but it is
-     * not evidence to present as confirmation of on-device placement to anyone.
-     */
-    private fun isOnDisplay(displayId: Int): Boolean {
-        val out = exec("dumpsys window displays")
-        // A bare `indexOf("mDisplayId=$displayId")` would let displayId=1 match as a
-        // prefix of mDisplayId=10, =11, ... =19. The lookahead anchors so the digit
-        // run cannot continue past the id we're actually looking for.
-        val marker = Regex("Display: mDisplayId=$displayId(?!\\d)").find(out) ?: return false
-        val start = marker.range.first
-        val next = Regex("Display: mDisplayId=\\d+").find(out, start + marker.value.length)
-        val section = if (next == null) out.substring(start) else out.substring(start, next.range.first)
-        return section.contains("RearActivity")
     }
 
     private fun pollTaskId(): Int {
@@ -1176,8 +1150,10 @@ class RearUserService : IRearService.Stub {
         val shape = shapeOf(pkg)
         val b = shape.bounds
         val rect = android.graphics.Rect(b.left, b.top, b.right, b.bottom)
-        val how = if (TaskShaper.apply(task, shape.mode, if (shape.confined) rect else null)) "transaction" else {
-            exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}"); "am task resize"
+        val how = when {
+            TaskShaper.apply(task, shape.mode, if (shape.confined) rect else null) -> "transaction"
+            resizeFallback(task, b.left, b.top, b.right, b.bottom) -> "am task resize"
+            else -> { Log.w(TAG, "portal: $pkg (task $task) not shaped — the task shaper refused it — $why"); return }
         }
         Log.i(TAG, "portal: $pkg (task $task) ${if (shape.confined) "kept right of the cameras" else "on the whole rear"}, by $how — $why")
         if (verify) {
@@ -1272,14 +1248,32 @@ class RearUserService : IRearService.Stub {
      * reuse it so. Else, sized to the front's whole screen.
      */
     private fun shapeForFront(task: Int) {
-        if (TaskShaper.apply(task, GuestShape.FULLSCREEN, null)) return
+        if (TaskShaper.apply(task, GuestShape.FULLSCREEN, null) || TaskShaper.available) return
         val size = runCatching {
             android.graphics.Point().also { p ->
                 @Suppress("DEPRECATION")
                 context?.getSystemService(android.hardware.display.DisplayManager::class.java)?.getDisplay(0)?.getRealSize(p)
             }
         }.getOrNull()?.takeIf { it.x > 0 && it.y > 0 } ?: return
-        exec("am task resize $task 0 0 ${size.x} ${size.y}")
+        resizeFallback(task, 0, 0, size.x, size.y)
+    }
+
+    @Volatile private var resizeFallbackLogged = false
+
+    /**
+     * `am task resize` [task] to these bounds, only where there is no TaskShaper on this
+     * firmware at all (logged once): where there is one and it refused, a resize would be
+     * refused too (no such task) or undo nothing it could not. Only a multi-window task takes
+     * it. True when it was sent.
+     */
+    private fun resizeFallback(task: Int, left: Int, top: Int, right: Int, bottom: Int): Boolean {
+        if (TaskShaper.available) return false
+        if (!resizeFallbackLogged) {
+            resizeFallbackLogged = true
+            Log.i(TAG, "portal: no task shaper on this firmware — guests shaped with am task resize")
+        }
+        exec("am task resize $task $left $top $right $bottom")
+        return true
     }
 
     /**
@@ -2732,28 +2726,6 @@ class RearUserService : IRearService.Stub {
         return out.contains("installed for user", ignoreCase = true) || out.contains("Success")
     }
 
-    /** Runs via `sh -c` so PATH resolves am/service/input in the forked process. */
-    /**
-     * Keeps the panel placed from INSIDE the Shizuku service, on its own thread.
-     *
-     * UsagePollService already runs a 20s watchdog doing the same job, and this does
-     * not replace it — it survives what that one cannot. That watchdog lives in the
-     * app process, so it dies with the app: an `adb install` (pm install -r kills the
-     * app), a low-memory kill, or MIUI's background management all leave the panel
-     * dead with nothing left running to notice. Observed exactly that on device — no
-     * app process, no services, panel gone, and no path back without user action.
-     *
-     * This thread lives in Shizuku's user-service process at shell uid, which Shizuku
-     * manages independently of the app's lifecycle, so it keeps checking through all
-     * of the above.
-     *
-     * The two guards match the app-side watchdog's, for the same reasons:
-     *   - nothing happens while the keyguard is up, because re-placing means `am start`
-     *     on display 0, which on a locked phone draws over the lock screen and wakes
-     *     the main display;
-     *   - only a definite "not composited on the rear" triggers a re-place, so an
-     *     unparseable dump or a momentary gap does not restart a healthy panel.
-     */
     /**
      * Rebuild the panel, at most once per [REPLACE_COOLDOWN_MS].
      *
@@ -2776,6 +2748,27 @@ class RearUserService : IRearService.Stub {
         show(lastPayload, displayId)
     }
 
+    /**
+     * Keeps the panel placed from INSIDE the Shizuku service, on its own thread.
+     *
+     * UsagePollService already runs a 20s watchdog doing the same job, and this does
+     * not replace it — it survives what that one cannot. That watchdog lives in the
+     * app process, so it dies with the app: an `adb install` (pm install -r kills the
+     * app), a low-memory kill, or MIUI's background management all leave the panel
+     * dead with nothing left running to notice. Observed exactly that on device — no
+     * app process, no services, panel gone, and no path back without user action.
+     *
+     * This thread lives in Shizuku's user-service process at shell uid, which Shizuku
+     * manages independently of the app's lifecycle, so it keeps checking through all
+     * of the above.
+     *
+     * The two guards match the app-side watchdog's, for the same reasons:
+     *   - nothing happens while the keyguard is up, because re-placing means `am start`
+     *     on display 0, which on a locked phone draws over the lock screen and wakes
+     *     the main display;
+     *   - only a definite "not composited on the rear" triggers a re-place, so an
+     *     unparseable dump or a momentary gap does not restart a healthy panel.
+     */
     private fun startKeepAlive(displayId: Int) {
         if (keepAlive?.isAlive == true) return
         keepAlive = guarded {
@@ -3061,6 +3054,7 @@ class RearUserService : IRearService.Stub {
         }
     }
 
+    /** Runs via `sh -c` so PATH resolves am/service/input in the forked process. */
     private fun exec(cmd: String): String = try {
         val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
         val out = BufferedReader(InputStreamReader(p.inputStream)).use { it.readText() }
@@ -3142,12 +3136,9 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         const val REAR_PHYSICAL_ID_SUFFIX = "332"
 
         /**
-         * Keep-alive period. Matches UsagePollService's watchdog rather than racing it:
-         * both may re-place, and show() is idempotent when the panel is healthy (it
-         * short-circuits to update+wake), so a duplicate tick costs one dumpsys.
-         */
-        /**
-         * How often the panel's presence is checked.
+         * How often the panel's presence is checked. Both this and UsagePollService's
+         * watchdog may re-place, and show() is idempotent when the panel is healthy (it
+         * short-circuits to update+wake), so a tick that overlaps the other costs one dumpsys.
          *
          * Was 20s, which is a long time to look at the wrong screen. A tick is one
          * `dumpsys SurfaceFlinger` — measured at 40ms on this device — so at six seconds

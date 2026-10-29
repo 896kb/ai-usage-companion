@@ -2,7 +2,6 @@ package dev.kb896.aiusage.rear
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.util.Log
 import dev.kb896.aiusage.data.GlassStyle
 import dev.kb896.aiusage.data.PanelTheme
 import dev.kb896.aiusage.data.PortalGrid
@@ -191,7 +190,7 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         overlay.changed()
     }
 
-    /** What the overlay draws: the sheet at its position, and the [TIMING_TAG] log. */
+    /** What the overlay draws: the sheet at its position. */
     private inner class Drawing : ShellOverlay.Content {
         override fun frame(): Float {
             frameAt = position
@@ -201,38 +200,6 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         override fun painter(): ShellOverlay.Painter {
             val r = Renderer()
             return ShellOverlay.Painter { canvas, _ -> r.draw(canvas, frameAt); false }
-        }
-
-        private var timing: Timing? = null
-
-        override fun drew(gen: Int, sinceBeganMs: Long, progress: Float) {
-            val t = timing?.takeIf { it.gen == gen } ?: Timing(gen).also { timing = it }
-            t.drew(sinceBeganMs, frameAt, guestOnTop != null)
-        }
-    }
-
-    /**
-     * The [TIMING_TAG] log, one run's worth: when its first frame was posted, when its contents
-     * first showed (Arrival past nothing) and whether the guest's buttons were among them —
-     * and, if they came later, when. A few lines per opening, for the "buttons come late"
-     * report: `adb logcat -s PortalSheetTiming`.
-     */
-    private class Timing(val gen: Int) {
-        private var first = false
-        private var contentsAt = -1L
-        private var buttonsAt = -1L
-
-        fun drew(ms: Long, at: Float, buttons: Boolean) {
-            if (!first) { first = true; Log.i(TIMING_TAG, "sheet $gen: first frame +$ms ms, guest buttons ${if (buttons) "in" else "out"}") }
-            val showing = Arrival.of(PortalSheet.progress(at)) > 0.004f
-            if (showing && contentsAt < 0) {
-                contentsAt = ms
-                Log.i(TIMING_TAG, "sheet $gen: contents show +$ms ms, guest buttons ${if (buttons) "with them" else "not there"}")
-            }
-            if (showing && buttons && buttonsAt < 0) {
-                buttonsAt = ms
-                if (ms > contentsAt) Log.i(TIMING_TAG, "sheet $gen: guest buttons LATE +$ms ms, ${ms - contentsAt} ms after the contents")
-            }
         }
     }
 
@@ -275,10 +242,5 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
                 guestIcon = guestIcon, slider = slider, names = names,
             )
         }
-    }
-
-    companion object {
-        /** The sheet's opening times (Timing), apart from the rest so they can be read alone. */
-        private const val TIMING_TAG = "PortalSheetTiming"
     }
 }

@@ -51,7 +51,6 @@ class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
 
     @Volatile private var color = 0xFF28FF85.toInt()
     private val shapes: List<ElectricBorder.Shape> = shapesFor(rear)
-    /** Volatile: [showing] reads it from threads that do not hold the lock. */
     @Volatile private var thread: Thread? = null
     /** Bumped by every show(); a render thread of an older generation stops. */
     @Volatile private var gen = 0
@@ -78,8 +77,6 @@ class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
     fun style(color: Int) {
         this.color = color
     }
-
-    val showing get() = thread?.isAlive == true
 
     /** Fades in, if the Portal border switch allows it: wanted either way, for when it does. */
     @Synchronized

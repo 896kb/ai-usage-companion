@@ -95,9 +95,6 @@ class ShellOverlay(
          * painters are its own, so an overlapping run shares nothing mutable).
          */
         fun painter(): Painter
-
-        /** Told when a frame was posted, [sinceBeganMs] after [begin] showed run [gen]. */
-        fun drew(gen: Int, sinceBeganMs: Long, progress: Float) {}
     }
 
     /** One run's drawing. */
@@ -123,8 +120,6 @@ class ShellOverlay(
     ) {
         /** Between a successful [begin] and [end], and not after the render loop died. */
         @Volatile var live = true
-        /** When [begin] showed it (uptime ms), for [Content.drew]. */
-        val beganAt = android.os.SystemClock.uptimeMillis()
     }
 
     private val version = AtomicInteger()
@@ -299,7 +294,6 @@ class ShellOverlay(
                 val radius = blurPx(p)
                 if (radius != blurred && blur(r, radius)) blurred = radius
                 drawn = v
-                content.drew(r.gen, android.os.SystemClock.uptimeMillis() - r.beganAt, p)
                 synchronized(progressLock) { if (gen == r.gen) onProgress?.invoke(p) }
             }
             val took = (System.nanoTime() - began) / 1_000_000

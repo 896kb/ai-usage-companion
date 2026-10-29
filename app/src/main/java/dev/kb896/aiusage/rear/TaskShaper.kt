@@ -62,6 +62,9 @@ internal object TaskShaper {
         }.onFailure { Log.w(TAG, "task shaper: none on this firmware (${(it.cause ?: it).message}); am task resize alone") }.getOrNull()
     }
 
+    /** Whether this firmware has what it takes at all (looked up once); false: `am task resize` alone. */
+    val available: Boolean get() = api != null
+
     /**
      * [task] in windowing [mode] with [bounds] (null: none of its own — fullscreen fills its
      * display), applied as a plain transaction — never a transition (see the class comment).

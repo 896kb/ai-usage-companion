@@ -6,14 +6,14 @@ import org.junit.Test
 class PortalAppsTest {
 
     @Test fun `pinning adds at the end and unpinning removes`() {
-        val one = PortalApps.toggled(emptyList(), "a")
+        val one = PortalApps.pinned(emptyList(), "a", on = true)
         assertEquals(listOf("a"), one)
-        assertEquals(listOf("a", "b"), PortalApps.toggled(one, "b"))
-        assertEquals(listOf("b"), PortalApps.toggled(listOf("a", "b"), "a"))
+        assertEquals(listOf("a", "b"), PortalApps.pinned(one, "b", on = true))
+        assertEquals(listOf("b"), PortalApps.pinned(listOf("a", "b"), "a", on = false))
     }
 
     @Test fun `unpinning drops every copy`() {
-        assertEquals(listOf("b"), PortalApps.toggled(listOf("a", "b", "a"), "a"))
+        assertEquals(listOf("b"), PortalApps.pinned(listOf("a", "b", "a"), "a", on = false))
     }
 
     @Test fun `moving up swaps with the one above, and the first stays first`() {
