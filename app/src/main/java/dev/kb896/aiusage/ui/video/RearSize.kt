@@ -11,9 +11,15 @@ import dev.kb896.aiusage.Panel
  * there is no second display to ask.
  */
 object RearSize {
+    /**
+     * The rear display by its id: not merely the first display that is not the front, which
+     * a screen recording's or a cast's virtual display can be.
+     */
+    private fun rear(context: Context): Display? =
+        runCatching { context.getSystemService(DisplayManager::class.java)?.getDisplay(Panel.DISPLAY_ID) }.getOrNull()
+
     fun pixels(context: Context): Pair<Int, Int> {
-        val rear = context.getSystemService(DisplayManager::class.java)
-            ?.displays?.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }
+        val rear = rear(context)
         val mode = rear?.mode
         val a = mode?.physicalWidth ?: Panel.WIDTH
         val b = mode?.physicalHeight ?: Panel.HEIGHT
@@ -28,8 +34,7 @@ object RearSize {
      * its window; the 17 Pro's (97 of 904) when it does not say.
      */
     fun cornerShare(context: Context): Float {
-        val rear = context.getSystemService(DisplayManager::class.java)
-            ?.displays?.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }
+        val rear = rear(context)
         val mode = rear?.mode
         val width = if (mode != null) maxOf(mode.physicalWidth, mode.physicalHeight) else 0
         return cornerShare(rear?.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT)?.radius, width)
