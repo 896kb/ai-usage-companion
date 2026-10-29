@@ -1118,8 +1118,8 @@ class RearUserService : IRearService.Stub {
     /**
      * [pkg]'s window really drawn where its shape says (SurfacePlace): read off SurfaceFlinger
      * ([dump] if one is in hand, else asked), and while it is not — the task's bounds right,
-     * its surface still at x 0, seen on the phone — nudged by two CHANGE transitions, a pixel
-     * off and back (TaskShaper.nudge; `am task resize` where there are none), and read again;
+     * its surface still at x 0, seen on the phone — nudged by `am task resize`, a pixel off and
+     * back (never a transition of our own: see TaskShaper), and read again;
      * [PLACE_TRIES] at most.
      * An app not composed on the rear (behind the panel, not drawn yet) is left as it is.
      * Under [placing].
@@ -1135,12 +1135,10 @@ class RearUserService : IRearService.Stub {
                 return
             }
             Log.w(TAG, "portal: $pkg drawn at x $left, its shape at ${b.left} — nudging (${i + 1}) — $why")
-            // Two CHANGE transitions, a pixel off and back (TaskShaper.nudge): a resize alone
-            // moves the bounds and not the surface of a task the system's shell organises.
-            if (!TaskShaper.nudge(task, android.graphics.Rect(b.left, b.top, b.right, b.bottom), PLACE_SETTLE_MS)) {
-                exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
-                exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
-            }
+            // A pixel off and back: a resize to the bounds it already has does nothing. Seen by
+            // hand to move the surface at times, not always.
+            exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
+            exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
             Thread.sleep(PLACE_SETTLE_MS)
             sf = exec("dumpsys SurfaceFlinger")
         }
