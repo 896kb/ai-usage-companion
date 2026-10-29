@@ -1626,8 +1626,8 @@ class RearUserService : IRearService.Stub {
     }
 
     private val sheetLock = Any()
-    /** The watch's classifier; one per getevent. Under [sheetLock]. */
-    private var gestures = EdgeGestures()
+    /** The watch's classifier; one per getevent, none before the first. Under [sheetLock]. */
+    private var gestures: EdgeGestures? = null
     private val motion = SheetMotion()
     /** From an opening's begin until its end is asked for. Under [sheetLock]. */
     private var sheetUp = false
@@ -1640,7 +1640,7 @@ class RearUserService : IRearService.Stub {
     /** And across: a sideways drag is measured from there. Under [sheetLock]. */
     private var touchDownX = 0f
     /** The grid's pages: which shows, and their slide. Under [sheetLock]. */
-    private val pager = SheetPager()
+    private val pager by lazy { SheetPager(PortalSheet.pageStride(geometry.cutoutUnits)) }
     /** What this finger's sideways drag moves (PortalSheet.swipe), decided as it starts. Under [sheetLock]. */
     private var slide = PortalSheet.Swipe.NONE
     /** A slider drag's app, the DPI its thumb started at, and where it is now. Under [sheetLock]. */
@@ -1981,7 +1981,7 @@ class RearUserService : IRearService.Stub {
         sheetUp = true
         beginPending = true
         driving = true
-        gestures.sheet = true
+        gestures?.sheet = true
         dropChoice()
         pressed = -1
         s.page(0f)
@@ -2063,7 +2063,9 @@ class RearUserService : IRearService.Stub {
     }
 
     /** The sheet's boxes as they are now: the grid, the pinned apps, the guest. */
-    private fun sheetLayout() = PortalSheet.layout(portalGrid, portalApps.size, sheetGuestOnTop)
+    private fun sheetLayout() =
+        // Laid out where the sheet draws it: right of the lenses it was made with.
+        PortalSheet.layout(portalGrid, portalApps.size, sheetGuestOnTop, shellSheet?.lensRight ?: geometry.cutoutUnits)
 
     /**
      * What a finger landing at [x], [y] on the sheet at rest at [at] shows pressed: a
@@ -2153,8 +2155,8 @@ class RearUserService : IRearService.Stub {
     /** The guest — on top or behind the panel — whose DPI the slider is: null without one. */
     private fun sliderGuest(): String? = guest?.takeIf { it.sheetOnTop != null }?.pkg
 
-    /** The thumb's DPI for [pkg] as it stands: its own, else the display's. */
-    private fun thumbOf(pkg: String) = portalDpi[pkg] ?: densityDefault ?: DensityDump.FALLBACK
+    /** The thumb's DPI for [pkg] as it stands: its own, else the display's as read, else as its geometry says. */
+    private fun thumbOf(pkg: String) = portalDpi[pkg] ?: densityDefault ?: geometry.dpi
 
     /**
      * A sideways drag begins: on the settled sheet's slider row it drags the slider's thumb,
@@ -2609,7 +2611,7 @@ class RearUserService : IRearService.Stub {
         pressed = -1
         slide = PortalSheet.Swipe.NONE
         sliderPkg = null
-        gestures.sheet = false
+        gestures?.sheet = false
         motion.reset()
         pager.reset()
         val then = afterShut

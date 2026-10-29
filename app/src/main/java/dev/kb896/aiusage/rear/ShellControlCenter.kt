@@ -64,7 +64,8 @@ class ShellControlCenter(
 
     private val lock = Any()
     private val model = ControlCenterModel()
-    private val finger = ControlCenterFinger()
+    /** Hit-tested right of this rear's own lenses, where it is drawn (ControlCenterLayout). */
+    private val finger = ControlCenterFinger { x, y -> ControlCenterLayout.hit(x, y, geometry().cutoutUnits) }
     /** The finger down now is the control centre's. Under [lock]. */
     private var owns = false
     /** Where the latest finger landed, for the opening pull. Under [lock]. */
@@ -289,7 +290,8 @@ class ShellControlCenter(
 
         override fun painter(): ShellOverlay.Painter {
             val f = face ?: return ShellOverlay.Painter { _, _ -> false }
-            val painter = ControlCenterPainter(f)
+            val rear = geometry()
+            val painter = ControlCenterPainter(f, rear.cutoutUnits)
             val cell = LiquidCellPainter.Cell()
             val glass = GlassPainter()
             var style: Pair<PanelTheme, GlassStyle?> = look
@@ -307,7 +309,8 @@ class ShellControlCenter(
                 glass.beginFrame(canvas.width, canvas.height)
                 painter.draw(
                     canvas, progress, l, cell, lens, SystemClock.elapsedRealtime(),
-                    corner = LiquidCellPainter.FALLBACK_CORNER,
+                    // The rear's own corner, in panel units as the cell is drawn.
+                    corner = rear.cornerPx / rear.fitX,
                     buttonGround = { background or (0xFF shl 24) },
                     cellGround = background,
                 )

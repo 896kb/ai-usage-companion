@@ -9,7 +9,7 @@ import org.junit.Test
 class BandTapTest {
 
     // The 17 Pro's rear touchscreen: 904x572 pixels at 100 raw units each.
-    private fun tap() = BandTap(90399, 57199)
+    private fun tap() = BandTap(90399, 57199, BandTap.band(RearGeometry.PRO17))
 
     private fun hex(v: Int) = "%08x".format(v)
 
@@ -91,7 +91,7 @@ class BandTapTest {
     }
 
     @Test fun `the band from the rear's geometry - the 17 Pro's is the constant, a Pro Max's its own lenses`() {
-        assertEquals(BandTap.BAND, BandTap.band(RearGeometry.PRO17), 1e-6f)
+        assertEquals((296f + 48f) / 904f, BandTap.band(RearGeometry.PRO17), 1e-6f)
         assertEquals(296f / 976f + 48f / 904f, BandTap.band(RearGeometry(976, 596, 296, 110, 450)), 1e-6f)
     }
 }

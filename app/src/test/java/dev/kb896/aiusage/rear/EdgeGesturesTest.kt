@@ -9,8 +9,12 @@ import org.junit.Test
 
 class EdgeGesturesTest {
 
+    /** The 17 Pro's lens column, in panel units: where its pull bands start. */
+    private val PRO_LENSES = dev.kb896.aiusage.Panel.CUTOUT_RIGHT.toFloat()
+
+
     private fun run(vararg events: RearTouches.Event): List<Action> {
-        val g = EdgeGestures()
+        val g = EdgeGestures(PRO_LENSES)
         return events.flatMap { g.feed(it) }
     }
 
@@ -85,7 +89,7 @@ class EdgeGesturesTest {
     // -- the sheet up --
 
     private fun sheet(vararg events: RearTouches.Event): List<Action> {
-        val g = EdgeGestures().apply { sheet = true }
+        val g = EdgeGestures(PRO_LENSES).apply { sheet = true }
         return events.flatMap { g.feed(it) }
     }
 
@@ -157,7 +161,7 @@ class EdgeGesturesTest {
     }
 
     @Test fun `the sheet's state is read when a finger lands, so the opening pull runs to its lift`() {
-        val g = EdgeGestures()
+        val g = EdgeGestures(PRO_LENSES)
         val out = mutableListOf<Action>()
         out += g.feed(Down(600f, 560f, 0))
         out += g.feed(Move(600f, 500f, 10))
@@ -230,7 +234,7 @@ class EdgeGesturesTest {
     }
 
     @Test fun `with the sheet up the top band is the sheet's`() {
-        val g = EdgeGestures().apply { sheet = true }
+        val g = EdgeGestures(PRO_LENSES).apply { sheet = true }
         val actions = listOf(Down(400f, 10f, 0), Move(400f, 80f, 10)).flatMap { g.feed(it) }
         assertEquals(listOf(Action.SheetDown(400f, 10f), Action.PullStart(80f, onSheet = true)), actions)
     }

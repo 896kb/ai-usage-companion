@@ -52,7 +52,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * being that size too, let touches there through to the app. The content draws in the 17
  * Pro's 904x572 panel units, as the panel does, under one canvas scale by the rear's fit
  * (RearGeometry.fitX, fitY): the touches come in panel units (RearTouches), so what is
- * drawn under a finger is what its hit test finds there.
+ * drawn under a finger is what its hit test finds there. PER AXIS, ON PURPOSE, as the panel
+ * itself draws (RearDialView.fitX/fitY; only its lab, taller than the panel, scales by fitX
+ * alone): the two differ by under four per cent on a Pro Max, so a round shape is that much
+ * squashed, as the panel's own control centre is there. A uniform scale would letterbox the
+ * contents, the touches would have to be letterboxed alike, and the shell's control centre
+ * would no longer stand where the panel's does.
  *
  * THREADING. [begin] makes both layers and shows them on the caller's thread, under the
  * instance lock, so when it says true they are there. The content's setters may be called

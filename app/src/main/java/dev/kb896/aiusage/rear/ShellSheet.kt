@@ -30,7 +30,7 @@ import dev.kb896.aiusage.data.PortalGrid
  *   the system's fonts loaded first, then through our Resources, or Departure Mono read
  *   out of our APK when they cannot. Never Typeface.DEFAULT.
  */
-class ShellSheet(layerStack: Int, rear: RearGeometry, face: PanelType.Face) {
+class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelType.Face) {
 
     private class Look(val theme: PanelTheme, val style: GlassStyle?)
 
@@ -62,6 +62,9 @@ class ShellSheet(layerStack: Int, rear: RearGeometry, face: PanelType.Face) {
 
     /** Where the frame being drawn stands, read once per frame ([Drawing.frame]). Render thread only. */
     private var frameAt = 0f
+
+    /** Where the rear's lenses end, in panel units, as this sheet lays itself out (PortalSheet.layout). */
+    val lensRight: Float get() = rear.cutoutUnits
 
     private val overlay = ShellOverlay(layerStack, rear, "portal-sheet", "portal sheet", Drawing())
 
@@ -253,13 +256,14 @@ class ShellSheet(layerStack: Int, rear: RearGeometry, face: PanelType.Face) {
             val onTop = guestOnTop
             frameLook = look
             val key = Triple(grid, a.snapshot.size, onTop)
-            val layout = laid?.takeIf { laidFor == key } ?: PortalSheet.layout(key.first, key.second, key.third).also { laid = it; laidFor = key }
+            val layout = laid?.takeIf { laidFor == key } ?: PortalSheet.layout(key.first, key.second, key.third, rear.cutoutUnits).also { laid = it; laidFor = key }
             val p = PortalSheet.progress(at)
             val slider = if (onTop != null) {
                 val own = guestPkg?.let { dpiValues[it] }
                 val dragged = sliderDrag
                 PortalSheetPainter.SliderLook(
-                    thumbDpi = dragged ?: own ?: dpiDefault ?: DensityDump.FALLBACK,
+                    // The display's own as read, else this rear's as its geometry says.
+                    thumbDpi = dragged ?: own ?: dpiDefault ?: rear.dpi,
                     label = PortalSheet.sliderLabel(dragged, own),
                 )
             } else null

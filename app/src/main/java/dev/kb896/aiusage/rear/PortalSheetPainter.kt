@@ -145,7 +145,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             // Faded as one picture, as the control centre is: glass cannot take a paint's alpha.
             if (arrived < 0.996f) canvas.saveLayerAlpha(0f, 0f, w, h, (255 * arrived).toInt())
             val paging = kotlin.math.abs(page - Math.round(page)) > 0.001f
-            faded(canvas, sides = paging, top = PortalSheet.topFade(scroll)) { c ->
+            faded(canvas, layout.pagesLeft, sides = paging, top = PortalSheet.topFade(scroll)) { c ->
                 drawUpper(c, dy, g, layout, page, icons, labels, guestOnTop, pressed, guestIcon, names)
             }
             val s = layout.slider
@@ -168,13 +168,13 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     }
 
     /**
-     * [block] drawn within the pages' width, faded at the [sides] (pages moving) and at the
+     * [block] drawn within the pages' width (from [l], the layout's, to PortalSheet.PAGES_RIGHT), faded at the [sides] (pages moving) and at the
      * [top] (on at that strength: the scroll's) as EdgeFade has it: sharp, then a blurred
      * copy over it on the way, then nothing. With neither, drawn as it is. The blur needs a
      * hardware canvas (a RenderNode with a RenderEffect); on a software one the fade alone.
      */
-    private fun faded(canvas: Canvas, sides: Boolean, top: Float, block: (Canvas) -> Unit) {
-        val l = PortalSheet.PAGES_LEFT; val r = PortalSheet.PAGES_RIGHT
+    private fun faded(canvas: Canvas, l: Float, sides: Boolean, top: Float, block: (Canvas) -> Unit) {
+        val r = PortalSheet.PAGES_RIGHT
         val w = Panel.WIDTH.toFloat(); val h = Panel.HEIGHT.toFloat()
         val clip = canvas.save()
         try {
@@ -183,7 +183,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             if (!canvas.isHardwareAccelerated) {
                 canvas.saveLayer(l, 0f, r, h, null)
                 block(canvas)
-                mask(canvas, sides, top, blurred = false)
+                mask(canvas, l, sides, top, blurred = false)
                 return
             }
             val node = content
@@ -193,7 +193,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             // Sharp: whole inside, gone at the edges.
             var layer = canvas.saveLayer(l, 0f, r, h, null)
             canvas.drawRenderNode(node)
-            mask(canvas, sides, top, blurred = false)
+            mask(canvas, l, sides, top, blurred = false)
             canvas.restoreToCount(layer)
             // Blurred, over it, on the way out.
             blurredContent.setPosition(0, 0, w.toInt(), h.toInt())
@@ -202,7 +202,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             try { bc.drawRenderNode(node) } finally { blurredContent.endRecording() }
             layer = canvas.saveLayer(l, 0f, r, h, null)
             canvas.drawRenderNode(blurredContent)
-            mask(canvas, sides, top, blurred = true)
+            mask(canvas, l, sides, top, blurred = true)
             canvas.restoreToCount(layer)
         } finally {
             canvas.restoreToCount(clip)
@@ -215,11 +215,11 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * is blurred at one edge only (the sides' while pages move) and fades as the sharp does
      * at the other.
      */
-    private fun mask(canvas: Canvas, sides: Boolean, top: Float, blurred: Boolean) {
-        val l = PortalSheet.PAGES_LEFT; val r = PortalSheet.PAGES_RIGHT
+    private fun mask(canvas: Canvas, l: Float, sides: Boolean, top: Float, blurred: Boolean) {
+        val r = PortalSheet.PAGES_RIGHT
         val h = Panel.HEIGHT.toFloat()
         if (sides) {
-            maskPaint.shader = sideShader(blurred)
+            maskPaint.shader = sideShader(l, blurred)
             canvas.drawRect(l, 0f, r, h, maskPaint)
         }
         if (top > 0.001f) {
@@ -230,10 +230,11 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         }
     }
 
-    /** The sides' mask across the pages' width: the band's stops at the left, mirrored at the right. */
-    private fun sideShader(blurred: Boolean): Shader {
+    /** The sides' mask across the pages' width from [l]: the band's stops at the left, mirrored at the right. */
+    private fun sideShader(l: Float, blurred: Boolean): Shader {
+        if (cachedSidesLeft != l) { cachedSides.fill(null); cachedSidesLeft = l }
         cachedSides[if (blurred) 1 else 0]?.let { return it }
-        val l = PortalSheet.PAGES_LEFT; val r = PortalSheet.PAGES_RIGHT
+        val r = PortalSheet.PAGES_RIGHT
         val band = EdgeFade.BAND / (r - l)
         val stops = EdgeFade.positions()
         val colours = if (blurred) EdgeFade.blurMask() else EdgeFade.sharpMask()
@@ -248,6 +249,8 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     private val blurEffect = RenderEffect.createBlurEffect(EdgeFade.BLUR, EdgeFade.BLUR, Shader.TileMode.DECAL)
     private val maskPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
     private val cachedSides = arrayOfNulls<Shader>(2)
+    /** The pages' left edge [cachedSides] were made for. */
+    private var cachedSidesLeft = Float.NaN
 
     /** The buttons, the pages of apps and their dots, [dy] down, each piece grown to [g]. */
     private fun drawUpper(
@@ -281,8 +284,8 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         val first = kotlin.math.floor(page).toInt()
         for (p in first..first + 1) {
             if (p !in 0 until layout.pages) continue
-            val dx = (p - page) * PortalSheet.PAGE_STRIDE
-            if (kotlin.math.abs(dx) >= PortalSheet.PAGE_STRIDE) continue
+            val dx = (p - page) * layout.pageStride
+            if (kotlin.math.abs(dx) >= layout.pageStride) continue
             layout.slots.forEachIndexed { slot, c ->
                 val i = layout.appAt(p, slot)
                 if (i < 0) return@forEachIndexed

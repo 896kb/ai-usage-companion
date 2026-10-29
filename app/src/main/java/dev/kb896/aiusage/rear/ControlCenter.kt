@@ -37,14 +37,13 @@ object ControlCenter {
     /** How long a button or a tile takes to change colour, on to off and back. */
     const val SWITCH_MS = 250f
 
-    private val PULL_LEFT = Panel.CUTOUT_RIGHT.toFloat()
-
     /**
      * A finger at [x], [y] (panel units) starts a pull: within [EDGE] of the top, over the left
-     * half of the usable area right of [left] — the lens column's edge, the panel's own unless
-     * the rear says otherwise (RearGeometry.cutoutUnits, for the shell's on a Pro Max).
+     * half of the usable area right of [left] — the lens column's edge, given: the panel's
+     * own Panel.CUTOUT_RIGHT for the panel's centre, the rear's (RearGeometry.cutoutUnits) for
+     * the shell's.
      */
-    fun startsPull(x: Float, y: Float, left: Float = PULL_LEFT): Boolean =
+    fun startsPull(x: Float, y: Float, left: Float): Boolean =
         y <= EDGE && x >= left && x <= left + (Panel.WIDTH - left) / 2f
 
     /** How far open, 0 to 1, under a finger that has moved [dy] (down positive). */

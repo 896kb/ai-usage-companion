@@ -11,6 +11,10 @@ import dev.kb896.aiusage.Panel
  *
  * Each piece arrives as Arrival has it: slid down into place from [shift] above it, and
  * grown about its own middle ([grown]) — not the lot from one point.
+ *
+ * Right of the lens column, which ends at `lensRight` in panel units: the panel's own
+ * Panel.CUTOUT_RIGHT for the panel's centre (RearDialView, laid out on the 17 Pro's
+ * numbers throughout), the rear's own (RearGeometry.cutoutUnits) for the shell's over a guest.
  */
 object ControlCenterLayout {
 
@@ -44,18 +48,18 @@ object ControlCenterLayout {
      * The brightness cell where it stands, slid down by [progress]: the charging cell's
      * width, short of the bottom by the round button under it.
      */
-    fun cellRect(progress: Float): RectF {
+    fun cellRect(progress: Float, lensRight: Float): RectF {
         val w = ChargeOverlay.width(Panel.WIDTH.toFloat())
-        val left = Panel.CUTOUT_RIGHT + ChargeOverlay.MARGIN
+        val left = lensRight + ChargeOverlay.MARGIN
         val shift = shift(progress)
         val bottom = Panel.HEIGHT - ChargeOverlay.MARGIN - w - BUTTON_GAP
         return grown(RectF(left, ChargeOverlay.MARGIN + shift, left + w, bottom + shift), progress)
     }
 
     /** The automatic-brightness button under the cell: a disc as wide as the cell. */
-    fun autoRect(progress: Float): RectF {
+    fun autoRect(progress: Float, lensRight: Float): RectF {
         val w = ChargeOverlay.width(Panel.WIDTH.toFloat())
-        val left = Panel.CUTOUT_RIGHT + ChargeOverlay.MARGIN
+        val left = lensRight + ChargeOverlay.MARGIN
         val top = Panel.HEIGHT - ChargeOverlay.MARGIN - w + shift(progress)
         return grown(RectF(left, top, left + w, top + w), progress)
     }
@@ -64,9 +68,9 @@ object ControlCenterLayout {
      * The four tiles, two by two in the room right of the brightness: one gap between them,
      * the same to the brightness, the panel's top, right and bottom.
      */
-    fun tileRect(i: Int, progress: Float): RectF {
+    fun tileRect(i: Int, progress: Float, lensRight: Float): RectF {
         val g = ChargeOverlay.MARGIN
-        val left = Panel.CUTOUT_RIGHT + ChargeOverlay.MARGIN + ChargeOverlay.width(Panel.WIDTH.toFloat()) + g
+        val left = lensRight + ChargeOverlay.MARGIN + ChargeOverlay.width(Panel.WIDTH.toFloat()) + g
         val right = Panel.WIDTH - g
         val w = (right - left - g) / 2f
         val h = (Panel.HEIGHT - 3f * g) / 2f
@@ -79,9 +83,9 @@ object ControlCenterLayout {
     }
 
     /** What a finger at [x], [y] lands on, the centre open: [CELL], [AUTO], a tile's index, or [NONE]. */
-    fun hit(x: Float, y: Float): Int = when {
-        cellRect(1f).contains(x, y) -> CELL
-        autoRect(1f).contains(x, y) -> AUTO
-        else -> (0 until 4).firstOrNull { tileRect(it, 1f).contains(x, y) } ?: NONE
+    fun hit(x: Float, y: Float, lensRight: Float): Int = when {
+        cellRect(1f, lensRight).contains(x, y) -> CELL
+        autoRect(1f, lensRight).contains(x, y) -> AUTO
+        else -> (0 until 4).firstOrNull { tileRect(it, 1f, lensRight).contains(x, y) } ?: NONE
     }
 }

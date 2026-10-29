@@ -35,7 +35,7 @@ class RearFitTest {
 
     @Test fun `a finger on a drawn cell or button hits it, on both rears`() {
         for (rear in rears) {
-            val l = PortalSheet.layout(PortalGrid.R3C4, 12, guestOnTop = true)
+            val l = PortalSheet.layout(PortalGrid.R3C4, 12, guestOnTop = true, lensRight = rear.cutoutUnits)
             val drawn = l.slots.mapIndexed { i, c -> c to PortalSheet.Hit.App(i) } +
                 l.buttons.mapIndexed { i, b -> b to PortalSheet.Hit.Button(i) }
             for ((box, want) in drawn) {
@@ -51,11 +51,11 @@ class RearFitTest {
 
     @Test fun `the control centre's pieces too`() {
         for (rear in rears) {
-            val pieces = (0 until 4).map { ControlCenterLayout.tileRect(it, 1f) to it } +
-                listOf(ControlCenterLayout.cellRect(1f) to ControlCenterLayout.CELL, ControlCenterLayout.autoRect(1f) to ControlCenterLayout.AUTO)
+            val pieces = (0 until 4).map { ControlCenterLayout.tileRect(it, 1f, rear.cutoutUnits) to it } +
+                listOf(ControlCenterLayout.cellRect(1f, rear.cutoutUnits) to ControlCenterLayout.CELL, ControlCenterLayout.autoRect(1f, rear.cutoutUnits) to ControlCenterLayout.AUTO)
             for ((rect, want) in pieces) {
                 val e = finger(rear, rect.centerX() * rear.fitX, rect.centerY() * rear.fitY)
-                assertEquals("$rear: $want", want, ControlCenterLayout.hit(e.x, e.y))
+                assertEquals("$rear: $want", want, ControlCenterLayout.hit(e.x, e.y, rear.cutoutUnits))
             }
         }
     }

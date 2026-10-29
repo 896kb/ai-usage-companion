@@ -18,8 +18,12 @@ class PortalSheetTest {
 
     private val guests = listOf<Boolean?>(null, false, true)
 
-    private fun layout(count: Int = 7, guest: Boolean? = null, grid: PortalGrid = PortalGrid.R3C4) =
-        PortalSheet.layout(grid, count, guest)
+    /** The 17 Pro's lens column, in panel units; and a Pro Max's, whose lenses keep their pixels on a wider rear. */
+    private val pro = Panel.CUTOUT_RIGHT.toFloat()
+    private val proMax = RearGeometry(976, 596, 296, 110, 450).cutoutUnits
+
+    private fun layout(count: Int = 7, guest: Boolean? = null, grid: PortalGrid = PortalGrid.R3C4, lensRight: Float = pro) =
+        PortalSheet.layout(grid, count, guest, lensRight)
 
     // -- the stops ---------------------------------------------------------------------
 
@@ -316,10 +320,10 @@ class PortalSheetTest {
 
     @Test fun `pages fade out past the grid's sides, the right band ending at the panel's edge`() {
         val l = layout(30)
-        assertEquals(l.slots.minOf { it.left } - EdgeFade.BAND, PortalSheet.PAGES_LEFT, 1f)
+        assertEquals(l.slots.minOf { it.left } - EdgeFade.BAND, l.pagesLeft, 1f)
         assertEquals(Panel.WIDTH.toFloat(), PortalSheet.PAGES_RIGHT, 0.01f)
         // At rest no app is in a band.
-        l.slots.forEach { assertTrue(it.left >= PortalSheet.PAGES_LEFT + EdgeFade.BAND - 0.01f && it.right <= PortalSheet.PAGES_RIGHT - EdgeFade.BAND + 0.01f) }
+        l.slots.forEach { assertTrue(it.left >= l.pagesLeft + EdgeFade.BAND - 0.01f && it.right <= PortalSheet.PAGES_RIGHT - EdgeFade.BAND + 0.01f) }
     }
 
     // -- the buttons' marks ----------------------------------------------------------------
@@ -358,5 +362,27 @@ class PortalSheetTest {
         val b = buttons[1]
         assertEquals(b.centerX, PortalSheet.labelled(b, 0f, 0f, 40f).textCenterX, 0.01f)
         assertEquals(b.width - 2 * PortalSheet.BUTTON_PAD, PortalSheet.labelRoom(b, 0f), 0.01f)
+    }
+
+
+    // -- another rear ------------------------------------------------------------------------
+
+    @Test fun `on a Pro Max the contents start where its lenses end, and still stop short of Xiaomi's Back strip`() {
+        for (grid in PortalGrid.entries) for (guest in guests) {
+            val l = layout(48, guest, grid, lensRight = proMax)
+            val slider = listOfNotNull(l.slider?.icon, l.slider?.track, l.slider?.value)
+            (l.slots + l.buttons + l.dots + slider).forEach {
+                assertTrue("$grid $guest $it", it.left >= proMax && it.right < EdgeGestures.BACK_LEFT)
+            }
+            // The same gap from the lenses as on the 17 Pro, so further left.
+            assertEquals(layout(48, guest, grid).left - (pro - proMax), l.left, 0.01f)
+            assertTrue(l.buttons.isEmpty() || l.buttons.first().left < layout(48, guest, grid).buttons.first().left)
+        }
+    }
+
+    @Test fun `a page is the width right of the lenses across, on either rear`() {
+        assertEquals(608f, layout().pageStride, 0.01f)
+        assertEquals(Panel.WIDTH - proMax, layout(lensRight = proMax).pageStride, 0.01f)
+        assertEquals(layout(30, lensRight = proMax).slots.minOf { it.left } - EdgeFade.BAND, layout(30, lensRight = proMax).pagesLeft, 1f)
     }
 }

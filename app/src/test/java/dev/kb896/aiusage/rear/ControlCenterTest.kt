@@ -9,11 +9,11 @@ import org.junit.Test
 class ControlCenterTest {
 
     @Test fun `it is pulled from the very top edge, over the left half of the usable area`() {
-        assertTrue(ControlCenter.startsPull(x = 320f, y = 4f))
-        assertTrue(ControlCenter.startsPull(x = 590f, y = 40f))
-        assertFalse("below the edge", ControlCenter.startsPull(x = 320f, y = 70f))
-        assertFalse("over the cameras", ControlCenter.startsPull(x = 200f, y = 4f))
-        assertFalse("the right half", ControlCenter.startsPull(x = 800f, y = 4f))
+        assertTrue(ControlCenter.startsPull(x = 320f, y = 4f, left = 296f))
+        assertTrue(ControlCenter.startsPull(x = 590f, y = 40f, left = 296f))
+        assertFalse("below the edge", ControlCenter.startsPull(x = 320f, y = 70f, left = 296f))
+        assertFalse("over the cameras", ControlCenter.startsPull(x = 200f, y = 4f, left = 296f))
+        assertFalse("the right half", ControlCenter.startsPull(x = 800f, y = 4f, left = 296f))
     }
 
     @Test fun `it follows the finger and opens past halfway`() {

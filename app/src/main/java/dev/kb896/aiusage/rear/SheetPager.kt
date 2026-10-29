@@ -12,11 +12,12 @@ import kotlin.math.roundToInt
  * A finger moving left brings the next page in. Past the first or the last page the pages
  * follow the finger only a third of the way, and come back.
  *
- * Let go, it turns a page if the drag went [SWIPE] of a page (PortalSheet.PAGE_STRIDE
- * pixels a page) or was a flick (ControlCenter.FLING), else it goes back — one page at a
- * time either way, from the page it was grabbed on.
+ * Let go, it turns a page if the drag went [SWIPE] of a page ([stride] pixels a page:
+ * PortalSheet.pageStride, the width right of the rear's lenses) or was a flick
+ * (ControlCenter.FLING), else it goes back — one page at a time either way, from the page it
+ * was grabbed on.
  */
-class SheetPager {
+class SheetPager(private val stride: Float) {
 
     /** How many pages there are; the page it is on is held within them. */
     var pages = 1
@@ -45,7 +46,7 @@ class SheetPager {
 
     /** Where the pages stand at [nowMs], in pages. */
     fun position(nowMs: Long): Float = when {
-        held -> band(base - dx / PortalSheet.PAGE_STRIDE)
+        held -> band(base - dx / stride)
         settling -> {
             val t = if (settleMs <= 0L) 1f else ((nowMs - startMs) / settleMs.toFloat()).coerceIn(0f, 1f)
             val e = 1f - (1f - t) * (1f - t)
@@ -116,7 +117,7 @@ class SheetPager {
         page = to
         from = at
         if (abs(to - at) < 0.001f) { rest(); return }
-        settleMs = ControlCenter.settleMs(abs(to - at) * PortalSheet.PAGE_STRIDE, speedPx)
+        settleMs = ControlCenter.settleMs(abs(to - at) * stride, speedPx)
         startMs = nowMs
         settling = true
     }

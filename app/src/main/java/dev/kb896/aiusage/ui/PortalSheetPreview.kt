@@ -61,7 +61,9 @@ internal class PortalSheetPreview(context: Context) : View(context) {
     }
     private val border = PortalFrame.Renderer()
     /** The back's own frame, in panel units as everything here is: its lenses and corner scaled with the panel. */
-    private val shapes = PortalFrame.shapesFor(RearGeometry.of(context).inPanelUnits())
+    /** This phone's rear in panel units: the border's shapes, and where its lenses end for the sheet. */
+    private val rear = RearGeometry.of(context).inPanelUnits()
+    private val shapes = PortalFrame.shapesFor(rear)
     private val dim = Paint().apply { color = ShellOverlay.dimColor(1f) }
     /** The border's clock starts with the view; only its motion shows, not where it began. */
     private val born = AnimationUtils.currentAnimationTimeMillis()
@@ -75,7 +77,7 @@ internal class PortalSheetPreview(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, w, h, dim)
         val key = config.portalGrid to labels.size
         val layout = laid?.takeIf { laidFor == key }
-            ?: PortalSheet.layout(key.first, key.second, guestOnTop = null).also { laid = it; laidFor = key }
+            ?: PortalSheet.layout(key.first, key.second, guestOnTop = null, lensRight = rear.cutoutPx.toFloat()).also { laid = it; laidFor = key }
         painter.draw(
             canvas, progress = 1f, scroll = 0f, layout = layout, page = 0f, icons = icons, labels = labels,
             guestOnTop = false, names = config.portalAppNames,

@@ -21,7 +21,7 @@ package dev.kb896.aiusage.rear
 class BandTap(
     private val maxX: Int,
     private val maxY: Int,
-    private val band: Float = BAND,
+    private val band: Float,
 ) {
     private var slot = 0
     private var active = 0
@@ -87,17 +87,13 @@ class BandTap(
         const val EDGE_ALLOW = 48f
 
         /**
-         * The lens column and a little more: left of the usable area's edge, which the rear
-         * display reports as its cutout's left inset — read from the system per model
-         * ([band] of RearGeometry), and this, the 17 Pro's 296 of 904, only when it
-         * says nothing — plus [EDGE_ALLOW].
+         * The band on [rear]: the lens column and a little more — left of the usable area's
+         * edge, which the rear display reports as its cutout's left inset (RearGeometry), as a
+         * share of its width — plus [EDGE_ALLOW].
          * The camera keeps that column grey, since its picture cannot go under the lenses;
          * on the 17 Pro its grey runs a little further (to 40.6%), but a tap past the grey
          * would land on the viewfinder. The panel lights up exactly this strip for the tip.
          */
-        const val BAND = (dev.kb896.aiusage.Panel.CUTOUT_RIGHT + EDGE_ALLOW) / dev.kb896.aiusage.Panel.WIDTH.toFloat()
-
-        /** The band on [rear]: its lens column as a share of its width, and [EDGE_ALLOW] more. */
         fun band(rear: RearGeometry): Float = rear.cutoutPx / rear.widthPx.toFloat() + EDGE_ALLOW / dev.kb896.aiusage.Panel.WIDTH
 
         const val TAP_MS = 400L

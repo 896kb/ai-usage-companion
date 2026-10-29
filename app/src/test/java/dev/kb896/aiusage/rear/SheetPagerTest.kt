@@ -7,9 +7,9 @@ import org.junit.Test
 
 class SheetPagerTest {
 
-    private val stride = PortalSheet.PAGE_STRIDE
+    private val stride = PortalSheet.pageStride(dev.kb896.aiusage.Panel.CUTOUT_RIGHT.toFloat())
 
-    private fun pager(pages: Int = 3) = SheetPager().apply { this.pages = pages }
+    private fun pager(pages: Int = 3) = SheetPager(stride).apply { this.pages = pages }
 
     /** A slow drag from x 600 by [dx], let go well after its last move. */
     private fun SheetPager.slowDrag(dx: Float, at: Long = 0): Int {

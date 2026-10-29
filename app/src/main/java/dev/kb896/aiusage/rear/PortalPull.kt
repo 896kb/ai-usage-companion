@@ -15,12 +15,10 @@ object PortalPull {
     /** And its travel: a pull this long opens the sheet all the way. */
     const val TRAVEL = ControlCenter.TRAVEL
 
-    private val PULL_LEFT = Panel.CUTOUT_RIGHT.toFloat()
-
     /**
      * A finger at [x], [y] (panel units) starts a pull: in the bottom band, right of [left] —
-     * the lens column's edge in panel units, the panel's own unless the rear says otherwise
-     * (RearGeometry.cutoutUnits: left of 296 on a Pro Max, whose lenses keep their pixels).
+     * the lens column's edge in panel units, given, never assumed (RearGeometry.cutoutUnits:
+     * left of 296 on a Pro Max, whose lenses keep their pixels).
      */
-    fun startsPull(x: Float, y: Float, left: Float = PULL_LEFT): Boolean = y >= Panel.HEIGHT - EDGE && x >= left
+    fun startsPull(x: Float, y: Float, left: Float): Boolean = y >= Panel.HEIGHT - EDGE && x >= left
 }

@@ -5659,7 +5659,7 @@ class RearDialView(context: Context) : View(context) {
     /**
      * The page: the front screen's silk over everything, and the real place to tap lit up where it is — the
      * strip at the left of this very screen that the camera leaves grey and the tap watch
-     * listens to ([BandTap.BAND] of the width), flashing, with a tap pulsing between the
+     * listens to (BandTap.band of the width), flashing, with a tap pulsing between the
      * lenses. Beside it, what to do, centred in the room above the slider; and until the
      * slider takes its band, the countdown where it will be.
      */
@@ -8717,7 +8717,7 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** A tile where it stands at [progress]: see ControlCenterLayout.tileRect. */
-    private fun quickTileRect(i: Int, progress: Float): RectF = ControlCenterLayout.tileRect(i, progress)
+    private fun quickTileRect(i: Int, progress: Float): RectF = ControlCenterLayout.tileRect(i, progress, CC_LENS_RIGHT)
 
     private val quickNames = ControlCenterPainter.QUICK_NAMES
 
@@ -8786,8 +8786,8 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** The brightness cell and the button under it where they stand: see ControlCenterLayout. */
-    private fun brightCellRect(progress: Float): RectF = ControlCenterLayout.cellRect(progress)
-    private fun autoButtonRect(progress: Float): RectF = ControlCenterLayout.autoRect(progress)
+    private fun brightCellRect(progress: Float): RectF = ControlCenterLayout.cellRect(progress, CC_LENS_RIGHT)
+    private fun autoButtonRect(progress: Float): RectF = ControlCenterLayout.autoRect(progress, CC_LENS_RIGHT)
 
     /**
      * The control centre's share of the touches: a pull from the edge, a drag up to close,
@@ -8799,7 +8799,7 @@ class RearDialView(context: Context) : View(context) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 val shown = controlCenterProgress() > 0.01f
                 ccGesture = shown ||
-                    (!locked && !aod && onlyAccount == null && ControlCenter.startsPull(event.x, event.y))
+                    (!locked && !aod && onlyAccount == null && ControlCenter.startsPull(event.x, event.y, CC_LENS_RIGHT))
                 if (!ccGesture) return false
                 if (!shown) onControlCenterOpening?.invoke()
                 downX = event.x; downY = event.y
@@ -8916,7 +8916,7 @@ class RearDialView(context: Context) : View(context) {
     private var ccPainter: ControlCenterPainter? = null
 
     private fun ccPainter(): ControlCenterPainter =
-        ccPainter ?: ControlCenterPainter(PanelType.face(resources, config.theme, config.font)).also { ccPainter = it }
+        ccPainter ?: ControlCenterPainter(PanelType.face(resources, config.theme, config.font), CC_LENS_RIGHT).also { ccPainter = it }
 
     /**
      * The control centre at [progress], drawn by ControlCenterPainter: the brightness as a
@@ -12735,6 +12735,11 @@ class RearDialView(context: Context) : View(context) {
 
         /** What this phone's rear display reports, for when the display will not say. */
         private const val FALLBACK_CORNER = LiquidCellPainter.FALLBACK_CORNER
+        /**
+         * The panel's own control centre stands right of the panel's lens column, as all of the
+         * panel is laid out (the shell's over a guest takes the rear's own: ShellControlCenter).
+         */
+        private const val CC_LENS_RIGHT = Panel.CUTOUT_RIGHT.toFloat()
 
         /**
          * How much smaller the strip's corner is than the screen's.

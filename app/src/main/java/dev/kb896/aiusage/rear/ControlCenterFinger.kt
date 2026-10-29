@@ -26,7 +26,7 @@ import kotlin.math.abs
  *
  * Distances are in panel units from where the finger landed, down positive.
  */
-class ControlCenterFinger(private val hit: (Float, Float) -> Int = ControlCenterLayout::hit) {
+class ControlCenterFinger(private val hit: (Float, Float) -> Int) {
 
     sealed interface Action {
         /** A finger landed on [target]: a tile (0 to 3), ControlCenterLayout.AUTO, CELL or NONE. */

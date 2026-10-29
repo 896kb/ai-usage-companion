@@ -24,7 +24,11 @@ import dev.kb896.aiusage.data.PanelTheme
  * Not thread-safe; all painters in a process must draw one at a time (they share Glass's
  * shaders).
  */
-class ControlCenterPainter(face: PanelType.Face) {
+class ControlCenterPainter(
+    face: PanelType.Face,
+    /** Where the lens column ends, in panel units: see ControlCenterLayout. */
+    private val lensRight: Float,
+) {
 
     /** The panel's theme: GLASS draws glass, ORIGINAL flat. */
     var theme: PanelTheme = PanelTheme.GLASS
@@ -124,11 +128,11 @@ class ControlCenterPainter(face: PanelType.Face) {
         cell: LiquidCellPainter.Cell, lens: LiquidCellPainter.Lens, nowMs: Long,
         corner: Float, buttonGround: () -> Int,
     ) {
-        val rect = ControlCenterLayout.cellRect(progress)
+        val rect = ControlCenterLayout.cellRect(progress, lensRight)
         val level = look.level
         val glass = theme.isGlass
         // The switches first, so the brightness figure grows out OVER them.
-        drawAutoButton(canvas, ControlCenterLayout.autoRect(progress), look, lens, buttonGround)
+        drawAutoButton(canvas, ControlCenterLayout.autoRect(progress, lensRight), look, lens, buttonGround)
         drawQuickTiles(canvas, progress, look, lens, corner, buttonGround)
         liquid.draw(
             canvas, cell, if (glass) heavy else body, nowMs,
@@ -147,7 +151,7 @@ class ControlCenterPainter(face: PanelType.Face) {
             rimAlpha = if (glass) RearDialView.CHARGE_RIM_ALPHA else 0xFF,
             // Where it crosses a tile, its colour turns over as far as the tile is on.
             figureOver = (0 until 4).map { i ->
-                val r = ControlCenterLayout.tileRect(i, progress)
+                val r = ControlCenterLayout.tileRect(i, progress, lensRight)
                 tileShape(i, r, corner) to (if (i == 0 || look.reachable) tileOn(look, i) else 0f)
             },
             figure = if (look.unavailable) "Needs Shizuku" else Math.round(level * 100f).toString() + "%",
@@ -189,7 +193,7 @@ class ControlCenterPainter(face: PanelType.Face) {
         canvas: Canvas, progress: Float, look: Look, lens: LiquidCellPainter.Lens, corner: Float, buttonGround: () -> Int,
     ) {
         for (i in 0 until 4) {
-            val rect = ControlCenterLayout.tileRect(i, progress)
+            val rect = ControlCenterLayout.tileRect(i, progress, lensRight)
             val shape = tileShape(i, rect, corner)
             // Silent is the app's own; the others need Shizuku, and are faint without it.
             val usable = i == 0 || look.reachable

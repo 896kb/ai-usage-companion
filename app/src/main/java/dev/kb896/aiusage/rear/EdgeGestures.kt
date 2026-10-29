@@ -47,7 +47,7 @@ import kotlin.math.abs
  */
 class EdgeGestures(
     /** Where the usable area starts, in panel units: the pull bands' left edge (RearGeometry.cutoutUnits). */
-    private val usableLeft: Float = dev.kb896.aiusage.Panel.CUTOUT_RIGHT.toFloat(),
+    private val usableLeft: Float,
 ) {
 
     sealed interface Action {
@@ -162,7 +162,15 @@ class EdgeGestures(
     companion object {
         /** The panel's own drag slop (RearDialView.DRAG_SLOP), so both decide alike. */
         const val SLOP = 16f
-        /** Where Xiaomi's SubScreenGestureBack band starts on the 17 Pro (measured: x 842–904). */
+        /**
+         * Where Xiaomi's SubScreenGestureBack band starts, in panel units: measured on the 17 Pro
+         * as x 842–904 (its 62 px at the right edge). Not read from the system — the band is
+         * Xiaomi's window, and nothing reports it — and not measured on a Pro Max: there it is
+         * taken to scale with the display as everything in panel units does (909 px of 976).
+         * The sheet's contents stay left of it (PortalSheet), and the control centre's Back
+         * candidates start at it (ControlCenterFinger), so a wrong guess there costs a Back that
+         * starts a few pixels further in, not a tap.
+         */
         const val BACK_LEFT = 842f
         const val BACK_TRAVEL = 60f
         /** The longest touch that is still a tap. */

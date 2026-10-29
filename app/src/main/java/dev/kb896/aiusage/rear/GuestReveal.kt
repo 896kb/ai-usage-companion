@@ -1,6 +1,5 @@
 package dev.kb896.aiusage.rear
 
-import dev.kb896.aiusage.Panel
 
 /**
  * The way a guest comes onto the rear: a picture of what was there (our panel, or the
@@ -44,7 +43,7 @@ internal class GuestReveal(private val coveredAtMs: Long) {
      * The cover at [nowMs], for a display [width] wide. Past [MAX_WAIT_MS] covered, the slide
      * is taken to have begun right then; past its end, DONE.
      */
-    fun at(nowMs: Long, width: Float = Panel.WIDTH.toFloat()): Frame {
+    fun at(nowMs: Long, width: Float): Frame {
         if (phase == Phase.COVERED && !waiting(nowMs)) { phase = Phase.SLIDING; slideFrom = coveredAtMs + MAX_WAIT_MS }
         if (phase == Phase.COVERED) return Frame(0f, 1f)
         val elapsed = nowMs - slideFrom

@@ -43,7 +43,7 @@ class GuestRevealTest {
         val r = GuestReveal(coveredAtMs = 1_000)
         assertEquals(Phase.COVERED, r.phase)
         assertTrue(r.waiting(1_200))
-        val f = r.at(1_200)
+        val f = r.at(1_200, w)
         assertEquals(0f, f.dx, 0f)
         assertEquals(1f, f.alpha, 0f)
         assertEquals(Phase.COVERED, r.phase)

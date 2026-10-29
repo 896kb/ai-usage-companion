@@ -20,8 +20,10 @@ import kotlin.math.ceil
  * laid out in the sheet's own content space: the panel at scroll 0, the slider's row just
  * below it.
  *
- * Laid out right of the lens column, as plain numbers: the layout and the hit tests are
- * unit-tested, the drawing is checked on the phone.
+ * Laid out right of the lens column — this rear's, in panel units (RearGeometry.cutoutUnits:
+ * 296 on the 17 Pro, left of that on a Pro Max, whose lenses keep their pixels), passed in,
+ * never assumed — as plain numbers: the layout and the hit tests are unit-tested, the drawing
+ * is checked on the phone.
  */
 object PortalSheet {
 
@@ -88,10 +90,14 @@ object PortalSheet {
 
     private const val GAP = 12f
     private const val BUTTON_H = 64f
-    private const val LEFT = Panel.CUTOUT_RIGHT + 24f
-    /** The grid's width: four cells of 120 as the portal was born, ending at 836, clear of Xiaomi's Back strip (x ≥ 842). */
-    private const val GRID_WIDTH = 4 * 120f + 3 * GAP
-    private const val RIGHT = LEFT + GRID_WIDTH
+    /** The contents start this far right of the lens column. */
+    private const val LENS_GAP = 24f
+    /**
+     * Where the contents end: four cells of 120 from the 17 Pro's lenses as the portal was
+     * born, at 836, clear of Xiaomi's Back strip (x ≥ 842). Fixed: on a rear whose lenses end
+     * further left the contents start further left, and are that much wider.
+     */
+    private const val RIGHT = 296f + LENS_GAP + 4 * 120f + 3 * GAP
     private const val PAD_TOP = 24f
     private const val PAD_BOTTOM = 8f
     /** The page dots' band under the grid. Kept whether or not there are pages, so the cells do not jump. */
@@ -113,8 +119,11 @@ object PortalSheet {
     const val ICON_MARGIN = 0.1f
     private const val CELL_PAD = 0.1f
 
-    /** From one page to the next across: the width right of the lens column, so a page at rest shows none of its neighbours. */
-    const val PAGE_STRIDE = (Panel.WIDTH - Panel.CUTOUT_RIGHT) * 1f
+    /**
+     * From one page to the next across, for lenses ending at [lensRight]: the width right of
+     * them, so a page at rest shows none of its neighbours.
+     */
+    fun pageStride(lensRight: Float): Float = Panel.WIDTH - lensRight
 
     /** The slider's row, in the middle of its strip. */
     private const val ROW_H = 56f
@@ -135,9 +144,12 @@ object PortalSheet {
      * One sheet's boxes, in its content space: the guest's three [buttons] (none without a
      * guest), one page's [slots] (the same on every page), the [dots] under the grid (none
      * for one page) and the row a finger finds them in ([dotsRow]), and below the panel's
-     * bottom the [slider] (only with a guest).
+     * bottom the [slider] (only with a guest). [left]: where the contents start, right of the
+     * lenses; [pageStride] from one page to the next.
      */
     class Layout(
+        val left: Float,
+        val pageStride: Float,
         val count: Int,
         val buttons: List<Box>,
         val slots: List<Box>,
@@ -151,6 +163,9 @@ object PortalSheet {
     ) {
         val perPage: Int get() = slots.size
 
+        /** Where pages fade out at the left: [EdgeFade.BAND] past the contents' start (see [PAGES_RIGHT]). */
+        val pagesLeft: Float get() = left - EdgeFade.BAND
+
         /** The app in [slot] of [page], or -1 for an empty slot. */
         fun appAt(page: Int, slot: Int): Int {
             if (slot !in slots.indices || page !in 0 until pages) return -1
@@ -161,25 +176,28 @@ object PortalSheet {
     /**
      * The sheet's boxes for [count] pinned apps (no more than [MAX_APPS]) in [grid], with
      * the guest as the sheet shows it: [guestOnTop] null none, else the buttons, and the
-     * slider's row under the panel.
+     * slider's row under the panel; right of the rear's lenses, which end at [lensRight] in
+     * panel units (RearGeometry.cutoutUnits).
      *
      * The cells are square and as big as the room under the buttons allows — the fewer
      * there are a page, the bigger, up to [CELL_MAX] — and centred in it.
      */
-    fun layout(grid: PortalGrid, count: Int, guestOnTop: Boolean?): Layout {
+    fun layout(grid: PortalGrid, count: Int, guestOnTop: Boolean?, lensRight: Float): Layout {
         val n = count.coerceIn(0, MAX_APPS)
+        val left = lensRight + LENS_GAP
+        val gridWidth = RIGHT - left
         val withGuest = guestOnTop != null
         val top = PAD_TOP + if (withGuest) BUTTON_H + GAP else 0f
         val bottom = FULL - PAD_BOTTOM - DOTS_H
         val (rows, cols) = grid.rows to grid.columns
         val cell = minOf(
-            (GRID_WIDTH - (cols - 1) * GAP) / cols,
+            (gridWidth - (cols - 1) * GAP) / cols,
             (bottom - top - (rows - 1) * GAP) / rows,
             CELL_MAX,
         )
         val w = cols * cell + (cols - 1) * GAP
         val h = rows * cell + (rows - 1) * GAP
-        val l0 = LEFT + (GRID_WIDTH - w) / 2
+        val l0 = left + (gridWidth - w) / 2
         val t0 = top + (bottom - top - h) / 2
         val slots = (0 until rows * cols).map { i ->
             val l = l0 + (i % cols) * (cell + GAP)
@@ -187,35 +205,36 @@ object PortalSheet {
             Box(l, t, l + cell, t + cell)
         }
         val pages = maxOf(1, ceil(n / grid.perPage.toFloat()).toInt())
-        val centerX = LEFT + GRID_WIDTH / 2
+        val centerX = (left + RIGHT) / 2
         val dotsY = t0 + h + DOTS_H / 2 + 2f
         val dots = if (pages < 2) emptyList() else (0 until pages).map { i ->
             val x = centerX + (i - (pages - 1) / 2f) * DOT_STEP
             Box(x - DOT_STEP / 2, dotsY - DOTS_H / 2, x + DOT_STEP / 2, dotsY + DOTS_H / 2)
         }
-        val dotsRow = if (pages < 2) null else Box(LEFT, dotsY - DOTS_HIT_H / 2, RIGHT, dotsY + DOTS_HIT_H / 2)
+        val dotsRow = if (pages < 2) null else Box(left, dotsY - DOTS_HIT_H / 2, RIGHT, dotsY + DOTS_HIT_H / 2)
         return Layout(
+            left = left, pageStride = pageStride(lensRight),
             count = n,
-            buttons = if (withGuest) buttons() else emptyList(),
+            buttons = if (withGuest) buttons(left) else emptyList(),
             slots = slots, pages = pages, dots = dots, dotsRow = dotsRow,
-            slider = if (withGuest) slider() else null,
+            slider = if (withGuest) slider(left) else null,
             emptyX = centerX, emptyY = (top + bottom) / 2,
         )
     }
 
-    private fun buttons(): List<Box> {
-        val w = (GRID_WIDTH - 2 * GAP) / 3
+    private fun buttons(left: Float): List<Box> {
+        val w = (RIGHT - left - 2 * GAP) / 3
         return (0 until 3).map { i ->
-            val l = LEFT + i * (w + GAP)
+            val l = left + i * (w + GAP)
             Box(l, PAD_TOP, l + w, PAD_TOP + BUTTON_H)
         }
     }
 
-    private fun slider(): Slider {
+    private fun slider(left: Float): Slider {
         val top = FULL + (STRIP - ROW_H) / 2
         val bottom = top + ROW_H
         val iconTop = top + (ROW_H - SLIDER_ICON) / 2
-        val icon = Box(LEFT, iconTop, LEFT + SLIDER_ICON, iconTop + SLIDER_ICON)
+        val icon = Box(left, iconTop, left + SLIDER_ICON, iconTop + SLIDER_ICON)
         val value = Box(RIGHT - VALUE_W, top, RIGHT, bottom)
         // The thumb's half past each end stays clear of the icon and the value.
         val track = Box(icon.right + ROW_GAP + THUMB / 2, top, value.left - ROW_GAP - THUMB / 2, bottom)
@@ -353,8 +372,10 @@ object PortalSheet {
     /** How far below their place the contents stand at [progress]: the control centre's slide, upward. */
     fun arrivalShift(progress: Float): Float = Arrival.offset(progress, FULL)
 
-    /** Where pages fade out across: [EdgeFade.BAND] past the grid's sides, the right one at the panel's edge. */
-    const val PAGES_LEFT = LEFT - EdgeFade.BAND
+    /**
+     * Where pages fade out at the right: [EdgeFade.BAND] past the contents' end, at the panel's
+     * edge. At the left, the layout's own ([Layout.pagesLeft]).
+     */
     const val PAGES_RIGHT = RIGHT + EdgeFade.BAND
 
     /** How strongly the top edge fades the scrolled contents: none at rest, all of it at the slider. */
