@@ -1436,16 +1436,13 @@ class MainActivity : ComponentActivity() {
         SettingsRows.toggle(portalRows, "Show app names", config.portalAppNames) { on ->
             write { it.copy(portalAppNames = on) }
         }
-        // The frame round a guest on the back; its colour only while there is one to colour.
-        SettingsRows.toggle(portalRows, "Portal border", config.portalBorder) { on ->
-            write { it.copy(portalBorder = on) }
-            buildSettingsRows()
-        }
-        if (config.portalBorder) {
-            SettingsRows.colorRow(portalRows, "Portal frame colour", config.portalFrameColor) { c ->
-                write { it.copy(portalFrameColor = c) }
-            }
-        }
+        // The frame round a guest on the back: one row, its switch and its colour, as the
+        // other coloured switches are.
+        SettingsRows.toggleWithColor(
+            portalRows, "Portal border", config.portalBorder, config.portalFrameColor,
+            onChange = { on -> write { it.copy(portalBorder = on) } },
+            onPick = { c -> write { it.copy(portalFrameColor = c) } },
+        )
         // The guide's card down, its sketch stays a tap away — with the tile's button while
         // the tile is still missing, for a card dismissed before it was added.
         if (!guide.card) SettingsRows.navigation(portalRows, "How to use the portal") {
