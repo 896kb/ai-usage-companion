@@ -86,11 +86,60 @@ class SurfacePlaceTest {
         assertEquals(0, SurfacePlace.left(real, 1, "com.google.android.googlequicksearchbox"))
     }
 
-    @Test fun `misplaced only when read and not at the shape's left`() {
+    @Test fun `misplaced only when a confined guest is read left of its shape`() {
         val confined = GuestShape.of(false, RearGeometry.PRO17)
+        // The failure seen on the phone: its task right of the cameras, its surface at x 0.
         assertTrue(SurfacePlace.misplaced(0, confined))
+        assertTrue(SurfacePlace.misplaced(295, confined))
         assertFalse(SurfacePlace.misplaced(296, confined))
         assertFalse(SurfacePlace.misplaced(null, confined))
+    }
+
+    @Test fun `a guest that does not fill its shape is not misplaced`() {
+        // Letterboxed (portrait only, size compat after a DPI change): drawn inside its shape,
+        // right of where it starts. Nudging it never changes that.
+        assertFalse(SurfacePlace.misplaced(400, GuestShape.of(false, RearGeometry.PRO17)))
+        assertFalse(SurfacePlace.misplaced(291, GuestShape.of(true, RearGeometry.PRO17)))
+        // A fullscreen guest has nowhere left of its shape to be.
         assertFalse(SurfacePlace.misplaced(0, GuestShape.of(true, RearGeometry.PRO17)))
+    }
+
+    @Test fun `put right a few times, then left alone until the key changes`() {
+        val g = SurfacePlace.GiveUp<String>(tries = 3)
+        assertTrue(g.attempt("a"))
+        assertTrue(g.attempt("a"))
+        assertTrue(g.attempt("a"))
+        // Three goes and still not right: no more.
+        assertFalse(g.attempt("a"))
+        assertTrue(g.givenUp("a"))
+        assertFalse(g.attempt("a"))
+        // Another task, shape or density: counted afresh.
+        assertTrue(g.attempt("b"))
+        assertFalse(g.givenUp("b"))
+    }
+
+    @Test fun `once right, its count starts again`() {
+        val g = SurfacePlace.GiveUp<String>(tries = 2)
+        g.attempt("a"); g.attempt("a")
+        g.placed("a")
+        assertTrue(g.attempt("a"))
+        assertTrue(g.attempt("a"))
+        assertFalse(g.attempt("a"))
+        // Being found right later counts too: it may be tried again when it next goes wrong.
+        g.placed("a")
+        assertFalse(g.givenUp("a"))
+        // Another key's right says nothing of this one.
+        g.attempt("a"); g.attempt("a"); g.placed("b")
+        assertTrue(g.givenUp("a"))
+    }
+
+    @Test fun `giving up is said once per key`() {
+        val g = SurfacePlace.GiveUp<String>(tries = 1)
+        g.attempt("a")
+        assertTrue(g.announce("a"))
+        assertFalse(g.announce("a"))
+        g.attempt("b")
+        assertFalse("not given up yet", g.announce("c"))
+        assertTrue(g.announce("b"))
     }
 }

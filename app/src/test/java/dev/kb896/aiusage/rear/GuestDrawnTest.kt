@@ -60,6 +60,21 @@ class GuestDrawnTest {
         val confined = window(w = 608, h = 572)
         assertTrue(GuestDrawn.drawn(confined, task = 75481, display = 1, width = 608, height = 572))
         assertFalse(GuestDrawn.drawn(window(), task = 75481, display = 1, width = 608, height = 572))
-        assertFalse(drawn(confined))
+    }
+
+    @Test fun `a guest that does not fill its shape is drawn all the same`() {
+        // Letterboxed — portrait only, size compat after a DPI change, no multi-window — it asks
+        // for less than the rear and never for the rear's size: it is drawn, not still coming.
+        assertTrue(drawn(window(w = 322, h = 572)))
+        assertTrue(drawn(window(w = 904, h = 500)))
+        assertTrue(GuestDrawn.drawn(window(w = 600, h = 572), task = 75481, display = 1, width = 608, height = 572))
+        // Bigger than its shape either way is still the front's size, or not yet laid out for it.
+        assertFalse(drawn(window(w = 905, h = 572)))
+        assertFalse(drawn(window(w = 2656, h = 1220)))
+    }
+
+    @Test fun `a window that has asked for no size yet is not drawn`() {
+        assertFalse(drawn(window(w = 0, h = 0)))
+        assertFalse(drawn(window(w = 904, h = 0)))
     }
 }

@@ -1097,6 +1097,21 @@ class RearUserService : IRearService.Stub {
     private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalConfined, geometry)
 
     /**
+     * What a guest's placing is tried for: its task, its shape and the density it is shown at.
+     * Given up on one of these ([placeTries], [driftTries]), it is tried again only when one of
+     * them changes.
+     */
+    private data class PlaceKey(val task: Int, val shape: GuestShape.Shape, val dpi: Int?)
+
+    private fun placeKey(task: Int, pkg: String) = PlaceKey(task, shapeOf(pkg), RearDensity.target(pkg, true, portalDpi))
+
+    /** Nudges of a guest drawn left of its shape ([ensurePlaced]): [PLACE_TRIES], then left as drawn. */
+    private val placeTries = SurfacePlace.GiveUp<PlaceKey>(PLACE_TRIES)
+
+    /** The keep-alive's reshapes of a guest whose bounds drifted: [PLACE_TRIES] ticks running, then left. */
+    private val driftTries = SurfacePlace.GiveUp<PlaceKey>(PLACE_TRIES)
+
+    /**
      * [task] ([pkg]'s, on the rear) given its shape: TaskShaper's transaction, else `am task
      * resize` — which only a multi-window task takes, as a launch makes it. Only ever on the
      * rear: shaped on the front first, it lands at x 0–608 (measured). Under [placing].
@@ -1119,22 +1134,35 @@ class RearUserService : IRearService.Stub {
      * [pkg]'s window really drawn where its shape says (SurfacePlace): read off SurfaceFlinger
      * ([dump] if one is in hand, else asked), and while it is not — the task's bounds right,
      * its surface still at x 0, seen on the phone — nudged by `am task resize`, a pixel off and
-     * back (never a transition of our own: see TaskShaper), and read again;
-     * [PLACE_TRIES] at most.
+     * back (never a transition of our own: see TaskShaper), and read again.
+     * [PLACE_TRIES] nudges for its task, shape and density in all ([placeTries]), across calls:
+     * past them it is left as it is drawn until one of those changes, so a guest no nudge
+     * moves is not nudged every keep-alive tick, forever, under [placing].
      * An app not composed on the rear (behind the panel, not drawn yet) is left as it is.
      * Under [placing].
      */
     private fun ensurePlaced(task: Int, pkg: String, why: String, dump: String? = null) {
         val shape = shapeOf(pkg)
         val b = shape.bounds
+        val key = placeKey(task, pkg)
+        if (placeTries.givenUp(key)) return
         var sf = dump ?: exec("dumpsys SurfaceFlinger")
-        for (i in 0 until PLACE_TRIES) {
+        var nudges = 0
+        while (true) {
             val left = SurfacePlace.left(sf, coverStack, pkg)
             if (!SurfacePlace.misplaced(left, shape)) {
-                if (i > 0) Log.i(TAG, "portal: $pkg drawn at x $left after ${i} nudge(s) — $why")
+                // Unread is not right: nothing is learnt from a guest not composed.
+                if (left != null) placeTries.placed(key)
+                if (nudges > 0) Log.i(TAG, "portal: $pkg drawn at x $left after $nudges nudge(s) — $why")
                 return
             }
-            Log.w(TAG, "portal: $pkg drawn at x $left, its shape at ${b.left} — nudging (${i + 1}) — $why")
+            if (!placeTries.attempt(key)) {
+                if (placeTries.announce(key)) Log.w(TAG, "portal: $pkg still drawn at x $left after $PLACE_TRIES nudges — " +
+                    "left as it is until its task, shape or density changes — $why")
+                return
+            }
+            nudges++
+            Log.w(TAG, "portal: $pkg drawn at x $left, its shape at ${b.left} — nudging ($nudges) — $why")
             // A pixel off and back: a resize to the bounds it already has does nothing. Seen by
             // hand to move the surface at times, not always.
             exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
@@ -1142,11 +1170,9 @@ class RearUserService : IRearService.Stub {
             Thread.sleep(PLACE_SETTLE_MS)
             sf = exec("dumpsys SurfaceFlinger")
         }
-        val left = SurfacePlace.left(sf, coverStack, pkg)
-        if (SurfacePlace.misplaced(left, shape)) Log.w(TAG, "portal: $pkg still drawn at x $left after $PLACE_TRIES nudges — $why")
     }
 
-    /** Until [pkg]'s [task] has drawn on [displayId] at its shape's size, or GuestReveal.MAX_WAIT_MS. */
+    /** Until [pkg]'s [task] has drawn on [displayId] within its shape, or GuestReveal.MAX_WAIT_MS. */
     private fun awaitDrawn(pkg: String, task: Int, displayId: Int) {
         val until = android.os.SystemClock.uptimeMillis() + GuestReveal.MAX_WAIT_MS
         while (android.os.SystemClock.uptimeMillis() < until) {
@@ -1232,8 +1258,8 @@ class RearUserService : IRearService.Stub {
         reveal(cover, pkg, displayId, onDrawn) { drawnOn(pkg, task, displayId, shapeOf(pkg).bounds) }
 
     /**
-     * [pkg]'s [task] has an app window drawn on [displayId] at [size] — its shape's, right of
-     * the cameras or the whole rear (GuestDrawn).
+     * [pkg]'s [task] has an app window drawn on [displayId] within [size] — its shape's, right
+     * of the cameras or the whole rear (GuestDrawn).
      */
     private fun drawnOn(pkg: String, task: Int, displayId: Int, size: GuestShape.Bounds = GuestShape.full(geometry)) =
         task > 0 && GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, size.width, size.height)
@@ -2728,11 +2754,24 @@ class RearUserService : IRearService.Stub {
                                 // doing): shaped again. Or the task's bounds are right and its
                                 // surface is not (seen: drawn at x 0): put right where it is
                                 // drawn. Under the lock, if it is still the guest.
+                                // A few times, not forever: a guest that will not take its shape
+                                // (one refusing multi-window keeps fullscreen bounds) or will not
+                                // be drawn there is left as it is until its task, shape or density
+                                // changes (SurfacePlace.GiveUp) — not reshaped every tick.
                                 val shape = shapeOf(g.pkg)
-                                if (GuestShape.drifted(entry?.bounds, shape)) synchronized(placing) {
-                                    if (guest?.task == g.task) shapeGuest(g.task, g.pkg, "its bounds drifted to ${entry?.bounds}")
-                                } else if (SurfacePlace.misplaced(SurfacePlace.left(sf, coverStack, g.pkg), shape)) synchronized(placing) {
-                                    if (guest?.task == g.task) ensurePlaced(g.task, g.pkg, "the keep-alive saw it drawn out of place", sf)
+                                val key = placeKey(g.task, g.pkg)
+                                if (GuestShape.drifted(entry?.bounds, shape)) {
+                                    if (driftTries.attempt(key)) synchronized(placing) {
+                                        if (guest?.task == g.task) shapeGuest(g.task, g.pkg, "its bounds drifted to ${entry?.bounds}")
+                                    } else if (driftTries.announce(key)) {
+                                        Log.w(TAG, "portal: ${g.pkg}'s bounds still ${entry?.bounds} after $PLACE_TRIES reshapes — " +
+                                            "left as they are until its task, shape or density changes")
+                                    }
+                                } else {
+                                    if (entry?.bounds != null) driftTries.placed(key)
+                                    if (!placeTries.givenUp(key) && SurfacePlace.misplaced(SurfacePlace.left(sf, coverStack, g.pkg), shape)) synchronized(placing) {
+                                        if (guest?.task == g.task) ensurePlaced(g.task, g.pkg, "the keep-alive saw it drawn out of place", sf)
+                                    }
                                 }
                                 if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                                 continue
@@ -3059,7 +3098,7 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val DRAWN_POLL_MS = 20L
         /** A shaped guest's surface is read this long after a resize, for where it is drawn. */
         private const val PLACE_SETTLE_MS = 120L
-        /** Nudges of a guest drawn out of place, at most, before it is left as it is (logged). */
+        /** Goes at putting a guest right — nudges, or the keep-alive's reshapes — before it is left as it is (logged once). */
         private const val PLACE_TRIES = 3
         private const val STRIP_SAMPLE_SCALE = 0.25f
         private const val BLACK = 0xFF000000.toInt()

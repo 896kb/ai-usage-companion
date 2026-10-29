@@ -6,7 +6,8 @@ package dev.kb896.aiusage.rear
  * confined guest's task read [296,0][904,572] in multi-window (mInSplitScreen=true) while
  * its surface was composed at x 0–608: nobody offset the task's leash on display 1. A
  * further `am task resize` moved it (seen by hand, twice). So the shell checks the surface
- * itself, and nudges until it is where its shape says ([misplaced]). Pure.
+ * itself, and nudges until it is where its shape says ([misplaced]) — a few times, not
+ * forever ([GiveUp]). Pure.
  *
  * In the list a layer's bounds read {left,top,bottom,right}. Of the app's windows on the
  * layer stack, the widest is its main one (a popup's are smaller and anywhere).
@@ -46,6 +47,54 @@ object SurfacePlace {
         return best
     }
 
-    /** Its window's left edge, as read ([left], null unread), is not its [shape]'s. */
-    fun misplaced(left: Int?, shape: GuestShape.Shape): Boolean = left != null && left != shape.bounds.left
+    /**
+     * Its window's left edge, as read ([left], null unread), is left of where its confined
+     * [shape] starts: the one failure seen (drawn at x 0, under the lenses), and the only one a
+     * nudge puts right. A guest drawn right of its shape's left — letterboxed, portrait only,
+     * in size compat after a DPI change — is where the system puts it, and nudging it moved
+     * nothing but cost six transitions a tick; a fullscreen guest has no left of its shape.
+     */
+    fun misplaced(left: Int?, shape: GuestShape.Shape): Boolean =
+        shape.confined && left != null && left < shape.bounds.left
+
+    /**
+     * When to stop putting a guest right. A guest the shell cannot shape — an app that refuses
+     * multi-window keeps fullscreen bounds, one in size compat keeps its own — was nudged or
+     * reshaped every keep-alive tick, forever, each time under the launch's lock. So each [K]
+     * (the service's: the task, its shape and its density) gets [tries] goes ([attempt]) until
+     * it is seen right ([placed]); after that it is left as it is until the key changes. Any
+     * thread.
+     */
+    class GiveUp<K>(private val tries: Int) {
+        private var key: K? = null
+        private var goes = 0
+        private var announced = false
+
+        /** One more go at [key]: true while it may be had, false once [tries] were had without a [placed]. */
+        @Synchronized
+        fun attempt(key: K): Boolean {
+            if (this.key != key) { this.key = key; goes = 0; announced = false }
+            if (goes >= tries) return false
+            goes++
+            return true
+        }
+
+        /** [key] is right now: it may be tried again when it next goes wrong. */
+        @Synchronized
+        fun placed(key: K) {
+            if (this.key == key) { this.key = null; goes = 0; announced = false }
+        }
+
+        /** Whether [key] has had all its goes. */
+        @Synchronized
+        fun givenUp(key: K): Boolean = this.key == key && goes >= tries
+
+        /** True the first time it is asked for [key] given up: the giving up logged once. */
+        @Synchronized
+        fun announce(key: K): Boolean {
+            if (!givenUp(key) || announced) return false
+            announced = true
+            return true
+        }
+    }
 }

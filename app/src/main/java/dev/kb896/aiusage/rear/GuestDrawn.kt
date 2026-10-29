@@ -5,11 +5,14 @@ package dev.kb896.aiusage.rear
  * (only that package's windows: a few KB, where the whole dump is megabytes). The sign the
  * GuestReveal cover waits for before it slides away.
  *
- * A window of the task's own (ty=BASE_APPLICATION) on the display, that ASKS for the
- * display's size ("Requested w= h=": the app's own relayout, so it has taken in the move
- * — WM's frame changes at the move itself, before the app has done anything), and whose
- * draw has reached the screen (mHasSurface=true, mDrawState=HAS_DRAWN). Each window is
- * read on its own: one window's lines never stand in for another's.
+ * A window of the task's own (ty=BASE_APPLICATION) on the display, that ASKS for a size
+ * within its shape on the rear ("Requested w= h=": the app's own relayout, so it has taken in
+ * the move — WM's frame changes at the move itself, before the app has done anything; the
+ * front's size is bigger than the rear's either way round), and whose draw has reached the
+ * screen (mHasSurface=true, mDrawState=HAS_DRAWN). Within, not exactly: a guest that does not
+ * fill its shape — letterboxed, portrait only, in size compat — never asks for the whole of
+ * it, and every reveal of one waited the whole GuestReveal.MAX_WAIT_MS. Each window is read on
+ * its own: one window's lines never stand in for another's.
  */
 object GuestDrawn {
 
@@ -25,7 +28,7 @@ object GuestDrawn {
             val wh = requested.find(block)?.groupValues ?: return@any false
             dt[1].toInt() == display && dt[2].toInt() == task &&
                 block.contains("ty=BASE_APPLICATION ") &&
-                wh[1].toInt() == width && wh[2].toInt() == height &&
+                wh[1].toInt() in 1..width && wh[2].toInt() in 1..height &&
                 block.contains("mHasSurface=true") && block.contains("mDrawState=HAS_DRAWN")
         }
     }
