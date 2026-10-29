@@ -21,6 +21,13 @@ class ShizukuBridge(private val context: Context) {
 
     @Volatile private var service: IRearService? = null
     private var pending: String? = null
+
+    /**
+     * The last payload handed to the shell (show or update), sent or not. A new shell process
+     * starts with none — its portal settings (frame colour, grid, DPI, confined apps) at their
+     * defaults until the next payload — so a (re)connect sends it first.
+     */
+    @Volatile private var lastPayload: String? = null
     private var binderListenerArmed = false
 
     /**
@@ -74,6 +81,8 @@ class ShizukuBridge(private val context: Context) {
             runCatching { service?.setDozing(dozing) }
             runCatching { service?.setEvents(events) }
             quickStates?.let { (states, reachable) -> runCatching { service?.setQuickStates(states, reachable) } }
+            // The settings the shell runs on, before anything is placed with them.
+            lastPayload?.let { p -> runCatching { service?.update(p) } }
             pending?.let { p -> pending = null; show(p) }
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
@@ -129,6 +138,7 @@ class ShizukuBridge(private val context: Context) {
             }
             return
         }
+        lastPayload = payload
         if (!s.ready) {
             // Hold the payload instead of dropping it. This is the normal state for the
             // first seconds after the app is killed and restarted: Shizuku has to
@@ -148,6 +158,7 @@ class ShizukuBridge(private val context: Context) {
 
     fun update(payload: String) {
         calibrating = CalibrateMode.isCalibrate(payload)
+        lastPayload = payload
         try { service?.update(payload) } catch (e: Exception) { Log.e(TAG, "update failed", e); service = null }
     }
 
