@@ -30,7 +30,17 @@ class RearUserService : IRearService.Stub {
 
     /** Last payload shown, so the keep-alive can re-place without the app's help. */
     @Volatile private var lastPayload: String = "{}"
-    private var keepAlive: Thread? = null
+    /** Volatile: hide() stops it off [placing], and [adoptPlaced] may start one meanwhile. */
+    @Volatile private var keepAlive: Thread? = null
+
+    /**
+     * The panel was hidden on purpose (hide(), the onboarding undone, the "panel hidden"
+     * toggle) and no show() has come since. hide() only forgets the display and sends an
+     * async FINISH, so for a moment the panel's task is still listed on the rear — and an
+     * update() or isAlive() racing it adopted it again ([adoptPlaced]), and the keep-alive then
+     * re-placed it. Set first thing in hide(), cleared in show().
+     */
+    @Volatile private var hiddenOnPurpose = false
 
     /** Consecutive failed attempts to move the panel off the main display. */
     private var strandStrikes = 0
@@ -139,20 +149,31 @@ class RearUserService : IRearService.Stub {
      * Measured on device after a reinstall. So whatever finds the panel placed adopts it
      * here: the display recorded, the touch watch started, and the keep-alive [show]
      * would have started. Once only — a panel already recorded is left alone, and
-     * [hide] still clears it.
+     * [hide] still clears it. Never a panel hidden on purpose ([hiddenOnPurpose]): its task
+     * lingers a moment after hide(), and adopting it brought it back.
      */
     private fun adoptPlaced(displayId: Int, why: String) {
-        if (displayId < 0 || placedDisplayId >= 0) return
+        if (displayId < 0 || placedDisplayId >= 0 || hiddenOnPurpose) return
         synchronized(placing) {
-            if (placedDisplayId >= 0) return
+            if (placedDisplayId >= 0 || hiddenOnPurpose) return
             placedDisplayId = displayId
             Log.i(TAG, "the panel is already on display $displayId ($why) — adopting it")
             startKeepAlive(displayId)
+            // hide() sets the flag before it tears down, off this lock: one that came in since
+            // the look above is undone here, or — later than this look — by hide() itself.
+            if (hiddenOnPurpose) {
+                placedDisplayId = -1
+                keepAlive?.interrupt()
+                keepAlive = null
+                return
+            }
         }
         syncTouchWatch()
     }
 
     override fun hide() {
+        // First: nothing may adopt the panel back from here (adoptPlaced).
+        hiddenOnPurpose = true
         // -p $PKG scopes the broadcast to our own app. The receiver stays exported
         // (the sender here is shell uid 2000, which an unexported receiver can't
         // reach), so without this any app declaring a matching intent-filter could
@@ -230,6 +251,7 @@ class RearUserService : IRearService.Stub {
 
     override fun show(payload: String, displayId: Int) = synchronized(placing) {
         if (displayId < 0) return@synchronized
+        hiddenOnPurpose = false
         lastPayload = payload
         styleFrame(payload)
         startKeepAlive(displayId)
@@ -2676,7 +2698,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun replace(displayId: Int, why: String) {
         // A keep-alive interrupted by hide() mid-tick must not re-place the hidden panel.
-        if (Thread.currentThread().isInterrupted) return
+        if (Thread.currentThread().isInterrupted || hiddenOnPurpose) return
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastReplaceAt < REPLACE_COOLDOWN_MS) return
         lastReplaceAt = now
