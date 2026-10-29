@@ -70,7 +70,7 @@ class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
 
     /**
      * The frame's layer as it is now, or null: for a picture of the rear without the frame
-     * in it. It may be released at any moment after, so a user must survive that.
+     * in it. It may be released at any moment after: a capture holds it with ShellLayer.lease.
      */
     val currentLayer: SurfaceControl? get() = layer
 

@@ -50,6 +50,9 @@ internal object ShellLayer {
     /** The camera strip beside a guest kept right of the cameras (CameraStrip): over every app, under the cover. */
     const val Z_STRIP = Int.MAX_VALUE - 4
 
+    /** How long [removeAll] waits for a capture holding layers ([lease]) before it lets them go anyway. */
+    private const val LEASE_WAIT_MS = 200L
+
     /** gui::TrustedOverlay::ENABLED. UNSET is 0 and DISABLED 1, and 1 still has touches dropped. */
     const val TRUSTED_OVERLAY_ENABLED = 2
 
@@ -59,6 +62,29 @@ internal object ShellLayer {
      * the rear at once, rather than leave them up until the process is gone.
      */
     private val live: MutableSet<SurfaceControl> = java.util.Collections.synchronizedSet(LinkedHashSet())
+
+    /**
+     * Read-held while a [lease] uses layers; write-held around each release in [remove]. A
+     * capture that leaves our layers out (GuestCover, the camera strip's colour) is handed
+     * them by their owners' threads, which may release them at any moment — and a layer
+     * released while the capture's arguments are being written is a freed native object.
+     */
+    private val releasing = java.util.concurrent.locks.ReentrantReadWriteLock()
+
+    /**
+     * [use] with [layers] — the nulls, and any already [remove]d, dropped — none of which can
+     * be released until it returns. For a capture's leave-out list, held only as long as the
+     * capture; never make or [remove] a layer inside it (a read lock cannot become a write lock).
+     */
+    fun <T> lease(layers: List<SurfaceControl?>, use: (List<SurfaceControl>) -> T): T {
+        val lock = releasing.readLock()
+        lock.lock()
+        try {
+            return use(layers.filterNotNull().filter { it in live })
+        } finally {
+            lock.unlock()
+        }
+    }
 
     /** Set by [removeAll], as the process ends: [create] makes nothing more. */
     @Volatile private var closed = false
@@ -110,8 +136,15 @@ internal object ShellLayer {
                 t.apply()
             }
         }
-        for (l in all) runCatching { l.release() }
-        for (r in roots) runCatching { r.release() }
+        // Past a capture in flight if it can be ([lease]); the process is ending either way.
+        val lock = releasing.writeLock()
+        val held = runCatching { lock.tryLock(LEASE_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false)
+        try {
+            for (l in all) runCatching { l.release() }
+            for (r in roots) runCatching { r.release() }
+        } finally {
+            if (held) lock.unlock()
+        }
     }
 
     /** A layer that had to be trusted could not be; [message] says why. */
@@ -159,7 +192,10 @@ internal object ShellLayer {
         if (layer == null) return
         live.remove(layer)
         runCatching { SurfaceControl.Transaction().use { it.setVisibility(layer, false).setAlpha(layer, 0f).reparent(layer, null).apply() } }
-        runCatching { layer.release() }
+        // Not while a capture holds it ([lease]): it waits for the capture, which is short.
+        val lock = releasing.writeLock()
+        lock.lock()
+        try { runCatching { layer.release() } } finally { lock.unlock() }
     }
 
     /** Marks [layer] a trusted overlay in [t]; null when done, else why it could not be. */

@@ -75,7 +75,8 @@ internal class GuestCover private constructor(
          * whole size, so a picture drawn into it (the screencap's) is not cut to the 17 Pro's.
          */
         fun up(layerStack: Int, rear: RearGeometry, displayId: Int, leaveOut: SurfaceControl?, screencap: () -> Bitmap?): GuestCover? {
-            val shot = runCatching { RearCapture.capture(displayId, listOfNotNull(leaveOut)) }
+            // The frame's layer held for the capture (ShellLayer.lease): its thread may let it go.
+            val shot = runCatching { ShellLayer.lease(listOf(leaveOut)) { RearCapture.capture(displayId, it) } }
                 .onFailure { once("no in-process capture (${(it.cause ?: it).javaClass.simpleName}: ${(it.cause ?: it).message}); screencap instead") }
                 .getOrNull()
             if (shot?.secure == true) {

@@ -1277,11 +1277,13 @@ class RearUserService : IRearService.Stub {
      * busy edge, a capture that failed.
      */
     private fun stripColor(): Int = runCatching {
-        val leaveOut = listOfNotNull(frame.currentLayer, strip.currentLayer, coverLayer)
         val at = StripColor.sample(geometry)
         val crop = android.graphics.Rect(at.left, at.top, at.right, at.bottom)
         // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
-        val shot = RearCapture.capture(rearDisplay(), leaveOut, crop, scaleY = STRIP_SAMPLE_SCALE) ?: return@runCatching BLACK
+        // Our layers held for the capture (ShellLayer.lease): their own threads may let them go.
+        val shot = ShellLayer.lease(listOf(frame.currentLayer, strip.currentLayer, coverLayer)) { leaveOut ->
+            RearCapture.capture(rearDisplay(), leaveOut, crop, scaleY = STRIP_SAMPLE_SCALE)
+        } ?: return@runCatching BLACK
         try {
             if (shot.secure) return@runCatching BLACK
             val hw = android.graphics.Bitmap.wrapHardwareBuffer(shot.buffer, shot.space) ?: return@runCatching BLACK
