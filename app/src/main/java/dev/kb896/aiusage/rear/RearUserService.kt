@@ -507,19 +507,30 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * `am kill` rather than `am force-stop`, and the difference matters here.
+     * The camera was closed on the back: both its halves go, then its process.
      *
-     * kill declines to touch a process the system considers foreground, so if any part of
-     * the camera is still in use — its companion UI on the front screen, a recording
-     * still finishing — this does nothing at all. force-stop would take those with it.
-     * Getting this wrong costs somebody their video; getting it too gently costs one
-     * resident process until the next time.
+     * THE FRONT HALF STAYED. The camera opened on the back brings up a companion on the
+     * front screen (MainScreenSelfieActivity, a task of its own), and closing the camera on
+     * the back does not always take it along: measured on OS4.0.5.0, when the camera leaves
+     * the rear by moving its own task back rather than through our Back, the companion
+     * stays focused on the front, and that kept the process foreground, so the `am kill`
+     * below declined and the camera was waiting on the front the next time the phone was
+     * turned over. Its tasks are removed first — the same as swiping them away in recents,
+     * which ends a recording the way Home does (see sendCameraBack) — and with no task left
+     * nothing is foreground any more.
+     *
+     * `am kill` rather than `am force-stop` after that, still: kill declines to touch a
+     * process the system considers foreground, so a recording still being written out keeps
+     * its process. Getting this wrong costs somebody their video; getting it too gently
+     * costs one resident process until the next time.
      */
     private fun closeCamera() {
         stopBandTaps()
         cameraLaunched = false
         cameraWasOnTop = false
-        Log.i(TAG, "camera dismissed and the panel is back — releasing it")
+        val tasks = StackList.taskIdsOf(exec("am stack list"), CAMERA_PACKAGE)
+        Log.i(TAG, "camera dismissed and the panel is back — removing its tasks $tasks and releasing it")
+        for (task in tasks) exec("am stack remove $task")
         exec("am kill $CAMERA_PACKAGE")
     }
 
