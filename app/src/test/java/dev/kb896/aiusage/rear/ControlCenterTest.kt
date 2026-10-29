@@ -61,4 +61,13 @@ class ControlCenterTest {
         assertFalse(ControlCenter.figureShown(nowMs = 10_000L, changedAtMs = 7_900L))
         assertFalse(ControlCenter.figureShown(nowMs = 10_000L, changedAtMs = 0L))
     }
+
+    @Test fun `on a Pro Max it is pulled from where its lenses end, over the left half from there`() {
+        val left = RearGeometry(976, 596, 296, 110, 450).cutoutUnits
+        assertTrue(ControlCenter.startsPull(x = 280f, y = 4f, left = left))
+        assertFalse(ControlCenter.startsPull(x = 270f, y = 4f, left = left))
+        // The half's edge moves with it: (274 + 904) / 2 = 589.
+        assertTrue(ControlCenter.startsPull(x = 585f, y = 4f, left = left))
+        assertFalse(ControlCenter.startsPull(x = 595f, y = 4f, left = left))
+    }
 }

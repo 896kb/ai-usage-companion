@@ -45,7 +45,10 @@ import kotlin.math.abs
  * The windows under the touch see it too, unless the sheet's blocker is up; reading is
  * all the shell does.
  */
-class EdgeGestures {
+class EdgeGestures(
+    /** Where the usable area starts, in panel units: the pull bands' left edge (RearGeometry.cutoutUnits). */
+    private val usableLeft: Float = dev.kb896.aiusage.Panel.CUTOUT_RIGHT.toFloat(),
+) {
 
     sealed interface Action {
         /** A pull begins, the finger at [y]: from the bottom band, or ([onSheet]) a drag on the sheet. */
@@ -97,8 +100,8 @@ class EdgeGestures {
             committed = false; sideways = false
             kind = when {
                 sheet -> Kind.SHEET
-                PortalPull.startsPull(e.x, e.y) -> Kind.PULL
-                ControlCenter.startsPull(e.x, e.y) -> Kind.TOP
+                PortalPull.startsPull(e.x, e.y, usableLeft) -> Kind.PULL
+                ControlCenter.startsPull(e.x, e.y, usableLeft) -> Kind.TOP
                 e.x >= BACK_LEFT -> Kind.BACK
                 else -> Kind.NONE
             }

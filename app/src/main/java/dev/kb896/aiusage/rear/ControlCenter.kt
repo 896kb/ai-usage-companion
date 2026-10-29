@@ -38,9 +38,14 @@ object ControlCenter {
     const val SWITCH_MS = 250f
 
     private val PULL_LEFT = Panel.CUTOUT_RIGHT.toFloat()
-    private val PULL_RIGHT = Panel.CUTOUT_RIGHT + (Panel.WIDTH - Panel.CUTOUT_RIGHT) / 2f
 
-    fun startsPull(x: Float, y: Float): Boolean = y <= EDGE && x >= PULL_LEFT && x <= PULL_RIGHT
+    /**
+     * A finger at [x], [y] (panel units) starts a pull: within [EDGE] of the top, over the left
+     * half of the usable area right of [left] — the lens column's edge, the panel's own unless
+     * the rear says otherwise (RearGeometry.cutoutUnits, for the shell's on a Pro Max).
+     */
+    fun startsPull(x: Float, y: Float, left: Float = PULL_LEFT): Boolean =
+        y <= EDGE && x >= left && x <= left + (Panel.WIDTH - left) / 2f
 
     /** How far open, 0 to 1, under a finger that has moved [dy] (down positive). */
     fun progress(open: Boolean, dy: Float): Float =

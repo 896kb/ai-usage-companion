@@ -234,4 +234,23 @@ class EdgeGesturesTest {
         val actions = listOf(Down(400f, 10f, 0), Move(400f, 80f, 10)).flatMap { g.feed(it) }
         assertEquals(listOf(Action.SheetDown(400f, 10f), Action.PullStart(80f, onSheet = true)), actions)
     }
+
+    // ---- on a Pro Max: the bands start where its lenses end (RearGeometry.cutoutUnits) ----
+
+    @Test fun `on a Pro Max a pull may start just right of its lenses, which the 17 Pro's band would miss`() {
+        val proMax = RearGeometry(976, 596, 296, 110, 450)
+        val up = arrayOf(Down(280f, 560f, 0), Move(280f, 500f, 10), Up(280f, 400f, 20))
+        val down = arrayOf(Down(280f, 10f, 0), Move(280f, 60f, 10), Up(280f, 200f, 20))
+        val max = EdgeGestures(proMax.cutoutUnits)
+        assertEquals(listOf(Action.PullStart(500f), Action.PullEnd(400f)), up.flatMap { max.feed(it) })
+        assertEquals(listOf(Action.TopPullStart(60f), Action.TopPullEnd(200f)), down.flatMap { max.feed(it) })
+        assertEquals(emptyList<Action>(), run(*up))
+        assertEquals(emptyList<Action>(), run(*down))
+    }
+
+    @Test fun `on the 17 Pro its geometry is the panel's own band`() {
+        assertEquals(296f, RearGeometry.PRO17.cutoutUnits, 0f)
+        val g = EdgeGestures(RearGeometry.PRO17.cutoutUnits)
+        assertEquals(emptyList<Action>(), listOf(Down(290f, 560f, 0), Move(290f, 500f, 10), Up(290f, 400f, 20)).flatMap { g.feed(it) })
+    }
 }

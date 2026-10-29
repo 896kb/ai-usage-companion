@@ -1459,7 +1459,8 @@ class RearUserService : IRearService.Stub {
             ProcessBuilder("sh", "-c", "exec getevent $path").redirectErrorStream(true).start()
         } catch (e: Exception) { Log.w(TAG, "portal: getevent failed: ${e.message}"); return }
         touchWatch.set(proc)
-        val gestures = EdgeGestures()
+        // Its pull bands start where this rear's lenses end, in panel units.
+        val gestures = EdgeGestures(geometry.cutoutUnits)
         synchronized(sheetLock) {
             gestures.sheet = sheetUp
             this.gestures = gestures
