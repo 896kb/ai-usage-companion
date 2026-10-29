@@ -112,11 +112,18 @@ class MainActivity : ComponentActivity() {
     /** The Portal tab's DPI as last built, so a value nudged on the back shows on the front. */
     private var shownPortalDpi: Map<String, Int>? = null
 
+    /**
+     * The Portal tab's guide as last built: its steps tick from outside this screen too —
+     * the tile service, the sheet opened on the back — and the card follows while it is open.
+     */
+    private var shownPortalGuide: PortalGuide.State? = null
+
     /** The config was written: the rows again if what they show of it changed. */
     private fun syncFromConfig() {
         val config = ConfigStore(this).load()
         val stale = shownCameraTip?.let { it != config.cameraTip } == true ||
-            shownPortalDpi?.let { it != config.portalDpi } == true
+            shownPortalDpi?.let { it != config.portalDpi } == true ||
+            shownPortalGuide?.let { it != PortalGuide.of(config) } == true
         if (stale) buildSettingsRows()
     }
 
@@ -1368,13 +1375,34 @@ class MainActivity : ComponentActivity() {
         // APP PORTAL: other apps on the back, opened from a pull up from the bottom edge.
         SettingsRows.note(portalRows, "Pull up from the bottom of the back to open apps there. A swipe in from the right edge is the app's Back.")
         shownPortalDpi = config.portalDpi
-        SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") {
+        fun pickPortalApps() {
             AppPicker.show(this, config.portalApps) { pinned ->
                 write { it.copy(portalApps = pinned, portalDpi = it.portalDpi.filterKeys { k -> k in pinned },
                     portalConfined = it.portalConfined.filter { k -> k in pinned }.toSet()) }
                 buildSettingsRows()
             }
         }
+        // The guide (PortalGuide): a card over the tab's settings until its three steps are
+        // ticked or it is dismissed, then a row at the tab's foot. A guide finished by a pin
+        // made here is marked down for good here — the tile service and the sheet's event mark
+        // theirs as they save. Shown before the save, whose listener compares against it.
+        val guide = PortalGuide.of(PortalGuide.settled(config))
+        shownPortalGuide = guide
+        if (guide.down && !config.portalGuideDone) store.save(config.copy(portalGuideDone = true))
+        findViewById<View>(R.id.card_portal_guide).visibility = if (guide.card) View.VISIBLE else View.GONE
+        findViewById<LinearLayout>(R.id.portal_guide_rows).let { rows ->
+            rows.removeAllViews()
+            if (guide.card) PortalGuideCard.fill(
+                rows, guide,
+                onPin = { pickPortalApps() },
+                onTile = { askPortalTile() },
+                onDismiss = {
+                    store.save(store.load().copy(portalGuideDone = true))
+                    syncFromConfig()
+                },
+            )
+        }
+        SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") { pickPortalApps() }
         // Rows × columns a page; more pinned apps than that go on further pages on the back.
         SettingsRows.choice(
             portalRows, "Apps per page", PortalGrid.entries.map { it.label }, config.portalGrid.ordinal,
@@ -1417,6 +1445,11 @@ class MainActivity : ComponentActivity() {
             SettingsRows.colorRow(portalRows, "Portal frame colour", config.portalFrameColor) { c ->
                 write { it.copy(portalFrameColor = c) }
             }
+        }
+        // The guide's card down, its sketch stays a tap away — with the tile's button while
+        // the tile is still missing, for a card dismissed before it was added.
+        if (!guide.card) SettingsRows.navigation(portalRows, "How to use the portal") {
+            PortalGuideCard.showHelp(this, if (store.load().portalTileAdded) null else ({ askPortalTile() }))
         }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
         // notifications with written ones — which is exactly right for filming and would
@@ -2246,6 +2279,29 @@ class MainActivity : ComponentActivity() {
 
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    /**
+     * The "Send to back" tile asked for (PortalGuideCard.requestTile). Added, it is saved for
+     * the guide, which follows — the tile service's onTileAdded says the same, and whichever
+     * comes first wins. Turned down, the step stays to ask again; a system that will not ask
+     * at all gets pointed at the shade's own editor.
+     */
+    private fun askPortalTile() {
+        PortalGuideCard.requestTile(this) { added ->
+            when (added) {
+                true -> {
+                    val store = ConfigStore(this)
+                    val config = store.load()
+                    if (!config.portalTileAdded) store.save(PortalGuide.settled(config.copy(portalTileAdded = true)))
+                    syncFromConfig()
+                }
+                false -> Unit
+                null -> Toast.makeText(
+                    this, "Couldn't ask here: add “Send to back” from Quick Settings' edit list", Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
 
     /**
      * The one destructive-looking tap in the app asks first, and the asking says what

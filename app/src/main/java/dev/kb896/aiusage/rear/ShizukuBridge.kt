@@ -501,7 +501,14 @@ class ShizukuBridge(private val context: Context) {
         override fun onControlCenterOpening() {
             context.sendBroadcast(android.content.Intent(RearActivity.ACTION_GET_QUICK).setPackage(context.packageName))
         }
+
+        override fun onPortalOpened() {
+            mainHandler.post { this@ShizukuBridge.onPortalOpened() }
+        }
     }
+
+    /** The portal sheet was opened on the back (IRearEvents.onPortalOpened). Set by Graph; run on the main thread. */
+    var onPortalOpened: () -> Unit = {}
 
     private companion object {
         const val TAG = "AiUsageBridge"

@@ -650,6 +650,16 @@ data class PanelConfig(
      * an older config may still carry — ignored.
      */
     val portalConfined: Set<String> = emptySet(),
+    /**
+     * App Portal: the "Send to back" tile is in Quick Settings, as far as the app was last
+     * told — the add-tile request's answer, and PortalTileService's own added / removed /
+     * listening. Ticks the Portal tab's second step (PortalGuide).
+     */
+    val portalTileAdded: Boolean = false,
+    /** App Portal: the sheet has been opened on the back at least once (IRearEvents.onPortalOpened). The third step. */
+    val portalSheetSeen: Boolean = false,
+    /** App Portal: the Portal tab's guide card is down for good — finished, or dismissed early. */
+    val portalGuideDone: Boolean = false,
 ) {
 
     /** This account's appearance, or an all-defaults one if it has no entry. */

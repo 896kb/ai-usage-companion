@@ -22,7 +22,23 @@ class PortalTileService : TileService() {
     /** True from the tap until the send has finished, across the shade closing and reopening. */
     @Volatile private var sending = false
 
+    // In the panel or not, kept for the Portal tab's guide (PortalGuide's second step). These
+    // run in the app's own process, on its main thread, as the settings screen's writes do.
+    override fun onTileAdded() = markAdded(true)
+    override fun onTileRemoved() = markAdded(false)
+
+    /** Saved only when it changes: listening happens every time the shade opens. */
+    private fun markAdded(added: Boolean) {
+        val store = dev.kb896.aiusage.data.ConfigStore(applicationContext)
+        val config = store.load()
+        if (config.portalTileAdded != added) {
+            store.save(dev.kb896.aiusage.ui.PortalGuide.settled(config.copy(portalTileAdded = added)))
+        }
+    }
+
     override fun onStartListening() {
+        // Listening at all means it is in the panel — added before there was anything to tell.
+        markAdded(true)
         qsTile?.apply {
             if (sending) { state = Tile.STATE_UNAVAILABLE; subtitle = "Sending…" }
             else { state = Tile.STATE_INACTIVE; subtitle = null }

@@ -569,6 +569,23 @@
             android:orientation="vertical"
             android:visibility="gone">
 
+        <!-- The portal's guide (PortalGuideCard): above the settings until it is done. -->
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_portal_guide"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/portal_guide_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <dev.kb896.aiusage.ui.glass.GlassCard
             android:id="@+id/card_portal"
             android:layout_width="match_parent"
