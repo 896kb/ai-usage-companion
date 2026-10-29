@@ -15,4 +15,8 @@ oneway interface IRearEvents {
     void onQuick(String which, boolean on) = 2;
     // That control centre is coming down: send the tiles' states, as the panel's opening asks.
     void onControlCenterOpening() = 3;
+    // The portal sheet came to rest open on the back: said once a process, the first time
+    // (and again later only if nobody was listening). The app keeps it as portalSheetSeen,
+    // which ticks the Portal tab's "Learn the gestures" step.
+    void onPortalOpened() = 4;
 }

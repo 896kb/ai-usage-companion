@@ -2391,13 +2391,19 @@ class RearUserService : IRearService.Stub {
         if (!all) scheduleDpiFlush()
     }
 
+    /** The sheet's first rest open, said to the app once (IRearEvents.onPortalOpened): the front's guide ticks it. */
+    private val portalOpened = dev.kb896.aiusage.data.OnceLatch()
+
     /** Whatever [motion] now says, carried out. Under [sheetLock]. */
     private fun afterMotion(nowMs: Long) {
         when (motion.phase) {
             SheetMotion.Phase.SETTLING -> { pushPosition(nowMs); if (!beginPending) startAnim() }
             SheetMotion.Phase.SHUT -> sheetDown()
             // Still: no frames for the sheet, but pages still sliding keep theirs.
-            else -> { if (!pager.settling) stopAnim(); pushPosition(nowMs) }
+            else -> {
+                if (!pager.settling) stopAnim(); pushPosition(nowMs)
+                if (motion.phase == SheetMotion.Phase.OPEN) portalOpened.fire { events?.onPortalOpened() != null }
+            }
         }
     }
 

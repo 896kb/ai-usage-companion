@@ -13,6 +13,7 @@ import dev.kb896.aiusage.data.ConfigStore
 import dev.kb896.aiusage.data.StatePayload
 import dev.kb896.aiusage.rear.DpiEdits
 import dev.kb896.aiusage.rear.ShizukuBridge
+import dev.kb896.aiusage.ui.PortalGuide
 import okhttp3.OkHttpClient
 
 /**
@@ -45,6 +46,13 @@ class Graph private constructor(context: Context) {
                 store.save(next)
                 if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
             }
+        }
+        // The sheet opened on the back: the Portal tab's last step ticks. The front's alone —
+        // nothing on the back reads it, so no payload goes.
+        b.onPortalOpened = {
+            val store = ConfigStore(context.applicationContext)
+            val config = store.load()
+            if (!config.portalSheetSeen) store.save(PortalGuide.settled(config.copy(portalSheetSeen = true)))
         }
     }
 
