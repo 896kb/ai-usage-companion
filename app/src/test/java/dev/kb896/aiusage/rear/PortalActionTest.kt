@@ -122,4 +122,17 @@ class PortalActionTest {
         // A Back invoked on it (at its root, it closes): the guest is over, not relaunched.
         assertEquals(PortalAction.Vanished.OVER, PortalAction.vanished(closedByUser = true))
     }
+
+    @Test fun `a guest still on the rear after a Back is on top only if the rear shows it`() {
+        // Its own window on top: within the app, or a Back it kept — the chrome stays or comes back.
+        assertEquals(PortalAction.AfterBack.ON_TOP, PortalAction.afterBack(top = "a.b", guestPkg = "a.b", ours = "us"))
+        // Our panel on top: at its root the app moved its task behind it (moveTaskToBack) — still
+        // the guest, behind, and the sheet offers Resume.
+        assertEquals(PortalAction.AfterBack.BEHIND, PortalAction.afterBack(top = "us", guestPkg = "a.b", ours = "us"))
+    }
+
+    @Test fun `nothing read, or a third app on top, after a Back changes nothing - the keep-alive sees to it`() {
+        assertEquals(PortalAction.AfterBack.UNKNOWN, PortalAction.afterBack(top = null, guestPkg = "a.b", ours = "us"))
+        assertEquals(PortalAction.AfterBack.UNKNOWN, PortalAction.afterBack(top = "c.d", guestPkg = "a.b", ours = "us"))
+    }
 }

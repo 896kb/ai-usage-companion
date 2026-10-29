@@ -1740,7 +1740,12 @@ class RearUserService : IRearService.Stub {
      * task is looked for at PortalAction.BACK_CHECKS_MS (`am stack list`), and once it has
      * left the rear the guest ends at once, as the keep-alive would end it. A Back the
      * navigation says closes the task (PortalAction.backMayClose) fades the chrome out as it
-     * is invoked, in step with the system's close; if the task stays after all, back in.
+     * is invoked, in step with the system's close. A task that stays is not proof the guest is
+     * on top: at its root a launcher activity's Back moves the task behind, alive on the rear
+     * under our panel. So what the rear shows on top is read (PortalAction.afterBack): the
+     * guest's own window, and the chrome is back in; our panel, and the guest is behind it, as
+     * Panel leaves it — no frame or strip over the panel, Resume on the sheet, no control
+     * centre of ours over it.
      * On a thread of its own, so the next Back does not wait for the checks.
      */
     private fun afterBack(g: Guest, type: Int) {
@@ -1765,8 +1770,20 @@ class RearUserService : IRearService.Stub {
                     return@guarded
                 }
             }
-            // Still there: a Back within the app, or one it kept (moveTaskToBack on the rear).
-            if (closing && guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
+            // Still there: a Back within the app, or one that moved its task behind the panel.
+            when (PortalAction.afterBack(rearTop(g), g.pkg, PKG)) {
+                PortalAction.AfterBack.ON_TOP -> if (closing && guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
+                PortalAction.AfterBack.BEHIND -> synchronized(placing) {
+                    // Under the lock: a launch or a button since may have changed the guest.
+                    if (guest?.task == g.task && markOnTop(g.task, false)) {
+                        Log.i(TAG, "portal: ${g.pkg} went behind the panel on Back — the guest still, behind")
+                        guestBehind(g.pkg)
+                    }
+                }
+                // Unread or another app's: the keep-alive's next tick decides; the chrome, if the
+                // Back faded it, stays down meanwhile rather than come up over the wrong thing.
+                PortalAction.AfterBack.UNKNOWN -> Unit
+            }
         }.apply { isDaemon = true; name = "portal-back-check"; start() }
     }
 

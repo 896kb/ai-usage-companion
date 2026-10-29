@@ -134,6 +134,32 @@ object PortalAction {
      * next tick, two seconds of a frame and a strip round nothing (seen on the phone).
      */
     val BACK_CHECKS_MS = listOf(120L, 300L, 700L)
+
+    /** Where a guest still on the rear after a Back stands, by what the rear composes on top. */
+    enum class AfterBack {
+        /** Its own window: a Back within the app — on top, chrome up. */
+        ON_TOP,
+        /**
+         * Our panel: at its root the app moved its task behind (a launcher activity's Back since
+         * Android 12) — still the guest, alive behind the panel, and the sheet offers Resume.
+         */
+        BEHIND,
+        /** Nothing read (a dark rear), or a third app: left as it is, for the keep-alive's next tick. */
+        UNKNOWN,
+    }
+
+    /**
+     * A guest ([guestPkg]) whose task is still on the rear after a Back, with [top] composed
+     * on top of the rear (null: nothing read) and [ours] our own package. Still listed on the
+     * rear is not still on top: the task of a root Back stays on display 1, behind the panel,
+     * and its frame and strip used to come back over the panel.
+     */
+    fun afterBack(top: String?, guestPkg: String, ours: String): AfterBack = when (top) {
+        null -> AfterBack.UNKNOWN
+        guestPkg -> AfterBack.ON_TOP
+        ours -> AfterBack.BEHIND
+        else -> AfterBack.UNKNOWN
+    }
     /** What a guest's task gone in the launch's survive wait comes to. */
     enum class Vanished {
         /** Started again once: a trampoline the move relaunched (Shazam, measured). */
