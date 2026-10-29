@@ -3,6 +3,8 @@ package dev.kb896.aiusage.rear
 import dev.kb896.aiusage.Panel
 import dev.kb896.aiusage.rear.RearGeometry.Reading
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RearGeometryTest {
@@ -67,5 +69,14 @@ class RearGeometryTest {
         val display = Reading(976, 596, null, null, null)
         val dump = Reading(596, 976, 40, 100, 440)
         assertEquals(RearGeometry(976, 596, 296, 97, 440), RearGeometry.resolve(display, dump))
+    }
+
+    @Test fun `only a rear one of the sources gave a size is known - the 17 Pro's fallback is asked again`() {
+        assertTrue(RearGeometry.known(Reading(976, 596, null, null, null), null))
+        assertTrue(RearGeometry.known(null, Reading(904, 572, 296, 97, 450)))
+        assertFalse(RearGeometry.known(null, null))
+        // A density alone, or half a size, is still the 17 Pro's whole geometry.
+        assertFalse(RearGeometry.known(Reading(0, 0, null, null, null), Reading(null, 572, 296, 97, 450)))
+        assertFalse(RearGeometry.known(null, Reading(null, null, null, null, 440)))
     }
 }

@@ -581,26 +581,48 @@ class RearUserService : IRearService.Stub {
 
     /**
      * The rear display as it really is (RearGeometry): its size, lens column, corner and
-     * density, the one source the shell takes any of them from. Read once, the first time
-     * anything needs it — it belongs to the panel, so it never changes: display 1 as the
+     * density, the one source the shell takes any of them from. Read the first time anything
+     * needs it and kept — it belongs to the panel, so it never changes: display 1 as the
      * window manager has it first (the frame task bounds and layers are in), `dumpsys
      * display`'s device line for what that does not say and for the density (the Display's
      * is the override a guest may have set), the 17 Pro's for the rest. Logged with what
-     * each said, so a Pro Max's first run says what it read.
+     * each said, so a Pro Max's first run says what it read. Kept only once a source has said
+     * its size (RearGeometry.known): with neither read, the 17 Pro's stands in and the rear is
+     * asked again after [GEOMETRY_RETRY_MS] — the frame and the strip, made once, keep the
+     * geometry they were made with.
      */
-    private val geometry: RearGeometry by lazy {
-        val display = runCatching {
-            context?.getSystemService(android.hardware.display.DisplayManager::class.java)
-                ?.getDisplay(Panel.DISPLAY_ID)?.let(RearGeometry::reading)
-        }.onFailure { Log.w(TAG, "rear geometry: display ${Panel.DISPLAY_ID} unreadable: ${it.message}") }.getOrNull()
-        val dump = runCatching {
-            rearPhysicalId()?.let { DisplayDump.device(exec("dumpsys display | grep 'DisplayDeviceInfo'"), it) }
-        }.getOrNull()
-        RearGeometry.resolve(display, dump).also {
-            Log.i(TAG, "rear geometry: ${it.widthPx}x${it.heightPx}, lenses to x ${it.cutoutPx}, corner ${it.cornerPx}, " +
-                "${it.dpi} dpi (fit ${"%.4f".format(it.fitX)} x ${"%.4f".format(it.fitY)}) — display said $display, dumpsys $dump")
+    private val geometry: RearGeometry
+        get() {
+            knownGeometry?.let { return it }
+            val now = android.os.SystemClock.uptimeMillis()
+            fallbackGeometry?.takeIf { now < geometryRetryAt }?.let { return it }
+            synchronized(geometryLock) {
+                knownGeometry?.let { return it }
+                fallbackGeometry?.takeIf { now < geometryRetryAt }?.let { return it }
+                val display = runCatching {
+                    context?.getSystemService(android.hardware.display.DisplayManager::class.java)
+                        ?.getDisplay(Panel.DISPLAY_ID)?.let(RearGeometry::reading)
+                }.onFailure { Log.w(TAG, "rear geometry: display ${Panel.DISPLAY_ID} unreadable: ${it.message}") }.getOrNull()
+                val dump = runCatching {
+                    rearPhysicalId()?.let { DisplayDump.device(exec("dumpsys display | grep 'DisplayDeviceInfo'"), it) }
+                }.getOrNull()
+                val g = RearGeometry.resolve(display, dump)
+                val known = RearGeometry.known(display, dump)
+                if (known || fallbackGeometry == null) {
+                    Log.i(TAG, "rear geometry: ${g.widthPx}x${g.heightPx}, lenses to x ${g.cutoutPx}, corner ${g.cornerPx}, " +
+                        "${g.dpi} dpi (fit ${"%.4f".format(g.fitX)} x ${"%.4f".format(g.fitY)}) — display said $display, dumpsys $dump" +
+                        if (known) "" else " — neither said its size: the 17 Pro's for now, asked again later")
+                }
+                if (known) knownGeometry = g
+                else { fallbackGeometry = g; geometryRetryAt = now + GEOMETRY_RETRY_MS }
+                return g
+            }
         }
-    }
+    @Volatile private var knownGeometry: RearGeometry? = null
+    /** The 17 Pro's stand-in while neither source says the rear's size, until [geometryRetryAt]. */
+    @Volatile private var fallbackGeometry: RearGeometry? = null
+    @Volatile private var geometryRetryAt = 0L
+    private val geometryLock = Any()
 
     /** The rear display's physical id, once read. It belongs to the panel, so it never changes. */
     @Volatile private var knownRearId: String? = null
@@ -3050,6 +3072,8 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        /** The rear's size unread: how long the 17 Pro's stands in before it is asked again. */
+        const val GEOMETRY_RETRY_MS = 60_000L
         /** After a failed re-read of display 1's density, how long before the next exec. */
         const val REREAD_BACKOFF_MS = 30_000L
         /** after a direct start on the rear display, before believing it took */

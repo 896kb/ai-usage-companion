@@ -49,6 +49,14 @@ data class RearGeometry(val widthPx: Int, val heightPx: Int, val cutoutPx: Int, 
         private fun Int?.said() = this?.takeIf { it > 0 }
 
         /**
+         * Whether [display] or [dump] says the rear's size, so that [resolve] is the rear's own
+         * and may be kept for good. Neither (both unread, a dump that came back empty): what
+         * [resolve] gives is [PRO17]'s, a stand-in to use now and ask again about later.
+         */
+        fun known(display: Reading?, dump: Reading?): Boolean =
+            listOfNotNull(display, dump).any { it.width.said() != null && it.height.said() != null }
+
+        /**
          * The rear from [display] (the window manager's own display, in the frame tasks and
          * layers use) and [dump] (`dumpsys display`'s device line), in that order, field by
          * field; the 17 Pro's for whatever neither says. The size comes whole from one of them
