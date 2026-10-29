@@ -1023,6 +1023,10 @@ class RearUserService : IRearService.Stub {
         if (component.isNullOrEmpty() || !COMPONENT.matches(component)) {
             Log.w(TAG, "portal: no launcher activity for $pkg"); return@synchronized false
         }
+        // A Back before this launch says nothing about it: an app's next launch may reuse the
+        // task a Back closed or sent behind, and a trampoline dying in its survive wait would
+        // then read as closed by the user, not retried.
+        backedTask = -1
         // One guest at a time: the old one goes to the front, alive — never killed. Not yet:
         // it stays on the rear, live, while the new one starts and settles on the front, and
         // leaves under the cover, as the new one comes in.
@@ -1779,7 +1783,10 @@ class RearUserService : IRearService.Stub {
         if (back) sendBackOnce()
     }
 
-    /** The last task a Back was invoked on (PortalAction.vanished): its leaving is the user's doing. */
+    /**
+     * The last task a Back was invoked on since the launch began (PortalAction.vanished): its
+     * leaving is the user's doing. Reset as each launch starts.
+     */
     @Volatile private var backedTask = -1
 
     /** Backs, one at a time and in order, off the touch reader and every lock it takes. */
