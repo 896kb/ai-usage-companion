@@ -1355,7 +1355,9 @@ class RearUserService : IRearService.Stub {
         val pkg = FocusDump.focusedPackage(dump, 0) ?: return@synchronized ""
         val task = FocusDump.focusedTask(dump, 0) ?: return@synchronized ""
         if (!PACKAGE_NAME.matches(pkg) || !GuestTask.sendable(pkg, PKG)) return@synchronized ""
-        guest?.let { old -> if (old.task != task) moveToDisplay(old.task, 0) }
+        // The old guest to the front made an ordinary fullscreen task again, as launchGuest and
+        // Front send it: left in multi-window it keeps the rear's bounds there.
+        guest?.let { old -> if (old.task != task) { moveToDisplay(old.task, 0); shapeForFront(old.task) } }
         guest = Guest(pkg, task, onTop = true)
         syncDensity("$pkg is landing")
         if (!moveToDisplay(task, displayId)) { endGuest("move refused"); return@synchronized "" }
