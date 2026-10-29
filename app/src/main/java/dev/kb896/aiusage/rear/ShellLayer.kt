@@ -14,15 +14,18 @@ import android.view.SurfaceControl
  *
  * ONE CONTAINER, AND NOTHING ELSE AT THE ROOT. On this firmware a ROOT layer (no parent, only
  * a layer stack) is never taken out of SurfaceFlinger's tree: reparent(null) does nothing to
- * a root, release() only drops our handle, and SurfaceFlinger keeps the layer — composed at
- * whatever alpha it last had — after its handle and even its process have died. Seen on the
- * phone: thirty frame, strip and cover layers of a service that had exited cleanly, still
- * listed, the latest still faintly drawn over the panel. So there is one root per process
- * (setLayerStack, hidden, by reflection — shell may call it), a container with nothing of its
- * own to draw and NOT trusted (so the untrusted blocker under it stays untrusted); every
- * layer of ours is its child, and a child reparented to null goes offscreen and is freed.
- * The container itself is hidden and emptied when the process ends ([removeAll]); a kill
- * that runs no code leaves it, with whatever children were showing at that moment.
+ * a root, and release() only drops our handle. Seen on the phone (2026-10-28), before the
+ * container (53c7a9e): thirty frame, strip and cover layers — each its own root, released
+ * without being hidden — still listed after the service had exited, the latest still faintly
+ * drawn over the panel. So there is one root per process (setLayerStack, hidden, by
+ * reflection — shell may call it), a container with nothing of its own to draw and NOT
+ * trusted (so the untrusted blocker under it stays untrusted); every layer of ours is its
+ * child, and a child reparented to null goes offscreen and is freed.
+ *
+ * A KILL LEAVES NOTHING. Measured on the phone (2026-10-29): a SIGKILLed shell process leaves
+ * nothing composed — the container and every child go with it. [removeAll] is the orderly
+ * way out (hidden at once, in one transaction, before the process exits), not a rescue of
+ * layers that would otherwise stay.
  *
  * FAIL CLOSED. A layer asked to be trusted that cannot be is never shown: the transaction
  * is not applied, the layer is released, and [Untrusted] is thrown so the caller can say
@@ -51,10 +54,9 @@ internal object ShellLayer {
     const val TRUSTED_OVERLAY_ENABLED = 2
 
     /**
-     * Every layer made here and not yet [remove]d. ON THIS FIRMWARE A SHELL LAYER OUTLIVES ITS
-     * PROCESS: after the service crashed, its camera strip stayed composed at full alpha
-     * (handleNotAlive) until a reboot. So whatever ends the process first takes them all
-     * away ([removeAll]: the service's destroy, and its last-chance uncaught-exception handler).
+     * Every layer made here and not yet [remove]d, for [removeAll]: whatever ends the process
+     * first (the service's destroy, its last-chance uncaught-exception handler) takes them off
+     * the rear at once, rather than leave them up until the process is gone.
      */
     private val live: MutableSet<SurfaceControl> = java.util.Collections.synchronizedSet(LinkedHashSet())
 
@@ -141,7 +143,9 @@ internal object ShellLayer {
             live.add(layer)
             return layer
         } catch (e: Throwable) {
-            runCatching { layer.release() }
+            // Off the container too, not only our handle dropped: a released child is still
+            // its child, in SurfaceFlinger's tree, until the container goes.
+            remove(layer)
             throw e
         }
     }

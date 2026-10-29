@@ -210,8 +210,8 @@ class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
                 }
                 // The whole layer, with the frame it goes with, and only when it moves.
                 if (a != alpha) {
-                    // Hidden, not only clear, while it shows nothing: a kill that runs no code
-                    // leaves a hidden layer hidden (ShellLayer).
+                    // Hidden, not only clear, while it shows nothing: SurfaceFlinger then has
+                    // nothing of it to compose.
                     SurfaceControl.Transaction().use { it.setAlpha(sc, a).setVisibility(sc, a > 0f).apply() }
                     alpha = a
                 }

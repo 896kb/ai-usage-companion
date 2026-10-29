@@ -50,8 +50,8 @@ class RearUserService : IRearService.Stub {
 
     /**
      * A thread whose body cannot kill the process: anything it throws, an Error too, is logged
-     * and that thread's work ends. An uncaught throwable in any thread kills app_process — and
-     * our layers outlive it (ShellLayer.live).
+     * and that thread's work ends. An uncaught throwable in any thread kills app_process, and
+     * the sheet, the frame and the guest's watch with it.
      */
     private inline fun guarded(crossinline body: () -> Unit): Thread = Thread {
         try { body() } catch (e: Throwable) { Log.e(TAG, "a shell thread (${Thread.currentThread().name}) failed", e) }
@@ -64,8 +64,8 @@ class RearUserService : IRearService.Stub {
         }, name).apply { isDaemon = true }
 
     init {
-        // The last chance: whatever still escapes takes our layers off the rear before the
-        // process dies, since they would otherwise stay there until a reboot (ShellLayer.live).
+        // The last chance: whatever still escapes takes our layers off the rear, at once and in
+        // order, before the process dies (a dying process takes them too, but not as tidily).
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching { Log.e(TAG, "uncaught in ${t.name} — our layers off the rear before the end", e) }
@@ -79,7 +79,7 @@ class RearUserService : IRearService.Stub {
         // touch on the rear. On this thread, since the process exits right after.
         closeSheetNow("the service is going", sync = true)
         stopTouchWatch()
-        // Every layer of ours off the rear now: they outlive the process (ShellLayer.live).
+        // Every layer of ours off the rear now, in one transaction, before the exit.
         ShellLayer.removeAll()
         // The guest's density must not outlive the service that set it. Closed first, so
         // nothing re-applies one between this restore and the exit; and nothing read means
@@ -2947,7 +2947,7 @@ class RearUserService : IRearService.Stub {
                     return@guarded
                 } catch (e: Throwable) {
                     // Any of it, an Error too: a keep-alive that dies leaves the rear unwatched
-                    // (and once took the process with it — see ShellLayer.live).
+                    // (and once took the process with it).
                     Log.e(TAG, "keep-alive tick failed", e)
                 }
             }
