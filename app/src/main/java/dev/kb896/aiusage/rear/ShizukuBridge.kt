@@ -85,8 +85,15 @@ class ShizukuBridge(private val context: Context) {
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
             runCatching { service?.setPanelGuarded(panelGuarded) }
             // A new shell process starts awake (dozing false): a panel asleep on purpose
-            // would otherwise be read and woken as if it were not.
-            runCatching { service?.setDozing(dozing) }
+            // would otherwise be read and woken as if it were not. But only what this process
+            // KNOWS: a new app process has not heard from the panel yet, and pushing its
+            // default false overwrote the shell's true while the back slept. Not known, the
+            // panel is asked to say it again (it answers ACTION_MIRROR_SYNC with ACTION_DOZING),
+            // and the answer comes through setDozing below, to the shell as well.
+            dozing.let { d ->
+                if (d != null) runCatching { service?.setDozing(d) }
+                else context.sendBroadcast(android.content.Intent(RearActivity.ACTION_MIRROR_SYNC).setPackage(context.packageName))
+            }
             runCatching { service?.setEvents(events) }
             quickStates?.let { (states, reachable) -> runCatching { service?.setQuickStates(states, reachable) } }
             // The settings the shell runs on, before anything is placed with them.
@@ -483,7 +490,11 @@ class ShizukuBridge(private val context: Context) {
             .onFailure { Log.w(TAG, "setDozing($value) failed: ${it.message}") }
     }
 
-    fun isDozing(): Boolean = dozing
+    /** Asleep on purpose as far as this process knows; not known counts as not. */
+    fun isDozing(): Boolean = dozing == true
+
+    /** The panel's last word on its hold: null until this process has heard one. */
+    fun dozingOrNull(): Boolean? = dozing
 
     /**
      * The panel's lock slider / pocket lock / always-on is up, or not. Kept, like [dozing],
@@ -498,7 +509,11 @@ class ShizukuBridge(private val context: Context) {
 
     @Volatile private var panelGuarded = false
 
-    @Volatile private var dozing = false
+    /**
+     * Null until the panel (or a wake from this process) has said: a new process does not
+     * know, and guessing "awake" is what overwrote the shell's correct "asleep" on connect.
+     */
+    @Volatile private var dozing: Boolean? = null
 
     /**
      * The control centre's tiles — silent, Bluetooth, mobile data, Wi-Fi — and whether the

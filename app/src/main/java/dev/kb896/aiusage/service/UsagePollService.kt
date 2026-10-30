@@ -118,8 +118,11 @@ class UsagePollService : Service() {
 
     private val limitNotifier by lazy { LimitNotifier(this) }
 
-    /** Last panel power state this listener acted on — see onDisplayChanged. */
-    private var panelWasOn = false
+    /**
+     * The panel's power as this listener last saw it — see onDisplayChanged. Seeded from the
+     * display itself as the listener is registered (onCreate), never assumed: see PanelPower.
+     */
+    private var panelPower = PanelPower(on = false)
 
     /** When the rear display last went dark, for telling a lock's sleep from an earlier one. */
     @Volatile private var rearWentOffAt = 0L
@@ -146,11 +149,9 @@ class UsagePollService : Service() {
          */
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != Panel.DISPLAY_ID) return
-            val on = panelOn()
-            if (panelWasOn && !on) rearWentOffAt = android.os.SystemClock.elapsedRealtime()
-            val woke = on && !panelWasOn
-            panelWasOn = on
-            if (!woke) return
+            val change = panelPower.see(panelOn())
+            if (change == PanelPower.Change.WENT_DARK) rearWentOffAt = android.os.SystemClock.elapsedRealtime()
+            if (change != PanelPower.Change.WOKE) return
             // THE BACKSTOP for the dozing flag. Everything else that clears it depends on
             // the panel still being alive to say so, and the one case the supervisors
             // exist for is the panel not being alive. A lit display is proof the sleep is
@@ -225,6 +226,9 @@ class UsagePollService : Service() {
         // remaining interval with a blank panel.
         cachedState()?.let { app.repository.restore(StatePayload.decode(it).state) }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        // As the back is NOW: a back lit when this service starts is not a back waking up at
+        // its first refresh-rate change (PanelPower).
+        panelPower = PanelPower(on = panelOn())
         displays.registerDisplayListener(displayListener, null)
         // RECEIVER_NOT_EXPORTED is required, not optional: on API 34+ a receiver whose
         // filter contains a NON-system action must declare its export state or
@@ -275,6 +279,9 @@ class UsagePollService : Service() {
         // This process may be new while the panel is not: the bridge starts unguarded, and the
         // panel says its guard only when it changes. Asked for again now that ACTION_GUARDED
         // is heard, so a pocket-locked panel stays guarded across a restart of this process.
+        // Its hold too: the panel answers with ACTION_DOZING, which is how the bridge — not
+        // knowing whether the panel sleeps until it is told — comes to know (and only then
+        // tells the shell; see ShizukuBridge.setDozing).
         sendBroadcast(Intent(RearActivity.ACTION_MIRROR_SYNC).setPackage(packageName))
 
         // Held by this service rather than by NotificationRelay, even though the relay is

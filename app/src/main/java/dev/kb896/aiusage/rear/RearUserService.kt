@@ -2943,11 +2943,15 @@ class RearUserService : IRearService.Stub {
                                     val at = now?.let { GuestTask.byId(exec("am stack list"), it.task)?.display }
                                     // Hidden on the front by Panel is not gone.
                                     val still = at == displayId || (at == 0 && now?.hiddenOnFront == true)
-                                    // Asleep on purpose, the rear stays dark: the panel's task is
-                                    // already behind, and is simply revealed. Gone too, it is
-                                    // relaunched on the next tick that is not asleep.
+                                    // A DARK rear stays dark: the panel's task is already behind,
+                                    // and is simply revealed. Gone too, it is relaunched on the
+                                    // next tick that finds it so. Decided by the display itself,
+                                    // not by `dozing`: the panel's sleep timer runs out behind a
+                                    // guest while the guest keeps the rear lit, and a rear that
+                                    // went dark with the power button was never "dozing" at all.
                                     if (now != null && !still) {
-                                        if (dozing) dropGuest("its task left the rear") else endGuest("its task left the rear")
+                                        if (rearLit(displayId) == true) endGuest("its task left the rear")
+                                        else dropGuest("its task left the rear, the rear dark")
                                     }
                                 }
                                 continue
