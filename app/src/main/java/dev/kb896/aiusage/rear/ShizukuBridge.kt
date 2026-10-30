@@ -429,6 +429,13 @@ class ShizukuBridge(private val context: Context) {
      * Costs nothing when the display is already on, which is most of the time.
      */
     fun wake(reason: String = ""): Boolean {
+        // In a pocket (pocket mode switched the back off for it): a notification, the
+        // charger, always-on after the lock — none of them lights the back inside it. What
+        // arrived meanwhile is in the panel's list when the pocket is left, the slider up.
+        if (pocketed) {
+            if (reason.isNotEmpty()) Log.i(TAG, "wake($reason) declined — the back is in a pocket")
+            return false
+        }
         val display = rearDisplayId()
         if (display < 0) return false
         val svc = service
@@ -447,7 +454,7 @@ class ShizukuBridge(private val context: Context) {
         runCatching { svc.wakeOwn(display) }
             .onSuccess { woke ->
                 if (!woke) {
-                    Log.i(TAG, "wake($reason) skipped — the other build's panel has the back")
+                    Log.i(TAG, "wake($reason) skipped — the other build's panel has the back, or it is in a pocket")
                     return false
                 }
                 if (reason.isNotEmpty()) {
@@ -523,6 +530,42 @@ class ShizukuBridge(private val context: Context) {
     }
 
     @Volatile private var panelGuarded = false
+
+    /**
+     * Pocket mode switched the back off for a pocket, and has not brought it back: [wake]
+     * declines. Here as well as in the shell so the decline costs no binder call, and is
+     * logged where the wake was asked for. Lost with this process — the shell's own holds.
+     */
+    @Volatile private var pocketed = false
+
+    /** In a pocket as far as this process knows. */
+    fun isPocketed(): Boolean = pocketed
+
+    /**
+     * Switch the back off for a pocket (IRearService.pocketSleep); false if it was not —
+     * no service, or the shell refused. Blocking (an exec in the shell): off the main thread.
+     */
+    fun pocketSleep(): Boolean {
+        val display = rearDisplayId()
+        val svc = service ?: return false
+        if (display < 0) return false
+        val done = runCatching { svc.pocketSleep(display) }
+            .onFailure { Log.w(TAG, "pocketSleep failed: ${it.message}") }.getOrDefault(false)
+        if (done) pocketed = true
+        return done
+    }
+
+    /**
+     * Out of the pocket, the back switched on again when [light]; or the pocket called off,
+     * the back left as it is. Wakes work again either way — here at once, in the shell when
+     * the call lands. Blocking, like [pocketSleep].
+     */
+    fun pocketEnd(light: Boolean) {
+        pocketed = false
+        val display = rearDisplayId()
+        runCatching { service?.pocketEnd(display, light) }
+            .onFailure { Log.w(TAG, "pocketEnd($light) failed: ${it.message}") }
+    }
 
     /**
      * Null until the panel (or a wake from this process) has said: a new process does not

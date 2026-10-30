@@ -141,4 +141,12 @@ interface IRearService {
     // Whether the App Portal's guest is on top of the rear (on the rear, in front of the panel)
     // as the shell last saw it. A field read, no command: the app asks it at the lock.
     boolean guestOnTop() = 28;
+    // Pocket mode: switch the rear display off NOW by sleeping its power group alone
+    // (`cmd power sleep --group-id`), the front untouched; and until pocketEnd, wakeOwn
+    // lights nothing. False if it was not done (the other build's panel has the back, the
+    // command refused). See PocketWatch.
+    boolean pocketSleep(int displayId) = 29;
+    // Out of the pocket ([light]: switch the back on again) or the pocket called off (the
+    // switch turned off, the watch gone): wakeOwn lights the back again either way.
+    void pocketEnd(int displayId, boolean light) = 30;
 }

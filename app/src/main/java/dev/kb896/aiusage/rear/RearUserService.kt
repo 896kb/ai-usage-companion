@@ -251,6 +251,13 @@ class RearUserService : IRearService.Stub {
      * always-on after the lock): those are this install's, and the back is not.
      */
     override fun wakeOwn(displayId: Int): Boolean {
+        // In a pocket: what the app lights on its own — a notification, the charger, always-on
+        // after the lock — would light the back inside it. The app declines these too
+        // (ShizukuBridge.wake); this is for an app process new since the pocket began.
+        if (pocketed) {
+            Log.i(TAG, "pocket: the back is in a pocket — not lighting it")
+            return false
+        }
         if (otherBuildOnTop(displayId)) return false
         wake(displayId)
         return true
@@ -259,8 +266,11 @@ class RearUserService : IRearService.Stub {
     override fun wake(displayId: Int) {
         // An explicit wake is somebody deciding the panel should be lit, which ends the
         // sleep by definition. Not gated on `dozing` — gating it here would make the
-        // notification that wakes a dozing panel the one thing that cannot.
+        // notification that wakes a dozing panel the one thing that cannot. The pocket's
+        // too: asked for ("Show on the back"), the back is lit, pocket or not, and the app's
+        // pocket watch switches it off again if it is still covered.
         dozing = false
+        pocketed = false
         syncTouchWatch()
         // Required, for a placement that is to end lit. The activity may be created on
         // display 0, where the screen is already on, so FLAG_TURN_SCREEN_ON has nothing
@@ -268,6 +278,59 @@ class RearUserService : IRearService.Stub {
         // state=OFF. Which placements are to end lit is PlaceLight's to say, not this.
         exec("input -d $displayId keyevent KEYCODE_WAKEUP")
     }
+
+    /**
+     * The back is switched off for a pocket (pocket mode, PocketWatch in the app): [wakeOwn]
+     * lights nothing until [pocketEnd], or until an explicit [wake] — somebody asking for the
+     * back — ends it. Volatile: binder threads write it and read it.
+     */
+    @Volatile private var pocketed = false
+
+    /**
+     * Switch the rear off now, for a pocket. NOT `input -d <rear> keyevent KEYCODE_SLEEP`:
+     * measured on the 17 Pro (SDK 37, OS4), that sleeps power group 0 — the FRONT — whatever
+     * display it names. `cmd power sleep --group-id` sleeps one power group alone, at once,
+     * and it stays off: "Sleeping power group (groupId=1, uid=2000, reason=application)",
+     * the front untouched. Before this the panel only let go of the display, and the back
+     * stayed lit in the pocket for HyperOS's ten-second rear timeout.
+     *
+     * Not over the other build's panel: the back is that install's.
+     */
+    override fun pocketSleep(displayId: Int): Boolean {
+        if (displayId < 0 || otherBuildOnTop(displayId)) return false
+        pocketed = true
+        // A sheet is not left up over a back going dark — setDozing says the same when the
+        // panel's own word arrives, but that is a hop through two processes behind this.
+        closeSheetNow("the back is in a pocket")
+        val run = execChecked("cmd power sleep --group-id ${rearPowerGroup(displayId)}")
+        if (run !is Run.Ok) {
+            pocketed = false
+            Log.w(TAG, "pocket: could not switch the back off ($run)")
+            return false
+        }
+        Log.i(TAG, "pocket: the back is covered — switched off")
+        return true
+    }
+
+    override fun pocketEnd(displayId: Int, light: Boolean) {
+        pocketed = false
+        if (!light || displayId < 0) {
+            Log.i(TAG, "pocket: called off — the back stays as it is")
+            return
+        }
+        // Asked for, by the pocket coming off it: the ordinary wake, the rear alone.
+        Log.i(TAG, "pocket: out of the pocket — switching the back on")
+        wake(displayId)
+    }
+
+    /**
+     * The rear display's power group, for `cmd power sleep --group-id`. The rear is the only
+     * display outside the default group on this phone, and it is group 1 — seen in the power
+     * manager's own log for it ("goToSleepInternal[groupId =1]") — so 1 it is, not read from
+     * `dumpsys display` per sleep: a pocket wants the back off now, not after a dump. The
+     * default display is the one display that cannot be the answer: that is the front.
+     */
+    private fun rearPowerGroup(@Suppress("UNUSED_PARAMETER") displayId: Int): Int = REAR_POWER_GROUP
 
     /**
      * Whether [displayId] is lit right now. Read before a placement, since afterwards
@@ -3164,6 +3227,8 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        /** The rear display's power group — see rearPowerGroup. */
+        const val REAR_POWER_GROUP = 1
         /** The rear's size unread: how long the 17 Pro's stands in before it is asked again. */
         const val GEOMETRY_RETRY_MS = 60_000L
         /** After a failed re-read of display 1's density, how long before the next exec. */
