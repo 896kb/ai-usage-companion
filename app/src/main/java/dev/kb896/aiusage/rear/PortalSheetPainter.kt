@@ -134,6 +134,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         guestOnTop: Boolean, pressed: Int = -1,
         guestIcon: Bitmap? = null, slider: SliderLook? = null, names: Boolean = true,
         keepRight: Boolean = false,
+        keepRightHidden: Boolean = false,
     ) {
         val arrived = Arrival.of(progress)
         if (arrived <= 0.004f) return
@@ -153,7 +154,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             val s = layout.slider
             if (s != null && slider != null && scroll > 0.5f) drawSlider(canvas, s, dy, g, slider, pressed, guestIcon)
             val t = layout.toggle
-            if (t != null && scroll > 0.5f) drawToggle(canvas, t, dy, g, keepRight, pressed)
+            if (t != null && !keepRightHidden && scroll > 0.5f) drawToggle(canvas, t, dy, g, keepRight, pressed)
         } finally {
             canvas.restoreToCount(saved)
         }

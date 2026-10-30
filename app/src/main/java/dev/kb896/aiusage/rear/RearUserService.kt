@@ -2338,7 +2338,7 @@ class RearUserService : IRearService.Stub {
             s.apps(portalApps)
             s.dpiValues(portalDpi)
             s.dpiDefault(sliderDefault())
-            s.keepRight(guest?.let { keepsRight(it) } == true)
+            s.keepRight(guest?.let { keepsRight(it) } == true, hidden = guest?.lockRetried == true)
             s.grid(portalGrid)
             s.names(portalNames)
             shellSheet = s
@@ -2391,8 +2391,9 @@ class RearUserService : IRearService.Stub {
 
     /** The sheet's "Keep right of the cameras" as the guest's now is. */
     private fun syncSheetKeepRight() {
-        // On for one here only for this open too: it IS right of the cameras.
-        shellSheet?.keepRight(guest?.let { keepsRight(it) } == true)
+        // Not offered for one here only for this open: with the front locked it runs nowhere
+        // else, and the switch could only make it fail (the owner, 2026-10-30).
+        shellSheet?.keepRight(guest?.let { keepsRight(it) } == true, hidden = guest?.lockRetried == true)
     }
 
     /** What the DPI slider stands at for a guest with none of its own: its private display's, or the rear's as read. */
@@ -3085,7 +3086,7 @@ class RearUserService : IRearService.Stub {
             // place when the sheet is down: not under it, whose picture a cover would be of.
             PortalSheet.Hit.Toggle -> {
                 val pkg = sliderGuest()
-                if (pkg == null) steady(atMs)
+                if (pkg == null || guest?.lockRetried == true) steady(atMs)
                 else {
                     // As the switch shows it. Off, one here only for this open is off for good:
                     // saved off, and the whole rear is tried, with no going back behind the lock.

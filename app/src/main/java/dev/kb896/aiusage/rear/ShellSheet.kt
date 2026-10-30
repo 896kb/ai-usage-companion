@@ -58,6 +58,8 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
     @Volatile private var dpiDefault: Int? = null
     /** The guest is kept right of the cameras: its switch under the slider. */
     @Volatile private var keepRight = false
+    /** No such switch for this open: the app runs nowhere else with the front locked (LockRetry). */
+    @Volatile private var keepRightHidden = false
     @Volatile private var look = Look(PanelTheme.GLASS, null)
     @Volatile private var face: PanelType.Face = face
 
@@ -169,10 +171,11 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         overlay.changed()
     }
 
-    /** Whether the guest's "Keep right of the cameras" switch is on. */
-    fun keepRight(on: Boolean) {
-        if (keepRight == on) return
+    /** Whether the guest's "Keep right of the cameras" switch is on, and whether it is offered at all. */
+    fun keepRight(on: Boolean, hidden: Boolean = false) {
+        if (keepRight == on && keepRightHidden == hidden) return
         keepRight = on
+        keepRightHidden = hidden
         overlay.changed()
     }
 
@@ -248,7 +251,7 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
             sheetPainter.draw(
                 canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, pressed = pressed,
-                guestIcon = guestIcon, slider = slider, names = names, keepRight = keepRight,
+                guestIcon = guestIcon, slider = slider, names = names, keepRight = keepRight, keepRightHidden = keepRightHidden,
             )
         }
     }
