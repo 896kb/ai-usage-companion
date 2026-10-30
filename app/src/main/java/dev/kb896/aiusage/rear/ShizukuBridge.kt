@@ -442,17 +442,23 @@ class ShizukuBridge(private val context: Context) {
         // that difference is the whole basis for locking. A fifth of a second later, when
         // the notification reaches the panel, both look identical.
         val wasDark = darkNow(display)
-        // Somebody has decided the panel should be lit, so it is no longer asleep on
-        // purpose. Cleared on this side too, not just in the service, or the watchdog here
-        // would go on standing down over a panel that is wide awake.
-        dozing = false
-        runCatching { svc.wake(display) }
-            .onSuccess {
+        // The other build (release vs dev) has the back: this install's notification,
+        // charger or always-on is not a reason to light it. The shell checks, as it wakes.
+        runCatching { svc.wakeOwn(display) }
+            .onSuccess { woke ->
+                if (!woke) {
+                    Log.i(TAG, "wake($reason) skipped — the other build's panel has the back")
+                    return false
+                }
                 if (reason.isNotEmpty()) {
                     Log.i(TAG, "woke rear display for $reason (was dark: $wasDark)")
                 }
             }
             .onFailure { Log.w(TAG, "wake($reason) failed: ${it.message}"); return false }
+        // Somebody has decided the panel should be lit, so it is no longer asleep on
+        // purpose. Cleared on this side too, not just in the service, or the watchdog here
+        // would go on standing down over a panel that is wide awake.
+        dozing = false
         return wasDark
     }
 

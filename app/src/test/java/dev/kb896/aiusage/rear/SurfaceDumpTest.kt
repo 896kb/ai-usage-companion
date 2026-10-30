@@ -16,6 +16,9 @@ class SurfaceDumpTest {
 
     private val rule = "-".repeat(80)
 
+    private val release = "dev.kb896.aiusage"
+    private val dev = "dev.kb896.aiusage.dev"
+
     private fun section(id: String, active: Boolean, vararg layers: String) = buildString {
         appendLine("Display $id (${if (active) "active" else "inactive"}) HWC layers:")
         appendLine(rule)
@@ -35,37 +38,37 @@ class SurfaceDumpTest {
 
     @Test fun `a panel on a Pro Max's rear display is on the rear`() {
         val dump = section(maxMain, true, launcher) + section(maxRear, true, panel)
-        assertEquals(Where.REAR, SurfaceDump.where(dump) { it == maxRear })
+        assertEquals(Where.REAR, SurfaceDump.where(dump, release) { it == maxRear })
     }
 
     @Test fun `a panel on a 17 Pro's rear display is on the rear`() {
         val dump = section(proMain, true, launcher) + section(proRear, true, panel)
-        assertEquals(Where.REAR, SurfaceDump.where(dump) { it == proRear })
+        assertEquals(Where.REAR, SurfaceDump.where(dump, release) { it == proRear })
     }
 
     @Test fun `a panel composited on the front display is on the main`() {
         val dump = section(maxMain, true, launcher, panel) + section(maxRear, true)
-        assertEquals(Where.MAIN, SurfaceDump.where(dump) { it == maxRear })
+        assertEquals(Where.MAIN, SurfaceDump.where(dump, release) { it == maxRear })
     }
 
     @Test fun `listed under both displays, the main wins`() {
         val dump = section(maxMain, true, panel) + section(maxRear, true, panel)
-        assertEquals(Where.MAIN, SurfaceDump.where(dump) { it == maxRear })
+        assertEquals(Where.MAIN, SurfaceDump.where(dump, release) { it == maxRear })
     }
 
     @Test fun `someone else on a lit rear display has displaced the panel`() {
         val dump = section(maxMain, true, launcher) + section(maxRear, true, clock)
-        assertEquals(Where.DISPLACED, SurfaceDump.where(dump) { it == maxRear })
+        assertEquals(Where.DISPLACED, SurfaceDump.where(dump, release) { it == maxRear })
     }
 
     @Test fun `someone else on a dark rear display is the panel asleep`() {
         val dump = section(maxMain, true, launcher) + section(maxRear, false, clock)
-        assertEquals(Where.NOWHERE, SurfaceDump.where(dump) { it == maxRear })
+        assertEquals(Where.NOWHERE, SurfaceDump.where(dump, release) { it == maxRear })
     }
 
     @Test fun `an empty rear display is the panel asleep`() {
         val dump = section(maxMain, true, launcher) + section(maxRear, true)
-        assertEquals(Where.NOWHERE, SurfaceDump.where(dump) { it == maxRear })
+        assertEquals(Where.NOWHERE, SurfaceDump.where(dump, release) { it == maxRear })
     }
 
     // Android 17 (HyperOS 4) heads a section "Display <id> HWC layers (top to bottom):"
@@ -91,26 +94,57 @@ class SurfaceDumpTest {
 
     @Test fun `android 17 - the panel on the rear display is on the rear`() {
         val dump = section17(proMain, settings17) + section17(proRear, *gestures17, panel17)
-        assertEquals(Where.REAR, SurfaceDump.where(dump) { it == proRear })
+        assertEquals(Where.REAR, SurfaceDump.where(dump, release) { it == proRear })
     }
 
     @Test fun `android 17 - the panel on the front display is on the main`() {
         val dump = section17(proMain, panel17, settings17) + section17(proRear)
-        assertEquals(Where.MAIN, SurfaceDump.where(dump) { it == proRear })
+        assertEquals(Where.MAIN, SurfaceDump.where(dump, release) { it == proRear })
     }
 
     @Test fun `android 17 - a lit rear display without the panel has it displaced`() {
         val dump = section17(proMain, settings17) + section17(proRear, *gestures17)
-        assertEquals(Where.DISPLACED, SurfaceDump.where(dump) { it == proRear })
+        assertEquals(Where.DISPLACED, SurfaceDump.where(dump, release) { it == proRear })
     }
 
     @Test fun `android 17 - an unlit rear display, listing nothing, is the panel asleep`() {
         val dump = section17(proMain, settings17) + section17(proRear)
-        assertEquals(Where.NOWHERE, SurfaceDump.where(dump) { it == proRear })
+        assertEquals(Where.NOWHERE, SurfaceDump.where(dump, release) { it == proRear })
     }
 
     @Test fun `a dump with no HWC sections is nowhere`() {
-        assertEquals(Where.NOWHERE, SurfaceDump.where("") { it == maxRear })
-        assertEquals(Where.NOWHERE, SurfaceDump.where("SurfaceFlinger is busy") { it == maxRear })
+        assertEquals(Where.NOWHERE, SurfaceDump.where("", release) { it == maxRear })
+        assertEquals(Where.NOWHERE, SurfaceDump.where("SurfaceFlinger is busy", release) { it == maxRear })
+    }
+
+    // -- the release and the dev build, both installed -----------------------------------
+
+    // As SurfaceFlinger shortens it on Android 16: the package and its slash survive.
+    private val devPanel = "dev.kb896.aiusage.dev/de[...]rear.RearActivity#1190"
+    private val devPanel17 = "VRI-dev.kb896.aiusage.dev/dev.kb896.aiusage.rear.RearActivity#3110"
+
+    @Test fun `the dev build's panel on the rear is the dev build's, and displaces the release`() {
+        val dump = section(proMain, true, launcher) + section(proRear, true, devPanel)
+        assertEquals(Where.REAR, SurfaceDump.where(dump, dev) { it == proRear })
+        assertEquals(Where.DISPLACED, SurfaceDump.where(dump, release) { it == proRear })
+    }
+
+    @Test fun `the release's panel on the rear displaces the dev build`() {
+        val dump = section(proMain, true, launcher) + section(proRear, true, panel)
+        assertEquals(Where.REAR, SurfaceDump.where(dump, release) { it == proRear })
+        assertEquals(Where.DISPLACED, SurfaceDump.where(dump, dev) { it == proRear })
+    }
+
+    @Test fun `the other build's panel on the front is not ours on the main`() {
+        val dump = section(proMain, true, launcher, devPanel) + section(proRear, true, panel)
+        assertEquals(Where.REAR, SurfaceDump.where(dump, release) { it == proRear })
+    }
+
+    @Test fun `android 17 - each build reads only its own panel`() {
+        val dump = section17(proMain, settings17) + section17(proRear, *gestures17, devPanel17, panel17)
+        assertEquals(Where.REAR, SurfaceDump.where(dump, dev) { it == proRear })
+        assertEquals(Where.REAR, SurfaceDump.where(dump, release) { it == proRear })
+        val devOnly = section17(proMain, settings17) + section17(proRear, *gestures17, devPanel17)
+        assertEquals(Where.DISPLACED, SurfaceDump.where(devOnly, release) { it == proRear })
     }
 }

@@ -75,13 +75,15 @@ object SurfaceDump {
     private val layerName = Regex("""^\s*\S+#\d+[ \t\r]*$""", RegexOption.MULTILINE)
 
     /**
-     * Where RearActivity is composited in [dump], with [isRear] saying which physical
-     * display id is the rear display.
+     * Where [pkg]'s RearActivity is composited in [dump], with [isRear] saying which physical
+     * display id is the rear display. [pkg]'s only: the other build's panel is the same class
+     * under another package (see [OwnPanel]), and to this install it is someone else on the
+     * rear — DISPLACED when it is there and lit.
      *
      * Deliberately asymmetric: MAIN is returned whenever the layer is on a display that
      * is not the rear one — see the comment on the return.
      */
-    fun where(dump: String, isRear: (physicalId: String) -> Boolean): Where {
+    fun where(dump: String, pkg: String, isRear: (physicalId: String) -> Boolean): Where {
         if (!dump.contains("HWC layers")) return Where.NOWHERE
 
         val matches = header.findAll(dump).toList()
@@ -109,7 +111,7 @@ object SurfaceDump {
                     rearActive = true
                 }
             }
-            if (!section.contains("RearActivity")) continue
+            if (section.lineSequence().none { OwnPanel.names(it, pkg) }) continue
             if (rear) onRear = true else onMain = true
         }
         // ON MAIN WINS, even when it is also on the rear. Observed on device: the panel

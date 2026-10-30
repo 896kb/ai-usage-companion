@@ -135,4 +135,7 @@ interface IRearService {
     // watchdog): lit afterwards only if it was lit before, so a back asleep in a pocket stays
     // asleep. See PlaceLight.
     void place(String payload, int displayId, boolean light) = 26;
+    // wake(), unless the other build's panel (release vs dev) is on top of displayId: then
+    // nothing, and false. What the app lights on its own goes through this.
+    boolean wakeOwn(int displayId) = 27;
 }

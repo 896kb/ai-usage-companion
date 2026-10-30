@@ -211,7 +211,7 @@ class RearUserService : IRearService.Stub {
         // ([adoptPlaced]). One `am stack list`, and only until it is.
         if (placedDisplayId < 0) {
             val list = exec("am stack list")
-            val task = StackList.parseTaskId(list, "RearActivity")
+            val task = StackList.parseTaskId(list, PKG, OwnPanel.ACTIVITY)
             if (task > 0 && GuestTask.byId(list, task)?.display == Panel.DISPLAY_ID) adoptPlaced(Panel.DISPLAY_ID, "update")
         }
     }
@@ -236,6 +236,17 @@ class RearUserService : IRearService.Stub {
         if (dozing) closeSheetNow("the panel is asleep")
         syncTouchWatch()
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
+    }
+
+    /**
+     * [wake], unless the other build's panel is on top of [displayId] — then nothing, and
+     * false. For what the app process lights on its own (a notification, the charger,
+     * always-on after the lock): those are this install's, and the back is not.
+     */
+    override fun wakeOwn(displayId: Int): Boolean {
+        if (otherBuildOnTop(displayId)) return false
+        wake(displayId)
+        return true
     }
 
     override fun wake(displayId: Int) {
@@ -279,6 +290,11 @@ class RearUserService : IRearService.Stub {
      */
     override fun place(payload: String, displayId: Int, light: Boolean) = synchronized(placing) {
         if (displayId < 0) return@synchronized
+        // THE OTHER BUILD HAS THE BACK: a recovery does not take it. Release and dev can both
+        // be installed, each with a shell of its own, and each re-placed itself over the other
+        // every few seconds. Only a placement somebody asked for in THIS install takes the
+        // back over ("Show on the back") — that is how the user switches between them.
+        if (!light && otherBuildOnTop(displayId)) return@synchronized
         // FIRST, before anything is started or moved: once the panel's start has gone
         // through, a lit rear and a rear it lit look the same.
         val lightIt = PlaceLight.wake(light, rearLit(displayId), dozing)
@@ -617,7 +633,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun panelWhere(): Where {
         val rear = rearPhysicalId()
-        return SurfaceDump.where(exec("dumpsys SurfaceFlinger")) { id ->
+        return SurfaceDump.where(exec("dumpsys SurfaceFlinger"), PKG) { id ->
             if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX)
         }
     }
@@ -706,7 +722,22 @@ class RearUserService : IRearService.Stub {
         return -1
     }
 
-    private fun taskId(): Int = StackList.parseTaskId(exec("am stack list"), "RearActivity")
+    private fun taskId(): Int = StackList.parseTaskId(exec("am stack list"), PKG, OwnPanel.ACTIVITY)
+
+    /**
+     * The other build's panel (release vs dev, see [OwnPanel]) is on top of [displayId]: the
+     * back is that install's. Logged on the change only — a recovery asks every tick.
+     */
+    private fun otherBuildOnTop(displayId: Int): Boolean {
+        val other = StackList.otherBuildOnTop(exec("am stack list"), PKG, displayId)
+        if (other != otherBuildSeen) {
+            otherBuildSeen = other
+            Log.i(TAG, if (other) "the other build's panel has display $displayId — standing down until asked"
+                else "the other build's panel no longer has display $displayId")
+        }
+        return other
+    }
+    @Volatile private var otherBuildSeen = false
 
     /** Single-quote for `sh -c`, escaping embedded single quotes. */
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
