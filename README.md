@@ -2,8 +2,8 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Your Claude Code rate limits, live on the rear display of the Xiaomi 17 Pro and Pro Max — so
-you can see how much of your window is left without unlocking anything, opening anything, or
+Your Claude Code rate limits, live on the rear display of the Xiaomi 17 Pro, 17 Pro Max, 18 Pro and 18 Pro
+Max — so you can see how much of your window is left without unlocking anything, opening anything, or
 asking.
 
 ![The panel running on the phone's rear display](assets/rear-panel.mp4)
@@ -1443,8 +1443,8 @@ where they disagree shows it.
 
 ## Requirements
 
-- **A Xiaomi 17 Pro or Pro Max.** The rear display's size, position and lens geometry are
-  measured into this app. It will not do anything useful on another phone.
+- **A Xiaomi 17 Pro, 17 Pro Max, 18 Pro or 18 Pro Max.** The app is built around the rear display's
+  size, position and lens geometry. It will not do anything useful on another phone.
 - **HyperOS 3, Android 16.** Developed and verified against **`3.0.318.0`**, the current
   stable. **It has not been tested against the HyperOS 4 beta** — the placement mechanism
   depends on system internals that have already changed once between releases, so assume

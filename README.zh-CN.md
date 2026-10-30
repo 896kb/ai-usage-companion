@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-你的 Claude Code 用量限制，实时显示在 Xiaomi 17 Pro 和 17 Pro Max 的背屏上——不用解锁、不用打开任何东西、也不用去问，就能看到当前窗口还剩多少。
+你的 Claude Code 用量限制，实时显示在 Xiaomi 17 Pro、17 Pro Max、18 Pro 和 18 Pro Max 的背屏上——不用解锁、不用打开任何东西、也不用去问，就能看到当前窗口还剩多少。
 
 ![面板在手机背屏上运行](assets/rear-panel.mp4)
 
@@ -649,7 +649,7 @@ Advanced（高级）→ **Copy rear-display report**（复制背屏报告）会�
 
 ## 系统要求
 
-- **小米 17 Pro 或 17 Pro Max。** 背屏的尺寸、位置和镜头几何都是实测后写进本应用的。在其他手机上它做不了任何有用的事。
+- **小米 17 Pro、17 Pro Max、18 Pro 或 18 Pro Max。** 本应用是围绕背屏的尺寸、位置和镜头几何设计的。在其他手机上它做不了任何有用的事。
 - **HyperOS 3，Android 16。** 基于当前稳定版 **`3.0.318.0`** 开发和验证。**尚未在 HyperOS 4 测试版上测试过**——放置机制依赖于系统内部实现，而这些实现在版本之间已经变过一次，所以请假定在那里需要重新验证。
 - **[Shizuku](https://shizuku.rikka.app/)**，并且处于运行状态。没有商量余地——见下文。
 - 一个可以使用 Claude Code 的 Claude 账号。

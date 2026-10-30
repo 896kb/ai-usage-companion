@@ -2270,7 +2270,7 @@ class MainActivity : ComponentActivity() {
                 recoveryScroll.visibility = View.GONE
             }
         }
-        recoveryDisplayAbsent.text = "Rear panel not found — this build only supports the Xiaomi 17 Pro and Pro Max."
+        recoveryDisplayAbsent.text = "Rear panel not found — this build only supports the Xiaomi 17 Pro, 17 Pro Max, 18 Pro and 18 Pro Max."
         recoveryDisplayAbsent.visibility = if (s.rearDisplayId < 0) View.VISIBLE else View.GONE
         collapseEmptyCards()
     }
