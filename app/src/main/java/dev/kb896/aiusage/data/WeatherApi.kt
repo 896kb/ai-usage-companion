@@ -32,11 +32,20 @@ class WeatherApi(
 
     data class Place(val label: String, val latitude: Double, val longitude: Double)
 
+    /**
+     * A coordinate as it leaves the phone: two decimals, about a kilometre (1.1 km of
+     * latitude, less of longitude away from the equator). The weather is the same a street
+     * away, and the device's own location, sent every few minutes, says no more than the
+     * neighbourhood. The owner's call, 2026-10-30.
+     */
+    private fun nearKm(degrees: Double): String =
+        java.math.BigDecimal(degrees).setScale(2, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+
     fun current(latitude: Double, longitude: Double, place: String, nowMs: Long): WeatherReading? {
         val url = forecastUrl.newBuilder()
             .addPathSegments("v1/forecast")
-            .addQueryParameter("latitude", latitude.toString())
-            .addQueryParameter("longitude", longitude.toString())
+            .addQueryParameter("latitude", nearKm(latitude))
+            .addQueryParameter("longitude", nearKm(longitude))
             .addQueryParameter("current", "temperature_2m,weather_code,is_day")
             .addQueryParameter("timezone", "auto")
             .build()

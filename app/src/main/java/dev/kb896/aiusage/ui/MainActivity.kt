@@ -1357,7 +1357,7 @@ class MainActivity : ComponentActivity() {
             write { it.copy(weatherPlace = typed) }
             geocodeJob?.cancel()
             geocodeJob = lifecycleScope.launch {
-                delay(800)   // after the last keystroke, not on every one
+                delay(600)   // once typing stops, not on every keystroke (the owner's 600 ms)
                 val place = withContext(Dispatchers.IO) { graph.weatherApi.geocode(typed) }
                 write {
                     it.copy(
@@ -2395,11 +2395,11 @@ class MainActivity : ComponentActivity() {
          * report for the reproduction. Do not reformat this string for readability.
          */
         private const val SHIZUKU_START_COMMAND =
-            "adb -s f940914b shell 'SRC=\$(pm path moe.shizuku.privileged.api | sed s/package://); " +
+            "adb shell 'SRC=\$(pm path moe.shizuku.privileged.api | sed s/package://); " +
                 "TOKEN=\$(cat /proc/sys/kernel/random/uuid); \$(dirname \$SRC)/lib/arm64/libshizuku.so " +
                 "--apk=\$SRC --token=\$TOKEN --package=moe.shizuku.privileged.api &'"
 
         private const val SHIZUKU_GRANT_COMMAND =
-            "adb -s f940914b shell pm grant dev.kb896.aiusage moe.shizuku.manager.permission.API_V23"
+            "adb shell pm grant dev.kb896.aiusage moe.shizuku.manager.permission.API_V23"
     }
 }

@@ -39,6 +39,14 @@ class WeatherApiTest {
         assertTrue(req.getHeader("User-Agent").orEmpty().isNotBlank())
     }
 
+    @Test fun `coordinates leave the phone rounded to about a kilometre`() {
+        server.enqueue(MockResponse().setBody(current))
+        api.current(44.436712, -26.102538, "here", nowMs = 0L)
+        val req = server.takeRequest()
+        assertEquals("44.44", req.requestUrl!!.queryParameter("latitude"))
+        assertEquals("-26.1", req.requestUrl!!.queryParameter("longitude"))
+    }
+
     @Test fun `night is is_day zero`() {
         server.enqueue(MockResponse().setBody(current.replace("\"is_day\":1", "\"is_day\":0")))
         assertEquals(false, api.current(44.4, 26.1, "x", 0L)!!.isDay)
