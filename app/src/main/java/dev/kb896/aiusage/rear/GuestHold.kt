@@ -36,8 +36,14 @@ class GuestHold {
 
     enum class Act { TAKE, LET_GO, NONE }
 
-    /** What to do now ([why] for the log, when not holding), and when to look again. */
-    data class Step(val act: Act, val why: String?, val recheckInMs: Long)
+    /**
+     * What to do now ([why] for the log, when not holding), and when to look again. [tail]: the
+     * hold merely ran out, so the back gets HyperOS's own last ten seconds, the dim in them,
+     * rather than cutting to dark: the caller pokes user activity as it lets go. Never when
+     * somebody is putting the back down — that poke is what lit it straight back up once
+     * (RearActivity.beginDimInner).
+     */
+    data class Step(val act: Act, val why: String?, val recheckInMs: Long, val tail: Boolean = false)
 
     /** The caller has the lock. Set by [taken] and [released], so a refused take is not believed. */
     var held = false
@@ -61,6 +67,7 @@ class GuestHold {
         val sinceTouch = now - lastTouchAt
         val sinceDoubleTap = if (doubleTapAt == 0L) Long.MAX_VALUE else now - doubleTapAt
         var recheck = NO_RECHECK
+        val ranOut = guestOnTop && !down && lastTouchAt > spentTouchAt && sinceTouch >= HOLD_MS
         val why = when {
             !guestOnTop -> "no guest on top"
             dozing -> "asleep on purpose"
@@ -82,7 +89,25 @@ class GuestHold {
             why != null && held -> Act.LET_GO
             else -> Act.NONE
         }
-        return Step(act, why, recheck)
+        return Step(act, why, recheck, tail = act == Act.LET_GO && ranOut)
+    }
+
+    private var opened = 0L
+    private var openedSeen = false
+
+    /**
+     * When the guest on top came on top of a lit back, or 0: the caller counts it as a touch, so
+     * a guest sent over from the front (the tile) is held from the moment it opens, not from the
+     * first finger on the back. Once per guest: the back relit under the same guest is no new
+     * opening, and only a touch takes the hold then. Over a dark back it waits for the light.
+     */
+    fun openedAt(guestOnTop: Boolean, rearLit: Boolean?, now: Long): Long {
+        if (!guestOnTop) openedSeen = false
+        else if (!openedSeen && rearLit == true) {
+            openedSeen = true
+            opened = now
+        }
+        return opened
     }
 
     fun taken() { held = true }

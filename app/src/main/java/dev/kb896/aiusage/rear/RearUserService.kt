@@ -2053,15 +2053,18 @@ class RearUserService : IRearService.Stub {
             synchronized(holdLock) {
                 val onTop = guestOnTop()
                 val display = rearDisplay()
+                val now = android.os.SystemClock.elapsedRealtime()
+                // No guest on top: no need to ask the display.
+                val lit = if (onTop) rearLit(display) else null
                 val s = guestHold.step(
                     guestOnTop = onTop,
-                    // No guest on top: no need to ask the display.
-                    rearLit = if (onTop) rearLit(display) else null,
+                    rearLit = lit,
                     dozing = dozing,
                     pocketed = pocketed,
-                    lastTouchAt = lastRearTouchAt,
+                    // Its opening counts as a touch: held from the moment it is up (GuestHold.openedAt).
+                    lastTouchAt = maxOf(lastRearTouchAt, guestHold.openedAt(onTop, lit, now)),
                     doubleTapAt = lastDoubleTapAt,
-                    now = android.os.SystemClock.elapsedRealtime(),
+                    now = now,
                 )
                 when (s.act) {
                     GuestHold.Act.TAKE -> if (backLock.acquire(display)) {
@@ -2070,7 +2073,13 @@ class RearUserService : IRearService.Stub {
                         runCatching { holdDisplays?.registerDisplayListener(holdDisplayListener, holdHandler) }
                         Log.i(TAG, "portal: holding the back lit, ${GuestHold.HOLD_MS / 1000} s past the last touch")
                     }
-                    GuestHold.Act.LET_GO -> letGoLocked(s.why ?: "")
+                    GuestHold.Act.LET_GO -> {
+                        // Ran out: HyperOS's own ten seconds from here, bright and then dim, as
+                        // the panel's let-go gets by ON_AFTER_RELEASE. Before the release, while
+                        // the group is still up: after it the expired timeout cuts it to dark.
+                        if (s.tail) backLock.poke(display)
+                        letGoLocked(s.why ?: "")
+                    }
                     GuestHold.Act.NONE -> Unit
                 }
                 holdHandler.removeCallbacks(holdCheck)

@@ -73,6 +73,23 @@ class DisplayWakeLock(private val tag: String) {
         }
     }
 
+    /**
+     * User activity on [displayId], as a touch would be: its own timeout starts over. By itself
+     * it lights nothing dark. Failing costs only the tail, so it says so and carries on.
+     */
+    fun poke(displayId: Int) {
+        val a = api ?: return
+        try {
+            a.power.javaClass.getMethod(
+                "userActivity",
+                Int::class.javaPrimitiveType, Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+            ).invoke(a.power, displayId, android.os.SystemClock.uptimeMillis(), 0, 0)
+        } catch (e: Throwable) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+            Log.w(TAG, "portal: user activity on display $displayId failed (${cause.javaClass.simpleName}: ${cause.message})")
+        }
+    }
+
     fun release() {
         val t = token ?: return
         token = null

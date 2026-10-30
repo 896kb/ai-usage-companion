@@ -206,4 +206,40 @@ class GuestHoldTest {
         assertTrue(d.down(100f, 100f, 200L)); d.up(100f, 100f, 250L)
         assertTrue(d.down(100f, 100f, 400L))
     }
+
+    @Test fun `a guest coming on top of a lit back counts as a touch`() {
+        val h = GuestHold()
+        assertEquals(0L, h.openedAt(guestOnTop = false, rearLit = true, now = 500))
+        assertEquals(1_000L, h.openedAt(guestOnTop = true, rearLit = true, now = 1_000))
+        // Only once, however often it is looked at.
+        assertEquals(1_000L, h.openedAt(guestOnTop = true, rearLit = true, now = 9_000))
+    }
+
+    @Test fun `a guest on top of a dark back counts from the back lighting`() {
+        val h = GuestHold()
+        assertEquals(0L, h.openedAt(guestOnTop = true, rearLit = false, now = 1_000))
+        assertEquals(2_000L, h.openedAt(guestOnTop = true, rearLit = true, now = 2_000))
+    }
+
+    @Test fun `the back relit under the same guest is not a new opening, a new guest is`() {
+        val h = GuestHold()
+        h.openedAt(guestOnTop = true, rearLit = true, now = 1_000)
+        assertEquals(1_000L, h.openedAt(guestOnTop = true, rearLit = false, now = 2_000))
+        assertEquals(1_000L, h.openedAt(guestOnTop = true, rearLit = true, now = 3_000))
+        h.openedAt(guestOnTop = false, rearLit = true, now = 4_000)
+        assertEquals(5_000L, h.openedAt(guestOnTop = true, rearLit = true, now = 5_000))
+    }
+
+    @Test fun `the time running out lets go with the dim's tail, nothing else does`() {
+        fun let(h: GuestHold, dozing: Boolean = false, pocketed: Boolean = false, lit: Boolean? = true, touch: Long = 1_000L, now: Long = 2_000L, top: Boolean = true) =
+            h.step(top, lit, dozing, pocketed, touch, 0L, now)
+        val held = { GuestHold().apply { taken() } }
+        val out = let(held(), now = 1_000L + GuestHold.HOLD_MS)
+        assertEquals(GuestHold.Act.LET_GO, out.act)
+        assertEquals(true, out.tail)
+        assertEquals(false, let(held(), dozing = true).tail)
+        assertEquals(false, let(held(), pocketed = true).tail)
+        assertEquals(false, let(held(), lit = false).tail)
+        assertEquals(false, let(held(), top = false).tail)
+    }
 }
