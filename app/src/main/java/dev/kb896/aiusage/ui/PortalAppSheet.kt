@@ -59,9 +59,10 @@ object PortalAppSheet {
                 if (!untouchedTap) onDpi(dpiOf(it))
             },
         )
-        // Off, as every app starts: the whole back. Experimental: HyperOS can still draw it at the left.
+        // Off, as every app starts: the whole back. Experimental for what it cannot do yet: its
+        // keyboard opens on the front, and an app keeping its own screen on does not keep the back's.
         SettingsRows.toggle(column, "Keep right of the cameras (experimental)", confined) { on -> onConfined(on) }
-        SettingsRows.note(column, "On, ${label.trim()} is kept out from under the cameras. It may land at the left edge for now.")
+        SettingsRows.note(column, "On, ${label.trim()} runs on a screen of its own beside the cameras. Its keyboard opens on the front, and it does not keep the back lit by itself.")
         Modal.show(
             Modal.builder(activity).setTitle(label.trim())
                 .setView(column)

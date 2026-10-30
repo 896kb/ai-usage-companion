@@ -5,15 +5,15 @@ import android.view.Surface
 import android.view.SurfaceControl
 
 /**
- * The camera strip (x < RearGeometry.cutoutPx) beside a guest kept right of the cameras
- * (GuestShape): a solid layer of the shell's own over it, so whatever task lies under the
- * strip — a stale app, our panel — does not show there. In the guest's own background
+ * The camera strip (x < RearGeometry.cutoutPx) beside a guest on a private display
+ * (PrivateDisplay): a solid layer of the shell's own over it, so whatever lies under the strip —
+ * our panel, always, on these — does not show there. In the guest's own background
  * colour where it has one, black where not (StripColor), read off the guest's leftmost
  * columns by [sample]: once as it is shown (the caller samples before the reveal, so it
  * arrives right), then at StripColor.Pace's pace while it is up, the rear lit ([dark] false) and
  * the sheet shut. A new colour eases in over StripColor.EASE_MS.
  *
- * Over every app, under the guest's cover ([ShellLayer.Z_STRIP]); trusted and so
+ * Over the app's picture's Z, under the guest's cover ([ShellLayer.Z_STRIP]); trusted and so
  * touch-transparent, or not shown at all. Fades in and out as the frame does (FrameFade),
  * on a thread of its own that lives while it is up or fading and ends once faded out —
  * decided under this instance's lock, which [show] takes too, as in PortalFrame.

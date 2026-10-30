@@ -81,6 +81,8 @@ class RearUserService : IRearService.Stub {
         // touch on the rear. On this thread, since the process exits right after.
         closeSheetNow("the service is going", sync = true)
         stopTouchWatch()
+        // A private display's first, while its layer is still there to be let go of in order.
+        closePrivate("the service is going")
         // Every layer of ours off the rear now, in one transaction, before the exit.
         ShellLayer.removeAll()
         // The guest's density must not outlive the service that set it. Closed first, so
@@ -235,6 +237,8 @@ class RearUserService : IRearService.Stub {
         if (dozing) closeSheetNow("the panel is asleep")
         // Letting go on purpose: the guest hold goes before anything else can see it held.
         if (dozing) syncGuestHoldNow()
+        // Said by every new panel as it starts: one that has not heard it is covered is told.
+        else if (panelCovered) tellPanelCovered()
         syncTouchWatch()
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
@@ -375,6 +379,12 @@ class RearUserService : IRearService.Stub {
         lastPayload = payload
         styleFrame(payload)
         startKeepAlive(displayId)
+        // A guest on a private display is up over the panel, which is where it should be and
+        // reads as anything but placed: our layers cover it in what the rear composes. A recovery
+        // re-placing it there changes nothing anyone sees but its own state (the service that lost
+        // track of one did, 2026-10-30). Somebody asking for the panel ([light]) goes on below,
+        // and that does hide the guest.
+        if (!light && guest?.let { it.onPrivate && it.onTop } == true) return@synchronized
         // The cheap path — already placed, just push new numbers — must ALSO require
         // that the panel is genuinely composited. Checking only "same display and the
         // task exists" is how a silently-dead panel became unrecoverable: the task
@@ -473,6 +483,8 @@ class RearUserService : IRearService.Stub {
         if (displayId < 0) return false
         // The back is the camera's from here: a sheet up would sit over it with its blocker.
         closeSheetNow("the camera is opening")
+        // Which would come up on the rear under a private display's layer.
+        guest?.takeIf { it.onPrivate }?.let { if (markOnTop(it.task, false)) guestBehind(it.pkg) }
         val out = exec("am start --display $displayId -f $CAMERA_FLAGS -n $CAMERA_COMPONENT")
         val ok = !out.contains("Error", ignoreCase = true)
         if (!ok) Log.w(TAG, "camera launch refused: ${out.take(200)}")
@@ -866,11 +878,17 @@ class RearUserService : IRearService.Stub {
      * the two seconds for [Guest.placed].
      * [Guest.hiddenOnFront]: the sheet's Panel moved it to display 0 behind the keyguard
      * (see [onSheetButton]); it is still the guest, behind, and Resume brings it back.
+     * [privateDisplay]: the display it is on when it is kept right of the cameras
+     * (PrivateDisplay), -1 when on the rear itself. [onTop] is then our own word: the layer that
+     * shows it up or not ([syncPrivate]), the panel under it on the rear all along.
      */
     private data class Guest(
         val pkg: String, val task: Int, val onTop: Boolean, val placed: Boolean = false,
         val hiddenOnFront: Boolean = false, val landed: Boolean = false,
+        val privateDisplay: Int = -1,
     ) {
+        val onPrivate: Boolean get() = privateDisplay >= 0
+
         /** As the sheet shows it: null none, true on top (Panel), false behind (Resume). */
         val sheetOnTop: Boolean? get() = PortalAction.sheetGuest(landed, placed, onTop)
     }
@@ -881,19 +899,19 @@ class RearUserService : IRearService.Stub {
             guestRef.set(value)
             syncGuestHold()
             syncNoRestrict()
+            syncPrivate()
         }
     private val frame by lazy { PortalFrame(rearLayerStack(), geometry) }
-    /** The camera strip beside a confined guest (CameraStrip), in the guest's edge colour. */
+    /** The camera strip beside a guest on a private display (CameraStrip), in the guest's edge colour. */
     private val strip by lazy { CameraStrip(rearLayerStack(), geometry) { stripColor() } }
 
     /**
-     * The guest's chrome up: its frame, and — kept right of the cameras — the camera strip
-     * beside it (else the strip goes). In place of a bare frame.show() everywhere.
+     * The guest's chrome up: its frame, and — on a private display — the camera strip beside
+     * it (else the strip goes). In place of a bare frame.show() everywhere.
      */
     private fun chromeShow() {
         frame.show()
-        val g = guest
-        if (g != null && shapeOf(g.pkg).confined) strip.show(null) else strip.hide()
+        if (guest?.onPrivate == true) strip.show(null) else strip.hide()
     }
 
     /** The guest's chrome down: frame and strip fade out. */
@@ -909,6 +927,7 @@ class RearUserService : IRearService.Stub {
             if (g.task != task || g.onTop == onTop) return false
             if (guestRef.compareAndSet(g, g.copy(onTop = onTop))) {
                 syncGuestHold()
+                syncPrivate()
                 return true
             }
         }
@@ -934,8 +953,12 @@ class RearUserService : IRearService.Stub {
 
     /** The apps' names under their icons on the back (PanelConfig.portalAppNames), from the last payload. */
     @Volatile private var portalNames = true
-    /** Apps kept right of the cameras (PanelConfig.portalConfined); every other guest is fullscreen. */
+    /**
+     * Apps kept right of the cameras (PanelConfig.portalConfined, with the switches made on the
+     * back laid over it, [confinedEdits]); every other guest is fullscreen. Written under [dpiLock].
+     */
     @Volatile private var portalConfined: Set<String> = emptySet()
+    private val confinedEdits = ConfinedEdits()
 
     /**
      * The pinned apps or the grid changed: the pages follow, an open sheet's with them. On
@@ -982,11 +1005,13 @@ class RearUserService : IRearService.Stub {
             if (regrid) repage()
             portalNames = config.portalAppNames
             shellSheet?.names(config.portalAppNames)
-            // An app kept right of the cameras, or let back, while it is the guest: reshaped —
-            // on the shape worker, not this binder thread (update() is the app's).
-            if (portalConfined != config.portalConfined) {
-                portalConfined = config.portalConfined
-                reshapeLater("its camera area setting changed", full = true)
+            // An app kept right of the cameras, or let back, while it is the guest: relaunched
+            // in its new place — on the mode worker, not this binder thread (update() is the app's).
+            val confined = synchronized(dpiLock) { confinedEdits.overlay(config.portalConfined, android.os.SystemClock.uptimeMillis()) }
+            if (portalConfined != confined) {
+                portalConfined = confined
+                syncSheetKeepRight()
+                relaunchLater("its camera area setting changed")
             }
             restyleSheetFace(config.theme to config.font)
         } catch (e: Exception) {
@@ -997,7 +1022,8 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * DPI PER APP: display 1's density follows the guest. A guest has its own
+     * DPI PER APP: display 1's density follows the guest; one on a private display has that
+     * display's instead ([syncPrivateDensity]), and the rear stays as it is. A guest has its own
      * (config.portalDpi, see [RearDensity]) for as long as it IS the guest — on top, behind
      * the panel, still being placed — so Panel / Resume never relayout it twice, and it
      * lands laid out once at its own DPI because that is set before its move. The display's
@@ -1066,7 +1092,14 @@ class RearUserService : IRearService.Stub {
     private fun syncDensity(why: String, thirdOnTop: Boolean = false) = synchronized(densityLock) {
         if (densityClosed) return@synchronized
         val g = guest
-        applyDensity(if (thirdOnTop) null else RearDensity.target(g?.pkg, g != null, portalDpi), why)
+        applyDensity(if (thirdOnTop) null else RearDensity.target(g?.pkg, g != null && !g.onPrivate, portalDpi), why)
+        syncPrivateDensity(g)
+    }
+
+    /** [g], if it is on a private display, at its density there: a comparison unless it changed. */
+    private fun syncPrivateDensity(g: Guest?) {
+        if (g == null || !g.onPrivate) return
+        privateDisplay?.takeIf { it.displayId == g.privateDisplay }?.density(RearDensity.ofPrivate(g.pkg, portalDpi, geometry))
     }
 
     /**
@@ -1121,12 +1154,9 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} at " +
             (if (ours) "$wanted dpi" else "its own ${wanted ?: physicalDensity} dpi") + " — $why")
         // A guest that is placed on the rear keeps its shape through the relayout. One still
-        // landing is shaped after its move (shaped before, on the front, it lands wrong). Here
-        // only the one transaction, under [densityLock]; where it is drawn is checked on the
-        // shape worker, under [placing] — not here, holding this lock for a second.
-        guest?.takeIf { it.placed && !it.hiddenOnFront }?.let { g ->
-            shapeGuest(g.task, g.pkg, "the density changed", verify = false)
-            reshapeLater("the density changed", full = false)
+        // landing is shaped after its move. One on a private display was not touched by this.
+        guest?.takeIf { it.placed && !it.hiddenOnFront && !it.onPrivate }?.let { g ->
+            shapeGuest(g.task, g.pkg, "the density changed")
         }
     }
 
@@ -1163,7 +1193,7 @@ class RearUserService : IRearService.Stub {
         physicalDensity = d.physical
         baselineDensity = start.baseline
         densityDefault = start.baseline ?: d.physical
-        shellSheet?.dpiDefault(densityDefault)
+        shellSheet?.dpiDefault(sliderDefault())
         currentDensity = d.override
         if (!start.ours && DensityDump.parseMarker(marker.out) != null) execChecked("settings delete global $DENSITY_MARKER")
         Log.i(TAG, "density: display ${Panel.DISPLAY_ID} is ${d.physical} dpi" +
@@ -1179,15 +1209,23 @@ class RearUserService : IRearService.Stub {
         // guest leave: its frame and watcher would outlive it.
         if (placedDisplayId < 0) { Log.w(TAG, "portal: no panel placed — not launching $pkg"); return@synchronized false }
         // Resolved before anything moves: an app with no launcher activity changes nothing.
-        val component = exec("cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $pkg")
-            .lines().lastOrNull()?.trim()
-        if (component.isNullOrEmpty() || !COMPONENT.matches(component)) {
+        val component = launcherOf(pkg)
+        if (component == null) {
             Log.w(TAG, "portal: no launcher activity for $pkg"); return@synchronized false
         }
         // A Back before this launch says nothing about it: an app's next launch may reuse the
         // task a Back closed or sent behind, and a trampoline dying in its survive wait would
         // then read as closed by the user, not retried.
         backedTask = -1
+        val wantPrivate = GuestShape.onPrivateDisplay(pkg, portalConfined)
+        // The same app, in the other place than it is: it ends there, and starts here.
+        guest?.takeIf { it.pkg == pkg && it.onPrivate != wantPrivate }?.let { endForRelaunch(it) }
+        if (wantPrivate) {
+            guest?.takeIf { it.pkg == pkg }?.let { return@synchronized openAgainOnPrivate(it, component, displayId) }
+            val pd = openPrivate(pkg)
+            if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd)
+            Log.w(TAG, "portal: no private display — $pkg on the whole rear instead")
+        }
         // One guest at a time: the old one goes to the front, alive — never killed. Not yet:
         // it stays on the rear, live, while the new one starts and settles on the front, and
         // leaves under the cover, as the new one comes in.
@@ -1217,19 +1255,22 @@ class RearUserService : IRearService.Stub {
             // and the live one fades out as it goes and back in after the reveal.
             val cover = if (first && arriving && !dozing) coverRear(displayId) else null
             if (cover != null && !cover.frameLeftOut) frame.hide()
-            if (first && old != null) { moveToDisplay(old.task, 0); shapeForFront(old.task) }
+            if (first && old != null) {
+                moveToDisplay(old.task, 0); shapeForFront(old.task)
+                if (old.onPrivate) closePrivate("${old.pkg} went to the front")
+            }
             guest = Guest(pkg, task, onTop = false)
             // Before the move, so it lands laid out once at its own DPI (see syncDensity).
             syncDensity("$pkg is landing")
             moveToDisplay(task, displayId)
-            // After the move, never before: shaped on the front, it lands at x 0–608.
-            shapeGuest(task, pkg, "it landed", verify = false)
+            // After the move: what a launch reused may be in multi-window from anywhere.
+            shapeGuest(task, pkg, "it landed")
             wake(displayId)
             val movedAt = android.os.SystemClock.uptimeMillis()
             // Uncovered, the frame comes up as the app lands, not after the survive wait;
             // show() is idempotent, so guestPlaced() below does not start a second one.
-            // Uncovered, as it draws: checked where it is drawn, then the chrome.
-            if (cover == null) { awaitDrawn(pkg, task, displayId); ensurePlaced(task, pkg, "it landed"); chromeShow() }
+            // Uncovered, as it draws.
+            if (cover == null) { awaitDrawn(pkg, task, displayId); chromeShow() }
             // Landed: the sheet's guest from now, so a pull during the survive wait has its
             // buttons from the first frame (they used to come in when it was placed).
             guest = Guest(pkg, task, onTop = true, landed = true)
@@ -1237,8 +1278,8 @@ class RearUserService : IRearService.Stub {
             // Covered: revealed once it has drawn, and the frame faded in after it (still up
             // from the guest before, it stays) — never before the app.
             if (cover != null) {
-                // Before the reveal: where it is drawn checked (and put right), the strip coloured.
-                reveal(cover, pkg, task, displayId) { ensurePlaced(task, pkg, "it landed"); stripFor(pkg) }
+                // Before the reveal: the strip of a private guest before it, gone.
+                reveal(cover, pkg, displayId, { stripFor() }) { drawnOn(pkg, task, displayId) }
                 if (guest?.let { it.task == task && it.onTop } == true) chromeShow()
             }
             // A task gone within two seconds of the move was a trampoline the move
@@ -1278,103 +1319,334 @@ class RearUserService : IRearService.Stub {
         val at = android.os.SystemClock.uptimeMillis()
         return GuestCover.up(coverStack, geometry, displayId, frame.currentLayer) { screencapRear() }
             ?.also {
-                coverLayer = it.layer
                 Log.i(TAG, "portal: the rear covered in ${android.os.SystemClock.uptimeMillis() - at} ms" +
                     if (it.frameLeftOut) ", the frame left out" else "")
             }
     }
 
-    /** The cover up now, if any: left out of the strip's samples. */
-    @Volatile private var coverLayer: android.view.SurfaceControl? = null
+    /** The launcher activity of [pkg], or null: fit to go into a shell command. */
+    private fun launcherOf(pkg: String): String? =
+        exec("cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $pkg")
+            .lines().lastOrNull()?.trim()?.takeIf { COMPONENT.matches(it) }
 
-    /** [pkg]'s shape on the rear (GuestShape): kept right of the cameras unless given their area. */
-    private fun shapeOf(pkg: String) = GuestShape.forApp(pkg, portalConfined, geometry)
+    // -- a guest on a private display -------------------------------------------------------
+    //
+    // See PrivateDisplay for why and what it is. Launched there rather than started on the front
+    // and moved: no trick to get a task onto the rear, no density to set on anything else, and the
+    // panel stays where it is, on the rear, under our layers. Everything else about a guest —
+    // its frame, the sheet and its slider, the control centre, the hold, the freezer's list — is
+    // as for one on the rear, off the same Guest. What differs, each in its place below: Panel and
+    // Resume only hide and show a layer (HIDE_LAYERS, SHOW_LAYERS); the keep-alive asks after it
+    // by its task on its display (privateTick); Back is a key on its display; and the fingers go
+    // to it from the service's one touch reader (forwardOpen).
+
+    /** The display of the guest kept right of the cameras; null with none. Under [placing], any thread may read it. */
+    @Volatile private var privateDisplay: PrivateDisplay? = null
+
+    /** A new display for [pkg] at its density, not yet anyone's; null where it cannot be had. Under [placing]. */
+    private fun openPrivate(pkg: String): PrivateDisplay? {
+        val ctx = context ?: run { Log.w(TAG, "private display: no Context from this Shizuku"); return null }
+        val pd = PrivateDisplay.open(ctx, coverStack, geometry, RearDensity.ofPrivate(pkg, portalDpi, geometry)) { id ->
+            exec("input -d $id keyevent KEYCODE_WAKEUP")
+        } ?: return null
+        // Said once more for the firmware that takes it: a portrait-locked app fills the display
+        // then. It did not take on OS4.0.5.0 (the spike): such an app letterboxes, on black.
+        Log.i(TAG, "private display ${pd.displayId}: ignore orientation: " +
+            exec("wm set-ignore-orientation-request -d ${pd.displayId} true; wm get-ignore-orientation-request -d ${pd.displayId}"))
+        return pd
+    }
+
+    /** The display gone, and with it whatever is still on it. Move what should live off first. Any thread. */
+    private fun closePrivate(why: String) {
+        val pd = privateDisplay ?: return
+        privateDisplay = null
+        Log.i(TAG, "private display ${pd.displayId}: closing — $why")
+        pd.release()
+    }
 
     /**
-     * What a guest's placing is tried for: its task, its shape and the density it is shown at.
-     * Given up on one of these ([placeTries], [driftTries]), it is tried again only when one of
-     * them changes.
+     * The layer and the panel under it follow the guest: shown while it is on top, and the panel
+     * told it is covered (RearActivity.setCovered). Called with every change of the guest, under
+     * no lock of its own: [PrivateDisplay.show] is one transaction, and the word to the app goes
+     * on a worker. Any thread.
      */
-    private data class PlaceKey(val task: Int, val shape: GuestShape.Shape, val dpi: Int?)
+    private fun syncPrivate() {
+        val g = guestRef.get()
+        val shown = g != null && g.onPrivate && g.onTop
+        privateDisplay?.takeIf { it.displayId == g?.privateDisplay }?.show(shown)
+        if (shown && !panelCovered) privateLit = true // new on top: the hold's next look says if not
+        if (shown != panelCovered) {
+            panelCovered = shown
+            tellPanelCovered()
+        }
+    }
 
-    private fun placeKey(task: Int, pkg: String) = PlaceKey(task, shapeOf(pkg), RearDensity.target(pkg, true, portalDpi))
+    @Volatile private var panelCovered = false
 
-    /** Nudges of a guest drawn left of its shape ([ensurePlaced]): [PLACE_TRIES], then left as drawn. */
-    private val placeTries = SurfacePlace.GiveUp<PlaceKey>(PLACE_TRIES)
+    /** What [panelCovered] says, to the panel through the app, in order, off the caller's thread. */
+    private fun tellPanelCovered() {
+        runCatching {
+            pokeWorker.execute {
+                val ev = events ?: return@execute
+                runCatching { ev.onPanelCovered(panelCovered) }.onFailure { Log.w(TAG, "portal: the panel not told it is covered: ${it.message}") }
+            }
+        }
+    }
+
+    /**
+     * [pkg] onto [pd], started there — `am start --display`, no front in it — and shown under a
+     * cover of the rear as a launch on the rear is. As there, whatever is on the rear goes on
+     * until the new one has started and settled, on its display, out of sight; then the cover, the
+     * old one leaving, the layer shown. A task gone within two seconds is tried once more; a start
+     * that gave no task is tried once through the front (HyperOS has been seen to abort starts
+     * under the keyguard, [show]). [pd] is this function's until it is the guest's. Under [placing].
+     */
+    private fun launchOnPrivate(pkg: String, component: String, displayId: Int, pd: PrivateDisplay): Boolean {
+        val old = guest
+        var landed = false
+        repeat(2) { attempt ->
+            val task = startOnPrivate(component, pkg, pd.displayId, throughFront = attempt > 0)
+            if (task == null) {
+                if (attempt == 0) { Log.i(TAG, "portal: $pkg gave no task on display ${pd.displayId} — through the front"); return@repeat }
+                if (!landed) {
+                    // Nothing on the rear has changed: what was there stays.
+                    pd.release()
+                    Log.w(TAG, "portal: $pkg never started on a private display")
+                } else endGuest("never started")
+                return false
+            }
+            val cover = if (!landed && !dozing) coverRear(displayId) else null
+            if (cover != null && !cover.frameLeftOut) frame.hide()
+            if (!landed) {
+                landed = true
+                if (old != null) {
+                    moveToDisplay(old.task, 0); shapeForFront(old.task)
+                    if (old.onPrivate) closePrivate("${old.pkg} went to the front")
+                }
+                privateDisplay = pd
+            }
+            // On top from here: the layer shows, under the cover, and the panel stands down.
+            guest = Guest(pkg, task, onTop = true, landed = true, privateDisplay = pd.displayId)
+            syncDensity("$pkg is landing")
+            wake(displayId)
+            val startedAt = android.os.SystemClock.uptimeMillis()
+            val area = GuestShape.appArea(geometry)
+            if (cover == null) { awaitDrawn(pkg, task, pd.displayId, area); chromeShow() }
+            syncSheetGuest()
+            if (cover != null) {
+                reveal(cover, pkg, displayId, { stripFor() }) { drawnOn(pkg, task, pd.displayId, area) }
+                if (guest?.let { it.task == task && it.onTop } == true) chromeShow()
+            }
+            Thread.sleep(maxOf(0L, GUEST_SURVIVE_MS - (android.os.SystemClock.uptimeMillis() - startedAt)))
+            if (GuestTask.byId(exec("am stack list"), task)?.display == pd.displayId) {
+                Log.i(TAG, "portal: $pkg is the guest on private display ${pd.displayId}, task $task")
+                guestPlaced(displayId)
+                return true
+            }
+            if (PortalAction.vanished(closedByUser = backedTask == task) == PortalAction.Vanished.OVER) {
+                Log.i(TAG, "portal: $pkg's task $task closed on a Back in its survive wait — not relaunched")
+                if (dozing) dropGuest("its task closed on Back") else endGuest("its task closed on Back")
+                return false
+            }
+            chromeHide()
+            guest = Guest(pkg, task, onTop = false, privateDisplay = pd.displayId)
+            syncSheetGuest()
+            Log.w(TAG, "portal: $pkg's task $task did not survive on display ${pd.displayId}, read on ${GuestTask.byId(exec("am stack list"), task)?.display} (try ${attempt + 1})")
+        }
+        // Two starts that gave a task and did not last, or one of each: the guest's to end.
+        if (landed) endGuest("did not stay on its display") else pd.release()
+        return false
+    }
+
+    /**
+     * [component] started on [display], and its task once its top activity has held still, as
+     * [startSettled]; null when none shows soon ([PRIVATE_NO_TASK_MS]; started through the front,
+     * GUEST_SETTLE_LIMIT_MS). One found elsewhere (the app open on the front, a start refused its
+     * display) is moved there.
+     */
+    private fun startOnPrivate(component: String, pkg: String, display: Int, throughFront: Boolean): Int? {
+        exec(if (throughFront) "am start --display 0 -n $component" else "am start --display $display -n $component")
+        val settle = GuestTask.Settle()
+        val began = android.os.SystemClock.uptimeMillis()
+        var seen: GuestTask.Entry? = null
+        while (true) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - began >= GUEST_SETTLE_LIMIT_MS) break
+            val mine = GuestTask.entries(exec("am stack list")).filter { it.pkg == pkg }
+            seen = mine.firstOrNull { it.display == display } ?: mine.firstOrNull()
+            if (seen == null && !throughFront && now - began >= PRIVATE_NO_TASK_MS) return null
+            if (seen != null && settle.feed(seen.top, now)) break
+            Thread.sleep(150)
+        }
+        val entry = seen ?: return null
+        if (entry.display != display) {
+            Log.i(TAG, "portal: $pkg's task ${entry.task} is on display ${entry.display} — moving it to its own")
+            if (!moveToDisplay(entry.task, display)) return null
+        }
+        return entry.task
+    }
+
+    /** [g], already on its private display, asked for again: to the front of it, and on top. Under [placing]. */
+    private fun openAgainOnPrivate(g: Guest, component: String, displayId: Int): Boolean {
+        exec("am start --display ${g.privateDisplay} -n $component")
+        if (!g.onTop) guestOnTopAgain(g, "opened again")
+        wake(displayId)
+        return true
+    }
+
+    /**
+     * "Keep right of the cameras" changed for the guest: it ends where it is, and the launch that
+     * follows starts it in its new place. Its task goes as a swipe from recents takes it (`am
+     * stack remove`, as the camera's: the activity destroyed, a warm process left), not moved:
+     * a move to the other display has to go through the front (seen there by anyone looking), and
+     * it is `am start` on these that has been proven. The app's own saved state is what it comes
+     * back with. Under [placing].
+     */
+    private fun endForRelaunch(g: Guest) {
+        Log.i(TAG, "portal: ${g.pkg} relaunching, ${if (g.onPrivate) "from its private display to the whole rear" else "from the whole rear to a private display"}")
+        exec("am stack remove ${g.task}")
+        for (i in 0 until RELAUNCH_POLLS) {
+            if (GuestTask.byId(exec("am stack list"), g.task) == null) break
+            Thread.sleep(RELAUNCH_POLL_MS)
+        }
+        dropGuest("relaunching in its new place")
+    }
+
+    /**
+     * The guest moved to where the config says, if that is not where it is. A launch's lock, so
+     * nothing races it. Under [placing].
+     */
+    private fun relaunchIfMoved(why: String) {
+        val g = guest?.takeIf { it.placed } ?: return
+        if (g.onPrivate == GuestShape.onPrivateDisplay(g.pkg, portalConfined)) return
+        Log.i(TAG, "portal: ${g.pkg} — $why")
+        launchGuest(g.pkg, rearDisplay())
+    }
+
+    /** [relaunchIfMoved] off the caller's thread. */
+    private fun relaunchLater(why: String) {
+        runCatching { modeWorker.execute { synchronized(placing) { relaunchIfMoved(why) } } }
+            .onFailure { Log.w(TAG, "portal: relaunch not queued: ${it.message}") }
+    }
+
+    /**
+     * Whether a finger now is the private guest's: it is up, the rear is lit, the sheet and the
+     * control centre are shut. Read at every frame, on the reader, off every lock ("never block
+     * the reader"), after EdgeGestures has had the same frame: a pull claimed by it has just made
+     * this false (TouchForward then cancels).
+     */
+    private fun forwardOpen(): Boolean {
+        val g = guestRef.get() ?: return false
+        return g.onPrivate && g.onTop && privateLit && !pocketed && !sheetUp && !controlCenter.isUp
+    }
+
+    /** The rear as the hold last read it, for [forwardOpen]: dark, a finger waking it is nobody's. */
+    @Volatile private var privateLit = true
+
+    /** Off the reader. */
+    private fun forwardOut(out: List<TouchForward.Out>) {
+        if (out.isNotEmpty()) privateDisplay?.forward(out)
+    }
+
+    /**
+     * One more thing kept for what is on top of the rear, one tick: a private guest asked after by
+     * its own things (GuestGate.tickPrivate). True when that was all, false for the usual recovery
+     * below. From the keep-alive, off [placing] as it is for a guest on the rear.
+     */
+    private fun privateTick(g: Guest, displayId: Int): Boolean {
+        val list = GuestTask.entries(exec("am stack list"))
+        val entry = list.firstOrNull { it.task == g.task }
+        val rearTask = list.firstOrNull { it.display == displayId }
+        val lit = rearLit(displayId) == true
+        val tick = GuestGate.tickPrivate(
+            alive = entry != null,
+            onDisplay = entry?.display == g.privateDisplay,
+            layer = privateDisplay?.displayId == g.privateDisplay,
+            onTop = g.onTop,
+            rearLit = lit,
+            // Listed but not shown is nothing over the panel: a task the panel has been put over.
+            rearTask = rearTask?.takeIf { it.visible != false }?.pkg,
+            ours = PKG,
+        )
+        if (!g.placed && tick != GuestGate.Tick.GUEST_GONE) return true
+        when (tick) {
+            GuestGate.Tick.GUEST_ON_TOP -> {
+                syncDensity("${g.pkg} is on top")
+                if (lit) { if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow() }
+                else {
+                    // Nothing to see: no frame drawing to it, no sheet left up. The layer and the
+                    // app stay as they are, and come back with the light (the hold's look).
+                    chromeHide()
+                    closeSheetNow("the rear is dark")
+                }
+                return true
+            }
+            GuestGate.Tick.GUEST_BEHIND -> {
+                syncDensity("${g.pkg} is behind")
+                chromeHide()
+                if (rearTask?.pkg == PKG) { if (cameraLaunched && cameraWasOnTop) closeCamera() else forgetUnseenCamera() }
+                if (!lit) closeSheetNow("the rear is dark")
+                // No task on the rear at all: the panel is gone. Recovered as it would be.
+                return rearTask != null
+            }
+            GuestGate.Tick.GUEST_GONE -> {
+                synchronized(placing) {
+                    val now = guest?.takeIf { it.task == g.task && it.onPrivate } ?: return true
+                    // Read again under the lock: a launch may have just made them.
+                    val at = GuestTask.byId(exec("am stack list"), now.task)?.display
+                    if (at != now.privateDisplay || privateDisplay?.displayId != now.privateDisplay) {
+                        // Where it was read, for the day it reads wrong: `am stack list` is the only word on it.
+                        val read = "its task read on display $at, not ${now.privateDisplay}"
+                        if (rearLit(displayId) == true) endGuest(read) else dropGuest("$read, the rear dark")
+                    }
+                }
+                return true
+            }
+            GuestGate.Tick.USUAL -> {
+                // What it was hiding has the rear: the guest behind, Resume on the sheet, and the
+                // panel re-placed over that as for any other guest.
+                Log.i(TAG, "portal: ${rearTask?.pkg} has the rear — ${g.pkg}'s layer down")
+                if (markOnTop(g.task, false)) syncSheetGuest()
+                chromeHide()
+                return dozing
+            }
+            GuestGate.Tick.GUEST_EXPOSED -> return true // never for one on a private display
+        }
+    }
+
+    /**
+     * One thread for the relaunches asked for off [placing], a payload's camera-area change on
+     * update()'s binder thread: each run under [placing], never holding up the thread that asked.
+     */
+    private val modeWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-mode", r) }
+    }
+
+    /**
+     * What a full-screen guest's shaping is tried for: its task and the density it is shown at.
+     * Given up on one of these ([driftTries]), it is tried again only when one of them changes.
+     */
+    private data class PlaceKey(val task: Int, val dpi: Int?)
+
+    private fun placeKey(task: Int, pkg: String) = PlaceKey(task, RearDensity.target(pkg, true, portalDpi))
 
     /** The keep-alive's reshapes of a guest whose bounds drifted: [PLACE_TRIES] ticks running, then left. */
-    private val driftTries = SurfacePlace.GiveUp<PlaceKey>(PLACE_TRIES)
+    private val driftTries = GuestShape.GiveUp<PlaceKey>(PLACE_TRIES)
 
     /**
-     * [task] ([pkg]'s, on the rear) given its shape: TaskShaper's transaction, else `am task
-     * resize` — which only a multi-window task takes, as a launch makes it. Only ever on the
-     * rear: shaped on the front first, it lands at x 0–608 (measured). With [verify] — where it
-     * is drawn read, and nudged — under [placing]; without, one transaction, from anywhere.
+     * [task] ([pkg]'s, on the rear) given the whole display: TaskShaper's transaction, else `am
+     * task resize`, which only a multi-window task takes. One transaction; from anywhere.
      */
-    private fun shapeGuest(task: Int, pkg: String, why: String, verify: Boolean = true) {
-        val shape = shapeOf(pkg)
-        val b = shape.bounds
-        val rect = android.graphics.Rect(b.left, b.top, b.right, b.bottom)
+    private fun shapeGuest(task: Int, pkg: String, why: String) {
+        val b = GuestShape.full(geometry)
         val how = when {
-            TaskShaper.apply(task, shape.mode, if (shape.confined) rect else null) -> "transaction"
+            TaskShaper.apply(task, GuestShape.FULLSCREEN, null) -> "transaction"
             resizeFallback(task, b.left, b.top, b.right, b.bottom) -> "am task resize"
             else -> { Log.w(TAG, "portal: $pkg (task $task) not shaped — the task shaper refused it — $why"); return }
         }
-        Log.i(TAG, "portal: $pkg (task $task) ${if (shape.confined) "kept right of the cameras" else "on the whole rear"}, by $how — $why")
-        if (verify) {
-            Thread.sleep(PLACE_SETTLE_MS)
-            ensurePlaced(task, pkg, why)
-        }
+        Log.i(TAG, "portal: $pkg (task $task) on the whole rear, by $how — $why")
     }
 
-    /**
-     * [pkg]'s window really drawn where its shape says (SurfacePlace): read off SurfaceFlinger
-     * ([dump] if one is in hand, else asked), and while it is not — the task's bounds right,
-     * its surface still at x 0, seen on the phone — nudged by `am task resize`, a pixel off and
-     * back (never a transition of our own: see TaskShaper), and read again.
-     * [PLACE_TRIES] nudges for its task, shape and density in all ([placeTries]), across calls:
-     * past them it is left as it is drawn until one of those changes, so a guest no nudge
-     * moves is not nudged every keep-alive tick, forever, under [placing].
-     * An app not composed on the rear (behind the panel, not drawn yet) is left as it is.
-     * Under [placing].
-     */
-    private fun ensurePlaced(task: Int, pkg: String, why: String, dump: String? = null) {
-        val shape = shapeOf(pkg)
-        val b = shape.bounds
-        val key = placeKey(task, pkg)
-        if (placeTries.givenUp(key)) return
-        var sf = dump ?: exec("dumpsys SurfaceFlinger")
-        var nudges = 0
-        while (true) {
-            val left = SurfacePlace.left(sf, coverStack, pkg)
-            if (!SurfacePlace.misplaced(left, shape)) {
-                // Unread is not right: nothing is learnt from a guest not composed.
-                if (left != null) placeTries.placed(key)
-                if (nudges > 0) Log.i(TAG, "portal: $pkg drawn at x $left after $nudges nudge(s) — $why")
-                return
-            }
-            if (!placeTries.attempt(key)) {
-                if (placeTries.announce(key)) Log.w(TAG, "portal: $pkg still drawn at x $left after $PLACE_TRIES nudges — " +
-                    "left as it is until its task, shape or density changes — $why")
-                return
-            }
-            nudges++
-            Log.w(TAG, "portal: $pkg drawn at x $left, its shape at ${b.left} — nudging ($nudges) — $why")
-            // A pixel off and back: a resize to the bounds it already has does nothing. Seen by
-            // hand to move the surface at times, not always.
-            exec("am task resize $task ${b.left + 1} ${b.top} ${b.right} ${b.bottom}")
-            exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
-            Thread.sleep(PLACE_SETTLE_MS)
-            sf = exec("dumpsys SurfaceFlinger")
-        }
-    }
-
-    /**
-     * One thread for the reshapes asked for off [placing] — a payload's camera-area change
-     * (on update()'s binder thread), a density change (under [densityLock]) — each run under
-     * [placing], so it never races a launch's, Resume's or the keep-alive's, and never holds
-     * up the thread that asked.
-     */
     private val noRestrictWorker by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-no-restrict", r) }
     }
@@ -1407,42 +1679,19 @@ class RearUserService : IRearService.Stub {
         }.onFailure { Log.w(TAG, "portal: the freezer's list not looked at: ${it.message}") }
     }
 
-    private val shapeWorker by lazy {
-        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-shape", r) }
-    }
-
-    /**
-     * The guest, if it is placed on the rear, shaped again ([full]: shapeGuest, and the chrome
-     * after it if it is on top) or only checked where it is drawn (ensurePlaced, a settle
-     * after the shape just sent), on [shapeWorker]. Read afresh when it runs.
-     */
-    private fun reshapeLater(why: String, full: Boolean) {
-        runCatching {
-            shapeWorker.execute {
-                if (!full) Thread.sleep(PLACE_SETTLE_MS)
-                synchronized(placing) {
-                    val g = guest?.takeIf { it.placed && !it.hiddenOnFront } ?: return@synchronized
-                    if (!full) { ensurePlaced(g.task, g.pkg, why); return@synchronized }
-                    shapeGuest(g.task, g.pkg, why)
-                    if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
-                }
-            }
-        }.onFailure { Log.w(TAG, "portal: reshape not queued: ${it.message}") }
-    }
-
-    /** Until [pkg]'s [task] has drawn on [displayId] within its shape, or GuestReveal.MAX_WAIT_MS. */
-    private fun awaitDrawn(pkg: String, task: Int, displayId: Int) {
+    /** Until [pkg]'s [task] has drawn on [displayId] within [size], or GuestReveal.MAX_WAIT_MS. */
+    private fun awaitDrawn(pkg: String, task: Int, displayId: Int, size: GuestShape.Bounds = GuestShape.full(geometry)) {
         val until = android.os.SystemClock.uptimeMillis() + GuestReveal.MAX_WAIT_MS
         while (android.os.SystemClock.uptimeMillis() < until) {
-            if (drawnOn(pkg, task, displayId, shapeOf(pkg).bounds)) return
+            if (drawnOn(pkg, task, displayId, size)) return
             Thread.sleep(DRAWN_POLL_MS)
         }
     }
 
     /**
-     * [task], leaving the rear for the front, made an ordinary fullscreen task again: in
-     * multi-window it would keep the rear's bounds there, and the app's next launch would
-     * reuse it so. Else, sized to the front's whole screen.
+     * [task], leaving the rear for the front, made an ordinary fullscreen task again: left in
+     * multi-window by anything it would keep the rear's bounds there, and the app's next launch
+     * would reuse it so. Else, sized to the front's whole screen.
      */
     private fun shapeForFront(task: Int) {
         if (TaskShaper.apply(task, GuestShape.FULLSCREEN, null) || TaskShaper.available) return
@@ -1474,47 +1723,47 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * The camera strip for [pkg] as it arrives, before its reveal so it is there when the
-     * cover slides: up in the guest's edge colour when it is kept right of the cameras, else
-     * down. Under the cover, which [stripColor] leaves out.
+     * The camera strip as a guest arrives, before its reveal so it is there when the cover slides:
+     * up in the guest's edge colour when it is on a private display, else down.
      */
-    private fun stripFor(pkg: String) {
-        if (shapeOf(pkg).confined) strip.show(stripColor()) else strip.hide()
+    private fun stripFor() {
+        if (guest?.onPrivate == true) strip.show(stripColor()) else strip.hide()
     }
 
     /**
-     * The guest's background colour at its left edge (StripColor.sample: x 296–302 on the 17
-     * Pro, the whole height) for the
-     * camera strip: a cropped captureDisplay without our layers in it, its pixels in sRGB,
-     * one colour picked (StripColor) — or black: secure content (it comes back black), a
-     * busy edge, a capture that failed.
+     * The colour of a private guest's left edge (StripColor.sample) for the camera strip: a capture
+     * of the app's own layer (RearCapture.layer, the spike's way), no window manager in it and
+     * nothing of ours to leave out of it, its pixels in sRGB, one colour picked (StripColor) — or
+     * black: secure content (it comes back black), a busy edge, a capture that failed. Null with no
+     * such guest: the strip keeps what it has.
      */
-    private fun stripColor(): Int = runCatching {
-        val at = StripColor.sample(geometry)
-        val crop = android.graphics.Rect(at.left, at.top, at.right, at.bottom)
-        // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
-        // Our layers held for the capture (ShellLayer.lease): their own threads may let them go.
-        val shot = ShellLayer.lease(listOf(frame.currentLayer, strip.currentLayer, coverLayer)) { leaveOut ->
-            RearCapture.capture(rearDisplay(), leaveOut, crop, scaleY = STRIP_SAMPLE_SCALE)
-        } ?: return@runCatching BLACK
-        try {
-            if (shot.secure) return@runCatching BLACK
-            val hw = android.graphics.Bitmap.wrapHardwareBuffer(shot.buffer, shot.space) ?: return@runCatching BLACK
-            val bmp = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-            hw.recycle()
-            // A crop refused gives the whole rear: the same columns, read out of it.
-            val x0 = if (bmp.width > StripColor.SAMPLE_W) at.left else 0
-            val w = minOf(StripColor.SAMPLE_W, bmp.width - x0)
-            val srgb = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
-            val px = IntArray(w * bmp.height) { i ->
-                bmp.getColor(x0 + i % w, i / w).convert(srgb).toArgb()
+    private fun stripColor(): Int? {
+        val pd = privateDisplay ?: return null
+        return runCatching {
+            val at = StripColor.sample(geometry)
+            val crop = android.graphics.Rect(at.left, at.top, at.right, at.bottom)
+            // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
+            // Its layer held for the capture (ShellLayer.lease): a close may let it go at any moment.
+            val shot = ShellLayer.lease(listOf(pd.layer)) { live ->
+                live.firstOrNull()?.let { RearCapture.layer(it, crop, STRIP_SAMPLE_SCALE) }
+            } ?: return@runCatching BLACK
+            try {
+                if (shot.secure) return@runCatching BLACK
+                val hw = android.graphics.Bitmap.wrapHardwareBuffer(shot.buffer, shot.space) ?: return@runCatching BLACK
+                val bmp = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                hw.recycle()
+                val w = minOf(StripColor.SAMPLE_W, bmp.width)
+                val srgb = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+                val px = IntArray(w * bmp.height) { i ->
+                    bmp.getColor(i % w, i / w).convert(srgb).toArgb()
+                }
+                bmp.recycle()
+                StripColor.pick(px)
+            } finally {
+                runCatching { shot.buffer.close() }
             }
-            bmp.recycle()
-            StripColor.pick(px)
-        } finally {
-            runCatching { shot.buffer.close() }
-        }
-    }.getOrDefault(BLACK)
+        }.getOrDefault(BLACK)
+    }
 
     /** The rear by the `screencap` command, for a cover where the in-process capture is missing; null if it cannot be had. */
     private fun screencapRear(): android.graphics.Bitmap? {
@@ -1529,15 +1778,8 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
-     * [cover] off the rear once [pkg]'s [task] has drawn on [displayId] (GuestDrawn, asked of
-     * `dumpsys window <pkg>` as fast as it answers): [reveal] with that for its sign.
-     */
-    private fun reveal(cover: GuestCover, pkg: String, task: Int, displayId: Int, onDrawn: () -> Unit = {}) =
-        reveal(cover, pkg, displayId, onDrawn) { drawnOn(pkg, task, displayId, shapeOf(pkg).bounds) }
-
-    /**
-     * [pkg]'s [task] has an app window drawn on [displayId] within [size] — its shape's, right
-     * of the cameras or the whole rear (GuestDrawn).
+     * [pkg]'s [task] has an app window drawn on [displayId] within [size] — the whole rear, or a
+     * private display's (GuestDrawn).
      */
     private fun drawnOn(pkg: String, task: Int, displayId: Int, size: GuestShape.Bounds = GuestShape.full(geometry)) =
         task > 0 && GuestDrawn.drawn(exec("dumpsys window $pkg"), task, displayId, size.width, size.height)
@@ -1574,7 +1816,6 @@ class RearUserService : IRearService.Stub {
         } finally {
             // Interrupted or not, a cover is never left over the rear.
             cover.remove()
-            coverLayer = null
         }
     }
 
@@ -1590,9 +1831,9 @@ class RearUserService : IRearService.Stub {
     private fun covered(what: String, drawn: () -> Boolean, onDrawn: () -> Unit = {}, change: () -> Boolean): Boolean {
         val display = rearDisplay()
         val cover = if (!dozing) coverRear(display) else null
-        val changed = try { change() } catch (e: Throwable) { cover?.remove(); coverLayer = null; throw e }
+        val changed = try { change() } catch (e: Throwable) { cover?.remove(); throw e }
         if (cover != null) {
-            if (changed) reveal(cover, what, display, onDrawn, drawn) else { cover.remove(); coverLayer = null }
+            if (changed) reveal(cover, what, display, onDrawn, drawn) else cover.remove()
         } else if (changed) onDrawn()
         return changed
     }
@@ -1612,9 +1853,7 @@ class RearUserService : IRearService.Stub {
      * task once the top activity has held still. Null if none.
      */
     private fun startSettled(component: String, pkg: String, front: Boolean): Int? {
-        // Confined, started in multi-window, so the rear can give it its bounds after the move.
-        val mode = GuestShape.launchFlags(shapeOf(pkg))
-        exec(if (front) "am start --display 0 $mode-n $component" else "am start $mode-n $component")
+        exec(if (front) "am start --display 0 -n $component" else "am start -n $component")
         val settle = GuestTask.Settle()
         val until = android.os.SystemClock.uptimeMillis() + GUEST_SETTLE_LIMIT_MS
         while (android.os.SystemClock.uptimeMillis() < until) {
@@ -1635,7 +1874,13 @@ class RearUserService : IRearService.Stub {
         if (!PACKAGE_NAME.matches(pkg) || !GuestTask.sendable(pkg, PKG)) return@synchronized ""
         // The old guest to the front made an ordinary fullscreen task again, as launchGuest and
         // Front send it: left in multi-window it keeps the rear's bounds there.
-        guest?.let { old -> if (old.task != task) { moveToDisplay(old.task, 0); shapeForFront(old.task) } }
+        guest?.let { old ->
+            if (old.task != task) {
+                moveToDisplay(old.task, 0); shapeForFront(old.task)
+                if (old.onPrivate) closePrivate("${old.pkg} went to the front")
+            }
+        }
+        if (GuestShape.onPrivateDisplay(pkg, portalConfined) && sendToPrivate(pkg, task, displayId)) return@synchronized pkg
         guest = Guest(pkg, task, onTop = true)
         syncDensity("$pkg is landing")
         if (!moveToDisplay(task, displayId)) { endGuest("move refused"); return@synchronized "" }
@@ -1643,6 +1888,29 @@ class RearUserService : IRearService.Stub {
         wake(displayId)
         guestPlaced(displayId)
         pkg
+    }
+
+    /**
+     * The focused app's [task], kept right of the cameras, moved to a new private display: not a
+     * launch, since it is what the app is showing now that is being sent. False, with no display
+     * left over, when it would not go: the tile then puts it on the whole rear, which is where it
+     * has always gone. Under [placing].
+     */
+    private fun sendToPrivate(pkg: String, task: Int, displayId: Int): Boolean {
+        val pd = openPrivate(pkg) ?: return false
+        if (!moveToDisplay(task, pd.displayId) || GuestTask.byId(exec("am stack list"), task)?.display != pd.displayId) {
+            Log.w(TAG, "portal: $pkg's task $task would not go to display ${pd.displayId} — the whole rear instead")
+            // Off it first, wherever it read: the display takes what is on it when it goes.
+            moveToDisplay(task, 0)
+            pd.release()
+            return false
+        }
+        privateDisplay = pd
+        guest = Guest(pkg, task, onTop = true, privateDisplay = pd.displayId)
+        syncDensity("$pkg is landing")
+        wake(displayId)
+        guestPlaced(displayId)
+        return true
     }
 
     /** A guest is on top: the frame, the watcher, and the sheet told. Under [placing]. */
@@ -1659,6 +1927,7 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, "portal: guest over — $why")
         guest = null
         chromeHide()
+        closePrivate(why)
         syncDensity("the guest is over")
         // Over the panel the watch goes on (it is for the panel too); dozing, it stops.
         syncTouchWatch()
@@ -1775,18 +2044,30 @@ class RearUserService : IRearService.Stub {
             // And the capture, once, so the first cover is taken in this process, not by screencap.
             RearCapture.warm(rearDisplay())
             val touches = RearTouches(maxX, maxY)
+            // The same lines, every finger, for a guest on a private display. After the first
+            // finger's gestures, so that a pull claimed on this very frame is not forwarded.
+            val rear = geometry
+            val forward = TouchForward(
+                maxX, maxY, rear.widthPx, rear.heightPx, rear.cutoutPx,
+                backLeft = EdgeGestures.BACK_LEFT * rear.fitX, slop = EdgeGestures.SLOP * rear.fitX,
+            )
             val startedAt = android.os.SystemClock.uptimeMillis()
             var events = 0
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
-                        for (e in touches.feed(line, android.os.SystemClock.uptimeMillis())) {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        for (e in touches.feed(line, now)) {
                             events++
                             onRearTouch(e, gestures)
                         }
+                        forwardOut(forward.feed(line, now, ::forwardOpen))
                     }
                 }
+                forwardOut(forward.cancel(android.os.SystemClock.uptimeMillis()))
             } catch (_: java.io.IOException) {
+                // A finger down as the reader goes is left open on the app otherwise.
+                forwardOut(forward.cancel(android.os.SystemClock.uptimeMillis()))
                 // The stream closing under us is how stopTouchWatch() ends this.
             } catch (e: Throwable) {
                 Log.w(TAG, "portal: touch watch stopped", e)
@@ -1820,8 +2101,8 @@ class RearUserService : IRearService.Stub {
     /** The watch's classifier; one per getevent, none before the first. Under [sheetLock]. */
     private var gestures: EdgeGestures? = null
     private val motion = SheetMotion()
-    /** From an opening's begin until its end is asked for. Under [sheetLock]. */
-    private var sheetUp = false
+    /** From an opening's begin until its end is asked for. Written under [sheetLock]; [forwardOpen] reads it off it. */
+    @Volatile private var sheetUp = false
     /** begin() asked for and not yet run on [sheetClock]. Under [sheetLock]. */
     private var beginPending = false
     /** This finger is moving the sheet (a pull or a drag on it). Under [sheetLock]. */
@@ -1894,7 +2175,8 @@ class RearUserService : IRearService.Stub {
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
             s.dpiValues(portalDpi)
-            s.dpiDefault(densityDefault)
+            s.dpiDefault(sliderDefault())
+            s.keepRight(guest?.let { it.pkg in portalConfined } == true)
             s.grid(portalGrid)
             s.names(portalNames)
             shellSheet = s
@@ -1904,7 +2186,7 @@ class RearUserService : IRearService.Stub {
             // And the grid and the names: a payload between the first and here told no sheet.
             s.grid(portalGrid)
             s.names(portalNames)
-            s.dpiDefault(densityDefault)
+            s.dpiDefault(sliderDefault())
             syncSheetGuest()
             return s
         }
@@ -1938,10 +2220,21 @@ class RearUserService : IRearService.Stub {
         sheetGuestOnTop = g?.sheetOnTop
         shellSheet?.guest(sheetGuestOnTop, g?.pkg)
         shellSheet?.guestIcon(g?.pkg?.let { guestIconOf(it) })
+        shellSheet?.dpiDefault(sliderDefault())
+        syncSheetKeepRight()
         // An open sheet's stops follow: the slider's scroll comes with a guest and goes with it.
         // On the clock, with the settle frames it may start, not on whichever thread this is.
         if (was != sheetGuestOnTop) runCatching { sheetClock.execute { restop() } }
     }
+
+    /** The sheet's "Keep right of the cameras" as the guest's now is. */
+    private fun syncSheetKeepRight() {
+        shellSheet?.keepRight(guest?.let { it.pkg in portalConfined } == true)
+    }
+
+    /** What the DPI slider stands at for a guest with none of its own: its private display's, or the rear's as read. */
+    private fun sliderDefault(): Int? =
+        if (guest?.onPrivate == true) RearDensity.privateDefault(geometry) else densityDefault
 
     /** An open sheet's stops, its pages and its buttons as the guest now has them. On [sheetClock]. */
     private fun restop() = runCatching {
@@ -2034,6 +2327,16 @@ class RearUserService : IRearService.Stub {
     private val guestHold = GuestHold()
     private val backLock = DisplayWakeLock("AiUsage:guest-hold")
     private val backGuard = BackGuard()
+    /**
+     * A private guest's display held awake for as long as the back is, one lock in step with the
+     * other. It has a power group of its own and so its own screen timeout (it may be shorter than
+     * the hold's thirty seconds), and no input of its own but what we inject. Only for that long:
+     * a lit display of any group keeps the phone out of suspend, so never for its whole life.
+     */
+    private val privateLock = DisplayWakeLock("AiUsage:private-display")
+    private var privateLockHeld = false
+    /** The last the hold's look saw of a private guest and the rear's light: chrome goes with an edge of that. Under [holdLock]. */
+    private var privateLight: Pair<Int, Boolean>? = null
     private var holdListening = false
     private val doubleTaps = GuestHold.DoubleTaps()
     /** Mirrors [GuestHold.held] for the touch path, which takes no lock. */
@@ -2091,6 +2394,9 @@ class RearUserService : IRearService.Stub {
                 val now = android.os.SystemClock.elapsedRealtime()
                 // No guest on top: no need to ask the display.
                 val lit = if (onTop) rearLit(display) else null
+                val g = guest
+                val onPrivate = onTop && g?.onPrivate == true
+                if (onTop) privateLit = lit != false
                 val s = guestHold.step(
                     guestOnTop = onTop,
                     rearLit = lit,
@@ -2099,7 +2405,8 @@ class RearUserService : IRearService.Stub {
                     // Its opening counts as a touch: held from the moment it is up (GuestHold.openedAt).
                     lastTouchAt = maxOf(lastRearTouchAt, guestHold.openedAt(onTop, lit, now)),
                     // With the guard on a double tap is the app's: no sleep to get out of the way of.
-                    doubleTapAt = if (backGuard.on) 0L else lastDoubleTapAt,
+                    // On a private display likewise: the panel under it has the focus, and its flag.
+                    doubleTapAt = if (backGuard.on || onPrivate) 0L else lastDoubleTapAt,
                     now = now,
                 )
                 when (s.act) {
@@ -2119,7 +2426,10 @@ class RearUserService : IRearService.Stub {
                 }
                 // A double tap is the app's while it is on top of a lit back. Dark, the guard
                 // goes: it takes the rear's touch double tap with it, and that is what wakes it.
-                backGuard.set(GuestHold.guards(onTop, lit))
+                // Never for one on a private display: the panel's focus is its guard (PrivateDisplay).
+                backGuard.set(GuestHold.guards(onTop && !onPrivate, lit))
+                syncPrivateLock(if (onPrivate) g else null)
+                if (onPrivate) privateLightEdge(g!!, lit)
                 syncHoldListening()
                 holdHandler.removeCallbacks(holdCheck)
                 if (s.recheckInMs >= 0L) holdHandler.postDelayed(holdCheck, s.recheckInMs)
@@ -2127,6 +2437,31 @@ class RearUserService : IRearService.Stub {
         } catch (e: Throwable) {
             Log.w(TAG, "portal: the guest hold's look failed", e)
         }
+    }
+
+    /** Under [holdLock]. [g]: the guest on a private display on top, if any. */
+    private fun syncPrivateLock(g: Guest?) {
+        val want = holdTaken && g != null
+        if (want == privateLockHeld) return
+        if (want) privateLockHeld = privateLock.acquire(g!!.privateDisplay)
+        else { privateLock.release(); privateLockHeld = false }
+    }
+
+    /**
+     * The rear going dark under a guest on a private display, or lit again, as the display listener
+     * has it (nothing covers it to go by, as for one on the rear): the chrome follows, the layer and
+     * the app stay as they are. Woken if its own display slept meanwhile. Under [holdLock], whose
+     * calls here take only the chrome's own locks.
+     */
+    private fun privateLightEdge(g: Guest, lit: Boolean?) {
+        if (lit == null) return
+        val was = privateLight
+        privateLight = g.task to lit
+        if (!g.placed || was == null || was.first != g.task || was.second == lit) return
+        if (lit) {
+            chromeShow()
+            privateDisplay?.ensureAwake()
+        } else chromeHide()
     }
 
     /** Under [holdLock]. */
@@ -2158,6 +2493,7 @@ class RearUserService : IRearService.Stub {
         try {
             synchronized(holdLock) {
                 backGuard.set(false)
+                syncPrivateLock(null)
                 syncHoldListening()
                 if (!holdTaken) return
                 holdHandler.removeCallbacks(holdCheck)
@@ -2185,6 +2521,11 @@ class RearUserService : IRearService.Stub {
      * Xiaomi's strip's arrives and does nothing (spec "Back on the rear"). Only the guest's:
      * when the focused window is another task's (the front's app) nothing is invoked. One
      * line logged per Back.
+     *
+     * ON A PRIVATE DISPLAY a key is the way, first: that skip of MIUI's is for displayId 1, and the
+     * display's own focus (OWN_FOCUS) takes it to the app's window where the system navigation asks
+     * after the globally focused one, which there is the panel's or the front's. Only if the key
+     * cannot be sent, the system navigation, which then most likely says it is not the guest's.
      */
     private fun sendBackOnce() {
         val g = guest ?: return
@@ -2192,6 +2533,12 @@ class RearUserService : IRearService.Stub {
             backWorker.execute {
                 // Still the guest it was swiped for, on top.
                 val now = guest?.takeIf { it.task == g.task && it.onTop } ?: return@execute
+                if (now.onPrivate && privateDisplay?.takeIf { it.displayId == now.privateDisplay }?.back() == true) {
+                    Log.i(TAG, "portal: Back for ${now.pkg} (task ${now.task}): a key on display ${now.privateDisplay}")
+                    backedTask = now.task
+                    afterBack(now, type = -1)
+                    return@execute
+                }
                 val o = SystemBack.invoke(now.task, geometry)
                 val what = when {
                     o.error != null -> "failed — ${o.error}"
@@ -2248,7 +2595,9 @@ class RearUserService : IRearService.Stub {
                 }
             }
             // Still there: a Back within the app, or one that moved its task behind the panel.
-            when (PortalAction.afterBack(rearTop(g), g.pkg, PKG)) {
+            val after = if (g.onPrivate) PortalAction.afterPrivateBack(GuestTask.byId(exec("am stack list"), g.task)?.visible)
+                else PortalAction.afterBack(rearTop(g), g.pkg, PKG)
+            when (after) {
                 PortalAction.AfterBack.ON_TOP -> if (closing && guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                 PortalAction.AfterBack.BEHIND -> synchronized(placing) {
                     // Under the lock: a launch or a button since may have changed the guest.
@@ -2267,6 +2616,7 @@ class RearUserService : IRearService.Stub {
     /** [g]'s task still on the rear — or on the front behind the keyguard, as Panel hides it. */
     private fun guestStillOnRear(g: Guest): Boolean {
         val at = GuestTask.byId(exec("am stack list"), g.task)?.display
+        if (g.onPrivate) return at == g.privateDisplay
         return at == rearDisplay() || (at == 0 && g.hiddenOnFront)
     }
 
@@ -2437,6 +2787,7 @@ class RearUserService : IRearService.Stub {
         when (val hit = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.page)) {
             is PortalSheet.Hit.Button -> hit.index
             PortalSheet.Hit.SliderValue -> PortalSheetPainter.PRESS_VALUE
+            PortalSheet.Hit.Toggle -> PortalSheetPainter.PRESS_TOGGLE
             PortalSheet.Hit.Slider -> {
                 val track = layout.slider?.track
                 val pkg = sliderGuest()
@@ -2509,6 +2860,16 @@ class RearUserService : IRearService.Stub {
                 val pkg = sliderGuest() ?: return
                 if (portalDpi.containsKey(pkg)) setAppDpi(pkg, null)
             }
+            // Shown switched at once, saved through the app, and the app relaunched in its new
+            // place when the sheet is down: not under it, whose picture a cover would be of.
+            PortalSheet.Hit.Toggle -> {
+                val pkg = sliderGuest()
+                if (pkg == null) steady(atMs)
+                else {
+                    setAppConfined(pkg, pkg !in portalConfined)
+                    shutSheet(atMs) { synchronized(placing) { relaunchIfMoved("switched on the back") } }
+                }
+            }
             PortalSheet.Hit.Blank -> steady(atMs)
             PortalSheet.Hit.Outside -> shutSheet(atMs, null)
         }
@@ -2518,7 +2879,7 @@ class RearUserService : IRearService.Stub {
     private fun sliderGuest(): String? = guest?.takeIf { it.sheetOnTop != null }?.pkg
 
     /** The thumb's DPI for [pkg] as it stands: its own, else the display's as read, else as its geometry says. */
-    private fun thumbOf(pkg: String) = portalDpi[pkg] ?: densityDefault ?: geometry.dpi
+    private fun thumbOf(pkg: String) = portalDpi[pkg] ?: sliderDefault() ?: geometry.dpi
 
     /**
      * A sideways drag begins: on the settled sheet's slider row it drags the slider's thumb,
@@ -2620,6 +2981,9 @@ class RearUserService : IRearService.Stub {
      * have put it, neither does; a refused `am start` of the panel changes nothing.
      * - Front: `move-stack <guest> 0`, Close: `am force-stop` — either way the guest ends and
      *   the panel comes back ([guestAction]).
+     * - On a private display: Panel and Resume only hide and show our layers (HIDE_LAYERS,
+     *   SHOW_LAYERS), the app alive on its display; Front and Close are the same, and its display
+     *   goes when the guest ends — after the move, so that it is not destroyed with it.
      *
      * The guest's DPI stays through Panel and Resume (kept while the guest lives); the frame
      * follows whether it is on top.
@@ -2635,7 +2999,7 @@ class RearUserService : IRearService.Stub {
                 Log.i(TAG, "portal sheet: ${if (guestOnTop) "Panel" else "Resume"} — the guest is ${if (g.onTop) "on top" else "behind"} already; nothing to do")
                 return
             }
-            PortalAction.strip(index, g.onTop, g.hiddenOnFront) { keyguardShowing() }
+            PortalAction.strip(index, g.onTop, g.hiddenOnFront, g.onPrivate) { keyguardShowing() }
         } ?: return
         Log.i(TAG, "portal sheet: $step")
         when (step) {
@@ -2664,10 +3028,36 @@ class RearUserService : IRearService.Stub {
                     true
                 }
             }
+            // Nothing moves: the panel is under the layers, and comes out from under them.
+            PortalAction.Step.HIDE_LAYERS -> synchronized(placing) {
+                val g = guest ?: return
+                covered("the panel", { panelShown(g) }) {
+                    markOnTop(g.task, false)
+                    guestBehind(g.pkg)
+                    true
+                }
+            }
+            PortalAction.Step.SHOW_LAYERS -> synchronized(placing) {
+                val g = guest ?: return
+                val area = GuestShape.appArea(geometry)
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, g.privateDisplay, area) }, { stripFor() }) {
+                    // Back at its root may have put its task behind on its display: started again.
+                    if (GuestTask.byId(exec("am stack list"), g.task)?.visible == false) {
+                        launcherOf(g.pkg)?.let { exec("am start --display ${g.privateDisplay} -n $it") }
+                    }
+                    privateDisplay?.ensureAwake()
+                    guestOnTopAgain(g, "Resume", showFrame = false)
+                    true
+                }
+                if (back) {
+                    if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
+                    wake(rearDisplay())
+                }
+            }
             PortalAction.Step.UNHIDE -> synchronized(placing) {
                 val g = guest ?: return
                 // The frame after the reveal, not before the guest is seen.
-                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { ensurePlaced(g.task, g.pkg, "Resume"); stripFor(g.pkg) }) {
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay()) }, { stripFor() }) {
                     unhide("Resume", showFrame = false)
                 }
                 if (back) {
@@ -2677,7 +3067,7 @@ class RearUserService : IRearService.Stub {
             }
             PortalAction.Step.PANEL_STEPS_BACK -> synchronized(placing) {
                 val g = guest ?: return
-                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { ensurePlaced(g.task, g.pkg, "Resume"); stripFor(g.pkg) }) changed@{
+                val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay()) }, { stripFor() }) changed@{
                     // The panel moves its own task to the back (RearActivity.ACTION_PORTAL_STEP_BACK):
                     // the guest is on top without leaving the rear, locked or not.
                     // Through the app (IRearEvents): the panel's receiver takes only the app.
@@ -2709,7 +3099,7 @@ class RearUserService : IRearService.Stub {
                         Log.i(TAG, "portal: the panel did not step back — ${g.pkg} through the front")
                         moveToDisplay(g.task, 0)
                         if (!moveToDisplay(g.task, rearDisplay())) return@changed false
-                        shapeGuest(g.task, g.pkg, "back from the front", verify = false)
+                        shapeGuest(g.task, g.pkg, "back from the front")
                     } else if (top != g.pkg) {
                         Log.i(TAG, "portal: after the step back the rear's top is ${top ?: "unknown"} — trusting it")
                     }
@@ -2731,7 +3121,14 @@ class RearUserService : IRearService.Stub {
                     guest == null
                 }
             }
-            PortalAction.Step.CLOSE -> guestAction("close")
+            // On a private display there is no close to see, only a layer gone: covered too.
+            PortalAction.Step.CLOSE -> if (guest?.onPrivate != true) guestAction("close") else synchronized(placing) {
+                val g = guest ?: return
+                covered("the panel", { panelShown(g) }) {
+                    guestAction("close")
+                    guest == null
+                }
+            }
         }
     }
 
@@ -2763,8 +3160,7 @@ class RearUserService : IRearService.Stub {
     private fun unhide(why: String, showFrame: Boolean = true): Boolean {
         val g = guest?.takeIf { it.hiddenOnFront } ?: return false
         if (!moveToDisplay(g.task, rearDisplay())) return false
-        // Covered (no frame yet), its reveal checks where it is drawn; uncovered, here.
-        shapeGuest(g.task, g.pkg, "back from the front", verify = showFrame)
+        shapeGuest(g.task, g.pkg, "back from the front")
         guestOnTopAgain(g, "back from the front: $why", showFrame)
         return true
     }
@@ -2851,7 +3247,11 @@ class RearUserService : IRearService.Stub {
     override fun setEvents(events: IRearEvents?) {
         this.events = events
         // Changes made while nobody listened go now.
-        if (events != null) scheduleDpiFlush()
+        if (events != null) {
+            scheduleDpiFlush()
+            flushConfined()
+            if (panelCovered) tellPanelCovered()
+        }
     }
 
     /** [portalDpi] set to what [make] returns (under [dpiLock]), and the sheet told. Any thread. */
@@ -2873,6 +3273,34 @@ class RearUserService : IRearService.Stub {
         // time; each run reads the latest map, so a quick run of changes ends at the last one.
         if (guest?.pkg == pkg) runCatching { densityWorker.execute { syncDensity("$pkg set on the back") } }
         scheduleDpiFlush()
+    }
+
+    /** [pkg]'s "Keep right of the cameras" set from the back. Under [sheetLock], on the reader: nothing here waits. */
+    private fun setAppConfined(pkg: String, on: Boolean) {
+        synchronized(dpiLock) {
+            confinedEdits.put(pkg, on, android.os.SystemClock.uptimeMillis())
+            portalConfined = if (on) portalConfined + pkg else portalConfined - pkg
+        }
+        Log.i(TAG, "portal sheet: $pkg ${if (on) "kept right of the cameras" else "on the whole rear"}, from the back")
+        syncSheetKeepRight()
+        flushConfined()
+    }
+
+    /**
+     * The switches made on the back handed to the app, off the caller's thread. With nobody
+     * listening they wait for [setEvents]; one the listener died under is due again, as a DPI's.
+     */
+    private fun flushConfined() {
+        runCatching {
+            pokeWorker.execute {
+                val ev = events ?: return@execute
+                val due = synchronized(dpiLock) { confinedEdits.due(android.os.SystemClock.uptimeMillis()) }
+                for ((pkg, on) in due) runCatching { ev.onPortalConfined(pkg, on) }.onFailure {
+                    Log.w(TAG, "portal: camera setting for $pkg not handed on: ${it.message}")
+                    if (it is android.os.DeadObjectException) synchronized(dpiLock) { confinedEdits.unsend(pkg, on) }
+                }
+            }
+        }
     }
 
     private val densityWorker by lazy {
@@ -3174,7 +3602,9 @@ class RearUserService : IRearService.Stub {
                     // The App Portal's guest first: its own rule (GuestGate), and the usual
                     // recovery below only when that rule says so.
                     val g = guest
-                    if (g != null) {
+                    if (g != null && g.onPrivate) {
+                        if (privateTick(g, displayId)) continue
+                    } else if (g != null) {
                         val entry = GuestTask.byId(exec("am stack list"), g.task)
                         // The guest's window may belong to another package — a permission
                         // dialog, a chooser — started into its task; on top, that is still
@@ -3184,10 +3614,8 @@ class RearUserService : IRearService.Stub {
                         // known: SurfaceFlinger shortens long layer names with [...], and a
                         // shortened one is matched back to whichever of these it starts.
                         val known = listOfNotNull(g.pkg, PKG, taskTop)
-                        // One dump for both: what is on top, and where the guest is drawn.
-                        val sf = exec("dumpsys SurfaceFlinger")
                         val top = SurfaceDump.topPackage(
-                            sf,
+                            exec("dumpsys SurfaceFlinger"),
                             isRear = { id -> if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX) },
                             known = known,
                         ).let { if (it != null && it == taskTop) g.pkg else it }
@@ -3212,29 +3640,19 @@ class RearUserService : IRearService.Stub {
                                 // Every tick, but a comparison unless something changed (or a
                                 // refused command is due a retry).
                                 syncDensity("${g.pkg} is on top")
-                                // Its bounds drifted from its shape (a relayout, the app's own
-                                // doing): shaped again. Or the task's bounds are right and its
-                                // surface is not (seen: drawn at x 0): put right where it is
-                                // drawn. Under the lock, if it is still the guest.
-                                // A few times, not forever: a guest that will not take its shape
-                                // (one refusing multi-window keeps fullscreen bounds) or will not
-                                // be drawn there is left as it is until its task, shape or density
-                                // changes (SurfacePlace.GiveUp) — not reshaped every tick.
-                                val shape = shapeOf(g.pkg)
+                                // Its bounds drifted from the display's (a relayout, the app's own
+                                // doing): shaped again. Under the lock, if it is still the guest.
+                                // A few times, not forever: a guest that will not take it is left
+                                // as it is until its task or density changes (GuestShape.GiveUp).
                                 val key = placeKey(g.task, g.pkg)
-                                if (GuestShape.drifted(entry?.bounds, shape)) {
+                                if (GuestShape.drifted(entry?.bounds, GuestShape.full(geometry))) {
                                     if (driftTries.attempt(key)) synchronized(placing) {
                                         if (guest?.task == g.task) shapeGuest(g.task, g.pkg, "its bounds drifted to ${entry?.bounds}")
                                     } else if (driftTries.announce(key)) {
                                         Log.w(TAG, "portal: ${g.pkg}'s bounds still ${entry?.bounds} after $PLACE_TRIES reshapes — " +
-                                            "left as they are until its task, shape or density changes")
+                                            "left as they are until its task or density changes")
                                     }
-                                } else {
-                                    if (entry?.bounds != null) driftTries.placed(key)
-                                    if (!placeTries.givenUp(key) && SurfacePlace.misplaced(SurfacePlace.left(sf, coverStack, g.pkg), shape)) synchronized(placing) {
-                                        if (guest?.task == g.task) ensurePlaced(g.task, g.pkg, "the keep-alive saw it drawn out of place", sf)
-                                    }
-                                }
+                                } else if (entry?.bounds != null) driftTries.placed(key)
                                 if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                                 continue
                             }
@@ -3565,10 +3983,13 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val GUEST_SETTLE_LIMIT_MS = 6_000L
         /** Between looks for an arriving guest's first draw: each look is a dumpsys of its own (~100 ms). */
         private const val DRAWN_POLL_MS = 20L
-        /** A shaped guest's surface is read this long after a resize, for where it is drawn. */
-        private const val PLACE_SETTLE_MS = 120L
-        /** Goes at putting a guest right — nudges, or the keep-alive's reshapes — before it is left as it is (logged once). */
+        /** The keep-alive's goes at reshaping a guest before it is left as it is (logged once). */
         private const val PLACE_TRIES = 3
+        /** A start on a private display that shows no task by then is taken as refused. */
+        private const val PRIVATE_NO_TASK_MS = 2_000L
+        /** How long a task removed for a relaunch is waited for, in looks. */
+        private const val RELAUNCH_POLLS = 10
+        private const val RELAUNCH_POLL_MS = 50L
         private const val STRIP_SAMPLE_SCALE = 0.25f
         private const val BLACK = 0xFF000000.toInt()
         /** The sheet's settle, a frame at a time. */

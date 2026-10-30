@@ -240,7 +240,7 @@ class PortalSheetTest {
         // On the screen: the row's content y less the scroll.
         fun y(b: PortalSheet.Box) = b.centerY - STRIP
         assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.centerX, y(s.track), STRIP, 0))
-        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.left - PortalSheet.THUMB / 2 + 1f, FULL - 4f, STRIP, 0))
+        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.left - PortalSheet.THUMB / 2 + 1f, FULL - 4f - PortalSheet.TOGGLE_ROW, STRIP, 0))
         assertEquals(Hit.SliderValue, PortalSheet.hit(l, s.value.centerX, y(s.value), STRIP, 0))
         assertEquals(Hit.Blank, PortalSheet.hit(l, s.icon.centerX, y(s.icon), STRIP, 0))
         // The grid moved up with it: a cell is hit where it now stands.
@@ -297,11 +297,12 @@ class PortalSheetTest {
 
     @Test fun `a sideways drag on the slider's row moves the slider, anywhere above it turns the pages`() {
         val l = layout(30, guest = true)
-        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f, STRIP))
+        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f - PortalSheet.TOGGLE_ROW, STRIP))
+        assertEquals(Swipe.NONE, PortalSheet.swipe(l, FULL - 20f, STRIP))
         assertEquals(Swipe.PAGES, PortalSheet.swipe(l, FULL - 20f, 0f))
         assertEquals(Swipe.PAGES, PortalSheet.swipe(l, 200f, STRIP))
         assertEquals(Swipe.NONE, PortalSheet.swipe(layout(12), 200f, 0f))
-        assertEquals(Swipe.SLIDER, PortalSheet.swipe(layout(12, guest = false), FULL - 20f, STRIP))
+        assertEquals(Swipe.SLIDER, PortalSheet.swipe(layout(12, guest = false), FULL - 20f - PortalSheet.TOGGLE_ROW, STRIP))
     }
 
     // -- motion ----------------------------------------------------------------------------
@@ -384,5 +385,22 @@ class PortalSheetTest {
         assertEquals(608f, layout().pageStride, 0.01f)
         assertEquals(Panel.WIDTH - proMax, layout(lensRight = proMax).pageStride, 0.01f)
         assertEquals(layout(30, lensRight = proMax).slots.minOf { it.left } - EdgeFade.BAND, layout(30, lensRight = proMax).pagesLeft, 1f)
+    }
+
+    @Test fun `the switch's row stands under the slider, in the strip, and is the switch's whole width`() {
+        val l = PortalSheet.layout(dev.kb896.aiusage.data.PortalGrid.R3C4, 12, true, 296f)
+        val s = l.slider!!
+        val t = l.toggle!!
+        assertTrue(t.row.top >= s.track.bottom)
+        assertTrue(t.row.bottom <= FULL + STRIP)
+        assertTrue(t.row.bottom - STRIP <= Panel.HEIGHT)
+        assertEquals(Hit.Toggle, PortalSheet.hit(l, t.row.left + 1f, t.row.centerY - STRIP, STRIP, 0))
+        assertEquals(Hit.Toggle, PortalSheet.hit(l, t.knob.centerX, t.knob.centerY - STRIP, STRIP, 0))
+        assertEquals(Hit.Blank, PortalSheet.hit(l, t.row.right + 1f, t.row.centerY - STRIP, STRIP, 0))
+        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.centerX, s.track.centerY - STRIP, STRIP, 0))
+    }
+
+    @Test fun `no switch without a guest`() {
+        assertEquals(null, PortalSheet.layout(dev.kb896.aiusage.data.PortalGrid.R3C4, 12, null, 296f).toggle)
     }
 }

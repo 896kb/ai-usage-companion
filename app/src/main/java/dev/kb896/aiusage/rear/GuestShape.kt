@@ -1,62 +1,82 @@
 package dev.kb896.aiusage.rear
 
 /**
- * Where a guest app sits on the rear: the whole display, or — for an app asked to "Keep
- * right of the cameras" (PanelConfig.portalConfined, experimental) — right of the lenses. Pure; RearUserService
- * applies it (TaskShaper, else `am task resize`) after every move onto the rear.
+ * Where a guest app sits on the rear: the whole of display 1, the default, or — for an app asked
+ * to "Keep right of the cameras" (PanelConfig.portalConfined) — right of the lenses, by being on a
+ * display of its own (PrivateDisplay). Pure; RearUserService applies it.
  *
- * Fullscreen, an app drew under the lenses ("my store app shows fullscreen", "the map runs
- * under the cameras"). Measured by hand on the phone: started in multi-window
- * (`am start --windowingMode 6`), moved to display 1, THEN resized to [confined] — resized
- * on display 0 first, it landed at x 0–608 — the app lays out in x 296–904. A task left in
- * multi-window is reused by the app's next launch, so the shape is asserted on every
- * launch, and wherever a task can lose it (back from the front, a density change, the
- * keep-alive seeing it [drifted]).
+ * It used to be multi-window bounds on display 1 for that, nudged and re-asserted wherever they
+ * could be lost. On HyperOS such a task read x 296–904 and was composed at x 0–608, whatever it
+ * was nudged with (2026-10-28 to 30), and it is gone. What is left of a shape is a full-screen
+ * guest's, which is only ever the display's own: TaskShaper asserts that after every move onto the
+ * rear, since a task left in multi-window by anything is reused so by the app's next launch.
  */
 object GuestShape {
 
-    /** WindowConfiguration's windowing modes. */
+    /** WindowConfiguration's windowing mode. */
     const val FULLSCREEN = 1
-    const val MULTI_WINDOW = 6
 
     data class Bounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
         val width get() = right - left
         val height get() = bottom - top
     }
 
-    /** A task's [mode] and its [bounds] on the rear. */
-    data class Shape(val mode: Int, val bounds: Bounds) {
-        val confined get() = mode == MULTI_WINDOW
-    }
-
     /**
-     * Right of the lens strip on [rear], in its real pixels: [296,0][904,572] on the 17 Pro.
-     * The lenses keep their pixels on a wider display, so a Pro Max's is wider, not shifted.
+     * Right of the lens strip on [rear], in its real pixels: [296,0][904,572] on the 17 Pro. The
+     * lenses keep their pixels on a wider display, so a Pro Max's is wider, not shifted. A private
+     * display's size, and where its layer stands.
      */
-    fun confined(rear: RearGeometry) = Bounds(rear.cutoutPx, 0, rear.widthPx, rear.heightPx)
+    fun appArea(rear: RearGeometry) = Bounds(rear.cutoutPx, 0, rear.widthPx, rear.heightPx)
 
     /** The whole of [rear]: what a fullscreen task's bounds read there. */
     fun full(rear: RearGeometry) = Bounds(0, 0, rear.widthPx, rear.heightPx)
 
-    fun of(fullscreen: Boolean, rear: RearGeometry): Shape =
-        if (fullscreen) Shape(FULLSCREEN, full(rear)) else Shape(MULTI_WINDOW, confined(rear))
+    /** Whether [pkg] goes on a private display, given the apps asked to keep right of the cameras. Opt-in. */
+    fun onPrivateDisplay(pkg: String, confinedApps: Set<String>): Boolean = pkg in confinedApps
 
     /**
-     * [pkg]'s shape, given the apps asked to keep right of the cameras: fullscreen unless it is
-     * one of them. Opt-in, not the default (2026-10-29): a confined guest's task reads
-     * [confined] but HyperOS composes it at x 0–608 — the multi-window task is organised by
-     * its split screen, which never offsets it on display 1 — and no nudge (resize, CHANGE
-     * transition, freeform) moved it reliably.
+     * A full-screen guest's task bounds as read ([current], null when unread) are not the
+     * display's ([full] of the real rear): to be shaped again.
      */
-    fun forApp(pkg: String, confinedApps: Set<String>, rear: RearGeometry): Shape = of(pkg !in confinedApps, rear)
+    fun drifted(current: Bounds?, full: Bounds): Boolean = current != null && current != full
 
     /**
-     * The task's bounds as read ([current], null when unread) are not [shape]'s: it is to be
-     * shaped again. A fullscreen guest's are the display's own ([full] of the real rear), so
-     * it never reads as drifted for being on a display bigger than the 17 Pro's.
+     * When to stop putting a guest right. A guest the shell cannot shape — one in size compat
+     * keeps its own bounds — was reshaped every keep-alive tick, forever, each time under the
+     * launch's lock. So each [K] (the service's: the task and its density) gets [tries] goes
+     * ([attempt]) until it is seen right ([placed]); after that it is left as it is until the key
+     * changes. Any thread.
      */
-    fun drifted(current: Bounds?, shape: Shape): Boolean = current != null && current != shape.bounds
+    class GiveUp<K>(private val tries: Int) {
+        private var key: K? = null
+        private var goes = 0
+        private var announced = false
 
-    /** What `am start` adds for [shape]: started in multi-window when it is to be confined. */
-    fun launchFlags(shape: Shape): String = if (shape.confined) "--windowingMode $MULTI_WINDOW " else ""
+        /** One more go at [key]: true while it may be had, false once [tries] were had without a [placed]. */
+        @Synchronized
+        fun attempt(key: K): Boolean {
+            if (this.key != key) { this.key = key; goes = 0; announced = false }
+            if (goes >= tries) return false
+            goes++
+            return true
+        }
+
+        /** [key] is right now: it may be tried again when it next goes wrong. */
+        @Synchronized
+        fun placed(key: K) {
+            if (this.key == key) { this.key = null; goes = 0; announced = false }
+        }
+
+        /** Whether [key] has had all its goes. */
+        @Synchronized
+        fun givenUp(key: K): Boolean = this.key == key && goes >= tries
+
+        /** True the first time it is asked for [key] given up: the giving up logged once. */
+        @Synchronized
+        fun announce(key: K): Boolean {
+            if (!givenUp(key) || announced) return false
+            announced = true
+            return true
+        }
+    }
 }

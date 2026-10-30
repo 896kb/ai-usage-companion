@@ -646,8 +646,9 @@ data class PanelConfig(
     val portalAppNames: Boolean = true,
     /**
      * App Portal: apps kept right of the cameras on the rear ("Keep right of the cameras" in
-     * the app's sheet on the front, experimental), by package. Every other guest has the whole
-     * display (GuestShape). Empty: all fullscreen. Replaces the opt-out portalFullscreen, which
+     * the app's sheet on the front and under the DPI slider on the back), by package: each runs on
+     * a private display (PrivateDisplay). Every other guest has the whole of display 1. Empty:
+     * all fullscreen. Replaces the opt-out portalFullscreen, which
      * an older config may still carry — ignored.
      */
     val portalConfined: Set<String> = emptySet(),

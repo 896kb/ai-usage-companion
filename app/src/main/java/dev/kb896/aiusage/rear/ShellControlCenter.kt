@@ -71,7 +71,10 @@ class ShellControlCenter(
     /** Where the latest finger landed, for the opening pull. Under [lock]. */
     private var downY = 0f
     /** Asked up (begin queued or done) and not yet ended. Under [lock]. */
-    private var up = false
+    @Volatile private var up = false
+
+    /** Up, or on its way: for the touch reader to read with no lock (a private display's fingers stop). */
+    val isUp: Boolean get() = up
     /** begin() queued on [clock] and not yet run. Under [lock]. */
     private var beginPending = false
     /** Its sheet, made with the face (off the touch reader: the layer stack is a dumpsys). */

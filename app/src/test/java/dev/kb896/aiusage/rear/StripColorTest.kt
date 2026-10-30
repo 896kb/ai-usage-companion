@@ -64,9 +64,9 @@ class StripColorTest {
         assertEquals(StripColor.FAST_MS, p.next(changed = false))
     }
 
-    @Test fun `the sample is the guest's first columns right of the lenses, the display's whole height`() {
-        assertEquals(GuestShape.Bounds(296, 0, 302, 572), StripColor.sample(RearGeometry.PRO17))
-        assertEquals(GuestShape.Bounds(296, 0, 302, 596), StripColor.sample(RearGeometry(976, 596, 296, 110, 450)))
+    @Test fun `the sample is the first columns of the app's layer, the display's whole height`() {
+        assertEquals(GuestShape.Bounds(0, 0, 6, 572), StripColor.sample(RearGeometry.PRO17))
+        assertEquals(GuestShape.Bounds(0, 0, 6, 596), StripColor.sample(RearGeometry(976, 596, 296, 110, 450)))
     }
 
     @Test fun `the strip itself is the lens column, the display's whole height`() {

@@ -56,6 +56,8 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
     /** The apps' DPI as the shell has it now (PanelConfig.portalDpi and the back's changes). */
     @Volatile private var dpiValues: Map<String, Int> = emptyMap()
     @Volatile private var dpiDefault: Int? = null
+    /** The guest is kept right of the cameras: its switch under the slider. */
+    @Volatile private var keepRight = false
     @Volatile private var look = Look(PanelTheme.GLASS, null)
     @Volatile private var face: PanelType.Face = face
 
@@ -167,7 +169,14 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         overlay.changed()
     }
 
-    /** The rear display's own density, shown for an app without one of its own; null while unknown. */
+    /** Whether the guest's "Keep right of the cameras" switch is on. */
+    fun keepRight(on: Boolean) {
+        if (keepRight == on) return
+        keepRight = on
+        overlay.changed()
+    }
+
+    /** The density shown for an app without one of its own (the rear's, or a private display's default); null while unknown. */
     fun dpiDefault(dpi: Int?) {
         if (dpiDefault == dpi) return
         dpiDefault = dpi
@@ -239,7 +248,7 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
             sheetPainter.draw(
                 canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, pressed = pressed,
-                guestIcon = guestIcon, slider = slider, names = names,
+                guestIcon = guestIcon, slider = slider, names = names, keepRight = keepRight,
             )
         }
     }

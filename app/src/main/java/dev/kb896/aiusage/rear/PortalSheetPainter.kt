@@ -16,7 +16,7 @@ import dev.kb896.aiusage.data.PanelTheme
 
 /**
  * Paints the App Portal's sheet — the buttons, the pinned apps' icons and names a page at
- * a time with their page dots, and the guest's DPI slider — over the blur SurfaceFlinger
+ * a time with their page dots, and the guest's DPI slider and camera switch — over the blur SurfaceFlinger
  * lays under the shell's layer. Needs no View, Context or Resources: the shell draws with
  * it into a surface's hardware canvas from app_process, and the front's preview of the
  * portal (ui.PortalSheetPreview) into its view's. Everything comes in: the [theme],
@@ -106,7 +106,8 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * the pinned apps', standing straight on the blur with nothing behind them, their names
      * left out without [names] (the layout's icons then grow into their room); with a guest
      * the layout's three buttons stand above them, [guestOnTop] picking Panel or Resume for
-     * the first, and the DPI [slider] under them, [guestIcon] at its start.
+     * the first, and the DPI [slider] under them, [guestIcon] at its start, and under that
+     * the "Keep right of the cameras" switch, on with [keepRight].
      *
      * The contents arrive as the control centre's do (Arrival, on [progress]): fading in as
      * one layer, sliding up into place (PortalSheet.arrivalShift), each piece — a button, an
@@ -132,6 +133,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, pressed: Int = -1,
         guestIcon: Bitmap? = null, slider: SliderLook? = null, names: Boolean = true,
+        keepRight: Boolean = false,
     ) {
         val arrived = Arrival.of(progress)
         if (arrived <= 0.004f) return
@@ -150,6 +152,8 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             }
             val s = layout.slider
             if (s != null && slider != null && scroll > 0.5f) drawSlider(canvas, s, dy, g, slider, pressed, guestIcon)
+            val t = layout.toggle
+            if (t != null && scroll > 0.5f) drawToggle(canvas, t, dy, g, keepRight, pressed)
         } finally {
             canvas.restoreToCount(saved)
         }
@@ -338,6 +342,45 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     }
 
     /**
+     * "Keep right of the cameras", [dy] down, grown to [g]: its row a button as the slider's value
+     * is, its words left of the switch, and the switch the front's, per theme as the slider is.
+     * GLASS: a capsule in the slider's grey, the front's accent when [on], its pill thumb white.
+     * ORIGINAL: square, the panel's TRACK, its green when on, the thumb its green off and its
+     * ground on.
+     */
+    private fun drawToggle(canvas: Canvas, t: PortalSheet.Toggle, dy: Float, g: Float, on: Boolean, pressed: Int) {
+        grown(canvas, t.row.centerX, t.row.centerY + dy, g) {
+            buttonRect.set(t.row.left, t.row.top + dy, t.row.right, t.row.bottom + dy)
+            drawButton(canvas, buttonRect, if (pressed == PRESS_TOGGLE) 0.5f else 0f, false)
+            val m = text.fontMetrics
+            val room = t.knob.left - t.row.left - 2 * PortalSheet.BUTTON_PAD
+            canvas.drawText(
+                ellipsize(PortalSheet.TOGGLE_LABEL, room), t.row.left + PortalSheet.BUTTON_PAD + room / 2,
+                t.row.centerY + dy - (m.ascent + m.descent) / 2f, text,
+            )
+            val glassy = theme.isGlass
+            val h = t.knob.height
+            val radius = if (glassy) h / 2 else 0f
+            buttonPaint.style = Paint.Style.FILL
+            buttonPaint.color = when {
+                on -> if (glassy) GLASS_ACCENT else Panel.Palette.WORK
+                else -> if (glassy) GLASS_TRACK else Panel.Palette.TRACK
+            }
+            fillRect.set(t.knob.left, t.knob.top + dy, t.knob.right, t.knob.bottom + dy)
+            canvas.drawRoundRect(fillRect, radius, radius, buttonPaint)
+            val inner = h - 2 * KNOB_INSET
+            val left = if (on) t.knob.right - KNOB_INSET - inner else t.knob.left + KNOB_INSET
+            buttonPaint.color = when {
+                glassy -> 0xFFFFFFFF.toInt()
+                on -> Panel.Palette.BG
+                else -> Panel.Palette.WORK
+            }
+            fillRect.set(left, t.knob.top + dy + KNOB_INSET, left + inner, t.knob.bottom + dy - KNOB_INSET)
+            canvas.drawRoundRect(fillRect, radius, radius, buttonPaint)
+        }
+    }
+
+    /**
      * The slider's track, its fill up to the thumb, and the thumb, [dy] down — the front's
      * sliders, at the rear's size. GLASS: GlassSlider's — a capsule track in its grey, filled
      * in the front's accent, and a pill thumb, white at rest and, held, one and a half times
@@ -419,6 +462,9 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         /** [draw]'s pressed: the slider's value, and its thumb held. */
         const val PRESS_VALUE = 10
         const val PRESS_THUMB = 11
+        /** [draw]'s pressed: "Keep right of the cameras"'s row. */
+        const val PRESS_TOGGLE = 12
+        private const val KNOB_INSET = 3f
 
         private const val SHADOW = 0xCC000000.toInt()
 

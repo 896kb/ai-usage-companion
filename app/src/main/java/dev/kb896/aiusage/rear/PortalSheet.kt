@@ -48,6 +48,8 @@ object PortalSheet {
         data object Slider : Hit
         /** The slider's value: a tap there is Default. */
         data object SliderValue : Hit
+        /** "Keep right of the cameras", its whole row: a tap switches it. */
+        data object Toggle : Hit
         /**
          * On the sheet, but on none of its controls — the slider's row off it, the dots' row off
          * its dots: nothing, and the sheet stays.
@@ -67,10 +69,12 @@ object PortalSheet {
     const val OPEN = PortalPull.TRAVEL
 
     /**
-     * The slider's row's height, and how far the open sheet scrolls to show it: the row and
-     * a margin round it, and no more.
+     * The slider's row's height with a margin round it, and under it the height of the switch's
+     * row ("Keep right of the cameras"). How far the open sheet scrolls is the two together.
      */
-    const val STRIP = 88f
+    const val SLIDER_ROW = 88f
+    const val TOGGLE_ROW = 72f
+    const val STRIP = SLIDER_ROW + TOGGLE_ROW
 
     /** Open and scrolled to the slider. */
     const val REVEALED = OPEN + STRIP
@@ -140,6 +144,14 @@ object PortalSheet {
     /** The slider's row: the guest's icon, the track, and the value. */
     data class Slider(val icon: Box, val track: Box, val value: Box)
 
+    /** The switch's row, its whole [row] a finger's, and where the [knob]'s track stands in it. */
+    data class Toggle(val row: Box, val knob: Box)
+
+    /** The switch's words, as the owner asked for them. */
+    const val TOGGLE_LABEL = "Keep right of the cameras"
+    const val TOGGLE_W = 64f
+    const val TOGGLE_H = 32f
+
     /**
      * One sheet's boxes, in its content space: the guest's three [buttons] (none without a
      * guest), one page's [slots] (the same on every page), the [dots] under the grid (none
@@ -157,6 +169,8 @@ object PortalSheet {
         val dots: List<Box>,
         val dotsRow: Box?,
         val slider: Slider?,
+        /** Under the slider, with it. */
+        val toggle: Toggle?,
         /** Where an empty sheet's words stand. */
         val emptyX: Float,
         val emptyY: Float,
@@ -218,6 +232,7 @@ object PortalSheet {
             buttons = if (withGuest) buttons(left) else emptyList(),
             slots = slots, pages = pages, dots = dots, dotsRow = dotsRow,
             slider = if (withGuest) slider(left) else null,
+            toggle = if (withGuest) toggle(left) else null,
             emptyX = centerX, emptyY = (top + bottom) / 2,
         )
     }
@@ -231,7 +246,7 @@ object PortalSheet {
     }
 
     private fun slider(left: Float): Slider {
-        val top = FULL + (STRIP - ROW_H) / 2
+        val top = FULL + (SLIDER_ROW - ROW_H) / 2
         val bottom = top + ROW_H
         val iconTop = top + (ROW_H - SLIDER_ICON) / 2
         val icon = Box(left, iconTop, left + SLIDER_ICON, iconTop + SLIDER_ICON)
@@ -239,6 +254,14 @@ object PortalSheet {
         // The thumb's half past each end stays clear of the icon and the value.
         val track = Box(icon.right + ROW_GAP + THUMB / 2, top, value.left - ROW_GAP - THUMB / 2, bottom)
         return Slider(icon, track, value)
+    }
+
+    private fun toggle(left: Float): Toggle {
+        val top = FULL + SLIDER_ROW + (TOGGLE_ROW - ROW_H) / 2
+        val row = Box(left, top, RIGHT, top + ROW_H)
+        val knobTop = row.centerY - TOGGLE_H / 2
+        val knobRight = RIGHT - BUTTON_PAD
+        return Toggle(row, Box(knobRight - TOGGLE_W, knobTop, knobRight, knobTop + TOGGLE_H))
     }
 
     /**
@@ -266,7 +289,7 @@ object PortalSheet {
      * the sheet has settled: the painter moves everything with it.
      *
      * The slider's row, when it is in, is the slider's whole height: its track (the thumb's
-     * overhang with it), its value, or nothing. Over the rest: the buttons, the page's
+     * overhang with it), its value, or nothing; the row under it is the switch's. Over the rest: the buttons, the page's
      * apps, then the dots' row — the nearest dot within reach, else nothing; anything else
      * is [Hit.Outside], and a tap there shuts the sheet.
      */
@@ -274,6 +297,7 @@ object PortalSheet {
         val cy = y + scroll
         l.slider?.let { s ->
             if (cy >= FULL) return when {
+                cy >= FULL + SLIDER_ROW -> if (x in (l.toggle?.row?.left ?: 0f)..(l.toggle?.row?.right ?: 0f)) Hit.Toggle else Hit.Blank
                 x in s.value.left..s.value.right -> Hit.SliderValue
                 x in (s.track.left - THUMB / 2)..(s.track.right + THUMB / 2) -> Hit.Slider
                 else -> Hit.Blank
@@ -300,10 +324,11 @@ object PortalSheet {
     /**
      * A sideways drag that landed at [y] on the open sheet at rest scrolled by [scroll]: on
      * the slider's row it is the slider's (it moves the thumb by as much as the finger
-     * moves, from where the thumb was — no jump to the finger), anywhere above it with more
-     * than one page it turns the page.
+     * moves, from where the thumb was — no jump to the finger), on the switch's row nothing,
+     * anywhere above them with more than one page it turns the page.
      */
     fun swipe(l: Layout, y: Float, scroll: Float): Swipe = when {
+        y + scroll >= FULL + SLIDER_ROW -> Swipe.NONE
         l.slider != null && y + scroll >= FULL -> Swipe.SLIDER
         l.pages > 1 && y + scroll < FULL -> Swipe.PAGES
         else -> Swipe.NONE

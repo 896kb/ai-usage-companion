@@ -8,10 +8,10 @@ import android.util.Log
  * A task's windowing mode and bounds, set as the system's own shell sets them: a
  * WindowContainerTransaction (setWindowingMode, setBounds) on the task's token, applied
  * through IActivityTaskManager.getWindowOrganizerController().applyTransaction — which shell
- * may call, holding MANAGE_ACTIVITY_TASKS. Unlike `am task resize`, it can turn a fullscreen
- * task (an app open on the front, reused by a launch) into a multi-window one, and back to
- * fullscreen when a guest goes to the front. By reflection, looked up once; false (logged
- * once) where any of it is missing or refused, and the caller falls back to `am task resize`.
+ * may call, holding MANAGE_ACTIVITY_TASKS. A guest on the whole rear is asserted fullscreen by it
+ * after every move: a task left in multi-window by anything is reused so by the app's next launch.
+ * By reflection, looked up once; false (logged once) where any of it is missing or refused, and
+ * the caller falls back to `am task resize`.
  *
  * NEVER AS A TRANSITION. For a while (cf55517) the transaction was started as a CHANGE
  * transition (IWindowOrganizerController.startNewTransition), since only a transition moved
@@ -20,7 +20,7 @@ import android.util.Log
  * is never finished or collected, and each one leaked a `Transition$Token` JNI global
  * reference in system_server — "global reference table overflow (max=51200)" with 48553 of
  * them, run up by the keep-alive's nudges over hours. So applyTransaction only, and callers
- * must keep every call bounded (RearUserService gives a guest a few goes, SurfacePlace.GiveUp).
+ * must keep every call bounded (RearUserService gives a guest a few goes, GuestShape.GiveUp).
  */
 internal object TaskShaper {
 

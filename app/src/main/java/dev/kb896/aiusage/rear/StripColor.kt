@@ -1,8 +1,8 @@
 package dev.kb896.aiusage.rear
 
 /**
- * The colour of the camera strip (x < Panel.CUTOUT_RIGHT) beside a guest kept right of the
- * cameras: the app's own background, read off its leftmost columns, so the strip reads as
+ * The colour of the camera strip (x < Panel.CUTOUT_RIGHT) beside a guest on a private display
+ * (PrivateDisplay): the app's own background, read off its leftmost columns, so the strip reads as
  * part of it — or black where there is no one colour to take. Pure; CameraStrip shows it.
  *
  * [pick]: per channel, the median of the sampled pixels; the edge is uniform enough when
@@ -21,8 +21,8 @@ object StripColor {
     /** The guest's columns read for the colour, from its left edge. */
     const val SAMPLE_W = 6
 
-    /** Where on [rear] the colour is read: the guest's first [SAMPLE_W] columns right of the lenses, the whole height. */
-    fun sample(rear: RearGeometry) = GuestShape.Bounds(rear.cutoutPx, 0, rear.cutoutPx + SAMPLE_W, rear.heightPx)
+    /** Where on the app's layer the colour is read, on [rear]: its first [SAMPLE_W] columns, its whole height. */
+    fun sample(rear: RearGeometry) = GuestShape.Bounds(0, 0, SAMPLE_W, rear.heightPx)
 
     /** The strip's own size on [rear], in its pixels: the lens column, the whole height. */
     fun stripSize(rear: RearGeometry): Pair<Int, Int> = rear.cutoutPx to rear.heightPx
@@ -52,7 +52,7 @@ object StripColor {
     /**
      * How long until the next sample: [FAST_MS] after a change, a touch or a new guest
      * ([poke]); [SLOW_MS] once [STABLE] samples running have changed nothing. A sample is a
-     * capture of its own (8–22 ms measured on the phone), so a page left still is not read
+     * capture of its own (8–37 ms measured on the phone), so a page left still is not read
      * four times a second.
      */
     class Pace {

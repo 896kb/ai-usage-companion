@@ -49,6 +49,8 @@ internal object ShellLayer {
     const val Z_COVER = Int.MAX_VALUE - 3
     /** The camera strip beside a guest kept right of the cameras (CameraStrip): over every app, under the cover. */
     const val Z_STRIP = Int.MAX_VALUE - 4
+    /** The picture of a guest on a private display (PrivateDisplay): over every app, under the strip beside it. */
+    const val Z_APP = Int.MAX_VALUE - 5
 
     /** How long [removeAll] waits for a capture holding layers ([lease]) before it lets them go anyway. */
     private const val LEASE_WAIT_MS = 200L
@@ -155,6 +157,8 @@ internal object ShellLayer {
      * at [z], [trusted] or not, shown at once when [visible], the whole layer at [alpha]
      * (SurfaceFlinger's, on everything drawn into it — nothing to do with trust). Throws [Untrusted] when
      * [trusted] cannot be had, or whatever building it threw; nothing is left behind either way.
+     * [format], [opaque]: what a private display's picture needs (PrivateDisplay); the rest draw
+     * themselves, translucent.
      */
     fun create(
         name: String, layerStack: Int, z: Int,
@@ -162,11 +166,12 @@ internal object ShellLayer {
         // uncovered at the right and the bottom. The size is the caller's, from RearGeometry.
         width: Int, height: Int,
         trusted: Boolean, visible: Boolean = true, alpha: Float = 1f,
+        format: Int = PixelFormat.TRANSLUCENT, opaque: Boolean = false,
     ): SurfaceControl {
         check(!closed) { "the shell's layers are closed: the process is ending" }
         // A child of this process's container, never a root of its own (see the class comment).
         val layer = SurfaceControl.Builder().setName(name).setBufferSize(width, height)
-            .setFormat(PixelFormat.TRANSLUCENT).setParent(container(layerStack)).build()
+            .setFormat(format).setOpaque(opaque).setParent(container(layerStack)).build()
         try {
             SurfaceControl.Transaction().use { t ->
                 if (trusted) trust(t, layer)?.let { throw Untrusted(it) }
