@@ -1138,6 +1138,18 @@ class MainActivity : ComponentActivity() {
             onChange = { on -> write { it.copy(showTableLights = on) } },
             onPick = { c -> write { it.copy(tableColor = c) } },
         )
+        // General's, not always-on's: it works whenever the back is lit, the full panel and
+        // a guest on top as well as always-on (PocketWatch). Off by default — on a phone
+        // whose rear proximity sensor reads covered in the hand, it is the back switching
+        // off for no reason anyone can see. The note says what it does, there being nothing
+        // on the back to show it.
+        SettingsRows.toggle(
+            generalRows, "Pocket mode", config.pocketMode,
+        ) { on -> write { it.copy(pocketMode = on) } }
+        SettingsRows.note(
+            generalRows,
+            "When something covers the back — a pocket, a bag — it switches off, and comes back as it was, with the slider up, once uncovered.",
+        )
 
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
         // two accounts, not a taxonomy — someone else has a client and a side project,
@@ -1303,11 +1315,6 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 aodRows, "  ↳ weather line", config.aodWeather,
             ) { on -> write { it.copy(aodWeather = on) } }
-            // Off by default: on a phone whose rear proximity sensor reads covered in the
-            // hand, pocket mode is the panel going black for no reason anyone can see.
-            SettingsRows.toggle(
-                aodRows, "  ↳ pocket mode: display off when the back is covered", config.aodPocket,
-            ) { on -> write { it.copy(aodPocket = on) } }
         }
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.

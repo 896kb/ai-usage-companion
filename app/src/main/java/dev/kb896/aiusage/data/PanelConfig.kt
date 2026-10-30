@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.data
 
 import dev.kb896.aiusage.Panel
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -465,18 +466,24 @@ data class PanelConfig(
     val keepPanelAwake: Boolean = false,
     /**
      * Always-on: instead of going dark, the panel settles into a dim, frozen page — no
-     * animation, the backdrop faded to black — and sleeps only in a pocket. A double tap
+     * animation, the backdrop faded to black — and sleeps only in a pocket (pocketMode). A double tap
      * on it raises the unlock slider; the swipe brings the full panel back.
      */
     val alwaysOn: Boolean = false,
     /** In always-on, the battery level above the clock. */
     val aodBattery: Boolean = false,
     /**
-     * In always-on, let the display go when the rear proximity sensor reads covered — a
-     * pocket, a bag. Off by default: on a phone whose sensor reads covered in the hand,
-     * it is the panel going black for no visible reason. See RearActivity.pocketWatch.
+     * Pocket mode: the rear proximity sensor covered while the back is lit — a pocket, a
+     * bag — switches the back off at once, and uncovered it comes back as it was, the
+     * slider up. Whenever the back is lit, not only in always-on, where it began. Off by
+     * default: on a phone whose sensor reads covered in the hand, it is the panel going
+     * black for no visible reason. See PocketWatch.
+     *
+     * STORED AS aodPocket, its name from when it was an always-on sub-switch: renaming the
+     * key would have quietly turned it off for everybody who had turned it on.
      */
-    val aodPocket: Boolean = false,
+    @SerialName("aodPocket")
+    val pocketMode: Boolean = false,
     /**
      * "Match the front notifications": a notification that leaves the front leaves the
      * back's list too, the list is brought in line with the front whenever the relay
