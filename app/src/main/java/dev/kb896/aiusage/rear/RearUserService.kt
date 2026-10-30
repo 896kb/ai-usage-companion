@@ -2033,6 +2033,8 @@ class RearUserService : IRearService.Stub {
     private val holdLock = Any()
     private val guestHold = GuestHold()
     private val backLock = DisplayWakeLock("AiUsage:guest-hold")
+    private val backGuard = BackGuard()
+    private var holdListening = false
     private val doubleTaps = GuestHold.DoubleTaps()
     /** Mirrors [GuestHold.held] for the touch path, which takes no lock. */
     @Volatile private var holdTaken = false
@@ -2048,7 +2050,7 @@ class RearUserService : IRearService.Stub {
         syncGuestHoldNow()
     }
     private val holdDisplays by lazy { context?.getSystemService(android.hardware.display.DisplayManager::class.java) }
-    /** Only while held. Any change posts a look, which reads the state; a refresh rate's costs one read. */
+    /** While there is something to look after: [syncHoldListening]. Any change posts a look, which reads the state; a refresh rate's costs one read. */
     private val holdDisplayListener = object : android.hardware.display.DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
         override fun onDisplayRemoved(displayId: Int) = Unit
@@ -2096,14 +2098,14 @@ class RearUserService : IRearService.Stub {
                     pocketed = pocketed,
                     // Its opening counts as a touch: held from the moment it is up (GuestHold.openedAt).
                     lastTouchAt = maxOf(lastRearTouchAt, guestHold.openedAt(onTop, lit, now)),
-                    doubleTapAt = lastDoubleTapAt,
+                    // With the guard on a double tap is the app's: no sleep to get out of the way of.
+                    doubleTapAt = if (backGuard.on) 0L else lastDoubleTapAt,
                     now = now,
                 )
                 when (s.act) {
                     GuestHold.Act.TAKE -> if (backLock.acquire(display)) {
                         guestHold.taken()
                         holdTaken = true
-                        runCatching { holdDisplays?.registerDisplayListener(holdDisplayListener, holdHandler) }
                         Log.i(TAG, "portal: holding the back lit, ${GuestHold.HOLD_MS / 1000} s past the last touch")
                     }
                     GuestHold.Act.LET_GO -> {
@@ -2115,6 +2117,10 @@ class RearUserService : IRearService.Stub {
                     }
                     GuestHold.Act.NONE -> Unit
                 }
+                // A double tap is the app's while it is on top of a lit back. Dark, the guard
+                // goes: it takes the rear's touch double tap with it, and that is what wakes it.
+                backGuard.set(GuestHold.guards(onTop, lit))
+                syncHoldListening()
                 holdHandler.removeCallbacks(holdCheck)
                 if (s.recheckInMs >= 0L) holdHandler.postDelayed(holdCheck, s.recheckInMs)
             }
@@ -2128,14 +2134,31 @@ class RearUserService : IRearService.Stub {
         backLock.release()
         guestHold.released()
         holdTaken = false
-        runCatching { holdDisplays?.unregisterDisplayListener(holdDisplayListener) }
+        syncHoldListening()
         Log.i(TAG, "portal: let go of the back — $why")
+    }
+
+    /**
+     * Under [holdLock]. The display is watched while a guest is on top, dark too: the guard has
+     * to be gone the moment it goes dark, or the rear's touch double tap cannot wake it (seen
+     * 2026-10-30), and back the moment it lights, or the first double tap after sleeps it.
+     */
+    private fun syncHoldListening() {
+        val want = holdTaken || backGuard.on || guest?.onTop == true
+        if (want == holdListening) return
+        holdListening = want
+        runCatching {
+            if (want) holdDisplays?.registerDisplayListener(holdDisplayListener, holdHandler)
+            else holdDisplays?.unregisterDisplayListener(holdDisplayListener)
+        }
     }
 
     /** Unconditionally, for the end of the service. */
     private fun letGoOfBack(why: String) {
         try {
             synchronized(holdLock) {
+                backGuard.set(false)
+                syncHoldListening()
                 if (!holdTaken) return
                 holdHandler.removeCallbacks(holdCheck)
                 letGoLocked(why)

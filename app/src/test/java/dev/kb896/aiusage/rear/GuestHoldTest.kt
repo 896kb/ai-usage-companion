@@ -242,4 +242,11 @@ class GuestHoldTest {
         assertEquals(false, let(held(), lit = false).tail)
         assertEquals(false, let(held(), top = false).tail)
     }
+
+    @Test fun `a double tap is the app's only over a guest on a lit back`() {
+        assertTrue(GuestHold.guards(guestOnTop = true, rearLit = true))
+        assertFalse(GuestHold.guards(guestOnTop = true, rearLit = false))
+        assertFalse(GuestHold.guards(guestOnTop = true, rearLit = null))
+        assertFalse(GuestHold.guards(guestOnTop = false, rearLit = true))
+    }
 }

@@ -157,6 +157,9 @@ class GuestHold {
     }
 
     companion object {
+        /** Whether a double tap is left to the app (BackGuard): a guest on top of a back known to be lit. */
+        fun guards(guestOnTop: Boolean, rearLit: Boolean?) = guestOnTop && rearLit == true
+
         /** The panel's own thirty seconds. */
         const val HOLD_MS = RearActivity.AWAKE_MS
         /** After a double tap, how long the back is left to go dark before the hold is looked at again. */
