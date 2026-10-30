@@ -3920,6 +3920,23 @@ class RearDialView(context: Context) : View(context) {
      */
     fun onMediaControl(x: Float, y: Float): Boolean = mediaAt(x, y) != null || near(muteButton, x, y)
 
+    /**
+     * On anything a single tap presses on its way up: the media controls above, and the
+     * camera and close buttons (the mascot, in ambient) — tested as onTouchEvent tests them.
+     * A double tap is only seen on its second touch, so the first had already pressed what
+     * it landed on: a sleep double tap in the camera's corner opened the camera. The same
+     * answer as the media controls': two quick presses of a button are the button's, never
+     * a sleep. Nothing counts while locked — the slider is the only target then.
+     */
+    fun onTapTarget(x: Float, y: Float): Boolean {
+        if (onMediaControl(x, y)) return true
+        if (locked) return false
+        val onCamera = !ambient && near(cameraButton, x, y)
+        val onClose = (config.showClose || config.showCloseInfo) &&
+            if (ambient) near(mascotButton, x, y) else near(closeButton, x, y)
+        return onCamera || onClose
+    }
+
     private fun near(r: android.graphics.RectF?, x: Float, y: Float): Boolean {
         val b = r ?: return false
         return x >= b.left - CAMERA_SLOP && x <= b.right + CAMERA_SLOP &&

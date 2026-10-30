@@ -672,9 +672,10 @@ class RearActivity : Activity() {
     private val doubleTaps by lazy {
         GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                // Two quick presses of a media button, or anywhere in the open control
-                // centre, are the controls', not a sleep.
-                if (dial.onMediaControl(e.x, e.y) || dial.controlCenterUp) return false
+                // Two quick presses of a button — media, camera, close — or anywhere in the
+                // open control centre, are the controls', not a sleep: the first of them has
+                // already pressed what it landed on (RearDialView.onTapTarget).
+                if (dial.onTapTarget(e.x, e.y) || dial.controlCenterUp) return false
                 if (aodOn) {
                     // always-on: the full panel drops into it; a dimmed page raises the slider
                     if (!inAod) enterAod() else if (!dial.isLocked) dial.lock()
