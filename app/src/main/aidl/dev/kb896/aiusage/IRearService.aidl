@@ -138,4 +138,7 @@ interface IRearService {
     // wake(), unless the other build's panel (release vs dev) is on top of displayId: then
     // nothing, and false. What the app lights on its own goes through this.
     boolean wakeOwn(int displayId) = 27;
+    // Whether the App Portal's guest is on top of the rear (on the rear, in front of the panel)
+    // as the shell last saw it. A field read, no command: the app asks it at the lock.
+    boolean guestOnTop() = 28;
 }

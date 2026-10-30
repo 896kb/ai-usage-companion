@@ -239,6 +239,13 @@ class RearUserService : IRearService.Stub {
     }
 
     /**
+     * The guest is in front of the panel on the rear, as last seen (the keep-alive and every
+     * guest change keep [Guest.onTop]); not one hidden on the front. No command run: the app
+     * asks this at the lock, on its main thread, to decide always-on's relight (LockRelight).
+     */
+    override fun guestOnTop(): Boolean = guest?.let { it.onTop && !it.hiddenOnFront } == true
+
+    /**
      * [wake], unless the other build's panel is on top of [displayId] — then nothing, and
      * false. For what the app process lights on its own (a notification, the charger,
      * always-on after the lock): those are this install's, and the back is not.

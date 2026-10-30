@@ -496,6 +496,15 @@ class ShizukuBridge(private val context: Context) {
             .onFailure { Log.w(TAG, "setDozing($value) failed: ${it.message}") }
     }
 
+    /**
+     * Whether the App Portal's guest is in front of the panel on the back (IRearService.guestOnTop);
+     * null with no service to ask. Never binds: asked at the lock, where not knowing is an answer.
+     */
+    fun guestOnTop(): Boolean? {
+        val svc = service ?: return null
+        return runCatching { svc.guestOnTop() }.onFailure { Log.w(TAG, "guestOnTop failed: ${it.message}") }.getOrNull()
+    }
+
     /** Asleep on purpose as far as this process knows; not known counts as not. */
     fun isDozing(): Boolean = dozing == true
 

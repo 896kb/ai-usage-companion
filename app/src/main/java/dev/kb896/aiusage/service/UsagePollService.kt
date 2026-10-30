@@ -512,16 +512,26 @@ class UsagePollService : Service() {
             // to dark ("aod is close, and just go to sleep directly"). With the panel's
             // always-on switched on, the back is lit again a moment later and the panel,
             // woken with always-on on, goes into it — the slider up, the page dimmed.
-            // Only when the back went dark WITH the front: a panel already asleep on
-            // purpose (the double tap, pocket mode) stays asleep. Not returned from — the
-            // lock's own supervision below still runs.
+            // Only when the back went dark WITH the front, and only over the panel itself,
+            // awake: a guest on top at the lock is not lit at full brightness on a locked
+            // phone, and a panel already letting the back go (the double tap, pocket mode)
+            // stays asleep — both read NOW, at the lock, before the sleep can change them
+            // (LockRelight). And never over the other build's panel (ShizukuBridge.wake).
+            // Not returned from — the lock's own supervision below still runs.
             if (intent?.action == Intent.ACTION_SCREEN_OFF && config().alwaysOn) {
                 val lockedAt = android.os.SystemClock.elapsedRealtime()
+                val bridge = Graph.of(this@UsagePollService).bridge
+                val dozingAtLock = bridge.dozingOrNull()
+                val guestAtLock = bridge.guestOnTop()
                 scope.launch {
                     delay(RELIGHT_AFTER_LOCK_MS)
-                    if (kotlin.math.abs(rearWentOffAt - lockedAt) <= WENT_DARK_TOGETHER_MS) {
+                    val together = kotlin.math.abs(rearWentOffAt - lockedAt) <= WENT_DARK_TOGETHER_MS
+                    if (LockRelight.relight(together, dozingAtLock, guestAtLock)) {
                         Log.i(TAG, "the front locked and took the back with it — always-on instead")
-                        Graph.of(this@UsagePollService).bridge.wake("always-on after the lock")
+                        bridge.wake("always-on after the lock")
+                    } else if (together) {
+                        Log.i(TAG, "the front locked and took the back with it — left dark " +
+                            "(asleep on purpose: $dozingAtLock, a guest on top: $guestAtLock)")
                     }
                 }
             }
