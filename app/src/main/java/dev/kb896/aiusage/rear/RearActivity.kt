@@ -575,7 +575,10 @@ class RearActivity : Activity() {
             }
             if (aodOn != decoded.config.alwaysOn) {
                 aodOn = decoded.config.alwaysOn
-                if (!aodOn) exitAod()
+                // Switched off under a panel in always-on: the slider is always-on's, and goes
+                // with it. Left up, it ran out a second and a half later as a spent lock, let
+                // go of the display and the back went dark — keep awake or not.
+                if (!aodOn && inAod) { exitAod(); dial.unlock() }
                 armSleep()
             }
             if (!decoded.config.aodPocket) pocketWatch(false) else if (inAod) pocketWatch(true)
