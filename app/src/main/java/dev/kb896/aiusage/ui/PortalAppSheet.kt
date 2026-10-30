@@ -60,9 +60,9 @@ object PortalAppSheet {
             },
         )
         // Off, as every app starts: the whole back. Experimental for what it cannot do yet: its
-        // keyboard opens on the front, and an app keeping its own screen on does not keep the back's.
+        // keyboard opens on the front.
         SettingsRows.toggle(column, "Keep right of the cameras (experimental)", confined) { on -> onConfined(on) }
-        SettingsRows.note(column, "On, ${label.trim()} runs on a screen of its own beside the cameras. Its keyboard opens on the front, and it does not keep the back lit by itself.")
+        SettingsRows.note(column, "On, ${label.trim()} runs on a screen of its own beside the cameras. Its keyboard opens on the front.")
         Modal.show(
             Modal.builder(activity).setTitle(label.trim())
                 .setView(column)

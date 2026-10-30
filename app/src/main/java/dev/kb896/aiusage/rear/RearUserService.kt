@@ -1375,6 +1375,7 @@ class RearUserService : IRearService.Stub {
         val shown = g != null && g.onPrivate && g.onTop
         privateDisplay?.takeIf { it.displayId == g?.privateDisplay }?.show(shown)
         if (shown && !panelCovered) privateLit = true // new on top: the hold's next look says if not
+        if (!shown) privateAppHolds = false
         if (shown != panelCovered) {
             panelCovered = shown
             tellPanelCovered()
@@ -1540,6 +1541,21 @@ class RearUserService : IRearService.Stub {
         return g.onPrivate && g.onTop && privateLit && !pocketed && !sheetUp && !controlCenter.isUp
     }
 
+    /**
+     * The guest's app keeps its private display's screen on, as the keep-alive's tick last read it
+     * (a video playing): the hold follows it (GuestHold). A dump, so on the tick alone, every six
+     * seconds and only over a lit back: never on a touch.
+     */
+    @Volatile private var privateAppHolds = false
+
+    private fun readPrivateAppHold(g: Guest) {
+        val holds = WakeLockDump.keepsScreenOn(exec("dumpsys power | sed -n '/^Wake Locks:/,/^\$/p'"), g.privateDisplay)
+        if (holds != privateAppHolds) Log.i(TAG, "portal: ${g.pkg} ${if (holds) "keeps its screen on — the back held with it" else "no longer keeps its screen on"}")
+        privateAppHolds = holds
+        // Each look that hears it is a touch to the hold, so it hears every tick.
+        if (holds) syncGuestHold()
+    }
+
     /** The rear as the hold last read it, for [forwardOpen]: dark, a finger waking it is nobody's. */
     @Volatile private var privateLit = true
 
@@ -1572,8 +1588,11 @@ class RearUserService : IRearService.Stub {
         when (tick) {
             GuestGate.Tick.GUEST_ON_TOP -> {
                 syncDensity("${g.pkg} is on top")
-                if (lit) { if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow() }
-                else {
+                if (lit) {
+                    if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
+                    readPrivateAppHold(g)
+                } else {
+                    privateAppHolds = false
                     // Nothing to see: no frame drawing to it, no sheet left up. The layer and the
                     // app stay as they are, and come back with the light (the hold's look).
                     chromeHide()
@@ -2408,6 +2427,7 @@ class RearUserService : IRearService.Stub {
                     // On a private display likewise: the panel under it has the focus, and its flag.
                     doubleTapAt = if (backGuard.on || onPrivate) 0L else lastDoubleTapAt,
                     now = now,
+                    appHolding = onPrivate && privateAppHolds,
                 )
                 when (s.act) {
                     GuestHold.Act.TAKE -> if (backLock.acquire(display)) {

@@ -25,6 +25,13 @@ package dev.kb896.aiusage.rear
  *   are spent as above; still lit, it was two quick taps in somebody's app, and the hold comes
  *   back with nothing having shown (HyperOS's timeout is far longer than the quiet).
  *
+ * AN APP THAT KEEPS ITS OWN SCREEN ON. On the rear itself its FLAG_KEEP_SCREEN_ON holds the rear.
+ * On a private display it holds that display only, and a playing video went dark 40 s in. So the
+ * caller says so ([step]'s appHolding, read on the keep-alive's tick, WakeLockDump) and each look
+ * that hears it counts as a touch: held past the thirty seconds for as long as it lasts, and once
+ * it stops, the usual thirty and the dim tail from there. It is a touch for the rest of this too:
+ * whatever puts the back down still wins at once, and nothing dark is lit for it.
+ *
  * [step] is the whole of it, called from anywhere that might have changed the answer; the
  * caller does as [Step.act] says and, one timer only, looks again in [Step.recheckInMs] (none
  * when negative). Held, a touch costs the caller nothing: the look at the end of the time
@@ -52,6 +59,9 @@ class GuestHold {
     /** The last touch that counted for nothing any more: seen before a dark, a sleep or a pocket. */
     private var spentTouchAt = 0L
 
+    /** When a look last heard the guest's app keeping its screen on. */
+    private var appHeldAt = 0L
+
     /** Times are one clock (elapsedRealtime); 0 is never. */
     fun step(
         guestOnTop: Boolean,
@@ -61,8 +71,24 @@ class GuestHold {
         lastTouchAt: Long,
         doubleTapAt: Long,
         now: Long,
+        appHolding: Boolean = false,
     ): Step {
         val down = rearLit != true || dozing || pocketed
+        if (!guestOnTop) appHeldAt = 0L
+        else if (appHolding && !down) appHeldAt = now
+        return decide(guestOnTop, down, rearLit, dozing, pocketed, maxOf(lastTouchAt, appHeldAt), doubleTapAt, now)
+    }
+
+    private fun decide(
+        guestOnTop: Boolean,
+        down: Boolean,
+        rearLit: Boolean?,
+        dozing: Boolean,
+        pocketed: Boolean,
+        lastTouchAt: Long,
+        doubleTapAt: Long,
+        now: Long,
+    ): Step {
         if (guestOnTop && down) spentTouchAt = lastTouchAt
         val sinceTouch = now - lastTouchAt
         val sinceDoubleTap = if (doubleTapAt == 0L) Long.MAX_VALUE else now - doubleTapAt

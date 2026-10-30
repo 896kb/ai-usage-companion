@@ -249,4 +249,42 @@ class GuestHoldTest {
         assertFalse(GuestHold.guards(guestOnTop = true, rearLit = null))
         assertFalse(GuestHold.guards(guestOnTop = false, rearLit = true))
     }
+
+    @Test fun `an app keeping its screen on holds the back past the thirty seconds, and the usual thirty after it stops`() {
+        val h = GuestHold()
+        fun step(now: Long, holding: Boolean) = h.step(true, true, false, false, lastTouchAt = 1_000L, doubleTapAt = 0L, now = now, appHolding = holding)
+        val taken = step(2_000L, true)
+        assertEquals(GuestHold.Act.TAKE, taken.act)
+        h.taken()
+        // Ten minutes on, no touch since: still held, and looked at again.
+        val on = step(600_000L, true)
+        assertEquals(GuestHold.Act.NONE, on.act)
+        assertTrue(on.recheckInMs > 0L)
+        // It stopped: thirty seconds from the last look that heard it.
+        assertEquals(GuestHold.Act.NONE, step(600_000L + GuestHold.HOLD_MS - 1, false).act)
+        val out = step(600_000L + GuestHold.HOLD_MS, false)
+        assertEquals(GuestHold.Act.LET_GO, out.act)
+        assertTrue("the dim tail", out.tail)
+    }
+
+    @Test fun `asleep on purpose, a pocket or a dark back still win over an app keeping its screen on`() {
+        for ((lit, dozing, pocketed) in listOf(Triple(true, true, false), Triple(true, false, true), Triple(false, false, false))) {
+            val h = GuestHold()
+            h.step(true, true, false, false, 1_000L, 0L, 2_000L, appHolding = true)
+            h.taken()
+            val s = h.step(true, lit, dozing, pocketed, 1_000L, 0L, 3_000L, appHolding = true)
+            assertEquals(GuestHold.Act.LET_GO, s.act)
+            assertFalse("no tail: that poke would light it again", s.tail)
+        }
+    }
+
+    @Test fun `what an app held for is spent going dark, and only hearing it again takes the back again`() {
+        val h = GuestHold()
+        h.step(true, true, false, false, 1_000L, 0L, 2_000L, appHolding = true)
+        h.taken()
+        h.step(true, false, false, false, 1_000L, 0L, 3_000L, appHolding = true)
+        h.released()
+        assertEquals(GuestHold.Act.NONE, h.step(true, true, false, false, 1_000L, 0L, 4_000L, appHolding = false).act)
+        assertEquals(GuestHold.Act.TAKE, h.step(true, true, false, false, 1_000L, 0L, 5_000L, appHolding = true).act)
+    }
 }
