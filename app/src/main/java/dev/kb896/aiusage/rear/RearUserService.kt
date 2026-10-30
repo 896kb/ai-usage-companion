@@ -880,6 +880,7 @@ class RearUserService : IRearService.Stub {
         set(value) {
             guestRef.set(value)
             syncGuestHold()
+            syncNoRestrict()
         }
     private val frame by lazy { PortalFrame(rearLayerStack(), geometry) }
     /** The camera strip beside a confined guest (CameraStrip), in the guest's edge colour. */
@@ -1374,6 +1375,38 @@ class RearUserService : IRearService.Stub {
      * [placing], so it never races a launch's, Resume's or the keep-alive's, and never holds
      * up the thread that asked.
      */
+    private val noRestrictWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-no-restrict", r) }
+    }
+
+    /**
+     * The guest on the list of apps HyperOS's freezer leaves alone, for as long as it is on the
+     * back, and what we added off it again: see [NoRestrictList]. Reads the list afresh each
+     * time, so it is only ever called "has anything changed", from the guest changing and from
+     * the service starting, which cleans up after one that died with a guest up. Our marker is
+     * written before an app goes on the list and cleared after it comes off, so a death at any
+     * point leaves something the next look can clean.
+     */
+    private fun syncNoRestrict() {
+        runCatching {
+            noRestrictWorker.execute {
+                val raw = exec("settings get system $NO_RESTRICT_SETTING").trim()
+                val ours = NoRestrictList.parse(exec("settings get global $NO_RESTRICT_MARKER"))
+                val step = NoRestrictList.step(raw, ours, guest?.pkg?.takeIf { PACKAGE_NAME.matches(it) })
+                val union = (ours + step.ours).distinct()
+                if (union != ours) exec("settings put global $NO_RESTRICT_MARKER ${NoRestrictList.marker(union)}")
+                step.list?.let {
+                    exec("settings put system $NO_RESTRICT_SETTING ${shellQuote(it)}")
+                    Log.i(TAG, "portal: the freezer's list: ${step.ours.ifEmpty { "nothing of ours" }} on it now, of what we added")
+                }
+                if (step.ours != union) {
+                    if (step.ours.isEmpty()) exec("settings delete global $NO_RESTRICT_MARKER")
+                    else exec("settings put global $NO_RESTRICT_MARKER ${NoRestrictList.marker(step.ours)}")
+                }
+            }
+        }.onFailure { Log.w(TAG, "portal: the freezer's list not looked at: ${it.message}") }
+    }
+
     private val shapeWorker by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("portal-shape", r) }
     }
@@ -3085,6 +3118,8 @@ class RearUserService : IRearService.Stub {
      */
     private fun startKeepAlive(displayId: Int) {
         if (keepAlive?.isAlive == true) return
+        // A service starting: anything its predecessor left on the freezer's list comes off.
+        syncNoRestrict()
         keepAlive = guarded {
             while (!Thread.currentThread().isInterrupted) {
                 try {
@@ -3541,6 +3576,11 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
          * started, fed and finished the RELEASE app's panel instead of its own.
          */
         const val PKG = BuildConfig.APPLICATION_ID
+
+        /** HyperOS's list of apps its freezer leaves alone; see [NoRestrictList]. */
+        private const val NO_RESTRICT_SETTING = "MILLET_NO_RESTRICT_APP"
+        /** What this build added to it, per build: the two can be installed side by side. */
+        private val NO_RESTRICT_MARKER = "ai_usage_no_restrict_" + PKG.replace('.', '_')
 
         /** In full: `.rear.RearActivity` resolves against PKG, which is not the namespace on a debug build. */
         const val ACTIVITY = "dev.kb896.aiusage.rear.RearActivity"
