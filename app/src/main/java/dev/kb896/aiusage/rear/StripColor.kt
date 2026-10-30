@@ -21,8 +21,15 @@ object StripColor {
     /** The guest's columns read for the colour, from its left edge. */
     const val SAMPLE_W = 6
 
-    /** Where on the app's layer the colour is read, on [rear]: its first [SAMPLE_W] columns, its whole height. */
-    fun sample(rear: RearGeometry) = GuestShape.Bounds(0, 0, SAMPLE_W, rear.heightPx)
+    /**
+     * Where on the app's layer the colour is read: the first [SAMPLE_W] columns of the app itself,
+     * [app] as it stands on [rear] (GuestShape.appOnRear), its whole height. Not the layer's: a
+     * letterboxed app has a black bar there, and the strip would read black beside any app.
+     */
+    fun sample(rear: RearGeometry, app: GuestShape.Bounds = GuestShape.appArea(rear)): GuestShape.Bounds {
+        val x = app.left - rear.cutoutPx
+        return GuestShape.Bounds(x, app.top, x + SAMPLE_W, app.bottom)
+    }
 
     /** The strip's own size on [rear], in its pixels: the lens column, the whole height. */
     fun stripSize(rear: RearGeometry): Pair<Int, Int> = rear.cutoutPx to rear.heightPx

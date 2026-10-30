@@ -28,6 +28,23 @@ object GuestShape {
      */
     fun appArea(rear: RearGeometry) = Bounds(rear.cutoutPx, 0, rear.widthPx, rear.heightPx)
 
+    /**
+     * Where an app on a private display really is on [rear]: [onDisplay], its top activity's
+     * rectangle in that display's pixels (TaskRead), moved right of the lenses and kept within the
+     * area. Unread or empty: the whole area, which is what a full-width app reads anyway. A
+     * letterboxed one is narrower, black either side: Bolt, at x 70–539 of 608, is x 366–835 here
+     * (measured 2026-10-30).
+     */
+    fun appOnRear(rear: RearGeometry, onDisplay: Bounds?): Bounds {
+        val area = appArea(rear)
+        if (onDisplay == null) return area
+        val left = (onDisplay.left + area.left).coerceAtLeast(area.left)
+        val top = onDisplay.top.coerceAtLeast(area.top)
+        val right = (onDisplay.right + area.left).coerceAtMost(area.right)
+        val bottom = onDisplay.bottom.coerceAtMost(area.bottom)
+        return if (right > left && bottom > top) Bounds(left, top, right, bottom) else area
+    }
+
     /** The whole of [rear]: what a fullscreen task's bounds read there. */
     fun full(rear: RearGeometry) = Bounds(0, 0, rear.widthPx, rear.heightPx)
 

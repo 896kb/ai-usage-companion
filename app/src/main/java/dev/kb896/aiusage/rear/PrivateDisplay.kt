@@ -89,13 +89,14 @@ internal class PrivateDisplay private constructor(
         Log.i(TAG, "private display $displayId: layer ${if (on) "shown" else "hidden"}")
     }
 
-    /** At [wanted] dpi: the app relayouts, display 1 knows nothing of it. A comparison when it is already. */
+    /** At [wanted] dpi: the app relayouts, display 1 knows nothing of it. A comparison when it is already; true when it changed. */
     @Synchronized
-    fun density(wanted: Int) {
-        if (released || wanted == dpi) return
-        runCatching { vd.resize(width, height, wanted) }
+    fun density(wanted: Int): Boolean {
+        if (released || wanted == dpi) return false
+        return runCatching { vd.resize(width, height, wanted) }
             .onSuccess { dpi = wanted; Log.i(TAG, "private display $displayId: at $wanted dpi") }
             .onFailure { Log.w(TAG, "private display $displayId: resize refused: ${it.message}") }
+            .isSuccess
     }
 
     /** These events on the injector's thread, in order. Any thread; never waits. */

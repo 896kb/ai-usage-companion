@@ -50,7 +50,8 @@ import android.view.SurfaceControl
 class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
 
     @Volatile private var color = 0xFF28FF85.toInt()
-    private val shapes: List<ElectricBorder.Shape> = shapesFor(rear)
+    /** What it runs round: the render thread reads it each frame ([follow]). */
+    @Volatile private var shapes: List<ElectricBorder.Shape> = shapesFor(rear)
     @Volatile private var thread: Thread? = null
     /** Bumped by every show(); a render thread of an older generation stops. */
     @Volatile private var gen = 0
@@ -76,6 +77,15 @@ class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
     /** The colour, from the panel's config. Takes effect next frame. */
     fun style(color: Int) {
         this.color = color
+    }
+
+    /**
+     * Round [app] from the next frame (GuestShape.appOnRear), or the whole usable area for null.
+     * No change, nothing: the bolt goes on where it was. Any thread.
+     */
+    fun follow(app: GuestShape.Bounds?) {
+        val next = shapesFor(rear, app ?: GuestShape.appArea(rear))
+        if (next != shapes) shapes = next
     }
 
     /** Fades in, if the Portal border switch allows it: wanted either way, for when it does. */
@@ -313,12 +323,21 @@ class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
          * radius=97 on the 17 Pro): on a wider display the edge is that display's, not the
          * panel's 904x572 drawn where it would be. The front's preview passes the rear in panel
          * units (RearGeometry.inPanelUnits).
+         *
+         * [app]: the rectangle it hugs, when an app on a private display does not fill the area
+         * (GuestShape.appOnRear). Round on the right only where it meets the glass's corners, by
+         * reaching the display's right edge, top and bottom; a letterboxed one meets none, and is
+         * square on both sides.
          */
-        fun shapesFor(rear: RearGeometry): List<ElectricBorder.Shape> = listOf(
-            ElectricBorder.Shape.Rounded(
-                rear.cutoutPx.toFloat(), 0f, rear.widthPx.toFloat(), rear.heightPx.toFloat(), rear.cornerPx.toFloat(),
-                leftR = 0f,
-            ),
-        )
+        fun shapesFor(rear: RearGeometry, app: GuestShape.Bounds = GuestShape.appArea(rear)): List<ElectricBorder.Shape> {
+            val meetsGlass = app.right == rear.widthPx && app.top == 0 && app.bottom == rear.heightPx
+            return listOf(
+                ElectricBorder.Shape.Rounded(
+                    app.left.toFloat(), app.top.toFloat(), app.right.toFloat(), app.bottom.toFloat(),
+                    if (meetsGlass) rear.cornerPx.toFloat() else 0f,
+                    leftR = 0f,
+                ),
+            )
+        }
     }
 }

@@ -910,6 +910,7 @@ class RearUserService : IRearService.Stub {
      * it (else the strip goes). In place of a bare frame.show() everywhere.
      */
     private fun chromeShow() {
+        frame.follow(if (guest?.onPrivate == true) privateApp else null)
         frame.show()
         if (guest?.onPrivate == true) strip.show(null) else strip.hide()
     }
@@ -1099,7 +1100,9 @@ class RearUserService : IRearService.Stub {
     /** [g], if it is on a private display, at its density there: a comparison unless it changed. */
     private fun syncPrivateDensity(g: Guest?) {
         if (g == null || !g.onPrivate) return
-        privateDisplay?.takeIf { it.displayId == g.privateDisplay }?.density(RearDensity.ofPrivate(g.pkg, portalDpi, geometry))
+        val changed = privateDisplay?.takeIf { it.displayId == g.privateDisplay }?.density(RearDensity.ofPrivate(g.pkg, portalDpi, geometry))
+        // It relayouts in its own time: another density can letterbox it otherwise.
+        if (changed == true) appRectSoon("its density changed")
     }
 
     /**
@@ -1343,6 +1346,38 @@ class RearUserService : IRearService.Stub {
     /** The display of the guest kept right of the cameras; null with none. Under [placing], any thread may read it. */
     @Volatile private var privateDisplay: PrivateDisplay? = null
 
+    /**
+     * Where the private guest's app stands on the rear (GuestShape.appOnRear); null before it is
+     * read, the whole area. What the frame runs round and where the strip's colour is read.
+     */
+    @Volatile private var privateApp: GuestShape.Bounds? = null
+
+    /**
+     * [privateApp] read again (TaskRead, one binder call, never on the touch path), and the frame
+     * following if it moved. As it draws, as it comes back, after a density change, and on the
+     * keep-alive's tick for what nobody tells us: an app rotating, another of its activities. Any
+     * thread but the reader.
+     */
+    private fun syncAppRect(why: String) {
+        val g = guestRef.get()?.takeIf { it.onPrivate } ?: return
+        val seen = TaskRead.of(g.task) as? TaskRead.Seen ?: return
+        val rect = GuestShape.appOnRear(geometry, seen.bounds)
+        if (rect == privateApp) return
+        privateApp = rect
+        frame.follow(rect)
+        strip.poke()
+        Log.i(TAG, "portal: ${g.pkg} stands at x ${rect.left}–${rect.right}, y ${rect.top}–${rect.bottom} — $why")
+    }
+
+    /** [syncAppRect] a moment from now, on the hold's thread: the app has not relaid out yet. */
+    private fun appRectSoon(why: String) {
+        runCatching {
+            holdHandler.postDelayed({
+                try { syncAppRect(why) } catch (e: Throwable) { Log.w(TAG, "portal: the app's rectangle not read", e) }
+            }, APP_RECT_SOON_MS)
+        }
+    }
+
     /** A new display for [pkg] at its density, not yet anyone's; null where it cannot be had. Under [placing]. */
     private fun openPrivate(pkg: String): PrivateDisplay? {
         val ctx = context ?: run { Log.w(TAG, "private display: no Context from this Shizuku"); return null }
@@ -1360,6 +1395,7 @@ class RearUserService : IRearService.Stub {
     private fun closePrivate(why: String) {
         val pd = privateDisplay ?: return
         privateDisplay = null
+        privateApp = null
         Log.i(TAG, "private display ${pd.displayId}: closing — $why")
         pd.release()
     }
@@ -1432,7 +1468,7 @@ class RearUserService : IRearService.Stub {
             wake(displayId)
             val startedAt = android.os.SystemClock.uptimeMillis()
             val area = GuestShape.appArea(geometry)
-            if (cover == null) { awaitDrawn(pkg, task, pd.displayId, area); chromeShow() }
+            if (cover == null) { awaitDrawn(pkg, task, pd.displayId, area); syncAppRect("it drew"); chromeShow() }
             syncSheetGuest()
             if (cover != null) {
                 reveal(cover, pkg, displayId, { stripFor() }) { drawnOn(pkg, task, pd.displayId, area) }
@@ -1589,6 +1625,7 @@ class RearUserService : IRearService.Stub {
             GuestGate.Tick.GUEST_ON_TOP -> {
                 syncDensity("${g.pkg} is on top")
                 if (lit) {
+                    syncAppRect("the keep-alive saw it")
                     if (guest?.let { it.task == g.task && it.onTop } == true) chromeShow()
                     readPrivateAppHold(g)
                 } else {
@@ -1746,6 +1783,7 @@ class RearUserService : IRearService.Stub {
      * up in the guest's edge colour when it is on a private display, else down.
      */
     private fun stripFor() {
+        syncAppRect("it drew")
         if (guest?.onPrivate == true) strip.show(stripColor()) else strip.hide()
     }
 
@@ -1759,7 +1797,7 @@ class RearUserService : IRearService.Stub {
     private fun stripColor(): Int? {
         val pd = privateDisplay ?: return null
         return runCatching {
-            val at = StripColor.sample(geometry)
+            val at = StripColor.sample(geometry, privateApp ?: GuestShape.appArea(geometry))
             val crop = android.graphics.Rect(at.left, at.top, at.right, at.bottom)
             // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
             // Its layer held for the capture (ShellLayer.lease): a close may let it go at any moment.
@@ -1929,6 +1967,7 @@ class RearUserService : IRearService.Stub {
         syncDensity("$pkg is landing")
         wake(displayId)
         guestPlaced(displayId)
+        appRectSoon("it was sent to the back")
         return true
     }
 
@@ -4005,6 +4044,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val DRAWN_POLL_MS = 20L
         /** The keep-alive's goes at reshaping a guest before it is left as it is (logged once). */
         private const val PLACE_TRIES = 3
+        /** After a change that relayouts a private guest, how long before where it stands is read. */
+        private const val APP_RECT_SOON_MS = 500L
         /** A start on a private display that shows no task by then is taken as refused. */
         private const val PRIVATE_NO_TASK_MS = 2_000L
         /** How long a task removed for a relaunch is waited for, in looks. */

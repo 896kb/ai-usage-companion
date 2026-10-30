@@ -1,6 +1,7 @@
 package dev.kb896.aiusage.rear
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The portal frame's outline: the usable display's own edge, in its real pixels. */
@@ -33,5 +34,20 @@ class PortalFrameTest {
     @Test fun `its CSS pixel is the rear's density over 160, the 17 Pro's as before`() {
         assertEquals(PortalFrame.D, PortalFrame.cssPx(RearGeometry.PRO17), 0f)
         assertEquals(400f / 160f, PortalFrame.cssPx(RearGeometry.PRO17.copy(dpi = 400)), 1e-6f)
+    }
+
+    @Test fun `round a letterboxed app the frame is square on both sides, and its outline is all numbers`() {
+        val shape = PortalFrame.shapesFor(RearGeometry.PRO17, GuestShape.Bounds(366, 0, 835, 572)).single()
+        assertEquals(ElectricBorder.Shape.Rounded(366f, 0f, 835f, 572f, 0f, leftR = 0f), shape)
+        val outline = ElectricBorder.outline(shape)
+        assertTrue(outline.isNotEmpty() && outline.none { it.isNaN() })
+        for (i in outline.indices step 2) {
+            assertTrue(outline[i] in 366f..835f)
+            assertTrue(outline[i + 1] in 0f..572f)
+        }
+    }
+
+    @Test fun `round a full-width app it is as it always was`() {
+        assertEquals(PortalFrame.shapesFor(RearGeometry.PRO17), PortalFrame.shapesFor(RearGeometry.PRO17, GuestShape.appArea(RearGeometry.PRO17)))
     }
 }

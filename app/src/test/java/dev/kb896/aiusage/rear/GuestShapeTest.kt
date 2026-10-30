@@ -82,4 +82,15 @@ class GuestShapeTest {
         assertFalse("not given up yet", g.announce("c"))
         assertTrue(g.announce("b"))
     }
+
+    @Test fun `an app on a private display, moved right of the lenses`() {
+        assertEquals(GuestShape.Bounds(366, 0, 835, 572), GuestShape.appOnRear(pro, GuestShape.Bounds(70, 0, 539, 572)))
+        assertEquals(GuestShape.appArea(pro), GuestShape.appOnRear(pro, GuestShape.Bounds(0, 0, 608, 572)))
+    }
+
+    @Test fun `unread, empty or out of the area, the whole area`() {
+        assertEquals(GuestShape.appArea(pro), GuestShape.appOnRear(pro, null))
+        assertEquals(GuestShape.appArea(pro), GuestShape.appOnRear(pro, GuestShape.Bounds(0, 0, 0, 0)))
+        assertEquals(GuestShape.Bounds(296, 0, 904, 572), GuestShape.appOnRear(pro, GuestShape.Bounds(-20, -5, 900, 900)))
+    }
 }

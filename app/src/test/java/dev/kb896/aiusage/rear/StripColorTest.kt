@@ -73,4 +73,8 @@ class StripColorTest {
         assertEquals(296 to 572, StripColor.stripSize(RearGeometry.PRO17))
         assertEquals(296 to 596, StripColor.stripSize(RearGeometry(976, 596, 296, 110, 450)))
     }
+
+    @Test fun `a letterboxed app's colour is read off its own left edge, not the black bar`() {
+        assertEquals(GuestShape.Bounds(70, 0, 76, 572), StripColor.sample(RearGeometry.PRO17, GuestShape.Bounds(366, 0, 835, 572)))
+    }
 }
