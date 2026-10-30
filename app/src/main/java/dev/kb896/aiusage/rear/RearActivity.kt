@@ -325,9 +325,11 @@ class RearActivity : Activity() {
                 // starts unguarded (ShizukuBridge) and would otherwise never hear it — a
                 // pocket-locked panel would then open the shell's sheet. Said at once from the
                 // last mirror, since a dozing panel may draw no frame to publish a new one.
+                // And the hold, for the same new process: it starts thinking the panel awake.
                 ACTION_MIRROR_SYNC -> {
                     guardSent = null
                     lastMirror?.let { announceGuard(it.aod || it.locked) }
+                    announceHold()
                     dial.republishMirror()
                 }
                 // Somebody is using the portal sheet over the panel: not a panel to doze.
@@ -778,6 +780,9 @@ class RearActivity : Activity() {
             Log.i(TAG, "double tap: the display went off — dim over")
             sleptByDoubleTap = true
             sleepStage.wentOff()
+            // Said again: the hold went at the dim's start, but a notification waking the
+            // app during the dim can have cleared its dozing flag while the hold stayed off.
+            announceHold()
             // Full brightness again only once the display is dark, so the next wake is
             // not a frame of the dim.
             window.decorView.postDelayed(restoreBrightness, 1_500)
@@ -808,6 +813,20 @@ class RearActivity : Activity() {
         holding = on
         // Tell the supervisors. They will otherwise recover a panel that is not lost, and
         // recovery lights the display — see IRearService.setDozing.
+        announceHold()
+    }
+
+    /** Whether this instance has said its hold since it landed on the rear. */
+    private var holdSaidOnPanel = false
+
+    /**
+     * Said once more when the panel first finds itself on the rear (onResume, the move's
+     * configuration change), after onStart's on display 0: that is the panel the app
+     * process means, and it costs one broadcast to be sure it has heard.
+     */
+    private fun announceHoldOnPanel() {
+        if (holdSaidOnPanel || display?.displayId != Panel.DISPLAY_ID) return
+        holdSaidOnPanel = true
         announceHold()
     }
 
@@ -1396,6 +1415,7 @@ class RearActivity : Activity() {
         tableWatch(true)
         armEvictionTimer()
         seedLitEdge()
+        announceHoldOnPanel()
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
         // resumed into an already-suspended display would never be told.
         dial.displayAwake = takesUpdates(display?.state)
@@ -1412,6 +1432,7 @@ class RearActivity : Activity() {
         hideBars()
         armEvictionTimer()
         seedLitEdge()
+        announceHoldOnPanel()
     }
 
     override fun onPause() {
@@ -1425,6 +1446,11 @@ class RearActivity : Activity() {
     override fun onStart() {
         super.onStart()
         started = true
+        // A new panel holds from the start (FLAG_KEEP_SCREEN_ON in onCreate) and never said
+        // so: after a recovery the app's PanelAwake stayed parked on the old panel's last
+        // "dozing", and the usage numbers froze. Said on every start, it being cheap and
+        // the app process perhaps new too.
+        announceHold()
         armSleep()
     }
 
