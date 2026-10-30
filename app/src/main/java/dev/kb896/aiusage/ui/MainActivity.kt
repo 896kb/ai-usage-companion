@@ -1364,7 +1364,10 @@ class MainActivity : ComponentActivity() {
 
         // The place is typed, then resolved once — the poll never geocodes. The note under
         // the field shows what the geocoder made of it, so a typo is visible where it was
-        // typed, and carries the attribution Open-Meteo's terms ask for.
+        // typed, and carries the attribution Open-Meteo's terms ask for — and says that
+        // the typing itself goes there. The lookup runs 800 ms after the last keystroke,
+        // so half a word can be sent; the field is the one place that can say so before
+        // anything has been typed.
         lateinit var placeNote: TextView
         fun placeNoteText(c: PanelConfig): String {
             val what = when {
@@ -1372,7 +1375,7 @@ class MainActivity : ComponentActivity() {
                 c.weatherPlace.isNotBlank() -> "Not found · "
                 else -> ""
             }
-            return what + "Weather by Open-Meteo"
+            return what + "Weather by Open-Meteo · what you type here is sent to it to find the place"
         }
         SettingsRows.textField(generalRows, "Place", config.weatherPlace, 40) { typed ->
             write { it.copy(weatherPlace = typed) }
@@ -1553,7 +1556,7 @@ class MainActivity : ComponentActivity() {
             SettingsRows.note(
                 mediaRows,
                 if (config.showLyrics) {
-                    "     sends each track's name, artist and length to lrclib.net"
+                    "     sends each track's name, artist, album and length to lrclib.net"
                 } else {
                     "     off — nothing about what you play leaves the phone"
                 },
