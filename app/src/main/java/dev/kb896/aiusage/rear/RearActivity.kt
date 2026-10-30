@@ -273,10 +273,10 @@ class RearActivity : Activity() {
         /**
          * How long the rear proximity sensor has to stay covered before pocket mode switches
          * the back off (PocketWatch): a finger passing over the lens, or a hand brushing it on
-         * the way to a button, is not a pocket. A second: 400 ms caught a finger pulling the
-         * control centre down past the lens (2026-10-30).
+         * the way to a button, is not a pocket. Three seconds, the owner's: 400 ms caught a
+         * finger pulling the control centre down past the lens (2026-10-30).
          */
-        const val POCKET_DEBOUNCE_MS = 1_000L
+        const val POCKET_DEBOUNCE_MS = 3_000L
         /**
          * A cover within this of the last touch on the back is the hand using it, not a pocket
          * (PocketMode.due): the count starts over.
