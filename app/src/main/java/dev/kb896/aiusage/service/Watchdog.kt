@@ -22,14 +22,21 @@ package dev.kb896.aiusage.service
  */
 object Watchdog {
 
-    enum class State { ALIVE, DEAD, CALIBRATING, DOZING }
+    enum class State { ALIVE, DEAD, CALIBRATING, DOZING, UNKNOWN }
 
     data class Decision(val state: State, val isNewState: Boolean) {
-        /** Only a confirmed-dead panel that is neither calibrating nor dozing. */
+        /** Only a confirmed-dead panel that is neither calibrating nor dozing — never an unknown one. */
         val shouldRespawn: Boolean get() = state == State.DEAD
     }
 
     /**
+     * [alive] null is UNKNOWN: this process is not bound to the shell yet, so nothing can be
+     * asked. That used to read as dead, and it is the normal state of every new app process
+     * — HyperOS restarting the app, an update, a swipe from recents — so each of those
+     * re-placed a panel that was very likely fine, and re-placing lit the back, in a pocket.
+     * Not acted on: the bridge binds, and supervision runs again the moment it connects
+     * (ShizukuBridge.onConnected), with an answer.
+     *
      * [dozing] and [calibrating] both win over [alive], and dozing wins outright.
      *
      * DOZING is the panel having let its own display go dark on purpose, and it has to
@@ -51,13 +58,14 @@ object Watchdog {
      */
     fun decide(
         previous: State?,
-        alive: Boolean,
+        alive: Boolean?,
         calibrating: Boolean,
         dozing: Boolean = false,
     ): Decision {
         val state = when {
             dozing -> State.DOZING
             calibrating -> State.CALIBRATING
+            alive == null -> State.UNKNOWN
             alive -> State.ALIVE
             else -> State.DEAD
         }

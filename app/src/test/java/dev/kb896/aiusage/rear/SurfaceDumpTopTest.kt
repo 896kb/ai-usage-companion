@@ -78,4 +78,16 @@ class SurfaceDumpTopTest {
         val dump = "Display $rear (active) HWC layers:\n$rule\n VRI-org.mozilla.firefox/x.App#3\n$rule\n"
         assertEquals("org.mozilla.firefox", SurfaceDump.topPackage(dump, ::isRear))
     }
+
+    @Test fun `the dev build's panel on top reads as the dev build, not the release`() {
+        val dump = section(rear, "VRI-SubScreenGestureHome#867",
+            "VRI-dev.kb896.aiusage.dev/dev.kb896.aiusage.rear.RearActivity#17900",
+            "VRI-dev.kb896.aiusage/dev.kb896.aiusage.rear.RearActivity#17891")
+        assertEquals("dev.kb896.aiusage.dev", SurfaceDump.topPackage(dump, ::isRear))
+    }
+
+    @Test fun `a truncated dev build name keeps its package`() {
+        val dump = section(rear, "VRI-dev.kb896.aiusage.dev/dev.k[...]rear.RearActivity#1190")
+        assertEquals("dev.kb896.aiusage.dev", SurfaceDump.topPackage(dump, ::isRear, known = listOf("dev.kb896.aiusage")))
+    }
 }

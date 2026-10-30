@@ -118,8 +118,11 @@ class UsagePollService : Service() {
 
     private val limitNotifier by lazy { LimitNotifier(this) }
 
-    /** Last panel power state this listener acted on — see onDisplayChanged. */
-    private var panelWasOn = false
+    /**
+     * The panel's power as this listener last saw it — see onDisplayChanged. Seeded from the
+     * display itself as the listener is registered (onCreate), never assumed: see PanelPower.
+     */
+    private var panelPower = PanelPower(on = false)
 
     /** When the rear display last went dark, for telling a lock's sleep from an earlier one. */
     @Volatile private var rearWentOffAt = 0L
@@ -146,11 +149,9 @@ class UsagePollService : Service() {
          */
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != Panel.DISPLAY_ID) return
-            val on = panelOn()
-            if (panelWasOn && !on) rearWentOffAt = android.os.SystemClock.elapsedRealtime()
-            val woke = on && !panelWasOn
-            panelWasOn = on
-            if (!woke) return
+            val change = panelPower.see(panelOn())
+            if (change == PanelPower.Change.WENT_DARK) rearWentOffAt = android.os.SystemClock.elapsedRealtime()
+            if (change != PanelPower.Change.WOKE) return
             // THE BACKSTOP for the dozing flag. Everything else that clears it depends on
             // the panel still being alive to say so, and the one case the supervisors
             // exist for is the panel not being alive. A lit display is proof the sleep is
@@ -225,6 +226,9 @@ class UsagePollService : Service() {
         // remaining interval with a blank panel.
         cachedState()?.let { app.repository.restore(StatePayload.decode(it).state) }
         displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        // As the back is NOW: a back lit when this service starts is not a back waking up at
+        // its first refresh-rate change (PanelPower).
+        panelPower = PanelPower(on = panelOn())
         displays.registerDisplayListener(displayListener, null)
         // RECEIVER_NOT_EXPORTED is required, not optional: on API 34+ a receiver whose
         // filter contains a NON-system action must declare its export state or
@@ -275,6 +279,9 @@ class UsagePollService : Service() {
         // This process may be new while the panel is not: the bridge starts unguarded, and the
         // panel says its guard only when it changes. Asked for again now that ACTION_GUARDED
         // is heard, so a pocket-locked panel stays guarded across a restart of this process.
+        // Its hold too: the panel answers with ACTION_DOZING, which is how the bridge — not
+        // knowing whether the panel sleeps until it is told — comes to know (and only then
+        // tells the shell; see ShizukuBridge.setDozing).
         sendBroadcast(Intent(RearActivity.ACTION_MIRROR_SYNC).setPackage(packageName))
 
         // Held by this service rather than by NotificationRelay, even though the relay is
@@ -296,6 +303,11 @@ class UsagePollService : Service() {
         //
         // Uses cached state and makes no network call, so it costs nothing against
         // the rate limit and cannot re-introduce the request bursts.
+        //
+        // In a new process the bridge is not bound yet and this first pass can only start
+        // the bind (the panel's state is unknown, not dead); the real look is taken the
+        // moment the service connects.
+        app.bridge.onConnected = { scope.launch { safeSupervise() } }
         scope.launch { safeSupervise() }
 
         scope.launch {
@@ -500,16 +512,26 @@ class UsagePollService : Service() {
             // to dark ("aod is close, and just go to sleep directly"). With the panel's
             // always-on switched on, the back is lit again a moment later and the panel,
             // woken with always-on on, goes into it — the slider up, the page dimmed.
-            // Only when the back went dark WITH the front: a panel already asleep on
-            // purpose (the double tap, pocket mode) stays asleep. Not returned from — the
-            // lock's own supervision below still runs.
+            // Only when the back went dark WITH the front, and only over the panel itself,
+            // awake: a guest on top at the lock is not lit at full brightness on a locked
+            // phone, and a panel already letting the back go (the double tap, pocket mode)
+            // stays asleep — both read NOW, at the lock, before the sleep can change them
+            // (LockRelight). And never over the other build's panel (ShizukuBridge.wake).
+            // Not returned from — the lock's own supervision below still runs.
             if (intent?.action == Intent.ACTION_SCREEN_OFF && config().alwaysOn) {
                 val lockedAt = android.os.SystemClock.elapsedRealtime()
+                val bridge = Graph.of(this@UsagePollService).bridge
+                val dozingAtLock = bridge.dozingOrNull()
+                val guestAtLock = bridge.guestOnTop()
                 scope.launch {
                     delay(RELIGHT_AFTER_LOCK_MS)
-                    if (kotlin.math.abs(rearWentOffAt - lockedAt) <= WENT_DARK_TOGETHER_MS) {
+                    val together = kotlin.math.abs(rearWentOffAt - lockedAt) <= WENT_DARK_TOGETHER_MS
+                    if (LockRelight.relight(together, dozingAtLock, guestAtLock)) {
                         Log.i(TAG, "the front locked and took the back with it — always-on instead")
-                        Graph.of(this@UsagePollService).bridge.wake("always-on after the lock")
+                        bridge.wake("always-on after the lock")
+                    } else if (together) {
+                        Log.i(TAG, "the front locked and took the back with it — left dark " +
+                            "(asleep on purpose: $dozingAtLock, a guest on top: $guestAtLock)")
                     }
                 }
             }
@@ -657,8 +679,11 @@ class UsagePollService : Service() {
         // A fresh respawn already delivered `payload` via the launch intent extra
         // (RearUserService.show()'s `am start --es state ...`), and calibrate mode
         // must never be touched by this service at all — only an already-alive,
-        // non-calibrating panel gets the routine push.
-        if (decision.state == Watchdog.State.ALIVE) app.bridge.update(payload)
+        // non-calibrating panel gets the routine push. Unknown (not bound yet) too: the
+        // bridge keeps it and hands it over as the service connects.
+        if (decision.state == Watchdog.State.ALIVE || decision.state == Watchdog.State.UNKNOWN) {
+            app.bridge.update(payload)
+        }
     }
 
     /**
@@ -690,7 +715,8 @@ class UsagePollService : Service() {
     private fun ensurePlaced(app: Graph, payload: String): Watchdog.Decision {
         val decision = Watchdog.decide(
             watchdogState,
-            app.bridge.isPanelAlive(),
+            // Null while this process is not bound to the shell — not dead. See Watchdog.decide.
+            app.bridge.panelAlive(),
             app.bridge.isCalibrating(),
             // Re-placing calls show(), and show() lights the display — so this watchdog,
             // doing exactly its job, undid every deliberate sleep. See Watchdog.decide.
@@ -703,6 +729,7 @@ class UsagePollService : Service() {
                 Watchdog.State.CALIBRATING -> "calibrate mode active — watchdog standing down"
                 Watchdog.State.DOZING -> "panel asleep on purpose — watchdog standing down"
                 Watchdog.State.ALIVE -> "rear panel confirmed alive"
+                Watchdog.State.UNKNOWN -> "not bound to the shell yet — asking again once it connects"
             })
         }
         if (decision.shouldRespawn) {
@@ -731,7 +758,10 @@ class UsagePollService : Service() {
             // delayed push from a separate store — the panel runs in ":rear" and could
             // not see values kept only in this process — and that delay was a visible
             // window in which every respawn showed the compiled-in defaults.
-            app.bridge.show(payload)
+            //
+            // light = false: a recovery, not a request. The back is lit afterwards only if it
+            // was lit before (PlaceLight) — this runs in pockets, after every app restart.
+            app.bridge.show(payload, light = false)
             scope.launch { verifyPlacement(app) }
         }
         return decision
@@ -801,6 +831,7 @@ class UsagePollService : Service() {
     private var media: MediaWatcher? = null
 
     override fun onDestroy() {
+        Graph.of(this).bridge.onConnected = {}
         stopConfigWatch?.invoke()
         stopConfigWatch = null
         runCatching { unregisterReceiver(portalAppsReceiver) }
@@ -831,6 +862,7 @@ class UsagePollService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SHOW_PANEL) {
             val app = Graph.of(this)
+            // Asked for by a tap, so lit (light defaults to true): unlike the watchdog's.
             app.bridge.show(StatePayload.encode(app.repository.state.value, config(), WeatherPoll.latest))
         }
         return START_STICKY

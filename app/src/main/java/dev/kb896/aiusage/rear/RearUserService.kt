@@ -211,7 +211,7 @@ class RearUserService : IRearService.Stub {
         // ([adoptPlaced]). One `am stack list`, and only until it is.
         if (placedDisplayId < 0) {
             val list = exec("am stack list")
-            val task = StackList.parseTaskId(list, "RearActivity")
+            val task = StackList.parseTaskId(list, PKG, OwnPanel.ACTIVITY)
             if (task > 0 && GuestTask.byId(list, task)?.display == Panel.DISPLAY_ID) adoptPlaced(Panel.DISPLAY_ID, "update")
         }
     }
@@ -238,23 +238,73 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
 
+    /**
+     * The guest is in front of the panel on the rear, as last seen (the keep-alive and every
+     * guest change keep [Guest.onTop]); not one hidden on the front. No command run: the app
+     * asks this at the lock, on its main thread, to decide always-on's relight (LockRelight).
+     */
+    override fun guestOnTop(): Boolean = guest?.let { it.onTop && !it.hiddenOnFront } == true
+
+    /**
+     * [wake], unless the other build's panel is on top of [displayId] — then nothing, and
+     * false. For what the app process lights on its own (a notification, the charger,
+     * always-on after the lock): those are this install's, and the back is not.
+     */
+    override fun wakeOwn(displayId: Int): Boolean {
+        if (otherBuildOnTop(displayId)) return false
+        wake(displayId)
+        return true
+    }
+
     override fun wake(displayId: Int) {
         // An explicit wake is somebody deciding the panel should be lit, which ends the
         // sleep by definition. Not gated on `dozing` — gating it here would make the
         // notification that wakes a dozing panel the one thing that cannot.
         dozing = false
         syncTouchWatch()
-        // Required. The activity is created on display 0 where the screen is
-        // already on, so FLAG_TURN_SCREEN_ON has nothing to act on; without
-        // this the task is placed and focused but the panel stays state=OFF.
+        // Required, for a placement that is to end lit. The activity may be created on
+        // display 0, where the screen is already on, so FLAG_TURN_SCREEN_ON has nothing
+        // to act on; without this the task is placed and focused but the panel stays
+        // state=OFF. Which placements are to end lit is PlaceLight's to say, not this.
         exec("input -d $displayId keyevent KEYCODE_WAKEUP")
     }
+
+    /**
+     * Whether [displayId] is lit right now. Read before a placement, since afterwards
+     * nothing can tell a back that was lit from one the placement lit. Null when it cannot
+     * be read (no Context — Shizuku before 13 — or no such display), which PlaceLight takes
+     * as dark.
+     */
+    private fun rearLit(displayId: Int): Boolean? = runCatching {
+        context?.getSystemService(android.hardware.display.DisplayManager::class.java)
+            ?.getDisplay(displayId)?.state?.let { it == android.view.Display.STATE_ON }
+    }.getOrNull()
 
     /** show() and ensureOnRear() both place; two at once moved the same task twice and the second threw. */
     private val placing = Any()
 
-    override fun show(payload: String, displayId: Int) = synchronized(placing) {
+    /** A recovery: see [place]. The app's watchdog (an older app), the keep-alive and endGuest come here. */
+    override fun show(payload: String, displayId: Int) = place(payload, displayId, false)
+
+    /**
+     * Place the panel, and end with the rear lit only as [PlaceLight] says: when [light] was
+     * asked for, or when it was lit already and the panel is not letting it go.
+     *
+     * It used to end with an unconditional wake, and every recovery lit the back: a new app
+     * process (unbound, so the panel read as dead), an update, a swipe from recents, the
+     * keep-alive's "no panel and no task" — measured as a back lit in a pocket after HyperOS
+     * restarted the app.
+     */
+    override fun place(payload: String, displayId: Int, light: Boolean) = synchronized(placing) {
         if (displayId < 0) return@synchronized
+        // THE OTHER BUILD HAS THE BACK: a recovery does not take it. Release and dev can both
+        // be installed, each with a shell of its own, and each re-placed itself over the other
+        // every few seconds. Only a placement somebody asked for in THIS install takes the
+        // back over ("Show on the back") — that is how the user switches between them.
+        if (!light && otherBuildOnTop(displayId)) return@synchronized
+        // FIRST, before anything is started or moved: once the panel's start has gone
+        // through, a lit rear and a rear it lit look the same.
+        val lightIt = PlaceLight.wake(light, rearLit(displayId), dozing)
         hiddenOnPurpose = false
         lastPayload = payload
         styleFrame(payload)
@@ -267,9 +317,9 @@ class RearUserService : IRearService.Stub {
         if (placedDisplayId == displayId && taskId() > 0 && panelWhere() == Where.REAR) {
             // The payload still goes through — the panel should be correct whenever it is
             // next seen — but it is NOT lit for it. A status update is not a reason to
-            // wake a display somebody deliberately let go.
+            // wake a display somebody deliberately let go, nor one that went dark by itself.
             update(payload)
-            if (!dozing) wake(displayId)
+            if (lightIt) wake(displayId)
             syncTouchWatch()
             return
         }
@@ -329,11 +379,13 @@ class RearUserService : IRearService.Stub {
         if (panelWhere() == Where.MAIN) {
             Log.w(TAG, "compositing on the MAIN display — re-issuing the move")
             moveToDisplay(task, displayId)
-            wake(displayId)
+            if (lightIt) wake(displayId)
         }
         syncDensity("the panel is placed")
         placedDisplayId = displayId
-        wake(displayId) // and the touch watch with it (syncTouchWatch)
+        // Lit only as PlaceLight said; the touch watch either way (wake starts it too).
+        if (lightIt) wake(displayId) else Log.i(TAG, "placed on display $displayId — the rear left dark, as it was")
+        syncTouchWatch()
     }
 
     /**
@@ -562,8 +614,11 @@ class RearUserService : IRearService.Stub {
         if (task <= 0) return false
         strandStrikes++
         Log.w(TAG, "task $task compositing on the MAIN display (strike $strandStrikes) — moving it back")
+        // A recovery like any other (see [place]): the lock is what hoists the panel onto the
+        // front, and the back went dark with that lock — moved back, it stays dark.
+        val lightIt = PlaceLight.wake(false, rearLit(displayId), dozing)
         moveToDisplay(task, displayId)
-        wake(displayId)
+        if (lightIt) wake(displayId)
         adoptPlaced(displayId, "ensureOnRear")
 
         // Last resort. If repeated moves will not get it off the main display, the
@@ -585,7 +640,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun panelWhere(): Where {
         val rear = rearPhysicalId()
-        return SurfaceDump.where(exec("dumpsys SurfaceFlinger")) { id ->
+        return SurfaceDump.where(exec("dumpsys SurfaceFlinger"), PKG) { id ->
             if (rear != null) id == rear else id.endsWith(REAR_PHYSICAL_ID_SUFFIX)
         }
     }
@@ -674,7 +729,22 @@ class RearUserService : IRearService.Stub {
         return -1
     }
 
-    private fun taskId(): Int = StackList.parseTaskId(exec("am stack list"), "RearActivity")
+    private fun taskId(): Int = StackList.parseTaskId(exec("am stack list"), PKG, OwnPanel.ACTIVITY)
+
+    /**
+     * The other build's panel (release vs dev, see [OwnPanel]) is on top of [displayId]: the
+     * back is that install's. Logged on the change only — a recovery asks every tick.
+     */
+    private fun otherBuildOnTop(displayId: Int): Boolean {
+        val other = StackList.otherBuildOnTop(exec("am stack list"), PKG, displayId)
+        if (other != otherBuildSeen) {
+            otherBuildSeen = other
+            Log.i(TAG, if (other) "the other build's panel has display $displayId — standing down until asked"
+                else "the other build's panel no longer has display $displayId")
+        }
+        return other
+    }
+    @Volatile private var otherBuildSeen = false
 
     /** Single-quote for `sh -c`, escaping embedded single quotes. */
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
@@ -2911,11 +2981,15 @@ class RearUserService : IRearService.Stub {
                                     val at = now?.let { GuestTask.byId(exec("am stack list"), it.task)?.display }
                                     // Hidden on the front by Panel is not gone.
                                     val still = at == displayId || (at == 0 && now?.hiddenOnFront == true)
-                                    // Asleep on purpose, the rear stays dark: the panel's task is
-                                    // already behind, and is simply revealed. Gone too, it is
-                                    // relaunched on the next tick that is not asleep.
+                                    // A DARK rear stays dark: the panel's task is already behind,
+                                    // and is simply revealed. Gone too, it is relaunched on the
+                                    // next tick that finds it so. Decided by the display itself,
+                                    // not by `dozing`: the panel's sleep timer runs out behind a
+                                    // guest while the guest keeps the rear lit, and a rear that
+                                    // went dark with the power button was never "dozing" at all.
                                     if (now != null && !still) {
-                                        if (dozing) dropGuest("its task left the rear") else endGuest("its task left the rear")
+                                        if (rearLit(displayId) == true) endGuest("its task left the rear")
+                                        else dropGuest("its task left the rear, the rear dark")
                                     }
                                 }
                                 continue
