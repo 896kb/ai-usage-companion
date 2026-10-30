@@ -886,6 +886,8 @@ class RearUserService : IRearService.Stub {
         val pkg: String, val task: Int, val onTop: Boolean, val placed: Boolean = false,
         val hiddenOnFront: Boolean = false, val landed: Boolean = false,
         val privateDisplay: Int = -1,
+        /** On that display only for this open, having closed itself behind the lock (LockRetry); the config says otherwise. */
+        val lockRetried: Boolean = false,
     ) {
         val onPrivate: Boolean get() = privateDisplay >= 0
 
@@ -1220,7 +1222,11 @@ class RearUserService : IRearService.Stub {
         // task a Back closed or sent behind, and a trampoline dying in its survive wait would
         // then read as closed by the user, not retried.
         backedTask = -1
-        val wantPrivate = GuestShape.onPrivateDisplay(pkg, portalConfined)
+        // The switch under the slider turned off is somebody asking for the whole rear: it is tried, and not taken back.
+        val askedWholeRear = wholeRearAsked
+        wholeRearAsked = false
+        val wantPrivate = GuestShape.onPrivateDisplay(pkg, portalConfined) || guest?.let { it.pkg == pkg && it.lockRetried } == true
+        var privateRefused = false
         // The same app, in the other place than it is: it ends there, and starts here. Its picture
         // taken first, while there is one, and carried through to the reveal: taken after, it would
         // be of the panel, shown for the length of the start. Whatever does not use it, this lets go.
@@ -1233,6 +1239,7 @@ class RearUserService : IRearService.Stub {
             val pd = openPrivate(pkg)
             if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried)
             Log.w(TAG, "portal: no private display — $pkg on the whole rear instead")
+            privateRefused = true
         }
         // One guest at a time: the old one goes to the front, alive — never killed. Not yet:
         // it stays on the rear, live, while the new one starts and settles on the front, and
@@ -1246,7 +1253,16 @@ class RearUserService : IRearService.Stub {
             // Asked for on the front by name: with the old guest still on the rear, where an
             // unspecified start lands is not ours to guess. The same app again is left to
             // land where its task is.
-            val task = startSettled(component, pkg, front = arriving)
+            val start = startSettled(component, pkg, front = arriving) { closed ->
+                LockRetry.applies(closed, wantPrivate, privateRefused, retried = !first || askedWholeRear) { keyguardShowing() }
+            }
+            // Nothing on the rear has changed yet, and the cover is not up: one smooth open from here.
+            if (start == Started.ClosedBehindLock) {
+                Log.i(TAG, "portal: $pkg closed itself behind the lock — on a private display instead")
+                val pd = openPrivate(pkg)
+                if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried, lockRetried = true)
+            }
+            val task = (start as? Started.Task)?.id
             if (task == null) {
                 // Nothing on the rear has changed yet: an old guest is still the guest.
                 if (first && old != null && guest == old) {
@@ -1496,7 +1512,9 @@ class RearUserService : IRearService.Stub {
      * that gave no task is tried once through the front (HyperOS has been seen to abort starts
      * under the keyguard, [show]). [pd] is this function's until it is the guest's. Under [placing].
      */
-    private fun launchOnPrivate(pkg: String, component: String, displayId: Int, pd: PrivateDisplay, carried: GuestCover? = null): Boolean {
+    private fun launchOnPrivate(
+        pkg: String, component: String, displayId: Int, pd: PrivateDisplay, carried: GuestCover? = null, lockRetried: Boolean = false,
+    ): Boolean {
         val old = guest
         var landed = false
         repeat(2) { attempt ->
@@ -1507,6 +1525,7 @@ class RearUserService : IRearService.Stub {
                     // Nothing on the rear has changed: what was there stays.
                     pd.release()
                     Log.w(TAG, "portal: $pkg never started on a private display")
+                    if (lockRetried && old == null) endGuest("never started")
                 } else endGuest("never started")
                 return false
             }
@@ -1521,7 +1540,7 @@ class RearUserService : IRearService.Stub {
                 privateDisplay = pd
             }
             // On top from here: the layer shows, under the cover, and the panel stands down.
-            guest = Guest(pkg, task, onTop = true, landed = true, privateDisplay = pd.displayId)
+            guest = Guest(pkg, task, onTop = true, landed = true, privateDisplay = pd.displayId, lockRetried = lockRetried)
             syncDensity("$pkg is landing")
             wake(displayId)
             val startedAt = android.os.SystemClock.uptimeMillis()
@@ -1544,12 +1563,12 @@ class RearUserService : IRearService.Stub {
                 return false
             }
             chromeHide()
-            guest = Guest(pkg, task, onTop = false, privateDisplay = pd.displayId)
+            guest = Guest(pkg, task, onTop = false, privateDisplay = pd.displayId, lockRetried = lockRetried)
             syncSheetGuest()
             Log.w(TAG, "portal: $pkg's task $task did not survive on display ${pd.displayId}, read on ${GuestTask.byId(exec("am stack list"), task)?.display} (try ${attempt + 1})")
         }
         // Two starts that gave a task and did not last, or one of each: the guest's to end.
-        if (landed) endGuest("did not stay on its display") else pd.release()
+        if (landed) endGuest(if (lockRetried) "never started" else "did not stay on its display") else pd.release()
         return false
     }
 
@@ -1613,10 +1632,16 @@ class RearUserService : IRearService.Stub {
      */
     private fun relaunchIfMoved(why: String) {
         val g = guest?.takeIf { it.placed } ?: return
-        if (g.onPrivate == GuestShape.onPrivateDisplay(g.pkg, portalConfined)) return
+        if (g.onPrivate == keepsRight(g)) return
         Log.i(TAG, "portal: ${g.pkg} — $why")
         launchGuest(g.pkg, rearDisplay())
     }
+
+    /** Whether [g] is to be right of the cameras: the config says so, or this open does (LockRetry). */
+    private fun keepsRight(g: Guest): Boolean = g.lockRetried || GuestShape.onPrivateDisplay(g.pkg, portalConfined)
+
+    /** The next launch is somebody having turned the switch off for the whole rear. Under [placing]. */
+    private var wholeRearAsked = false
 
     /** [relaunchIfMoved] off the caller's thread. */
     private fun relaunchLater(why: String) {
@@ -1965,18 +1990,39 @@ class RearUserService : IRearService.Stub {
 
     /**
      * Started on the front — by name when [front], else wherever `am start` puts it — and its
-     * task once the top activity has held still. Null if none.
+     * task once the top activity has held still, or none. [retries]: asked once, as soon as its task
+     * is seen to have gone (LockRetry.closedItself), whether that is the end of waiting for it.
      */
-    private fun startSettled(component: String, pkg: String, front: Boolean): Int? {
-        exec(if (front) "am start --display 0 -n $component" else "am start -n $component")
+    private fun startSettled(component: String, pkg: String, front: Boolean, retries: (Boolean) -> Boolean): Started {
+        val out = exec(if (front) "am start --display 0 -n $component" else "am start -n $component")
+        val took = !out.contains("Error", ignoreCase = true)
         val settle = GuestTask.Settle()
-        val until = android.os.SystemClock.uptimeMillis() + GUEST_SETTLE_LIMIT_MS
+        val began = android.os.SystemClock.uptimeMillis()
+        val until = began + GUEST_SETTLE_LIMIT_MS
+        var saw = false
+        var lastSeen = began
+        var asked = false
         while (android.os.SystemClock.uptimeMillis() < until) {
             val entry = GuestTask.taskOf(exec("am stack list"), pkg)
-            if (entry != null && settle.feed(entry.top, android.os.SystemClock.uptimeMillis())) return entry.task
+            val now = android.os.SystemClock.uptimeMillis()
+            if (entry != null) {
+                saw = true
+                lastSeen = now
+                if (settle.feed(entry.top, now)) return Started.Task(entry.task)
+            } else if (!asked && LockRetry.closedItself(took, saw, now - lastSeen)) {
+                asked = true
+                if (retries(true)) return Started.ClosedBehindLock
+            }
             Thread.sleep(150)
         }
-        return GuestTask.taskOf(exec("am stack list"), pkg)?.task
+        return GuestTask.taskOf(exec("am stack list"), pkg)?.let { Started.Task(it.task) } ?: Started.Nothing
+    }
+
+    /** What a start on the front came to. */
+    private sealed interface Started {
+        data class Task(val id: Int) : Started
+        data object ClosedBehindLock : Started
+        data object Nothing : Started
     }
 
     override fun sendFocusedToBack(displayId: Int): String = synchronized(placing) {
@@ -2292,7 +2338,7 @@ class RearUserService : IRearService.Stub {
             s.apps(portalApps)
             s.dpiValues(portalDpi)
             s.dpiDefault(sliderDefault())
-            s.keepRight(guest?.let { it.pkg in portalConfined } == true)
+            s.keepRight(guest?.let { keepsRight(it) } == true)
             s.grid(portalGrid)
             s.names(portalNames)
             shellSheet = s
@@ -2345,7 +2391,8 @@ class RearUserService : IRearService.Stub {
 
     /** The sheet's "Keep right of the cameras" as the guest's now is. */
     private fun syncSheetKeepRight() {
-        shellSheet?.keepRight(guest?.let { it.pkg in portalConfined } == true)
+        // On for one here only for this open too: it IS right of the cameras.
+        shellSheet?.keepRight(guest?.let { keepsRight(it) } == true)
     }
 
     /** What the DPI slider stands at for a guest with none of its own: its private display's, or the rear's as read. */
@@ -3040,8 +3087,21 @@ class RearUserService : IRearService.Stub {
                 val pkg = sliderGuest()
                 if (pkg == null) steady(atMs)
                 else {
-                    setAppConfined(pkg, pkg !in portalConfined)
-                    shutSheet(atMs) { synchronized(placing) { relaunchIfMoved("switched on the back") } }
+                    // As the switch shows it. Off, one here only for this open is off for good:
+                    // saved off, and the whole rear is tried, with no going back behind the lock.
+                    val on = !(guest?.let { keepsRight(it) } ?: (pkg in portalConfined))
+                    setAppConfined(pkg, on)
+                    shellSheet?.keepRight(on)
+                    shutSheet(atMs) {
+                        synchronized(placing) {
+                            if (!on) {
+                                wholeRearAsked = true
+                                guest?.takeIf { it.pkg == pkg && it.lockRetried }?.let { guest = it.copy(lockRetried = false) }
+                            }
+                            relaunchIfMoved("switched on the back")
+                            wholeRearAsked = false
+                        }
+                    }
                 }
             }
             PortalSheet.Hit.Blank -> steady(atMs)
