@@ -784,7 +784,6 @@ class RearDialView(context: Context) : View(context) {
         // The masthead is heavier than the body: under glass it is a lens shaped like the
         // letters, and a lens needs a stroke wide enough to have an inside.
         face.set(title, PanelType.TITLE)
-        face.set(tipText, PanelType.BODY)
         label.textSize = typed(18f)
         heading.textSize = typed(22.5f)
         value.textSize = typed(21f)
@@ -1691,7 +1690,6 @@ class RearDialView(context: Context) : View(context) {
             swept(canvas) { drawPendingRings(it) }
             swept(canvas) { drawPendingOver(it) }
             swept(canvas) { drawPendingButtons(it) }
-            drawCameraTip(canvas)
             drawAodVeil(canvas)
             drawTableGlow(canvas)
             drawLockOverlay(canvas)
@@ -1731,9 +1729,6 @@ class RearDialView(context: Context) : View(context) {
         // Straight after the bands, so a ring's own label is legible on top of it.
         if (pendingOver.isNotEmpty()) active.add(GROUP_OVER)
         if (pendingButtons.isNotEmpty()) active.add(GROUP_BUTTONS)
-        // The camera tip covers all of the above, and is its own layer so the slider's
-        // glass bends the tip rather than the panel hidden under it.
-        if (tipAt != 0L || tipLeftAt != 0L) active.add(GROUP_TIP)
         // The lock group also carries the always-on veil and the table lights, which
         // show without any slider: in always-on the slider is always up, which hid
         // that the group never came on for the lights alone on a plain page.
@@ -1788,7 +1783,6 @@ class RearDialView(context: Context) : View(context) {
             GROUP_RINGS -> swept(canvas) { drawPendingRings(it) }
             GROUP_OVER -> swept(canvas) { drawPendingOver(it) }
             GROUP_BUTTONS -> swept(canvas) { drawPendingButtons(it) }
-            GROUP_TIP -> drawCameraTip(canvas)
             GROUP_LOCK -> { drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
             GROUP_NOTICE -> drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             else -> drawCharge(canvas)
@@ -2373,19 +2367,10 @@ class RearDialView(context: Context) : View(context) {
         // mid-sweep meant restarting from nothing in the opposite sense, so a second tap
         // had to be ignored until the first finished.
         val v = ambientSweep(rippleNow)
-        // The camera tip opens the same way: a circle of its own, out of the camera button,
-        // taking the readout away and leaving the background. See tipCircle.
-        val tv = cameraTipFade(frameNowMs)
-        val hidden = v >= 0.999f || tv >= 0.999f
-        val ambientFront = if (v > 0.001f && v < 0.999f) android.graphics.Path().apply {
+        val hidden = v >= 0.999f
+        val front = if (v > 0.001f && v < 0.999f) android.graphics.Path().apply {
             addCircle(rippleCx, rippleCy, rippleReach() * v, android.graphics.Path.Direction.CW)
         } else null
-        val tipFront = tipCircle(tv)
-        val front = when {
-            ambientFront == null -> tipFront
-            tipFront == null -> ambientFront
-            else -> android.graphics.Path(ambientFront).apply { op(tipFront, android.graphics.Path.Op.UNION) }
-        }
 
         // Opaque, and the colour is the user's.
         //
@@ -2543,8 +2528,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // Fired ONCE. This runs every frame, and putting the display out is not something
         // to ask for sixty times a second.
-        // Never under the camera tip: its slider waits for the swipe, and gives up on its own.
-        if (locked && tipAt == 0L && !lockExpiredSent && frameNowMs - lockArmedAt > LOCK_MIN_MS &&
+        if (locked && !lockExpiredSent && frameNowMs - lockArmedAt > LOCK_MIN_MS &&
             lockSpent(nowReal)
         ) {
             lockExpiredSent = true
@@ -3130,7 +3114,7 @@ class RearDialView(context: Context) : View(context) {
         //
         // Drawn before the notice and the charging cell, which are allowed over it: they
         // are why the panel is awake, and the knob is at the left where neither reaches.
-        if (overlays) { drawCameraTip(canvas); drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
+        if (overlays) { drawAodVeil(canvas); drawTableGlow(canvas); drawLockOverlay(canvas); drawAodSliderVeil(canvas) }
 
         // Over everything, and outside the readout's ripple clip: a notification arriving
         // while the panel is closing should still be readable.
@@ -3149,7 +3133,7 @@ class RearDialView(context: Context) : View(context) {
             // that had been there all along and was being revealed.
             if (v > 0.001f) {
                 canvas.save()
-                if (ambientFront != null) canvas.clipPath(ambientFront)
+                if (front != null) canvas.clipPath(front)
                 // NOTHING IS PAINTED HERE ANY MORE, and that is the fix rather than an
                 // omission. This used to wash the swept region with a see-through copy of
                 // the background colour, because the ground itself was drawn only when
@@ -5544,11 +5528,7 @@ class RearDialView(context: Context) : View(context) {
         if (!locked) return
         locked = false
         syncVideo(fresh = true)
-        // The tip's slider, swiped: "I understand" — the camera opens, after the panel has
-        // had its usual unlock. A tip that gave up has already ended itself, so nothing.
-        val tipConfirmed = endCameraTip()
         onUnlocked?.invoke()
-        tipConfirmed?.invoke()
         lockAt = SystemClock.uptimeMillis()
         // the thumb stays where the swipe left it while the band slides out; lockSwap
         // resets it once the band has gone, so the next lock starts clean
@@ -5559,224 +5539,6 @@ class RearDialView(context: Context) : View(context) {
     }
 
     val isLocked: Boolean get() = locked
-
-    // ---- the camera tip ----
-
-    /**
-     * The first camera of all: before it opens, a page over the whole panel says how to
-     * close it from the back — a tap in its empty grey band, the only way there is (see
-     * RearUserService.watchBandTaps). Unskippable for [CAMERA_TIP_MS]; then the slider
-     * comes, saying "I UNDERSTAND", and its swipe opens the camera.
-     *
-     * The slider is the lock's own, so it moves and answers the way it always does; only
-     * its word is different, and it does not run out while the tip is up. Who decides the
-     * tip is due, and what "seen" means afterwards, is the activity's business.
-     */
-    private var tipAt = 0L
-    private var tipLeftAt = 0L
-    private var tipDone: (() -> Unit)? = null
-    val cameraTipUp: Boolean get() = tipAt != 0L
-
-    /** Puts the tip up; [done] runs once its slider is swiped. */
-    fun showCameraTip(done: () -> Unit) {
-        if (tipAt != 0L) return
-        cameraButton?.let { tipCx = it.centerX(); tipCy = it.centerY() }
-        tipAt = SystemClock.uptimeMillis()
-        tipLeftAt = 0L
-        tipDone = done
-        removeCallbacks(tipArrive)
-        removeCallbacks(tipGiveUp)
-        postDelayed(tipArrive, CAMERA_TIP_MS)
-        postDelayed(tipGiveUp, CAMERA_TIP_GIVE_UP_MS)
-        onInteraction?.invoke()
-        invalidate()
-    }
-
-    private val tipArrive = Runnable { if (tipAt != 0L) lock() }
-
-    /** Walked away from: the tip goes, the panel comes back, the camera stays shut — and it is shown again next time. */
-    private val tipGiveUp = Runnable {
-        if (tipAt == 0L) return@Runnable
-        endCameraTip()
-        unlock()
-    }
-
-    /** Ends the tip, fading it out; what it was going to do, for the caller to run or drop. */
-    private fun endCameraTip(): (() -> Unit)? {
-        if (tipAt == 0L) return null
-        val done = tipDone
-        tipAt = 0L
-        tipDone = null
-        tipLeftAt = SystemClock.uptimeMillis()
-        removeCallbacks(tipArrive)
-        removeCallbacks(tipGiveUp)
-        invalidate()
-        return done
-    }
-
-    private fun cameraTipFade(now: Long): Float {
-        val rising = tipAt != 0L
-        val from = if (rising) tipAt else tipLeftAt
-        if (from == 0L) return 0f
-        val t = ((now - from).toFloat() / CAMERA_TIP_FADE_MS).coerceIn(0f, 1f)
-        if (!rising && t >= 1f) { tipLeftAt = 0L; return 0f }
-        if (t < 1f) animating = true
-        val e = Tween.easeInOut(t)
-        return if (rising) e else 1f - e
-    }
-
-    private val tipFill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tipStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val tipText by lazy {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = label.typeface; textAlign = Paint.Align.CENTER }
-    }
-    private val tipRect = android.graphics.RectF()
-    /** The tap's glow: one unit-radius gradient, placed and sized by its matrix each frame. */
-    private val tipGlow = android.graphics.RadialGradient(
-        0f, 0f, 1f,
-        // The app's accent (Ink.ACCENT), glowing: strong at the point, gone at the edge.
-        intArrayOf(
-            (CAMERA_TIP_TAP and 0x00FFFFFF) or (0xCC shl 24),
-            (CAMERA_TIP_TAP and 0x00FFFFFF) or (0x55 shl 24),
-            CAMERA_TIP_TAP and 0x00FFFFFF,
-        ),
-        floatArrayOf(0f, 0.45f, 1f),
-        android.graphics.Shader.TileMode.CLAMP,
-    )
-    private val tipGlowMatrix = android.graphics.Matrix()
-
-    /** Where the tip opens from: the camera button that was pressed. */
-    private var tipCx = Panel.WIDTH.toFloat()
-    private var tipCy = Panel.HEIGHT.toFloat()
-
-    /**
-     * The tip's circle at [reveal] (0 to 1): out of the camera button to the farthest
-     * corner, as the gamepad's ripple opens out of the gamepad. Null when it is not between
-     * — wholly shut, or wholly open.
-     */
-    private fun tipCircle(reveal: Float): android.graphics.Path? {
-        if (reveal <= 0.001f || reveal >= 0.999f) return null
-        var far = 0f
-        for (x in floatArrayOf(0f, Panel.WIDTH.toFloat())) for (y in floatArrayOf(0f, Panel.HEIGHT.toFloat())) {
-            far = maxOf(far, kotlin.math.hypot(x - tipCx, y - tipCy))
-        }
-        return android.graphics.Path().apply { addCircle(tipCx, tipCy, far * reveal, android.graphics.Path.Direction.CW) }
-    }
-
-    /**
-     * The left edge of the usable area, in panel units: the left inset of the cutout this
-     * view's display reports (296 of 904 on the 17 Pro's rear display), scaled. The 17
-     * Pro's when the display says nothing — the same fallback the tap watch uses.
-     */
-    private fun cutoutLeft(): Float {
-        val inset = display?.cutout?.safeInsetLeft ?: 0
-        // The view fills the display, so its width is the display's in the cutout's own frame.
-        val w = if (width > 0) width else display?.mode?.physicalWidth ?: 0
-        return if (inset > 0 && w > 0) Panel.WIDTH * inset / w.toFloat() else Panel.CUTOUT_RIGHT.toFloat()
-    }
-
-    /**
-     * The page: the front screen's silk over everything, and the real place to tap lit up where it is — the
-     * strip at the left of this very screen that the camera leaves grey and the tap watch
-     * listens to (BandTap.band of the width), flashing, with a tap pulsing between the
-     * lenses. Beside it, what to do, centred in the room above the slider; and until the
-     * slider takes its band, the countdown where it will be.
-     */
-    private fun drawCameraTip(canvas: Canvas) {
-        val now = frameNowMs
-        val fade = cameraTipFade(now)
-        if (fade <= 0.001f) return
-        // The countdown, the flash and the tap's pulse move for as long as the tip is up.
-        if (tipAt != 0L) animating = true
-        // Whole inside the circle: revealed, not faded in. See tipCircle.
-        fun alpha(of: Float) = (255 * of).toInt().coerceIn(0, 255)
-
-        // ON THE PANEL'S OWN BACKGROUND — the same one, never a copy in a circle. It only
-        // dims, panel-wide, as the tip opens, so the words read on a bright picture. The
-        // ripple is for the page's things: the readout is swept away by the circle out of
-        // the camera button (see drawFrame), and the tip's are revealed inside it, as the
-        // gamepad's screen is.
-        tipFill.color = android.graphics.Color.BLACK
-        tipFill.alpha = (TIP_SHADE * fade).toInt()
-        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), tipFill)
-        canvas.save()
-        tipCircle(fade)?.let { canvas.clipPath(it) }
-
-        // ONE POINT, NOT THE ZONE. The whole lens column closes the camera, but the lenses
-        // fill most of it, so a finger goes where it is shown: right on the usable area's
-        // left edge as this display reports it, halfway down, clear of the lenses. It
-        // breathes — a soft glow swelling and fading, slowly — with a ring drifting out of
-        // it now and then, rather than blinking.
-        val edge = cutoutLeft()
-        val stripRight = edge + BandTap.EDGE_ALLOW
-        val tx = edge // on the edge itself: the lenses end 38 units short of it on the 17 Pro
-        val ty = Panel.HEIGHT / 2f
-        val breath = 0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * (now % CAMERA_TIP_BREATH_MS) / CAMERA_TIP_BREATH_MS).toFloat()
-        tipGlowMatrix.setScale(CAMERA_TIP_GLOW * (0.8f + 0.25f * breath), CAMERA_TIP_GLOW * (0.8f + 0.25f * breath))
-        tipGlowMatrix.postTranslate(tx, ty)
-        tipGlow.setLocalMatrix(tipGlowMatrix)
-        tipFill.shader = tipGlow
-        tipFill.color = android.graphics.Color.WHITE
-        tipFill.alpha = alpha(0.45f + 0.55f * breath)
-        canvas.drawCircle(tx, ty, CAMERA_TIP_GLOW * 1.05f, tipFill)
-        tipFill.shader = null
-
-        val drift = (now % CAMERA_TIP_BREATH_MS).toFloat() / CAMERA_TIP_BREATH_MS
-        tipStroke.color = CAMERA_TIP_TAP
-        tipStroke.strokeWidth = 2f
-        tipStroke.alpha = alpha(0.6f * (1f - drift))
-        canvas.drawCircle(tx, ty, 12f + 40f * Tween.easeInOut(drift), tipStroke)
-
-        tipFill.color = android.graphics.Color.WHITE
-        tipFill.alpha = alpha(0.85f + 0.15f * breath)
-        canvas.drawCircle(tx, ty, 9f, tipFill)
-
-        // What to do, beside it: centred in the column right of the strip and in the room
-        // above the slider, and shrunk only if a line would not fit across.
-        val band = markRegion()
-        val colLeft = stripRight + CAMERA_TIP_GAP
-        val colRight = Panel.WIDTH - CAMERA_TIP_GAP
-        val cx = (colLeft + colRight) / 2f
-        tipText.textSize = typed(CAMERA_TIP_BODY)
-        val widest = CAMERA_TIP_LINES.maxOf { tipText.measureText(it) }
-        tipText.textSize = typed(CAMERA_TIP_TITLE)
-        val title = tipText.measureText(CAMERA_TIP_HEADING)
-        val fit = minOf(1f, (colRight - colLeft) / maxOf(title, widest))
-        val titleSize = typed(CAMERA_TIP_TITLE) * fit
-        val bodySize = typed(CAMERA_TIP_BODY) * fit
-        val step = bodySize * 1.6f
-        val block = titleSize + CAMERA_TIP_TITLE_GAP + step * (CAMERA_TIP_LINES.size - 1) + bodySize
-        var y = (band.top - CAMERA_TIP_GAP - block) / 2f + titleSize
-        tipText.color = android.graphics.Color.WHITE
-        tipText.alpha = alpha(1f)
-        tipText.textSize = titleSize
-        canvas.drawText(CAMERA_TIP_HEADING, cx, y, tipText)
-        y += CAMERA_TIP_TITLE_GAP + bodySize
-        tipText.textSize = bodySize
-        tipText.color = Panel.Palette.FG
-        tipText.alpha = alpha(1f)
-        for (line in CAMERA_TIP_LINES) {
-            canvas.drawText(line, cx, y, tipText)
-            y += step
-        }
-
-        // The countdown, in the band the slider is about to take.
-        if (tipAt != 0L) {
-            val left = CAMERA_TIP_MS - (now - tipAt)
-            val secs = ((left + 999L) / 1000L).coerceAtLeast(0L)
-            val keep = 1f - lockSwap(now)
-            if (secs > 0 && keep > 0.001f) {
-                tipText.textSize = typed(LOCK_TEXT)
-                tipText.color = Panel.Palette.FG
-                tipText.alpha = alpha(keep * LOCK_TEXT_ALPHA / 255f)
-                canvas.drawText(
-                    "PLEASE READ  ·  $secs", (LockSlider.left() + LockSlider.right()) / 2f,
-                    band.centerY() + LOCK_TEXT * 0.36f, tipText,
-                )
-            }
-        }
-        canvas.restore()
-    }
 
     /**
      * 0 while the slot holds what it normally would, 1 while the slider does.
@@ -7620,7 +7382,7 @@ class RearDialView(context: Context) : View(context) {
         extras.color =
             (colour and 0x00FFFFFF) or (alpha.toInt().coerceIn(0, 255) shl 24)
         canvas.drawText(
-            if (tipAt != 0L) CAMERA_TIP_LABEL else LOCK_LABEL,
+            LOCK_LABEL,
             (LockSlider.left() + LockSlider.right()) / 2f,
             region.centerY() + LOCK_TEXT * 0.36f,
             extras,
@@ -12305,35 +12067,6 @@ class RearDialView(context: Context) : View(context) {
         private const val GROUP_LOCK = 1
         private const val GROUP_NOTICE = 2
         private const val GROUP_CHARGE = 3
-        private const val GROUP_TIP = 6
-
-        /** The camera tip: the wait before its slider comes, unskippable. */
-        private const val CAMERA_TIP_MS = 5_000L
-        /** Nobody swiped in this long after it appeared: the tip gives up, the camera stays shut. */
-        private const val CAMERA_TIP_GIVE_UP_MS = 90_000L
-        /** The tip's circle opening and closing: the gamepad's ripple's time. */
-        private const val CAMERA_TIP_FADE_MS = 1200f   // RIPPLE_MS, below: a const cannot read one declared after it
-        /** The shade over the background inside the tip's circle, for the words' sake. */
-        private const val TIP_SHADE = 0x66
-        private const val CAMERA_TIP_LABEL = "I UNDERSTAND"
-        private const val CAMERA_TIP_TITLE = 32f
-        private const val CAMERA_TIP_BODY = 23f
-        private const val CAMERA_TIP_TITLE_GAP = 22f
-        private const val CAMERA_TIP_GAP = 28f
-        private const val CAMERA_TIP_HEADING = "CLOSING THE CAMERA"
-        private val CAMERA_TIP_LINES = listOf(
-            "No close button on the back.",
-            "Tap the flashing area on",
-            "the left of this screen,",
-            "grey in the camera, and",
-            "the camera closes.",
-        )
-        /** The tap's breath — one slow swell and fade — and how far its glow reaches. */
-        private const val CAMERA_TIP_BREATH_MS = 2_400L
-        private const val CAMERA_TIP_GLOW = 54f
-        /** The tap, in the accent the slider reveals. */
-        /** The tap point's colour: the app's accent, as the front shows it. */
-        private const val CAMERA_TIP_TAP = dev.kb896.aiusage.ui.glass.Ink.ACCENT
 
         /** The session window's fixed length — see sessionElapsed. */
         private const val SESSION_WINDOW_MS = 5f * 60f * 60f * 1000f
@@ -12507,8 +12240,7 @@ class RearDialView(context: Context) : View(context) {
 
         /**
          * The colour the instruction is revealed in under the indicator: the app's accent,
-         * as the front shows it — on the lock slider and on the camera tip's, which is the
-         * same slider with another word.
+         * as the front shows it.
          */
         private const val LOCK_REVEAL = dev.kb896.aiusage.ui.glass.Ink.ACCENT
 

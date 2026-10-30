@@ -56,9 +56,6 @@ class RearActivity : Activity() {
          */
         const val ACTION_OPEN_CAMERA = "dev.kb896.aiusage.OPEN_CAMERA"
 
-        /** The camera tip has been shown on the back: its switch goes off. */
-        const val ACTION_CAMERA_TIP_SHOWN = "dev.kb896.aiusage.CAMERA_TIP_SHOWN"
-
         /** Another app's notification, on its way to the panel. */
         const val ACTION_NOTIFICATION = "dev.kb896.aiusage.NOTIFICATION"
         const val EXTRA_NOTIFICATION_APP = "app"
@@ -437,19 +434,7 @@ class RearActivity : Activity() {
         // learns nothing about whether the launch worked: there is no screen here to
         // report a failure on, and the camera either appears or it does not.
         dial.onCameraTap = {
-            if (dial.config.cameraTip) {
-                // The first camera: the tip first, and the camera once it is swiped through.
-                // Shown is seen: the switch goes off now, in the main process that keeps
-                // the settings and in this panel's own copy, so a second press cannot
-                // repeat it — whether or not it is swiped through.
-                dial.config = dial.config.copy(cameraTip = false)
-                sendBroadcast(Intent(ACTION_CAMERA_TIP_SHOWN).setPackage(packageName))
-                dial.showCameraTip {
-                    sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
-                }
-            } else {
-                sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
-            }
+            sendBroadcast(Intent(ACTION_OPEN_CAMERA).setPackage(packageName))
         }
         // Same shape, same reason: the session lives in the main process, so a press
         // here is a message rather than an action. The panel does NOT optimistically
@@ -692,17 +677,13 @@ class RearActivity : Activity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         dial.throughCrt(ev) // first: everything below reads the flat picture's coordinates
         dial.toPanel(ev) // then real pixels into panel units — the Pro Max's display is larger
-        // The camera tip takes nothing but its slider — not even the double tap — and
-        // nothing at all before the slider has come.
-        val tip = dial.cameraTipUp
-        if (tip) dial.onInteraction?.invoke()
-        if (systemDoubleTapTakenOver && !tip) doubleTaps.onTouchEvent(ev)
+        if (systemDoubleTapTakenOver) doubleTaps.onTouchEvent(ev)
         // A dimmed page — the double tap's dim, or always-on — takes no touch but the
         // double tap: no paging, no buttons, no drag. The one exception is the slider,
         // which has to be swiped: a touch that starts on its band goes through, and so
         // does the rest of that same gesture wherever the finger wanders.
         if (sleepStage.dimming) return true
-        if (inAod || guardedAfterWake || tip) {
+        if (inAod || guardedAfterWake) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> sliderTouch = dial.isLocked && dial.lockBand().contains(ev.x, ev.y)
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val pass = sliderTouch; sliderTouch = false; return if (pass) super.dispatchTouchEvent(ev) else true }
@@ -901,13 +882,8 @@ class RearActivity : Activity() {
     private var unlockingBySpent = false
     private var sliderTouch = false
 
-    /** [sleepPanel] re-arming itself needs a name for itself. */
-    private val sleepPanelRef: Runnable get() = sleepPanel
-
     private fun enterAod() {
         if (inAod) return
-        // The camera tip is never dimmed into always-on, whatever asks.
-        if (dial.cameraTipUp) return
         inAod = true
         window.decorView.removeCallbacks(sleepPanel)
         // A spent lock still handing back is over: always-on keeps the slider, and the
@@ -1085,9 +1061,6 @@ class RearActivity : Activity() {
         // — and only then: stopped because the rear went dark, the panel must still say so.
         // onStart arms the countdown again.
         if (!started && display?.state == android.view.Display.STATE_ON) return@Runnable
-        // Never under the camera tip: it waits for a swipe, and gives up on its own. The
-        // countdown starts over instead, so the panel sleeps once the tip has gone.
-        if (dial.cameraTipUp) { window.decorView.postDelayed(sleepPanelRef, AWAKE_MS); return@Runnable }
         if (aodOn) enterAod() else holdScreen(false)
     }
 

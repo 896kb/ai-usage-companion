@@ -261,7 +261,6 @@ class UsagePollService : Service() {
             // it comes here: the Shizuku binding lives in this process and the panel's
             // does not.
             addAction(RearActivity.ACTION_OPEN_CAMERA)
-            addAction(RearActivity.ACTION_CAMERA_TIP_SHOWN)
             // And its transport buttons, for the same reason again.
             addAction(RearActivity.ACTION_MEDIA_COMMAND)
             // The panel telling us it has let its display go, or taken it back.
@@ -420,16 +419,6 @@ class UsagePollService : Service() {
             // position at the exact moment something else is about to cover it.
             if (intent?.action == RearActivity.ACTION_OPEN_CAMERA) {
                 Graph.of(this@UsagePollService).bridge.openCamera()
-                return
-            }
-            // The camera tip, shown on the back: its switch goes off — settled here, where
-            // the settings live, and handed back to the panel with the next state.
-            if (intent?.action == RearActivity.ACTION_CAMERA_TIP_SHOWN) {
-                val app = Graph.of(this@UsagePollService)
-                val store = ConfigStore(this@UsagePollService)
-                val config = store.load().copy(cameraTip = false)
-                store.save(config)
-                app.bridge.update(StatePayload.encode(app.repository.state.value, config, WeatherPoll.latest))
                 return
             }
             // THE CHARGER GOING IN LIGHTS THE PANEL.

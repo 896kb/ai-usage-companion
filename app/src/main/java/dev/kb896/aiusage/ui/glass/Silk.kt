@@ -78,8 +78,8 @@ half4 main(float2 coord) {
 
     /**
      * A silk of its own, at the same settings, for a canvas that keeps its own time — the
-     * camera tip on the back, which must not move the front's (both live in one process
-     * when the preview draws the panel).
+     * panel's background on the back, which must not move the front's (both live in one
+     * process when the preview draws the panel).
      */
     fun create(): RuntimeShader =
         RuntimeShader(SRC).apply {

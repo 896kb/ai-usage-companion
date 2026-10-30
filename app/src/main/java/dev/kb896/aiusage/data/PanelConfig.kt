@@ -478,12 +478,6 @@ data class PanelConfig(
      */
     val aodPocket: Boolean = false,
     /**
-     * Show the camera tip — how to close the camera from the back — the next time the
-     * panel's camera button is pressed. On until it has been swiped through once; the
-     * Advanced switch turns it back on for the next time.
-     */
-    val cameraTip: Boolean = true,
-    /**
      * "Match the front notifications": a notification that leaves the front leaves the
      * back's list too, the list is brought in line with the front whenever the relay
      * connects, and a card swiped away on the back is cleared on the front. Off, the back

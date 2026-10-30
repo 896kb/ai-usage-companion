@@ -92,7 +92,7 @@ class BandTap(
          * share of its width — plus [EDGE_ALLOW].
          * The camera keeps that column grey, since its picture cannot go under the lenses;
          * on the 17 Pro its grey runs a little further (to 40.6%), but a tap past the grey
-         * would land on the viewfinder. The panel lights up exactly this strip for the tip.
+         * would land on the viewfinder.
          */
         fun band(rear: RearGeometry): Float = rear.cutoutPx / rear.widthPx.toFloat() + EDGE_ALLOW / dev.kb896.aiusage.Panel.WIDTH
 

@@ -101,12 +101,11 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * What the camera tip's switch shows. The panel turns the setting off by itself when it
-     * shows the tip — saved by the service, behind this screen's back — so while the screen
-     * is open it watches the store and redraws the rows when the two disagree. Only for that
-     * switch: redrawing on every write would rebuild the rows under someone typing a title.
+     * Some settings change behind this screen's back — saved by the service, or by the panel
+     * — so while the screen is open it watches the store and redraws the rows when what they
+     * show disagrees with it. Only for those: redrawing on every write would rebuild the rows
+     * under someone typing a title.
      */
-    private var shownCameraTip: Boolean? = null
     private var stopWatchingConfig: (() -> Unit)? = null
 
     /** The Portal tab's DPI as last built, so a value nudged on the back shows on the front. */
@@ -121,8 +120,7 @@ class MainActivity : ComponentActivity() {
     /** The config was written: the rows again if what they show of it changed. */
     private fun syncFromConfig() {
         val config = ConfigStore(this).load()
-        val stale = shownCameraTip?.let { it != config.cameraTip } == true ||
-            shownPortalDpi?.let { it != config.portalDpi } == true ||
+        val stale = shownPortalDpi?.let { it != config.portalDpi } == true ||
             shownPortalGuide?.let { it != PortalGuide.of(config) } == true
         if (stale) buildSettingsRows()
     }
@@ -1549,12 +1547,6 @@ class MainActivity : ComponentActivity() {
         // Shizuku and copied to the clipboard. The panel dying on someone else's phone is
         // a question about their firmware, and this is the shortest way to ask it.
         SettingsRows.navigation(advanced, "Copy rear-display report") { copyRearReport() }
-        // The camera tip shows once; this brings it back for the next camera, and goes off
-        // by itself once it has been swiped through again.
-        shownCameraTip = config.cameraTip
-        SettingsRows.toggle(
-            advanced, "Show the camera tip next time", config.cameraTip,
-        ) { on -> shownCameraTip = on; write { it.copy(cameraTip = on) } }
         SettingsRows.colorGrid(advanced, config.rampColors.mapIndexed { i, colour ->
             SettingsRows.Swatch("RAMP ${i + 1}", colour) { c ->
                 write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
