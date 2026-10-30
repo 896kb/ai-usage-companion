@@ -57,5 +57,9 @@ class DoubleTapSleep {
          * Always-on's veil, so the two dims read alike.
          */
         const val VEIL_ALPHA = 0.6f
+        /** The veil fading in, about as long as HyperOS's backlight ramp took the old dim. */
+        const val VEIL_IN_MS = 900L
+        /** And out again when a second double tap calls the dim off. */
+        const val VEIL_OUT_MS = 250L
     }
 }

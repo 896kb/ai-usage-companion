@@ -750,10 +750,15 @@ class RearActivity : Activity() {
         // panel auto-brightness has turned right down (0.045 over 0.019, seen 2026-10-30).
         val v = veil ?: View(this).apply {
             setBackgroundColor(Color.BLACK)
-            alpha = DoubleTapSleep.VEIL_ALPHA
+            alpha = 0f
             isClickable = false
         }.also { veil = it }
         if (v.parent == null) addContentView(v, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // Faded in, as the backlight's ramp used to fade the old dim; put up at once it
+        // read as a cut. From wherever it is, should a called-off dim still be fading out.
+        v.animate().cancel()
+        v.animate().alpha(DoubleTapSleep.VEIL_ALPHA).setDuration(DoubleTapSleep.VEIL_IN_MS)
+            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
         Log.i(TAG, "double tap: dimmed and let go — HyperOS powers the display down on its rear timeout")
     }
 
@@ -765,7 +770,18 @@ class RearActivity : Activity() {
     private fun endDim(off: Boolean) { endDimInner(off); sendMirror() }
     private fun endDimInner(off: Boolean) {
         sleepStage.reset()
-        veil?.let { v -> (v.parent as? ViewGroup)?.removeView(v) }
+        veil?.let { v ->
+            v.animate().cancel()
+            if (off) {
+                // Dark already: nothing to see it go.
+                v.alpha = 0f
+                (v.parent as? ViewGroup)?.removeView(v)
+            } else {
+                // Called off in front of somebody: faded out, as it came.
+                v.animate().alpha(0f).setDuration(DoubleTapSleep.VEIL_OUT_MS)
+                    .withEndAction { if (!sleepStage.dimming) (v.parent as? ViewGroup)?.removeView(v) }.start()
+            }
+        }
         if (off) {
             Log.i(TAG, "double tap: the display went off — dim over")
             sleptByDoubleTap = true
