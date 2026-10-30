@@ -1124,6 +1124,8 @@ class RearActivity : Activity() {
      * forever after. Whatever lights the display next, a notification or a thumb, this
      * puts the hold back.
      */
+    private val litEdge = LitEdge()
+
     private val displayListener = object :
         android.hardware.display.DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -1131,7 +1133,8 @@ class RearActivity : Activity() {
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != display?.displayId) return
             val state = display?.state
-            onDisplayState(state == android.view.Display.STATE_ON)
+            // Only on an edge: a lit display changing its refresh rate is not one (LitEdge).
+            litEdge.next(state == android.view.Display.STATE_ON)?.let(::onDisplayState)
             // Separate from the question above, which is about the LOCK handing back.
             // This one is about whether drawing reaches anything at all.
             dial.displayAwake = takesUpdates(state)
