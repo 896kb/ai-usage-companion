@@ -502,6 +502,14 @@ class RearActivity : Activity() {
             window.decorView.removeCallbacks(restorePanel)
             awaitingDoze = false
             holdScreen(true)
+            // In always-on the pocket keeps watching: a notification lighting a panel that
+            // had let go for the pocket left the watch off, and the back stayed lit in the
+            // pocket. Still covered, the pocket's countdown starts over from here.
+            if (inAod) {
+                pocket.heldAgain()
+                pocketWatch(true)
+                pocketRearm()
+            }
             armSleep()
         }
         // Somebody is looking at it. Same effect, different reason — see onInteraction. And
@@ -941,11 +949,21 @@ class RearActivity : Activity() {
             ?: all.firstOrNull { rear.containsMatchIn(it.stringType) || rear.containsMatchIn(it.name) }
     }
     private var pocketWatching = false
+    /** Between letting go for the pocket and the display going dark — see PocketHold. */
+    private val pocket = PocketHold()
     private val pocketSleep: Runnable = Runnable {
-        if (!inAod) return@Runnable
+        if (!inAod || pocket.released) return@Runnable
         Log.i(TAG, "always-on: in a pocket — letting the display go")
-        pocketWatch(false)
+        // Still watching: out of the pocket before the display goes dark takes the hold back.
+        // onDisplayState(false) stops the watch once it has.
+        pocket.letGo()
         holdScreen(false)
+    }
+
+    /** Pocket mode's countdown over again, from the last reading. */
+    private fun pocketRearm() {
+        window.decorView.removeCallbacks(pocketSleep)
+        if (pocket.covered) window.decorView.postDelayed(pocketSleep, POCKET_MS)
     }
 
     /**
@@ -986,8 +1004,11 @@ class RearActivity : Activity() {
     private val pocketListener = object : android.hardware.SensorEventListener {
         override fun onSensorChanged(e: android.hardware.SensorEvent) {
             val covered = e.values[0] < e.sensor.maximumRange.coerceAtLeast(1f) * 0.5f
-            window.decorView.removeCallbacks(pocketSleep)
-            if (covered) window.decorView.postDelayed(pocketSleep, POCKET_MS)
+            if (pocket.reading(covered) && inAod) {
+                Log.i(TAG, "always-on: out of the pocket before the display went dark — holding it again")
+                holdScreen(true)
+            }
+            pocketRearm()
         }
         override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
     }
@@ -1001,7 +1022,7 @@ class RearActivity : Activity() {
         if (on) Log.i(TAG, "pocket mode: watching ${sensor.name} (${sensor.stringType}), range ${sensor.maximumRange}")
         pocketWatching = on
         if (on) sensors.registerListener(pocketListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
-        else { sensors.unregisterListener(pocketListener); window.decorView.removeCallbacks(pocketSleep) }
+        else { sensors.unregisterListener(pocketListener); window.decorView.removeCallbacks(pocketSleep); pocket.reset() }
     }
 
     /**
