@@ -2,6 +2,7 @@ package dev.kb896.aiusage.rear
 
 import dev.kb896.aiusage.rear.PortalSheet.OPEN
 import dev.kb896.aiusage.rear.PortalSheet.REVEALED
+import dev.kb896.aiusage.rear.PortalSheet.STRIP
 import dev.kb896.aiusage.rear.SheetMotion.Phase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,8 +33,8 @@ class SheetMotionTest {
     @Test fun `let go slowly, it rests at the nearest stop`() {
         assertEquals(0f, SheetMotion.snap(noGuest, 120f, 0f), 0f)
         assertEquals(OPEN, SheetMotion.snap(noGuest, 140f, 0f), 0f)
-        assertEquals(OPEN, SheetMotion.snap(guest, OPEN + 40f, 0f), 0f)
-        assertEquals(REVEALED, SheetMotion.snap(guest, OPEN + 50f, 0f), 0f)
+        assertEquals(OPEN, SheetMotion.snap(guest, OPEN + STRIP / 2 - 10f, 0f), 0f)
+        assertEquals(REVEALED, SheetMotion.snap(guest, OPEN + STRIP / 2 + 10f, 0f), 0f)
     }
 
     @Test fun `a flick goes to the next stop its way, one stop and never two`() {
@@ -79,8 +80,8 @@ class SheetMotionTest {
 
     @Test fun `open with a guest, a swipe up scrolls on to the slider`() {
         val m = restingAt(OPEN)
-        m.grab(400f, 20_000); m.drag(360f, 20_400); m.drag(320f, 20_800)
-        assertEquals(REVEALED, m.release(320f, 21_000), 0f)
+        m.grab(400f, 20_000); m.drag(360f, 20_400); m.drag(300f, 20_800)
+        assertEquals(REVEALED, m.release(300f, 21_000), 0f)
     }
 
     @Test fun `open without a guest, a swipe up does nothing`() {
