@@ -149,6 +149,8 @@ class UsagePollService : Service() {
          */
         override fun onDisplayChanged(displayId: Int) {
             if (displayId != Panel.DISPLAY_ID) return
+            // Pocket mode hears every change, and keeps only the power (PocketMode.lit).
+            pocket?.sync()
             val change = panelPower.see(panelOn())
             if (change == PanelPower.Change.WENT_DARK) rearWentOffAt = android.os.SystemClock.elapsedRealtime()
             if (change != PanelPower.Change.WOKE) return
@@ -164,6 +166,9 @@ class UsagePollService : Service() {
     }
 
     private var portalApps: PortalAppsLoader? = null
+
+    /** Pocket mode's sensor and calls — see PocketWatch for why they live in this process. */
+    private var pocket: PocketWatch? = null
     private var stopConfigWatch: (() -> Unit)? = null
 
     /** Installs, updates, removals and a language change all alter the pinned apps' icons or names. */
@@ -186,7 +191,7 @@ class UsagePollService : Service() {
         val app = Graph.of(this)
         // The pinned apps' icons and names go to the shell: now, and on every config write.
         val loader = PortalAppsLoader(this) { app.bridge.setPortalApps(it) }.also { portalApps = it }
-        stopConfigWatch = ConfigStore(this).listen { loader.refresh() }
+        stopConfigWatch = ConfigStore(this).listen { loader.refresh(); pocket?.setSwitch(config().pocketMode) }
         ContextCompat.registerReceiver(this, portalAppsReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addAction(Intent.ACTION_PACKAGE_REMOVED)
@@ -229,6 +234,7 @@ class UsagePollService : Service() {
         // As the back is NOW: a back lit when this service starts is not a back waking up at
         // its first refresh-rate change (PanelPower).
         panelPower = PanelPower(on = panelOn())
+        pocket = PocketWatch(this, app.bridge).also { it.setSwitch(config().pocketMode); it.sync() }
         displays.registerDisplayListener(displayListener, null)
         // RECEIVER_NOT_EXPORTED is required, not optional: on API 34+ a receiver whose
         // filter contains a NON-system action must declare its export state or
@@ -826,6 +832,8 @@ class UsagePollService : Service() {
         runCatching { unregisterReceiver(portalAppsReceiver) }
         portalApps?.stop()
         displays.unregisterDisplayListener(displayListener)
+        pocket?.stop()
+        pocket = null
         media?.stop()
         media = null
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}

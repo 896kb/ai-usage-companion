@@ -236,6 +236,16 @@ class RearActivity : Activity() {
         const val EXTRA_MIRROR_DIM = "dim"
 
         const val EXTRA_DOZING = "dozing"
+        /**
+         * Pocket mode, from the app process (PocketWatch): [EXTRA_POCKETED] true — the back has
+         * been switched off for a pocket: let go of the display, take no hold until out of it;
+         * false — out of it, and with [EXTRA_POCKET_RESTORE] being switched on again: the slider
+         * up, unless [EXTRA_POCKET_GUEST] (a guest app was on top, and comes back on top).
+         */
+        const val ACTION_POCKET = "dev.kb896.aiusage.POCKET"
+        const val EXTRA_POCKETED = "pocketed"
+        const val EXTRA_POCKET_RESTORE = "pocketRestore"
+        const val EXTRA_POCKET_GUEST = "pocketGuest"
 
 
         const val EXTRA_STATE = "state"
@@ -260,8 +270,12 @@ class RearActivity : Activity() {
          * on a desk is not costing a core.
          */
         const val AWAKE_MS = 30_000L
-        /** how long the rear proximity sensor has to stay covered before always-on lets the display go */
-        const val POCKET_MS = 1_500L
+        /**
+         * How long the rear proximity sensor has to stay covered before pocket mode switches
+         * the back off (PocketWatch): a finger passing over the lens, or a hand brushing it on
+         * the way to a button, is not a pocket.
+         */
+        const val POCKET_DEBOUNCE_MS = 400L
         /** table mode: gravity along -z beyond this, x and y within this, for this long */
         const val TABLE_Z = 8.6f
         const val TABLE_XY = 2.2f
@@ -340,6 +354,10 @@ class RearActivity : Activity() {
                     moveTaskToBack(true)
                 }
                 ACTION_LOCK -> lockPanel()
+                ACTION_POCKET -> if (intent.getBooleanExtra(EXTRA_POCKETED, false)) intoPocket() else outOfPocket(
+                    restore = intent.getBooleanExtra(EXTRA_POCKET_RESTORE, false),
+                    guest = intent.getBooleanExtra(EXTRA_POCKET_GUEST, false),
+                )
                 ACTION_NOTIFICATION -> { peekForNotice(); dial.showNotification(
                     intent.getStringExtra(EXTRA_NOTIFICATION_APP).orEmpty(),
                     intent.getStringExtra(EXTRA_NOTIFICATION_PKG).orEmpty(),
@@ -493,14 +511,6 @@ class RearActivity : Activity() {
             window.decorView.removeCallbacks(restorePanel)
             awaitingDoze = false
             holdScreen(true)
-            // In always-on the pocket keeps watching: a notification lighting a panel that
-            // had let go for the pocket left the watch off, and the back stayed lit in the
-            // pocket. Still covered, the pocket's countdown starts over from here.
-            if (inAod) {
-                pocket.heldAgain()
-                pocketWatch(true)
-                pocketRearm()
-            }
             armSleep()
         }
         // Somebody is looking at it. Same effect, different reason — see onInteraction. And
@@ -543,6 +553,7 @@ class RearActivity : Activity() {
                 addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
                 addAction(ACTION_REAR_BRIGHTNESS)
                 addAction(ACTION_QUICK_STATES)
+                addAction(ACTION_POCKET)
 
             },
             ContextCompat.RECEIVER_EXPORTED,
@@ -582,7 +593,6 @@ class RearActivity : Activity() {
                 if (!aodOn && inAod) { exitAod(); dial.unlock() }
                 armSleep()
             }
-            if (!decoded.config.pocketMode) pocketWatch(false) else if (inAod) pocketWatch(true)
             calibrationView.geometry = PanelGeometry.of(decoded.config.effectiveRingLayout)
         }
     }
@@ -816,7 +826,9 @@ class RearActivity : Activity() {
         // touch reaches the view after the dim begins, and the view's touch handling
         // re-took the hold a millisecond after it was released — so the flag never
         // stayed cleared and the display never let go (seen in the wakelock history).
-        if (on && (sleptByDoubleTap || sleepStage.dimming)) return
+        // Nor in a pocket: the back is switched off for it, and a notification's hold there
+        // (onNeedsScreen, the lock) is a request to light it inside the pocket.
+        if (on && (sleptByDoubleTap || sleepStage.dimming || pocketed)) return
         if (on) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
@@ -888,9 +900,9 @@ class RearActivity : Activity() {
      * the display stays held, the window dims to the double tap's level, the view stops
      * animating and fades its backdrop away. A double tap on it raises the unlock slider
      * at once; the swipe brings the full panel back and the idle timer starts again. It
-     * sleeps only in a pocket: the rear proximity sensor covered for a moment lets the
-     * display go, and HyperOS powers it down on its own timeout. Any wake lands back in
-     * always-on, with a notification's card and slider on top of it as usual.
+     * sleeps only in a pocket — pocket mode, which switches the back off (PocketWatch) — or
+     * by the power button. Any wake lands back in always-on, with a notification's card and
+     * slider on top of it as usual.
      */
     private var aodOn = false
     private var inAod = false
@@ -911,14 +923,12 @@ class RearActivity : Activity() {
         dial.ringsClosed = true
         // the slider is up from the first moment, and stays: the page dims around it
         dial.lock()
-        pocketWatch(true)
         Log.i(TAG, "always-on: dimmed and frozen, the slider up")
     }
 
     private fun exitAod() {
         if (!inAod) return
         inAod = false
-        pocketWatch(false)
         window.decorView.removeCallbacks(endPeek)
         dial.aodPeek = false
         dial.aod = false
@@ -930,6 +940,7 @@ class RearActivity : Activity() {
     }
 
     // ---- the table: gravity says the phone lies flat on its face, rear display up ----
+    private val sensors by lazy { getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager }
     private val gravitySensor: android.hardware.Sensor? by lazy {
         sensors.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
             ?: sensors.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
@@ -960,40 +971,6 @@ class RearActivity : Activity() {
         tableWatching = on
         if (on) sensors.registerListener(tableListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
         else { sensors.unregisterListener(tableListener); flatSince = -1L; dial.tableGlow = false }
-    }
-
-    // ---- the pocket: the rear proximity sensor, or the best sensor the phone has ----
-    private val sensors by lazy { getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager }
-    /**
-     * The proximity sensor on the BACK of the phone, and only that one. Xiaomi names it
-     * "xiaomi.sensor.proxmity_back" (sic) on the 17 Pro; matched loosely in case another
-     * model spells it differently. Never the front sensor: falling back to it made the
-     * panel read "in a pocket" whenever the phone was held or lay on its face — and let
-     * the display go, which is what a panel going black ten seconds after a wake looked
-     * like on phones where the name did not match.
-     */
-    private val pocketSensor: android.hardware.Sensor? by lazy {
-        val all = sensors.getSensorList(android.hardware.Sensor.TYPE_ALL)
-        val rear = Regex("(?i)prox.*(back|rear|sub)|(back|rear|sub).*prox")
-        all.firstOrNull { it.stringType == "xiaomi.sensor.proxmity_back" }
-            ?: all.firstOrNull { rear.containsMatchIn(it.stringType) || rear.containsMatchIn(it.name) }
-    }
-    private var pocketWatching = false
-    /** Between letting go for the pocket and the display going dark — see PocketHold. */
-    private val pocket = PocketHold()
-    private val pocketSleep: Runnable = Runnable {
-        if (!inAod || pocket.released) return@Runnable
-        Log.i(TAG, "always-on: in a pocket — letting the display go")
-        // Still watching: out of the pocket before the display goes dark takes the hold back.
-        // onDisplayState(false) stops the watch once it has.
-        pocket.letGo()
-        holdScreen(false)
-    }
-
-    /** Pocket mode's countdown over again, from the last reading. */
-    private fun pocketRearm() {
-        window.decorView.removeCallbacks(pocketSleep)
-        if (pocket.covered) window.decorView.postDelayed(pocketSleep, POCKET_MS)
     }
 
     /**
@@ -1031,28 +1008,54 @@ class RearActivity : Activity() {
      * the lock running out puts the panel back to sleep, as it always did.
      */
     private var guardedAfterWake = false
-    private val pocketListener = object : android.hardware.SensorEventListener {
-        override fun onSensorChanged(e: android.hardware.SensorEvent) {
-            val covered = e.values[0] < e.sensor.maximumRange.coerceAtLeast(1f) * 0.5f
-            if (pocket.reading(covered) && inAod) {
-                Log.i(TAG, "always-on: out of the pocket before the display went dark — holding it again")
-                holdScreen(true)
-            }
-            pocketRearm()
-        }
-        override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+
+    // ---- the pocket: PocketWatch, in the app process, switches the back off and on ----
+    /**
+     * The back is switched off for a pocket (PocketWatch), and not out of it yet. No hold is
+     * taken meanwhile — see holdScreen — so nothing here can light it back up in the pocket.
+     */
+    private var pocketed = false
+
+    /**
+     * Into the pocket: the shell has switched the back off. Let go of the display — which
+     * also tells the supervisors the panel is asleep on purpose, not lost (announceHold) — and
+     * stand the sleep timer down: it has nothing to do until the way out.
+     */
+    private fun intoPocket() {
+        pocketed = true
+        window.decorView.removeCallbacks(sleepPanel)
+        holdScreen(false)
+        Log.i(TAG, "pocket: switched off for a pocket — no holds until out of it")
     }
-    private fun pocketWatch(on: Boolean) {
-        // A switch, off by default: a sensor that reads covered in the hand makes this
-        // the panel going black for no reason anyone can see.
-        if (on && !dial.config.pocketMode) { pocketWatch(false); return }
-        if (on == pocketWatching) return
-        val sensor = pocketSensor
-        if (sensor == null) { Log.w(TAG, "always-on: no rear proximity sensor — no pocket mode"); return }
-        if (on) Log.i(TAG, "pocket mode: watching ${sensor.name} (${sensor.stringType}), range ${sensor.maximumRange}")
-        pocketWatching = on
-        if (on) sensors.registerListener(pocketListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
-        else { sensors.unregisterListener(pocketListener); window.decorView.removeCallbacks(pocketSleep); pocket.reset() }
+
+    /**
+     * Out of the pocket. With [restore] the back is being switched on again, and comes back
+     * as it was but ALWAYS GUARDED: the full panel with its slider up and the page taking no
+     * touch but the slider's (guardedAfterWake, the double tap's wake); always-on as it was,
+     * its slider up anyway. Over a guest ([guest]) nothing: no slider can go over another
+     * app, and a lock raised behind it would only run out and let the back go under the
+     * guest. Without [restore] the pocket was called off (the switch, the service going) and
+     * the back stays as it is — only holds are allowed again.
+     */
+    private fun outOfPocket(restore: Boolean, guest: Boolean) {
+        if (!pocketed && !restore) return
+        pocketed = false
+        if (!restore) return
+        Log.i(TAG, "pocket: out of it — back as it was, the slider up${if (guest) " (a guest on top: no slider over it)" else ""}")
+        if (!guest) {
+            if (inAod) {
+                if (!dial.isLocked) dial.lock()
+            } else {
+                guardedAfterWake = true
+                // lockPanel: a spent lock's hand-back called off, the hold back, the slider up
+                lockPanel()
+            }
+        }
+        // Lit already (somebody lit it in the pocket, and the holds were refused) the
+        // display-state edge has been and gone: the hold is taken here. Dark, the edge to
+        // come takes it (onDisplayState), and this only asks for what it will.
+        if (display?.state == android.view.Display.STATE_ON) holdScreen(true)
+        armSleep()
     }
 
     /**
@@ -1178,7 +1181,6 @@ class RearActivity : Activity() {
 
     private fun onDisplayState(on: Boolean) {
         if (!on) {
-            pocketWatch(false)
             tableWatch(false)
             if (sleepStage.dimming) endDim(off = true)
             if (!awaitingDoze) return
@@ -1204,7 +1206,7 @@ class RearActivity : Activity() {
             dial.lock()
         }
         if (!holding && !awaitingDoze) holdScreen(true)
-        if (aodOn) { if (inAod) { pocketWatch(true); if (!holding) holdScreen(true) } else enterAod() }
+        if (aodOn) { if (inAod) { if (!holding) holdScreen(true) } else enterAod() }
         // Lit again, for whatever reason. Start the clock over rather than letting a
         // stale countdown put it straight back to sleep.
         armSleep()
@@ -1473,7 +1475,6 @@ class RearActivity : Activity() {
         window.decorView.removeCallbacks(restoreBrightness)
         window.decorView.removeCallbacks(sleepPanel)
         window.decorView.removeCallbacks(endPeek)
-        pocketWatch(false)
         tableWatch(false)
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE)
