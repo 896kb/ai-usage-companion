@@ -72,4 +72,23 @@ class GuestTaskTest {
         assertEquals(GuestShape.Bounds(296, 0, 904, 572), GuestTask.byId(d, 7)!!.bounds)
         assertNull(GuestTask.byId("  taskId=7: a.b/a.b.Main userId=0", 7)!!.bounds)
     }
+
+    @Test fun `a root task's displayId is believed over its configuration's display`() {
+        val d = """
+            RootTask id=9 bounds=[0,0][608,572] displayId=12 userId=0
+             configuration={x as.4 display=0 y}
+              taskId=9: a.b/a.b.Main bounds=[0,0][608,572] userId=0 visible=true topActivity=ComponentInfo{a.b/a.b.Main}
+            RootTask id=3 bounds=[0,0][904,572] displayId=1 userId=0
+             configuration={x as.4 display=1 y}
+              taskId=3: c.d/c.d.Main bounds=[0,0][904,572] userId=0 visible=false
+        """.trimIndent()
+        assertEquals(12, GuestTask.byId(d, 9)!!.display)
+        assertEquals(1, GuestTask.byId(d, 3)!!.display)
+    }
+
+    @Test fun `whether a task is visible is read with it`() {
+        assertEquals(true, GuestTask.byId(dump, 75311)!!.visible)
+        assertEquals(false, GuestTask.byId("  taskId=7: a.b/a.b.Main visible=false", 7)!!.visible)
+        assertNull(GuestTask.byId("  taskId=7: a.b/a.b.Main userId=0", 7)!!.visible)
+    }
 }

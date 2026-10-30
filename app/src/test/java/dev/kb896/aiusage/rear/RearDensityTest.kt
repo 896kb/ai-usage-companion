@@ -34,4 +34,14 @@ class RearDensityTest {
         assertEquals(240, RearDensity.clamp(-5))
         assertEquals(600, RearDensity.clamp(900))
     }
+
+    @Test fun `a private display defaults to two thirds of the rear's density, 300 on the 17 Pro`() {
+        assertEquals(300, RearDensity.privateDefault(RearGeometry.PRO17))
+        assertEquals(300, RearDensity.ofPrivate("a", emptyMap(), RearGeometry.PRO17))
+    }
+
+    @Test fun `a private display takes the app's own DPI, clamped`() {
+        assertEquals(380, RearDensity.ofPrivate("a", mapOf("a" to 380), RearGeometry.PRO17))
+        assertEquals(240, RearDensity.ofPrivate("a", mapOf("a" to 100), RearGeometry.PRO17))
+    }
 }

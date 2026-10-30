@@ -10,25 +10,37 @@ package dev.kb896.aiusage.rear
  */
 object GuestTask {
 
-    /** [bounds]: the task's, as `am stack list` gives them; null where the line has none. */
-    data class Entry(val task: Int, val pkg: String, val display: Int, val top: String, val bounds: GuestShape.Bounds? = null)
+    /** [bounds] and [visible]: the task's, as `am stack list` gives them; null where the line has none. */
+    data class Entry(
+        val task: Int, val pkg: String, val display: Int, val top: String,
+        val bounds: GuestShape.Bounds? = null, val visible: Boolean? = null,
+    )
 
     private val DISPLAY = Regex("""\bdisplay=(\d+)""")
+    private val DISPLAY_ID = Regex("""\bdisplayId=(\d+)""")
+    private val VISIBLE = Regex("""\bvisible=(true|false)""")
     private val BOUNDS = Regex("""\bbounds=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]""")
     private val TASK = Regex("""taskId=(\d+): ([^/\s]+)/\S+(?:.*?topActivity=ComponentInfo\{([^}]+)\})?""")
 
     fun entries(stackList: String): List<Entry> {
         val out = mutableListOf<Entry>()
         var display = -1
+        // A root task's own `displayId=` over its configuration's `display=`, where it has one:
+        // only the first is the platform's (RootTaskInfo.toString), and a private display is the
+        // first thing here that the second has never been seen to read.
+        var rootSaid = false
         for (line in stackList.lineSequence()) {
             val t = TASK.find(line)
             if (t != null) {
                 val b = BOUNDS.find(line)?.groupValues?.drop(1)?.map { it.toInt() }
                 out += Entry(t.groupValues[1].toInt(), t.groupValues[2], display, t.groupValues[3],  // "" while no top activity yet
-                    b?.let { GuestShape.Bounds(it[0], it[1], it[2], it[3]) })
+                    b?.let { GuestShape.Bounds(it[0], it[1], it[2], it[3]) },
+                    VISIBLE.find(line)?.groupValues?.get(1)?.toBoolean())
                 continue
             }
-            DISPLAY.find(line)?.let { display = it.groupValues[1].toInt() }
+            val root = DISPLAY_ID.find(line)
+            if (root != null) { display = root.groupValues[1].toInt(); rootSaid = true; continue }
+            if (!rootSaid) DISPLAY.find(line)?.let { display = it.groupValues[1].toInt() }
         }
         return out
     }

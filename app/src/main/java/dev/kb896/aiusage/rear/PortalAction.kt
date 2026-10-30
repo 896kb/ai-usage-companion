@@ -21,6 +21,13 @@ object PortalAction {
          * on top a moment later, out to display 0 and back instead.
          */
         PANEL_STEPS_BACK,
+        /**
+         * Panel over a guest on a private display: our layers hidden, nothing moved. The panel is
+         * under them on the rear all along, resumed; the app stays up on its display.
+         */
+        HIDE_LAYERS,
+        /** Resume of a guest on a private display: our layers shown again. */
+        SHOW_LAYERS,
         /** Front: the guest to display 0, and it is no longer the guest. */
         FRONT,
         /** Close: force-stopped. */
@@ -30,10 +37,15 @@ object PortalAction {
     /**
      * The strip's button [index] — 0 Panel when the guest was on top ([guestOnTop]) else
      * Resume, 1 Front, 2 Close — as a [Step]. [frontLocked] is only asked for Panel (it
-     * costs a dumpsys). Null for an index the strip does not have.
+     * costs a dumpsys). Null for an index the strip does not have. [onPrivate]: the guest is on
+     * a private display, where the first button only shows or hides our layers, locked or not.
      */
-    fun strip(index: Int, guestOnTop: Boolean, hiddenOnFront: Boolean, frontLocked: () -> Boolean): Step? = when (index) {
+    fun strip(index: Int, guestOnTop: Boolean, hiddenOnFront: Boolean, frontLocked: () -> Boolean): Step? =
+        strip(index, guestOnTop, hiddenOnFront, false, frontLocked)
+
+    fun strip(index: Int, guestOnTop: Boolean, hiddenOnFront: Boolean, onPrivate: Boolean, frontLocked: () -> Boolean): Step? = when (index) {
         0 -> when {
+            onPrivate -> if (guestOnTop) Step.HIDE_LAYERS else Step.SHOW_LAYERS
             guestOnTop -> if (frontLocked()) Step.HIDE_ON_FRONT else Step.START_PANEL
             hiddenOnFront -> Step.UNHIDE
             else -> Step.PANEL_STEPS_BACK
@@ -160,6 +172,15 @@ object PortalAction {
         ours -> AfterBack.BEHIND
         else -> AfterBack.UNKNOWN
     }
+
+    /**
+     * A guest on a private display whose task is still there after a Back. What the rear shows
+     * says nothing (our layers cover it): the task does. At its root a launcher activity's Back
+     * moves its task behind, as on the rear, and with nothing else on that display it would be a
+     * black layer for good: [visible] false is behind, and Resume starts it again. Unread, on top.
+     */
+    fun afterPrivateBack(visible: Boolean?): AfterBack = if (visible == false) AfterBack.BEHIND else AfterBack.ON_TOP
+
     /** What a guest's task gone in the launch's survive wait comes to. */
     enum class Vanished {
         /** Started again once: a trampoline the move relaunched (Shazam, measured). */

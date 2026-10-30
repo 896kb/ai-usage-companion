@@ -135,4 +135,18 @@ class PortalActionTest {
         assertEquals(PortalAction.AfterBack.UNKNOWN, PortalAction.afterBack(top = null, guestPkg = "a.b", ours = "us"))
         assertEquals(PortalAction.AfterBack.UNKNOWN, PortalAction.afterBack(top = "c.d", guestPkg = "a.b", ours = "us"))
     }
+
+    @Test fun `on a private display the first button shows or hides layers, and the keyguard is not asked`() {
+        val never = { throw AssertionError("not asked") }
+        assertEquals(PortalAction.Step.HIDE_LAYERS, PortalAction.strip(0, guestOnTop = true, hiddenOnFront = false, onPrivate = true, frontLocked = never))
+        assertEquals(PortalAction.Step.SHOW_LAYERS, PortalAction.strip(0, guestOnTop = false, hiddenOnFront = false, onPrivate = true, frontLocked = never))
+        assertEquals(PortalAction.Step.FRONT, PortalAction.strip(1, guestOnTop = true, hiddenOnFront = false, onPrivate = true, frontLocked = never))
+        assertEquals(PortalAction.Step.CLOSE, PortalAction.strip(2, guestOnTop = true, hiddenOnFront = false, onPrivate = true, frontLocked = never))
+    }
+
+    @Test fun `a private guest's task not visible after a Back has gone behind`() {
+        assertEquals(PortalAction.AfterBack.BEHIND, PortalAction.afterPrivateBack(false))
+        assertEquals(PortalAction.AfterBack.ON_TOP, PortalAction.afterPrivateBack(true))
+        assertEquals(PortalAction.AfterBack.ON_TOP, PortalAction.afterPrivateBack(null))
+    }
 }
