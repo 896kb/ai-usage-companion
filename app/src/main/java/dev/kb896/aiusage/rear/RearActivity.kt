@@ -480,6 +480,8 @@ class RearActivity : Activity() {
         }
         dial.onUnlocked = {
             guardedAfterWake = false
+            // A swipe ends the double tap's guard on later wakes; a spent lock's hand-back does not.
+            sleepStage.unlocked(bySwipe = !unlockingBySpent)
             if (inAod && !unlockingBySpent) exitAod()
             // Swiped while the spent lock was letting the display go (the hand-back clears
             // awaitingDoze before it unlocks, so this is a finger): somebody is looking at
@@ -762,6 +764,7 @@ class RearActivity : Activity() {
         if (off) {
             Log.i(TAG, "double tap: the display went off — dim over")
             sleptByDoubleTap = true
+            sleepStage.wentOff()
             // Full brightness again only once the display is dark, so the next wake is
             // not a frame of the dim.
             window.decorView.postDelayed(restoreBrightness, 1_500)
@@ -847,6 +850,7 @@ class RearActivity : Activity() {
      */
     private var aodOn = false
     private var inAod = false
+    /** The spent lock's hand-back (restorePanel) is unlocking, not a finger on the slider. */
     private var unlockingBySpent = false
     private var sliderTouch = false
 
@@ -1035,7 +1039,12 @@ class RearActivity : Activity() {
      * restore happen, which is correct — the lock has expired, and watching it hand back
      * is better than being shown a slider that is no longer guarding anything.
      */
-    private val restorePanel = Runnable { awaitingDoze = false; dial.unlock() }
+    private val restorePanel = Runnable {
+        awaitingDoze = false
+        // Not a swipe: a panel put to sleep by the double tap stays guarded on its next wake.
+        unlockingBySpent = true
+        try { dial.unlock() } finally { unlockingBySpent = false }
+    }
 
     private fun onLockSpent() {
         guardedAfterWake = false
@@ -1114,7 +1123,10 @@ class RearActivity : Activity() {
         // starts the video over (RearDialView.displayAwake), with its frame faded from.
         dial.videoPaused = false
         tableWatch(true)
-        val wokeFromSleep = sleptByDoubleTap
+        // Every wake after the double tap's sleep, not only the first: a lock that ran out
+        // unswiped hands back behind the dark screen, and the tap-to-wake in a pocket after
+        // it lit the full panel (DoubleTapSleep.guardsWake). Only a swipe ends it.
+        val wokeFromSleep = sleptByDoubleTap || sleepStage.guardsWake
         sleptByDoubleTap = false // lit by something real: holds mean something again
         if (!aodOn) dial.ringsClosed = false // awake after the double tap's sleep: the rings open
         if (!aodOn && wokeFromSleep) {

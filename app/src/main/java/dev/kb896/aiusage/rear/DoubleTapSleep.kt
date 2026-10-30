@@ -30,6 +30,26 @@ class DoubleTapSleep {
         dimmedAt = null
     }
 
+    /**
+     * Put to sleep on purpose, and not yet unlocked by a swipe: every wake raises the
+     * slider until somebody swipes it. It used to be spent by the first wake — woken, the
+     * lock ran out unswiped and handed back behind the dark screen, and the next wake (a
+     * tap-to-wake in a pocket) lit the full, unlocked panel.
+     */
+    var guardsWake = false
+        private set
+
+    /** The dim ran its course and the display went off under it. */
+    fun wentOff() {
+        reset()
+        guardsWake = true
+    }
+
+    /** The panel unlocked: by a finger on the slider, or handed back by a spent lock. */
+    fun unlocked(bySwipe: Boolean) {
+        if (bySwipe) guardsWake = false
+    }
+
     companion object {
         /**
          * How much of the content the veil hides — the whole dim. Not the backlight: an
