@@ -47,6 +47,16 @@ class Graph private constructor(context: Context) {
                 if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
             }
         }
+        // "Keep right of the cameras" switched on the back, for the guest whichever way it got
+        // there: not only a pinned app's, or a guest sent by the tile would go back where it was
+        // when the shell's hold on the switch ran out with no payload agreeing (ConfinedEdits).
+        b.onPortalConfined = { pkg, on ->
+            val store = ConfigStore(context.applicationContext)
+            val config = store.load()
+            val next = config.copy(portalConfined = if (on) config.portalConfined + pkg else config.portalConfined - pkg)
+            store.save(next)
+            if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
+        }
         // The sheet opened on the back: the Portal tab's last step ticks. The front's alone —
         // nothing on the back reads it, so no payload goes.
         b.onPortalOpened = {

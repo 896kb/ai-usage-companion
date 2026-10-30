@@ -601,6 +601,9 @@ class ShizukuBridge(private val context: Context) {
      */
     var onPortalDpi: (pkg: String, dpi: Int) -> Unit = { _, _ -> }
 
+    /** "Keep right of the cameras" switched on the back. Set by Graph, as [onPortalDpi]. */
+    var onPortalConfined: (pkg: String, on: Boolean) -> Unit = { _, _ -> }
+
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** What the shell service tells this process (IRearEvents); handed over on every (re)connect. */
@@ -634,6 +637,18 @@ class ShizukuBridge(private val context: Context) {
         override fun onPanelPoke() = toPanel(RearActivity.ACTION_PORTAL_POKE)
 
         override fun onPanelStepBack() = toPanel(RearActivity.ACTION_PORTAL_STEP_BACK)
+
+        override fun onPortalConfined(pkg: String?, on: Boolean) {
+            if (pkg.isNullOrEmpty() || pkg.length > 255) return
+            mainHandler.post { this@ShizukuBridge.onPortalConfined(pkg, on) }
+        }
+
+        override fun onPanelCovered(covered: Boolean) {
+            context.sendBroadcast(
+                android.content.Intent(RearActivity.ACTION_PORTAL_COVERED).setPackage(context.packageName)
+                    .putExtra(RearActivity.EXTRA_PORTAL_COVERED, covered),
+            )
+        }
     }
 
     /** A broadcast to the panel, from inside the app — the only sender its receiver takes. */

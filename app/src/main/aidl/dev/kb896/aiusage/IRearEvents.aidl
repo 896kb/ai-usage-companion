@@ -25,4 +25,10 @@ oneway interface IRearEvents {
     void onPanelPoke() = 5;
     // Resume: the panel moves its own task back, the guest on top (ACTION_PORTAL_STEP_BACK).
     void onPanelStepBack() = 6;
+    // "Keep right of the cameras" switched on the back for [pkg]: the app saves it in the config
+    // (PanelConfig.portalConfined) and pushes the payload back, as onPortalDpi.
+    void onPortalConfined(String pkg, boolean on) = 7;
+    // A guest on a private display is up (true) or hidden (false), in our layers over the panel:
+    // the panel, still resumed under them, stands down (ACTION_PORTAL_COVERED).
+    void onPanelCovered(boolean covered) = 8;
 }

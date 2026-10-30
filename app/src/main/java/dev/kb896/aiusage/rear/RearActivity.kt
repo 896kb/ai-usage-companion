@@ -45,6 +45,13 @@ class RearActivity : Activity() {
          * is then on top without leaving the display.
          */
         const val ACTION_PORTAL_STEP_BACK = "dev.kb896.aiusage.PORTAL_STEP_BACK"
+        /**
+         * From the shell, passed on by the app (IRearEvents.onPanelCovered): a guest on a private
+         * display is up in the shell's layers over this panel ([EXTRA_PORTAL_COVERED] true), or no
+         * longer. See [setCovered].
+         */
+        const val ACTION_PORTAL_COVERED = "dev.kb896.aiusage.PORTAL_COVERED"
+        const val EXTRA_PORTAL_COVERED = "covered"
 
         /**
          * The panel's camera button was pressed.
@@ -359,6 +366,7 @@ class RearActivity : Activity() {
                 } else {
                     moveTaskToBack(true)
                 }
+                ACTION_PORTAL_COVERED -> setCovered(intent.getBooleanExtra(EXTRA_PORTAL_COVERED, false))
                 ACTION_LOCK -> lockPanel()
                 ACTION_POCKET -> if (intent.getBooleanExtra(EXTRA_POCKETED, false)) intoPocket() else outOfPocket(
                     restore = intent.getBooleanExtra(EXTRA_POCKET_RESTORE, false),
@@ -556,6 +564,7 @@ class RearActivity : Activity() {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
                 addAction(ACTION_MIRROR_SYNC); addAction(ACTION_PORTAL_POKE); addAction(ACTION_PORTAL_STEP_BACK)
+                addAction(ACTION_PORTAL_COVERED)
                 addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
                 addAction(ACTION_REAR_BRIGHTNESS)
                 addAction(ACTION_QUICK_STATES)
@@ -695,6 +704,11 @@ class RearActivity : Activity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Covered, a finger on the lens strip (the one part of the rear a private display's layer
+        // leaves touches through to) is no finger on a page nobody can see: no paging, no double
+        // tap's dim. A gesture is decided as it lands, and goes on as it began.
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) touchCovered = covered
+        if (touchCovered) return true
         dial.throughCrt(ev) // first: everything below reads the flat picture's coordinates
         dial.toPanel(ev) // then real pixels into panel units — the Pro Max's display is larger
         if (systemDoubleTapTakenOver) doubleTaps.onTouchEvent(ev)
@@ -751,6 +765,40 @@ class RearActivity : Activity() {
         }.getOrDefault(false)
         systemDoubleTapTakenOver = viaMiuiFlags || viaMethod
         Log.i(TAG, "double tap: flag=0x${flag.toString(16)} miuiFlags=${viaMiuiFlags} setExtraFlags=${viaMethod}")
+    }
+
+    // ---- covered: a guest on a private display up in the shell's layers over this panel ----
+    /**
+     * Under a guest on the rear itself this activity is stopped, and all of its keeping awake
+     * stands down with that (see sleepPanel). A guest on a private display leaves it RESUMED and
+     * visible to the window manager, only behind the shell's opaque layers, which nothing here can
+     * see. Left to itself it went on drawing to nobody (about a core, with media), its
+     * FLAG_KEEP_SCREEN_ON held the back lit for as long as always-on or keep-awake ask, and thirty
+     * seconds on its sleep timer said the panel was dozing, which is the shell's word to let go of
+     * the back and shut its sheet, under somebody using the app.
+     *
+     * So covered it behaves as if stopped: no flag, no timer, no drawing but the heartbeat, no
+     * touches, and it never says it dozes (the guest hold, GuestHold, has the back meanwhile).
+     * [holding] goes on meaning what it means, so that it all comes back as it was when uncovered.
+     * Told by the shell through the app, at every change and whenever a new panel says its hold.
+     */
+    private var covered = false
+    private var touchCovered = false
+
+    private fun setCovered(on: Boolean) {
+        if (covered == on) return
+        covered = on
+        Log.i(TAG, if (on) "portal: covered by a private display's guest — standing down" else "portal: uncovered")
+        if (on) {
+            window.decorView.removeCallbacks(sleepPanel)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            // Let go just before it came: the shell would go on hearing it dozes, and hold nothing.
+            if (!holding) holdScreen(true)
+        } else if (holding && !pocketed) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        dial.displayAwake = takesUpdates(display?.state) && !on
+        armSleep()
     }
 
     private fun beginDim() { beginDimInner(); sendMirror() }
@@ -839,8 +887,10 @@ class RearActivity : Activity() {
         // Nor in a pocket: the back is switched off for it, and a notification's hold there
         // (onNeedsScreen, the lock) is a request to light it inside the pocket.
         if (on && (sleptByDoubleTap || sleepStage.dimming || pocketed)) return
+        // Covered, it never says it lets go ([setCovered]): the back is the guest hold's.
+        if (!on && covered) return
         if (on) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (!covered) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
@@ -1083,7 +1133,7 @@ class RearActivity : Activity() {
      * thirty seconds after it started.
      */
     private val sleepPanel = Runnable {
-        if (keepAwake) return@Runnable
+        if (keepAwake || covered) return@Runnable
         // Stopped behind a guest app: letting go would tell the app process the panel is
         // dozing, which pauses the shell service's guest checks while the guest is in plain
         // view. Stopped with the rear still lit is that — something is in front of the panel
@@ -1100,6 +1150,7 @@ class RearActivity : Activity() {
      */
     private fun armSleep() {
         window.decorView.removeCallbacks(sleepPanel)
+        if (covered) return
         if (keepAwake) {
             // Not while a spent lock is letting the display go — see KeepAwakeHold.
             if (KeepAwakeHold.retake(keepAwake, holding, awaitingDoze)) holdScreen(true)
@@ -1263,7 +1314,7 @@ class RearActivity : Activity() {
             }
             // Separate from the question above, which is about the LOCK handing back.
             // This one is about whether drawing reaches anything at all.
-            dial.displayAwake = takesUpdates(state)
+            dial.displayAwake = takesUpdates(state) && !covered
         }
     }
 
@@ -1438,7 +1489,7 @@ class RearActivity : Activity() {
         announceHoldOnPanel()
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
         // resumed into an already-suspended display would never be told.
-        dial.displayAwake = takesUpdates(display?.state)
+        dial.displayAwake = takesUpdates(display?.state) && !covered
         if (!dial.displayAwake) Log.i(TAG, "resumed onto a display in state ${display?.state} — the panel stops drawing until it changes")
         armSleep()
     }
