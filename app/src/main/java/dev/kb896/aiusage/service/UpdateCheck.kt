@@ -50,7 +50,9 @@ object UpdateCheck {
      * opens. Null without the store.
      */
     fun inStore(context: Context): Intent? {
-        val link = Intent(Intent.ACTION_VIEW, Uri.parse("kb896store://app/${context.packageName}?update=1")).setPackage(STORE)
+        // The release's package, also from a dev build: the store's catalogue has no .dev.
+        val pkg = context.packageName.removeSuffix(".dev")
+        val link = Intent(Intent.ACTION_VIEW, Uri.parse("kb896store://app/$pkg?update=1")).setPackage(STORE)
         return if (link.resolveActivity(context.packageManager) != null) link
         else context.packageManager.getLaunchIntentForPackage(STORE)
     }
