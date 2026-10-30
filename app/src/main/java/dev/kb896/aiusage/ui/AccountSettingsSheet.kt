@@ -434,6 +434,10 @@ object AccountSettingsSheet {
             dialog.dismiss()
             promptForToken(context, account, onDone)
         }
+        // The disclosure for the browser sign-in lives here, in the chooser that is already
+        // in front of it, rather than in a second dialog after the tap: this is where the
+        // decision to connect an account is made. See Privacy.
+        SettingsRows.note(box, Privacy.SIGN_IN)
         Modal.show(dialog)
     }
 

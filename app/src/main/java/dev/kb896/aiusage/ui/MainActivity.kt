@@ -627,20 +627,30 @@ class MainActivity : ComponentActivity() {
     /**
      * Notification access, asked for where it is needed rather than in onboarding: the
      * panel's notifications and its media controls both read from it, and nothing else
-     * does. Switched on without it, the feature says so and offers the page; "Not now"
-     * runs [declined], which turns the feature back off.
+     * does. Switched on without it, the feature says so — with what the access is used
+     * for, the one dialog doing both jobs rather than a disclosure stacked on an ask — and
+     * offers the page; Cancel runs [declined], which turns the feature back off.
      */
     private fun askNotificationAccess(feature: String, declined: () -> Unit) {
         if (Setup.notificationAccess(this)) return
-        Modal.show(Modal.builder(this)
-            .setTitle("Allow notification access?")
-            .setMessage(
-                "$feature reads from Android's notification access — other apps' " +
-                    "notifications and what is playing both come through it. Allow it for " +
-                    "this app on the next screen."
-            )
-            .setPositiveButton("Allow") { _, _ -> openNotificationAccess() }
-            .setNegativeButton("Not now") { _, _ -> declined(); buildSettingsRows() })
+        discloseNotificationAccess(
+            lead = "$feature needs Android's notification access.",
+            onCancel = { declined(); buildSettingsRows() },
+        )
+    }
+
+    /**
+     * The disclosure, then the page. Also what the "allow notification access" hint rows
+     * open: a row under a switch that is already on is another way to the same grant, and
+     * the grant is what the disclosure is about, not the switch.
+     */
+    private fun discloseNotificationAccess(lead: String? = null, onCancel: () -> Unit = {}) {
+        Privacy.disclose(
+            this, Privacy.Access.NOTIFICATIONS,
+            lead = lead,
+            next = "Allow it for this app on the next screen.",
+            onCancel = onCancel,
+        ) { openNotificationAccess() }
     }
 
     private fun openNotificationAccess() {
@@ -1274,7 +1284,7 @@ class MainActivity : ComponentActivity() {
         // arrived and broadcasting what it said are different decisions.
         if (config.showNotifications) {
             if (!Setup.notificationAccess(this)) {
-                SettingsRows.navigation(generalRows, "  ↳ allow notification access") { openNotificationAccess() }
+                SettingsRows.navigation(generalRows, "  ↳ allow notification access") { discloseNotificationAccess() }
             }
             SettingsRows.toggle(
                 generalRows, "  ↳ include the message text", config.showNotificationText,
@@ -1388,7 +1398,14 @@ class MainActivity : ComponentActivity() {
             when {
                 !on -> write { it.copy(weatherUseDevice = false) }
                 allowed -> { write { it.copy(weatherUseDevice = true) }; WeatherPoll.nudge() }
-                else -> askLocation.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                // What the location is used for, before Android's own prompt — which says
+                // only "approximate location" and nothing of where it goes. Cancelled, the
+                // switch the tap flipped goes back to off: nothing was written yet, so the
+                // rows only need drawing again from the store.
+                else -> Privacy.disclose(
+                    this, Privacy.Access.LOCATION,
+                    onCancel = { buildSettingsRows() },
+                ) { askLocation.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION) }
             }
         }
         // APP PORTAL: other apps on the back, opened from a pull up from the bottom edge.
@@ -1487,7 +1504,7 @@ class MainActivity : ComponentActivity() {
         }
         if (config.showMedia) {
             if (!Setup.notificationAccess(this)) {
-                SettingsRows.navigation(mediaRows, "  ↳ allow notification access") { openNotificationAccess() }
+                SettingsRows.navigation(mediaRows, "  ↳ allow notification access") { discloseNotificationAccess() }
             }
             // The cover first, right under the switch: the page's biggest thing.
             SettingsRows.choice(
@@ -2208,6 +2225,20 @@ class MainActivity : ComponentActivity() {
                     }
                 )
                 typeface = UiType.of(this@MainActivity)
+                fun go() {
+                    val intent = step.open?.invoke()
+                    if (intent == null) {
+                        // Shizuku: granted in-app. onResume re-reads the state when the
+                        // system dialog returns, so the row ticks itself.
+                        graph.bridge.requestPermission(this@MainActivity)
+                        return
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (_: Exception) {
+                        toast("Could not open that settings page")
+                    }
+                }
                 setOnClickListener {
                     if (step.kind == Setup.Kind.XIAOMI_APP) {
                         // satisfied == true means the app is already gone: the tap restores it
@@ -2215,21 +2246,18 @@ class MainActivity : ComponentActivity() {
                         else confirmRemoveXiaomiRearApp()
                         return@setOnClickListener
                     }
-                    val intent = step.open?.invoke()
-                    if (intent == null) {
-                        // Shizuku: granted in-app. onResume re-reads the state when the
-                        // system dialog returns, so the row ticks itself.
-                        // The request goes nowhere while Shizuku is down; say so rather
-                        // than let the tap fall silent.
-                        if (!graph.bridge.status().running) toast("Start Shizuku first — the row above")
-                        else graph.bridge.requestPermission(this@MainActivity)
+                    // The request goes nowhere while Shizuku is down; say so rather than
+                    // let the tap fall silent — and before the disclosure, not after a
+                    // Continue that would lead nowhere.
+                    if (step.kind == Setup.Kind.SHIZUKU && !graph.bridge.status().running) {
+                        toast("Start Shizuku first — the row above")
                         return@setOnClickListener
                     }
-                    try {
-                        startActivity(intent)
-                    } catch (_: Exception) {
-                        toast("Could not open that settings page")
-                    }
+                    // What the step's page or grant is for, said before it opens (the
+                    // step's own Privacy.Access); a step with nothing to disclose just goes.
+                    val access = step.access
+                    if (access == null) go()
+                    else Privacy.disclose(this@MainActivity, access, next = step.next) { go() }
                 }
             }, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -2297,7 +2325,7 @@ class MainActivity : ComponentActivity() {
      * comes first wins. Turned down, the step stays to ask again; a system that will not ask
      * at all gets pointed at the shade's own editor.
      */
-    private fun askPortalTile() {
+    private fun askPortalTile() = Privacy.disclose(this, Privacy.Access.TILE) {
         PortalGuideCard.requestTile(this) { added ->
             when (added) {
                 true -> {
