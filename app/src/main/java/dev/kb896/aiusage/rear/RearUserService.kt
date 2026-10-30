@@ -548,11 +548,22 @@ class RearUserService : IRearService.Stub {
     /**
      * The panel in front, and the camera we launched never seen ahead of it for
      * [CAMERA_UNSEEN_MS]: opened and closed between two ticks, or closed by the strip's own
-     * Back. Nothing to release, but the flags would hold [cameraUp] — no sheet — forever.
+     * Back. The flags would otherwise hold [cameraUp] — no sheet — forever.
+     *
+     * NOT SEEN IS NOT GONE. Opened and Backed out of inside one tick (1.3 s, seen
+     * 2026-10-30: Xiaomi's edge Back, which the camera answers by moving its own task back)
+     * left both its tasks alive — the front-screen half waiting on the front the next time
+     * the phone was turned over — and this only forgot it. So a camera with tasks still
+     * stacked is closed as a seen one is (closeCamera); with none, there is nothing to do.
      */
     private fun forgetUnseenCamera() {
         if (!cameraLaunched || cameraWasOnTop) return
         if (android.os.SystemClock.elapsedRealtime() - cameraLaunchedAt < CAMERA_UNSEEN_MS) return
+        if (StackList.taskIdsOf(exec("am stack list"), CAMERA_PACKAGE).isNotEmpty()) {
+            Log.i(TAG, "camera: never seen in front, but its tasks are still there — closing it")
+            closeCamera()
+            return
+        }
         Log.i(TAG, "camera: launched but never seen in front, and the panel is — forgotten")
         cameraLaunched = false
         stopBandTaps()
