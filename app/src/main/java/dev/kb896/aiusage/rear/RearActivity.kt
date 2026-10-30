@@ -1127,6 +1127,21 @@ class RearActivity : Activity() {
      */
     private val litEdge = LitEdge()
 
+    /**
+     * Tell [litEdge] what the rear display already is, the first time the panel finds
+     * itself on it (onResume, or the move's configuration change). Before this a freshly
+     * created panel took its first display change for a wake — the refresh rate dropping
+     * three seconds after a touch called off the double tap's dim, or put a panel in use
+     * into always-on. Not on display 0: that is the placement's stop on the way, and its
+     * state says nothing about the rear. LitEdge takes only the first seed, so the resumes
+     * after it cannot swallow an edge.
+     */
+    private fun seedLitEdge() {
+        val d = display ?: return
+        if (d.displayId != Panel.DISPLAY_ID) return
+        litEdge.seed(d.state == android.view.Display.STATE_ON)
+    }
+
     private val displayListener = object :
         android.hardware.display.DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -1135,7 +1150,11 @@ class RearActivity : Activity() {
             if (displayId != display?.displayId) return
             val state = display?.state
             // Only on an edge: a lit display changing its refresh rate is not one (LitEdge).
-            litEdge.next(state == android.view.Display.STATE_ON)?.let(::onDisplayState)
+            // And only the rear's: display 0's changes during the placement would be taken
+            // for the first report, and the seed after the move would then count for nothing.
+            if (displayId == Panel.DISPLAY_ID) {
+                litEdge.next(state == android.view.Display.STATE_ON)?.let(::onDisplayState)
+            }
             // Separate from the question above, which is about the LOCK handing back.
             // This one is about whether drawing reaches anything at all.
             dial.displayAwake = takesUpdates(state)
@@ -1309,6 +1328,7 @@ class RearActivity : Activity() {
         panelResumed = true
         tableWatch(true)
         armEvictionTimer()
+        seedLitEdge()
         // Asked rather than assumed. The listener only fires on CHANGES, so a panel that
         // resumed into an already-suspended display would never be told.
         dial.displayAwake = takesUpdates(display?.state)
@@ -1324,6 +1344,7 @@ class RearActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         hideBars()
         armEvictionTimer()
+        seedLitEdge()
     }
 
     override fun onPause() {
