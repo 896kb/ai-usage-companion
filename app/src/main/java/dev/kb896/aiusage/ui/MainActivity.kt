@@ -97,8 +97,23 @@ class MainActivity : ComponentActivity() {
 
         refreshStatus()
 
+        // The privacy notice before the setup checklist, never both at once. The checklist
+        // cannot be closed until setup is done, so shown first it would hold the notice
+        // behind it for as long as setup takes; shown second, it waits only for an OK.
+        // buildSetupRows leaves the checklist alone while the notice is up, and closing the
+        // notice calls it again — which is what brings the checklist up, if it is needed.
+        if (Privacy.noticeDue(this)) {
+            privacyNotice = Privacy.showNotice(this) {
+                privacyNotice = null
+                buildSetupRows()
+            }
+        }
+
         buildSetupRows()
     }
+
+    /** The privacy notice while it is up; the setup checklist waits for it. See onCreate. */
+    private var privacyNotice: android.app.AlertDialog? = null
 
     /**
      * Some settings change behind this screen's back — saved by the service, or by the panel
@@ -184,6 +199,9 @@ class MainActivity : ComponentActivity() {
         }
         bindPinned()
         findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
+        // Beside the credits, in every build, and not only in the notice: a notice closed once
+        // is gone, and the policy has to stay findable after it.
+        findViewById<Button>(R.id.privacy_policy).setOnClickListener { Privacy.openPolicy(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
         // field only ever displays a command MainActivity wrote, never accepts
@@ -2105,7 +2123,8 @@ class MainActivity : ComponentActivity() {
         val status = graph.bridge.status()
         val steps = Setup.steps(this, status.granted, status.running)
         val done = Setup.allDone(steps)
-        if (!done && onboarding?.isShowing != true) showOnboarding()
+        // Not while the privacy notice is up: closing it calls this again. See onCreate.
+        if (!done && privacyNotice == null && onboarding?.isShowing != true) showOnboarding()
         onboardingRows?.let { fillSetupRows(it, steps) }
         refreshControl()
         onboarding?.let { dialog ->

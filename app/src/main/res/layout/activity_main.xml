@@ -384,6 +384,15 @@
             android:text="Credits"
             android:textSize="13sp" />
 
+        <!-- The privacy policy, on rear.896.ro: the notice shows once, this stays. See Privacy. -->
+        <dev.kb896.aiusage.ui.glass.GlassButton
+            android:id="@+id/privacy_policy"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Privacy policy"
+            android:textSize="13sp" />
+
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
         </LinearLayout>
