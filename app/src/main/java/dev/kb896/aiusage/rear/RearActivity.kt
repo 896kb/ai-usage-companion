@@ -799,6 +799,12 @@ class RearActivity : Activity() {
             restoreBrightness.run()
             dial.ringsClosed = false
             dial.videoPaused = false // called off: it starts over from that frame
+            // A lock that ran out during the dim queued its hand-back and is letting go:
+            // called off, somebody is looking — keep it, as a swipe in that window does
+            // (onUnlocked). Left queued, the hold came back with awaitingDoze still set and
+            // the fallback unlocked the panel in front of them half a minute later.
+            window.decorView.removeCallbacks(restorePanel)
+            awaitingDoze = false
             holdScreen(true)
             armSleep()
         }
