@@ -19,4 +19,10 @@ oneway interface IRearEvents {
     // (and again later only if nobody was listening). The app keeps it as portalSheetSeen,
     // which ticks the Portal tab's "Learn the gestures" step.
     void onPortalOpened() = 4;
+    // The panel's broadcasts the shell used to send itself (`am broadcast -p`), now sent by the
+    // app: the panel's receiver takes nothing from outside the app (RearActivity's receiver).
+    // The sheet was touched or opened over the panel: re-arm its sleep (ACTION_PORTAL_POKE).
+    void onPanelPoke() = 5;
+    // Resume: the panel moves its own task back, the guest on top (ACTION_PORTAL_STEP_BACK).
+    void onPanelStepBack() = 6;
 }

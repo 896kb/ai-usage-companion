@@ -174,11 +174,9 @@ class RearUserService : IRearService.Stub {
     override fun hide() {
         // First: nothing may adopt the panel back from here (adoptPlaced).
         hiddenOnPurpose = true
-        // -p $PKG scopes the broadcast to our own app. The receiver stays exported
-        // (the sender here is shell uid 2000, which an unexported receiver can't
-        // reach), so without this any app declaring a matching intent-filter could
-        // receive — or spoof — panel state. Do not drop this as "redundant."
-        exec("am broadcast -p $PKG -a $ACTION_FINISH")
+        // The panel's ACTION_FINISH is the app's to send (ShizukuBridge.hide): the panel's
+        // receiver takes nothing from outside the app — once exported for this shell uid,
+        // any app on the phone could feed it fake state or take it down.
         placedDisplayId = -1
         // Nothing of ours on the rear any more: no touches read, no sheet over it.
         syncTouchWatch()
@@ -205,8 +203,7 @@ class RearUserService : IRearService.Stub {
         // back an older config (its portalDpi with it).
         lastPayload = payload
         styleFrame(payload)
-        // See hide() — same exported-receiver-plus-shell-sender reasoning.
-        exec("am broadcast -p $PKG -a $ACTION_STATE --es state ${shellQuote(payload)}")
+        // The panel gets the payload from the app itself (ShizukuBridge.update) — see hide().
         // Only update()d, a panel this service did not place would never be recorded
         // ([adoptPlaced]). One `am stack list`, and only until it is.
         if (placedDisplayId < 0) {
@@ -2196,7 +2193,8 @@ class RearUserService : IRearService.Stub {
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastPokeAt < POKE_EVERY_MS) return
         lastPokeAt = now
-        runCatching { pokeWorker.execute { exec("am broadcast -p $PKG -a $ACTION_PORTAL_POKE") } }
+        // Through the app (IRearEvents): the panel's receiver takes only the app — see hide().
+        runCatching { pokeWorker.execute { if (events?.let { runCatching { it.onPanelPoke() }.isSuccess } != true) Log.w(TAG, "portal: no app to pass the poke on — the panel's sleep not re-armed") } }
     }
 
     /** Whether a bottom pull may open the sheet now: [PortalAction.sheetOpens]. */
@@ -2396,7 +2394,7 @@ class RearUserService : IRearService.Stub {
      * - Panel, front unlocked: `am start --display <rear>` of the panel, over the guest.
      * - Resume of a hidden guest: `move-stack <guest> <rear>` and a wake ([unhide]).
      * - Resume of a guest behind the panel on the rear: the panel moves its own task to the
-     *   back (a scoped broadcast, [ACTION_PORTAL_STEP_BACK]), locked or not. Only if the
+     *   back (RearActivity.ACTION_PORTAL_STEP_BACK, passed on by the app), locked or not. Only if the
      *   panel is still what the rear shows on top after [STEP_BACK_LIMIT_MS] (looked at
      *   every [STEP_BACK_POLL_MS]; nothing read is trusted as done): `move-stack <guest> 0` and
      *   back to the rear (a move to the display a task is already on does not raise it) —
@@ -2465,9 +2463,11 @@ class RearUserService : IRearService.Stub {
             PortalAction.Step.PANEL_STEPS_BACK -> synchronized(placing) {
                 val g = guest ?: return
                 val back = covered(g.pkg, { drawnOn(g.pkg, g.task, rearDisplay(), shapeOf(g.pkg).bounds) }, { ensurePlaced(g.task, g.pkg, "Resume"); stripFor(g.pkg) }) changed@{
-                    // The panel moves its own task to the back (RearActivity, ACTION_PORTAL_STEP_BACK):
+                    // The panel moves its own task to the back (RearActivity.ACTION_PORTAL_STEP_BACK):
                     // the guest is on top without leaving the rear, locked or not.
-                    exec("am broadcast -p $PKG -a $ACTION_PORTAL_STEP_BACK")
+                    // Through the app (IRearEvents): the panel's receiver takes only the app.
+                    if (events?.let { runCatching { it.onPanelStepBack() }.isSuccess } != true)
+                        Log.w(TAG, "portal: no app to pass the step back on — the guest stays behind the panel")
                     // Watched until the guest is on top, up to STEP_BACK_LIMIT_MS: the broadcast
                     // reaches the panel when it does, and one look after a fixed wait took a slow
                     // step back for none.
@@ -3363,10 +3363,6 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
 
         /** The least time between two pokes keeping the panel awake under the sheet. */
         private const val POKE_EVERY_MS = 1_000L
-        /** RearActivity re-arms its sleep countdown on it: the sheet's blocker keeps touches from the panel. */
-        const val ACTION_PORTAL_POKE = "dev.kb896.aiusage.PORTAL_POKE"
-        /** The panel moves its own task to the back (Resume); RearActivity.ACTION_PORTAL_STEP_BACK. */
-        const val ACTION_PORTAL_STEP_BACK = "dev.kb896.aiusage.PORTAL_STEP_BACK"
         /**
          * What may go into a shell command as a package or a component: these come from
          * the app's config and from dumps, and this service runs them at shell uid.
@@ -3385,7 +3381,5 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
 
         /** In full: `.rear.RearActivity` resolves against PKG, which is not the namespace on a debug build. */
         const val ACTIVITY = "dev.kb896.aiusage.rear.RearActivity"
-        const val ACTION_STATE = "dev.kb896.aiusage.STATE"
-        const val ACTION_FINISH = "dev.kb896.aiusage.FINISH"
     }
 }

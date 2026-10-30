@@ -194,10 +194,14 @@ class ShizukuBridge(private val context: Context) {
     fun update(payload: String) {
         calibrating = CalibrateMode.isCalibrate(payload)
         lastPayload = payload
+        // To the panel from here, not relayed by the shell: its receiver takes only this app.
+        // The shell is still told — it keeps the payload for its own re-placing and frame.
+        toPanel(RearActivity.ACTION_STATE, payload)
         try { service?.update(payload) } catch (e: Exception) { Log.e(TAG, "update failed", e); service = null }
     }
 
     fun hide() {
+        toPanel(RearActivity.ACTION_FINISH)
         try { service?.hide() } catch (e: Exception) { Log.e(TAG, "hide failed", e) }
     }
 
@@ -334,11 +338,11 @@ class ShizukuBridge(private val context: Context) {
      * a calibrate payload — the watchdog's guard against re-placing a panel that is
      * mid-calibration (Task 15 Step 2b).
      *
-     * DEAD CODE TODAY, on purpose, not by oversight: calibrate mode is currently
-     * reachable ONLY via the manual `adb shell am broadcast ... --es state
-     * '{"mode":"calibrate"}'` workaround (see MainActivity's comment), which goes
-     * straight to RearActivity's receiver and never touches ShizukuBridge/
-     * IRearService. Nothing in the app calls show()/update() with a calibrate
+     * DEAD CODE TODAY, on purpose, not by oversight: calibrate mode was reachable ONLY
+     * via a manual `adb shell am broadcast ... --es state '{"mode":"calibrate"}'`, straight
+     * to RearActivity's receiver — which no longer takes broadcasts from outside the app
+     * (2026-10-30), so not even that now; the in-app Advanced geometry fields cover it.
+     * Nothing in the app calls show()/update() with a calibrate
      * payload yet, so this field is always false in practice and the guard can
      * never fire — until Task 17 (or whatever adds an in-app calibrate control)
      * wires it through this bridge, which is the natural integration (it already
@@ -620,6 +624,19 @@ class ShizukuBridge(private val context: Context) {
         override fun onPortalOpened() {
             mainHandler.post { this@ShizukuBridge.onPortalOpened() }
         }
+
+        // The shell's two words to the panel, passed on: the panel's receiver hears only this
+        // app (RearActivity), and the shell is uid 2000.
+        override fun onPanelPoke() = toPanel(RearActivity.ACTION_PORTAL_POKE)
+
+        override fun onPanelStepBack() = toPanel(RearActivity.ACTION_PORTAL_STEP_BACK)
+    }
+
+    /** A broadcast to the panel, from inside the app — the only sender its receiver takes. */
+    private fun toPanel(action: String, state: String? = null) {
+        val intent = android.content.Intent(action).setPackage(context.packageName)
+        if (state != null) intent.putExtra(RearActivity.EXTRA_STATE, state)
+        context.sendBroadcast(intent)
     }
 
     /** The portal sheet was opened on the back (IRearEvents.onPortalOpened). Set by Graph; run on the main thread. */

@@ -36,13 +36,13 @@ class RearActivity : Activity() {
         /**
          * From the shell service while its portal sheet is up over this panel: the sheet's
          * blocker keeps every touch from the panel, so the sleep countdown is re-armed here
-         * instead. Same string as RearUserService.ACTION_PORTAL_POKE.
+         * instead. Passed on by the app (IRearEvents.onPanelPoke): this receiver takes only it.
          */
         const val ACTION_PORTAL_POKE = "dev.kb896.aiusage.PORTAL_POKE"
         /**
-         * From the shell (`am broadcast -p`), for the portal sheet's Resume: this task goes
-         * behind the guest on the rear, which is then on top without leaving the display.
-         * Same string as RearUserService.ACTION_PORTAL_STEP_BACK.
+         * From the shell, for the portal sheet's Resume — passed on by the app
+         * (IRearEvents.onPanelStepBack): this task goes behind the guest on the rear, which
+         * is then on top without leaving the display.
          */
         const val ACTION_PORTAL_STEP_BACK = "dev.kb896.aiusage.PORTAL_STEP_BACK"
 
@@ -556,7 +556,11 @@ class RearActivity : Activity() {
                 addAction(ACTION_POCKET)
 
             },
-            ContextCompat.RECEIVER_EXPORTED,
+            // NOT EXPORTED: only this app reaches it. It was exported for the shell's own
+            // `am broadcast`s (uid 2000), which let any app on the phone feed the back fake
+            // usage, fake notices or a FINISH; the shell's words now come through the app
+            // (ShizukuBridge: update, hide, IRearEvents.onPanelPoke/onPanelStepBack).
+            ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         render(intent?.getStringExtra(EXTRA_STATE).orEmpty())
         // This process may be new, and the front may have changed while it was gone: ask
