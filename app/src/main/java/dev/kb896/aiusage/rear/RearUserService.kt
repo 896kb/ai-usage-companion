@@ -75,6 +75,8 @@ class RearUserService : IRearService.Stub {
     }
 
     override fun destroy() {
+        // Going anyway with the process, the token dying with it; said first, so it is seen to.
+        letGoOfBack("the service is going")
         // The sheet's blocker must not outlive us: an untrusted layer left up takes every
         // touch on the rear. On this thread, since the process exits right after.
         closeSheetNow("the service is going", sync = true)
@@ -231,6 +233,8 @@ class RearUserService : IRearService.Stub {
         strip.dark = dozing && !guestOnTop
         // A sheet is never left up over a rear going to sleep: its blocker would outlive it.
         if (dozing) closeSheetNow("the panel is asleep")
+        // Letting go on purpose: the guest hold goes before anything else can see it held.
+        if (dozing) syncGuestHoldNow()
         syncTouchWatch()
         Log.i(TAG, if (dozing) "standing down — the panel is asleep on purpose" else "resuming")
     }
@@ -296,6 +300,8 @@ class RearUserService : IRearService.Stub {
     override fun pocketSleep(displayId: Int): Boolean {
         if (displayId < 0 || otherBuildOnTop(displayId)) return false
         pocketed = true
+        // Off before the sleep below, not after, so nothing of ours is holding the back up.
+        syncGuestHoldNow()
         // A sheet is not left up over a back going dark — setDozing says the same when the
         // panel's own word arrives, but that is a hop through two processes behind this.
         closeSheetNow("the back is in a pocket")
@@ -871,7 +877,10 @@ class RearUserService : IRearService.Stub {
     private val guestRef = AtomicReference<Guest?>(null)
     private var guest: Guest?
         get() = guestRef.get()
-        set(value) = guestRef.set(value)
+        set(value) {
+            guestRef.set(value)
+            syncGuestHold()
+        }
     private val frame by lazy { PortalFrame(rearLayerStack(), geometry) }
     /** The camera strip beside a confined guest (CameraStrip), in the guest's edge colour. */
     private val strip by lazy { CameraStrip(rearLayerStack(), geometry) { stripColor() } }
@@ -897,7 +906,10 @@ class RearUserService : IRearService.Stub {
         while (true) {
             val g = guestRef.get() ?: return false
             if (g.task != task || g.onTop == onTop) return false
-            if (guestRef.compareAndSet(g, g.copy(onTop = onTop))) return true
+            if (guestRef.compareAndSet(g, g.copy(onTop = onTop))) {
+                syncGuestHold()
+                return true
+            }
         }
     }
 
@@ -1942,6 +1954,7 @@ class RearUserService : IRearService.Stub {
 
     private fun onRearTouch(e: RearTouches.Event, from: EdgeGestures) {
         lastRearTouchAt = android.os.SystemClock.elapsedRealtime()
+        guestHoldTouch(e)
         var back = false
         synchronized(sheetLock) {
             if (from !== gestures) return
@@ -1958,6 +1971,136 @@ class RearUserService : IRearService.Stub {
             }
         }
         if (back) sendBackOnce()
+    }
+
+    // -- the guest hold: the back kept lit over a guest ----------------------------------
+    //
+    // See GuestHold for why and when, DisplayWakeLock for what is held, and the reading of
+    // what it can and cannot do against a sleep. Here only the plumbing:
+    //
+    // ONE THREAD, ONE TIMER. [holdHandler] does the looking, its one delayed [holdCheck] is
+    // the only timer there is, and it is replaced at every look; GuestHold asks for none when
+    // there is nothing to hold, so a back nobody touches has nothing running for it.
+    //
+    // THE TOUCH PATH TAKES NO LOCK and is not delayed: [guestHoldTouch] reads volatiles, and
+    // while held it has nothing to do at all — the timer, when it comes, reads
+    // [lastRearTouchAt] and moves itself out. Otherwise it posts one look ([holdQueued], so a
+    // finger's moves are one post), and that is where the display is read (a binder call) and
+    // the lock taken. [holdLock] is a leaf: nothing is called under it but the display's
+    // state and the power manager, and the anything-may-call [syncGuestHold] only posts, so it
+    // is safe from under [placing] and everywhere else.
+    //
+    // WHAT PUTS THE BACK DOWN GOES FIRST: a sleep on purpose and a pocket let go on their own
+    // thread before they go on ([syncGuestHoldNow]); a double tap is caught at its second
+    // landing. The back going dark any other way (the power button, HyperOS's own sleep) is
+    // seen by a display listener while held; the keep-alive tick is the net under that, for a
+    // listener that hears nothing in this process. A display with no Context here reads as
+    // dark, so before Shizuku 13 there is no hold, and the rear keeps HyperOS's own timeout.
+
+    private val holdLock = Any()
+    private val guestHold = GuestHold()
+    private val backLock = DisplayWakeLock("AiUsage:guest-hold")
+    private val doubleTaps = GuestHold.DoubleTaps()
+    /** Mirrors [GuestHold.held] for the touch path, which takes no lock. */
+    @Volatile private var holdTaken = false
+    @Volatile private var lastDoubleTapAt = 0L
+    private val holdQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val holdHandler by lazy {
+        android.os.Handler(android.os.HandlerThread("portal-hold").apply { isDaemon = true; start() }.looper)
+    }
+    /** The one timer. Its own Runnable, so a look's replacing it never takes a queued look. */
+    private val holdCheck = Runnable { syncGuestHoldNow() }
+    private val holdLook = Runnable {
+        holdQueued.set(false)
+        syncGuestHoldNow()
+    }
+    private val holdDisplays by lazy { context?.getSystemService(android.hardware.display.DisplayManager::class.java) }
+    /** Only while held. Any change posts a look, which reads the state; a refresh rate's costs one read. */
+    private val holdDisplayListener = object : android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == rearDisplay()) syncGuestHold()
+        }
+    }
+
+    /** One touch, on the reader thread: see above. */
+    private fun guestHoldTouch(e: RearTouches.Event) {
+        when (e) {
+            is RearTouches.Down -> if (doubleTaps.down(e.x, e.y, e.atMs)) {
+                lastDoubleTapAt = android.os.SystemClock.elapsedRealtime()
+                if (holdTaken) { syncGuestHold(); return }
+            }
+            is RearTouches.Up -> doubleTaps.up(e.x, e.y, e.atMs)
+            is RearTouches.Move -> Unit
+        }
+        if (holdTaken || guest?.onTop != true || dozing || pocketed) return
+        syncGuestHold()
+    }
+
+    /** A look, soon, on [holdHandler]. Any thread, under any lock. */
+    private fun syncGuestHold() {
+        if (holdQueued.compareAndSet(false, true)) holdHandler.post(holdLook)
+    }
+
+    /**
+     * The look: what [GuestHold] says, done here and now. On [holdHandler], or a binder thread
+     * that wants the lock gone before it goes on. Nothing it throws gets out: on the handler's
+     * thread that would end the process, the sheet and the frame with it.
+     */
+    private fun syncGuestHoldNow() {
+        try {
+            synchronized(holdLock) {
+                val onTop = guestOnTop()
+                val display = rearDisplay()
+                val s = guestHold.step(
+                    guestOnTop = onTop,
+                    // No guest on top: no need to ask the display.
+                    rearLit = if (onTop) rearLit(display) else null,
+                    dozing = dozing,
+                    pocketed = pocketed,
+                    lastTouchAt = lastRearTouchAt,
+                    doubleTapAt = lastDoubleTapAt,
+                    now = android.os.SystemClock.elapsedRealtime(),
+                )
+                when (s.act) {
+                    GuestHold.Act.TAKE -> if (backLock.acquire(display)) {
+                        guestHold.taken()
+                        holdTaken = true
+                        runCatching { holdDisplays?.registerDisplayListener(holdDisplayListener, holdHandler) }
+                        Log.i(TAG, "portal: holding the back lit, ${GuestHold.HOLD_MS / 1000} s past the last touch")
+                    }
+                    GuestHold.Act.LET_GO -> letGoLocked(s.why ?: "")
+                    GuestHold.Act.NONE -> Unit
+                }
+                holdHandler.removeCallbacks(holdCheck)
+                if (s.recheckInMs >= 0L) holdHandler.postDelayed(holdCheck, s.recheckInMs)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "portal: the guest hold's look failed", e)
+        }
+    }
+
+    /** Under [holdLock]. */
+    private fun letGoLocked(why: String) {
+        backLock.release()
+        guestHold.released()
+        holdTaken = false
+        runCatching { holdDisplays?.unregisterDisplayListener(holdDisplayListener) }
+        Log.i(TAG, "portal: let go of the back — $why")
+    }
+
+    /** Unconditionally, for the end of the service. */
+    private fun letGoOfBack(why: String) {
+        try {
+            synchronized(holdLock) {
+                if (!holdTaken) return
+                holdHandler.removeCallbacks(holdCheck)
+                letGoLocked(why)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "portal: letting go of the back failed", e)
+        }
     }
 
     /**
@@ -2957,6 +3100,8 @@ class RearUserService : IRearService.Stub {
                     // is really dark shows here as nothing on top (GUEST_BEHIND).
                     // The touch watch's safety net: a getevent that died is restarted here.
                     syncTouchWatch()
+                    // The guest hold's net under its display listener: see GuestHold.
+                    syncGuestHold()
                     if (dozing && guest?.onTop != true) continue
 
                     // The App Portal's guest first: its own rule (GuestGate), and the usual
@@ -2994,6 +3139,7 @@ class RearUserService : IRearService.Stub {
                                 // A hidden flag here is stale (it is on the rear): cleared with it.
                                 if ((!g.onTop || g.hiddenOnFront) &&
                                     guestRef.compareAndSet(g, g.copy(onTop = true, hiddenOnFront = false))) {
+                                    syncGuestHold()
                                     syncSheetGuest()
                                 }
                                 // Every tick, but a comparison unless something changed (or a
@@ -3036,6 +3182,7 @@ class RearUserService : IRearService.Stub {
                                 if ((covered || stale) &&
                                     guestRef.compareAndSet(g, g.copy(onTop = g.onTop && !covered, hiddenOnFront = g.hiddenOnFront && !stale)) &&
                                     covered) {
+                                    syncGuestHold()
                                     syncSheetGuest()
                                 }
                                 syncDensity("${g.pkg} is behind")
