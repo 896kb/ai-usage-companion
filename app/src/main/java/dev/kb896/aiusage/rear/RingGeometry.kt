@@ -15,7 +15,7 @@ data class PanelGeometry(val personal: RingGeometry, val work: RingGeometry) {
 
     companion object {
         /**
-         * Lens centres, MEASURED on device f940914b (Xiaomi 17 Pro, 25098PN5AC) on
+         * Lens centres, MEASURED on a Xiaomi 17 Pro (25098PN5AC) on
          * 2026-08-14 and confirmed visually by the user against the physical lenses.
          * Do not "correct" these back toward round numbers.
          */
