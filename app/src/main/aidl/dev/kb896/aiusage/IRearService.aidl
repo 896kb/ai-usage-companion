@@ -8,7 +8,10 @@ interface IRearService {
     // Shizuku-reserved destroy transaction id.
     void destroy() = 16777114;
 
-    /** Place RearActivity on displayId with an initial payload, then wake the panel. */
+    /**
+     * Place RearActivity on displayId with an initial payload. A recovery: the rear is lit
+     * afterwards only if it was lit before — place(..., light = true) is the one that lights it.
+     */
     void show(String payload, int displayId) = 1;
 
     /**
@@ -127,5 +130,9 @@ interface IRearService {
     // Sent with every change the app sees, and on (re)connect; oneway, nothing waits on it.
     oneway void setQuickStates(in boolean[] states, boolean reachable) = 25;
     /** Whether to keep poking the rear display awake while the panel holds it. See RearUserService. */
-
+    // show(), and [light]: true when somebody ASKED for the panel ("Show on the back", the
+    // notification's tap) — the rear is lit whatever it was. False is a recovery (the app's
+    // watchdog): lit afterwards only if it was lit before, so a back asleep in a pocket stays
+    // asleep. See PlaceLight.
+    void place(String payload, int displayId, boolean light) = 26;
 }

@@ -20,7 +20,14 @@ class ShizukuBridge(private val context: Context) {
     }
 
     @Volatile private var service: IRearService? = null
-    private var pending: String? = null
+    /** A placement waiting for the service: the payload, and whether it was asked to light the back. */
+    private var pending: Pair<String, Boolean>? = null
+
+    /**
+     * Supervision wants an answer from the service and there was no binder to bind with yet:
+     * bound as soon as Shizuku's binder arrives (see [armBinderListener]).
+     */
+    @Volatile private var bindWanted = false
 
     /**
      * The last payload handed to the shell (show or update), sent or not. A new shell process
@@ -51,7 +58,8 @@ class ShizukuBridge(private val context: Context) {
         binderListenerArmed = true
         try {
             Shizuku.addBinderReceivedListenerSticky {
-                pending?.let { p -> pending = null; show(p) }
+                pending?.let { (p, light) -> pending = null; show(p, light) }
+                if (bindWanted) { bindWanted = false; bind() }
             }
         } catch (e: Exception) {
             binderListenerArmed = false
@@ -83,7 +91,9 @@ class ShizukuBridge(private val context: Context) {
             quickStates?.let { (states, reachable) -> runCatching { service?.setQuickStates(states, reachable) } }
             // The settings the shell runs on, before anything is placed with them.
             lastPayload?.let { p -> runCatching { service?.update(p) } }
-            pending?.let { p -> pending = null; show(p) }
+            pending?.let { (p, light) -> pending = null; show(p, light) }
+            // Now there is somebody to ask whether the panel is there: supervision, again.
+            if (service != null) onConnected()
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
     }
@@ -122,7 +132,13 @@ class ShizukuBridge(private val context: Context) {
         try { Shizuku.bindUserService(args, connection) } catch (e: Exception) { Log.e(TAG, "bind failed", e) }
     }
 
-    fun show(payload: String) {
+    /**
+     * Place the panel. [light]: somebody ASKED for it — the "Show on the back" button, the
+     * notification's tap, the onboarding finishing — so the back is lit whatever it was. The
+     * watchdog's recoveries pass false, and the back is then left as they find it (PlaceLight):
+     * a new app process recovering a panel must not light a back asleep in a pocket.
+     */
+    fun show(payload: String, light: Boolean = true) {
         calibrating = CalibrateMode.isCalibrate(payload)
         val s = status()
         if (!gate(s)) {
@@ -130,7 +146,7 @@ class ShizukuBridge(private val context: Context) {
             // is up from before the step came undone is taken down, so the two rear-screen
             // apps stop trading the display every tick.
             pending = null
-            if (isPanelAlive()) {
+            if (panelAlive() == true) {
                 Log.i(TAG, "onboarding incomplete — taking the panel down")
                 hide()
             } else {
@@ -148,12 +164,24 @@ class ShizukuBridge(private val context: Context) {
             // happened to land after the binder arrived — measured at ~30s. Queued
             // plus the listener below, it goes back the moment Shizuku is reachable.
             Log.w(TAG, "not ready: $s — queuing")
-            pending = payload
+            pending = payload to light
             armBinderListener()
             return
         }
-        val svc = service ?: run { pending = payload; bind(); return }
-        try { svc.show(payload, s.rearDisplayId) } catch (e: Exception) { Log.e(TAG, "show failed", e); service = null }
+        val svc = service ?: run { pending = payload to light; bind(); return }
+        try { svc.place(payload, s.rearDisplayId, light) } catch (e: Exception) { Log.e(TAG, "show failed", e); service = null }
+    }
+
+    /**
+     * Run when the service connects (main thread). Set by UsagePollService to supervise again:
+     * an unbound bridge cannot say whether the panel is there ([panelAlive] is null), so the
+     * watchdog leaves it alone until this.
+     */
+    @Volatile var onConnected: () -> Unit = {}
+
+    /** Bind now if Shizuku is reachable, or the moment its binder arrives. */
+    private fun bindWhenReachable() {
+        if (status().ready) bind() else { bindWanted = true; armBinderListener() }
     }
 
     fun update(payload: String) {
@@ -166,14 +194,6 @@ class ShizukuBridge(private val context: Context) {
         try { service?.hide() } catch (e: Exception) { Log.e(TAG, "hide failed", e) }
     }
 
-    /**
-     * Asks the shell-uid service whether RearActivity's task still exists — see the
-     * KDoc on IRearService.isAlive(). Not yet bound counts as "not alive": that is
-     * exactly the state a killed panel would be in immediately after Shizuku itself
-     * restarts, and the caller (UsagePollService's watchdog) already treats "not
-     * alive" as "call show()", whose existing `pending` queue-and-bind handles an
-     * unbound service correctly.
-     */
     /**
      * Hide or restore HyperOS's rear-screen app. Null when the user service is not bound
      * yet — a bind is started, and the caller should say "try again in a moment" rather
@@ -272,9 +292,20 @@ class ShizukuBridge(private val context: Context) {
         }
     }
 
-    fun isPanelAlive(): Boolean {
-        val svc = service ?: return false
-        return try { svc.isAlive() } catch (e: Exception) { Log.e(TAG, "isAlive failed", e); service = null; false }
+    /**
+     * Whether the panel is there (IRearService.isAlive); NULL when there is no service to ask.
+     *
+     * Not bound used to read as DEAD, and that is the state of every new app process — HyperOS
+     * restarting the app, an update, a swipe from recents — so each of those re-placed a panel
+     * that was most likely fine, and the placement lit the back in a pocket. Unknown is not
+     * dead: a bind is started here, and [onConnected] runs supervision again with a real answer.
+     * A call that fails is unknown too — the service has gone, and is bound again.
+     */
+    fun panelAlive(): Boolean? {
+        val svc = service ?: run { bindWhenReachable(); return null }
+        return try { svc.isAlive() } catch (e: Exception) {
+            Log.e(TAG, "isAlive failed", e); service = null; bindWhenReachable(); null
+        }
     }
 
     /**

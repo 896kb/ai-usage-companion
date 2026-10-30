@@ -296,6 +296,11 @@ class UsagePollService : Service() {
         //
         // Uses cached state and makes no network call, so it costs nothing against
         // the rate limit and cannot re-introduce the request bursts.
+        //
+        // In a new process the bridge is not bound yet and this first pass can only start
+        // the bind (the panel's state is unknown, not dead); the real look is taken the
+        // moment the service connects.
+        app.bridge.onConnected = { scope.launch { safeSupervise() } }
         scope.launch { safeSupervise() }
 
         scope.launch {
@@ -657,8 +662,11 @@ class UsagePollService : Service() {
         // A fresh respawn already delivered `payload` via the launch intent extra
         // (RearUserService.show()'s `am start --es state ...`), and calibrate mode
         // must never be touched by this service at all — only an already-alive,
-        // non-calibrating panel gets the routine push.
-        if (decision.state == Watchdog.State.ALIVE) app.bridge.update(payload)
+        // non-calibrating panel gets the routine push. Unknown (not bound yet) too: the
+        // bridge keeps it and hands it over as the service connects.
+        if (decision.state == Watchdog.State.ALIVE || decision.state == Watchdog.State.UNKNOWN) {
+            app.bridge.update(payload)
+        }
     }
 
     /**
@@ -690,7 +698,8 @@ class UsagePollService : Service() {
     private fun ensurePlaced(app: Graph, payload: String): Watchdog.Decision {
         val decision = Watchdog.decide(
             watchdogState,
-            app.bridge.isPanelAlive(),
+            // Null while this process is not bound to the shell — not dead. See Watchdog.decide.
+            app.bridge.panelAlive(),
             app.bridge.isCalibrating(),
             // Re-placing calls show(), and show() lights the display — so this watchdog,
             // doing exactly its job, undid every deliberate sleep. See Watchdog.decide.
@@ -703,6 +712,7 @@ class UsagePollService : Service() {
                 Watchdog.State.CALIBRATING -> "calibrate mode active — watchdog standing down"
                 Watchdog.State.DOZING -> "panel asleep on purpose — watchdog standing down"
                 Watchdog.State.ALIVE -> "rear panel confirmed alive"
+                Watchdog.State.UNKNOWN -> "not bound to the shell yet — asking again once it connects"
             })
         }
         if (decision.shouldRespawn) {
@@ -731,7 +741,10 @@ class UsagePollService : Service() {
             // delayed push from a separate store — the panel runs in ":rear" and could
             // not see values kept only in this process — and that delay was a visible
             // window in which every respawn showed the compiled-in defaults.
-            app.bridge.show(payload)
+            //
+            // light = false: a recovery, not a request. The back is lit afterwards only if it
+            // was lit before (PlaceLight) — this runs in pockets, after every app restart.
+            app.bridge.show(payload, light = false)
             scope.launch { verifyPlacement(app) }
         }
         return decision
@@ -801,6 +814,7 @@ class UsagePollService : Service() {
     private var media: MediaWatcher? = null
 
     override fun onDestroy() {
+        Graph.of(this).bridge.onConnected = {}
         stopConfigWatch?.invoke()
         stopConfigWatch = null
         runCatching { unregisterReceiver(portalAppsReceiver) }
@@ -831,6 +845,7 @@ class UsagePollService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SHOW_PANEL) {
             val app = Graph.of(this)
+            // Asked for by a tap, so lit (light defaults to true): unlike the watchdog's.
             app.bridge.show(StatePayload.encode(app.repository.state.value, config(), WeatherPoll.latest))
         }
         return START_STICKY

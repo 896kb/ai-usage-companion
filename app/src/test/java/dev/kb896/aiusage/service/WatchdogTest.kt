@@ -126,4 +126,29 @@ class WatchdogTest {
             Watchdog.decide(previous = null, alive = false, calibrating = false).state,
         )
     }
+
+    // -- not bound yet ------------------------------------------------------------------
+
+    /**
+     * A new app process has no binding to the shell, so it cannot know whether the panel
+     * is there. That used to read as DEAD, and the respawn lit a sleeping back in a pocket
+     * every time HyperOS restarted the app. Unknown is asked again once bound, never acted on.
+     */
+    @Test fun `an unknown panel is not respawned`() {
+        val d = Watchdog.decide(previous = null, alive = null, calibrating = false)
+        assertEquals(Watchdog.State.UNKNOWN, d.state)
+        assertFalse(d.shouldRespawn)
+    }
+
+    @Test fun `an answer once bound is a new transition`() {
+        val unknown = Watchdog.decide(previous = null, alive = null, calibrating = false)
+        val dead = Watchdog.decide(previous = unknown.state, alive = false, calibrating = false)
+        assertTrue(dead.isNewState)
+        assertTrue(dead.shouldRespawn)
+    }
+
+    @Test fun `dozing and calibrating still win over unknown`() {
+        assertEquals(Watchdog.State.DOZING, Watchdog.decide(null, alive = null, calibrating = false, dozing = true).state)
+        assertEquals(Watchdog.State.CALIBRATING, Watchdog.decide(null, alive = null, calibrating = true).state)
+    }
 }

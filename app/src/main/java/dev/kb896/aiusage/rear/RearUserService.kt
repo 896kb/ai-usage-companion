@@ -244,17 +244,44 @@ class RearUserService : IRearService.Stub {
         // notification that wakes a dozing panel the one thing that cannot.
         dozing = false
         syncTouchWatch()
-        // Required. The activity is created on display 0 where the screen is
-        // already on, so FLAG_TURN_SCREEN_ON has nothing to act on; without
-        // this the task is placed and focused but the panel stays state=OFF.
+        // Required, for a placement that is to end lit. The activity may be created on
+        // display 0, where the screen is already on, so FLAG_TURN_SCREEN_ON has nothing
+        // to act on; without this the task is placed and focused but the panel stays
+        // state=OFF. Which placements are to end lit is PlaceLight's to say, not this.
         exec("input -d $displayId keyevent KEYCODE_WAKEUP")
     }
+
+    /**
+     * Whether [displayId] is lit right now. Read before a placement, since afterwards
+     * nothing can tell a back that was lit from one the placement lit. Null when it cannot
+     * be read (no Context — Shizuku before 13 — or no such display), which PlaceLight takes
+     * as dark.
+     */
+    private fun rearLit(displayId: Int): Boolean? = runCatching {
+        context?.getSystemService(android.hardware.display.DisplayManager::class.java)
+            ?.getDisplay(displayId)?.state?.let { it == android.view.Display.STATE_ON }
+    }.getOrNull()
 
     /** show() and ensureOnRear() both place; two at once moved the same task twice and the second threw. */
     private val placing = Any()
 
-    override fun show(payload: String, displayId: Int) = synchronized(placing) {
+    /** A recovery: see [place]. The app's watchdog (an older app), the keep-alive and endGuest come here. */
+    override fun show(payload: String, displayId: Int) = place(payload, displayId, false)
+
+    /**
+     * Place the panel, and end with the rear lit only as [PlaceLight] says: when [light] was
+     * asked for, or when it was lit already and the panel is not letting it go.
+     *
+     * It used to end with an unconditional wake, and every recovery lit the back: a new app
+     * process (unbound, so the panel read as dead), an update, a swipe from recents, the
+     * keep-alive's "no panel and no task" — measured as a back lit in a pocket after HyperOS
+     * restarted the app.
+     */
+    override fun place(payload: String, displayId: Int, light: Boolean) = synchronized(placing) {
         if (displayId < 0) return@synchronized
+        // FIRST, before anything is started or moved: once the panel's start has gone
+        // through, a lit rear and a rear it lit look the same.
+        val lightIt = PlaceLight.wake(light, rearLit(displayId), dozing)
         hiddenOnPurpose = false
         lastPayload = payload
         styleFrame(payload)
@@ -267,9 +294,9 @@ class RearUserService : IRearService.Stub {
         if (placedDisplayId == displayId && taskId() > 0 && panelWhere() == Where.REAR) {
             // The payload still goes through — the panel should be correct whenever it is
             // next seen — but it is NOT lit for it. A status update is not a reason to
-            // wake a display somebody deliberately let go.
+            // wake a display somebody deliberately let go, nor one that went dark by itself.
             update(payload)
-            if (!dozing) wake(displayId)
+            if (lightIt) wake(displayId)
             syncTouchWatch()
             return
         }
@@ -329,11 +356,13 @@ class RearUserService : IRearService.Stub {
         if (panelWhere() == Where.MAIN) {
             Log.w(TAG, "compositing on the MAIN display — re-issuing the move")
             moveToDisplay(task, displayId)
-            wake(displayId)
+            if (lightIt) wake(displayId)
         }
         syncDensity("the panel is placed")
         placedDisplayId = displayId
-        wake(displayId) // and the touch watch with it (syncTouchWatch)
+        // Lit only as PlaceLight said; the touch watch either way (wake starts it too).
+        if (lightIt) wake(displayId) else Log.i(TAG, "placed on display $displayId — the rear left dark, as it was")
+        syncTouchWatch()
     }
 
     /**
@@ -562,8 +591,11 @@ class RearUserService : IRearService.Stub {
         if (task <= 0) return false
         strandStrikes++
         Log.w(TAG, "task $task compositing on the MAIN display (strike $strandStrikes) — moving it back")
+        // A recovery like any other (see [place]): the lock is what hoists the panel onto the
+        // front, and the back went dark with that lock — moved back, it stays dark.
+        val lightIt = PlaceLight.wake(false, rearLit(displayId), dozing)
         moveToDisplay(task, displayId)
-        wake(displayId)
+        if (lightIt) wake(displayId)
         adoptPlaced(displayId, "ensureOnRear")
 
         // Last resort. If repeated moves will not get it off the main display, the
