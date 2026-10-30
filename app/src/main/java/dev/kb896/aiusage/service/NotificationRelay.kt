@@ -53,7 +53,13 @@ class NotificationRelay : NotificationListenerService() {
         }
         // Whatever left the front while the relay was not bound, the back finds out now.
         sendActive()
+        // And whatever is on the front already has been seen: an alert-once update of it is
+        // not news, however long ago the relay last heard of it. See NotificationAlert.
+        runCatching { activeNotifications }.getOrNull()?.let { all -> seen.seed(all.map { it.key }) }
     }
+
+    /** Every key posted, ongoing or not — see NotificationAlert.SeenKeys. */
+    private val seen = NotificationAlert.SeenKeys()
 
     private var debugRegistered = false
     private val debugUnbind = object : android.content.BroadcastReceiver() {
@@ -99,6 +105,8 @@ class NotificationRelay : NotificationListenerService() {
 
     /** Gone from the front — swiped, tapped, cleared, withdrawn: gone from the back too. */
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        // Gone, so the same key posted again later is new again — whatever the switches say.
+        seen.forget(sbn.key)
         if (!ConfigStore(this).load().matchFrontNotifications) return
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION_REMOVED).setPackage(packageName)
@@ -107,6 +115,10 @@ class NotificationRelay : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        // FIRST, before anything can return: whether this key was posted before. The filters
+        // below drop ongoing posts, and a player's first post after it pauses — the first one
+        // not ongoing — must still be known as an update of something already seen.
+        val seenBefore = seen.see(sbn.key)
         val config = ConfigStore(this).load()
         if (!config.showNotifications) return
 
@@ -143,6 +155,20 @@ class NotificationRelay : NotificationListenerService() {
         }
 
         val extras = sbn.notification.extras
+        // Would the FRONT alert for this? The back wakes only if so — see NotificationAlert.
+        // A paused player is the case that was seen: no longer ongoing, clearable, no
+        // category, a song title for a headline — so it is told by its media session.
+        val ranking = android.service.notification.NotificationListenerService.Ranking()
+        val ranked = runCatching { currentRanking?.getRanking(sbn.key, ranking) }.getOrNull() == true
+        val verdict = NotificationAlert.verdict(
+            media = extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) ||
+                sbn.notification.category == android.app.Notification.CATEGORY_TRANSPORT,
+            importance = if (ranked) ranking.importance else null,
+            matchesFilter = if (ranked) ranking.matchesInterruptionFilter() else null,
+            onlyAlertOnce = sbn.notification.flags and android.app.Notification.FLAG_ONLY_ALERT_ONCE != 0,
+            seenBefore = seenBefore,
+        )
+        if (verdict == NotificationAlert.Verdict.DROP) return
         val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
         val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
         val app = appLabel(sbn.packageName)
@@ -176,7 +202,15 @@ class NotificationRelay : NotificationListenerService() {
         // UNDER one, because saying how much more there is is what it was written for.
         val next = cascade(sbn)
 
-        Log.i(TAG, "relaying from ${sbn.packageName}${if (next != null) " (+1 in group)" else ""}")
+        Log.i(TAG, "relaying from ${sbn.packageName}${if (next != null) " (+1 in group)" else ""}" +
+            if (verdict == NotificationAlert.Verdict.CARD) " — a card only, the front would not alert for it" else "")
+
+        // Not one the front would alert for: a card for a back somebody is already looking
+        // at, and the panel drops it if the back is dark. No light, no lock, no settle.
+        if (verdict == NotificationAlert.Verdict.CARD) {
+            relay(app, sbn, title, body, next, config)
+            return
+        }
 
         // LIGHT THE PANEL FIRST, then tell it.
         //
