@@ -30,6 +30,9 @@ class CameraStrip(private val layerStack: Int, private val rear: RearGeometry, p
     @Volatile private var failedAt = 0L
     /** The colour it is going to. */
     @Volatile private var target = BLACK
+
+    /** The colour it stands at, as near as a picture of it needs. */
+    val color: Int get() = target
     @Volatile private var sheet = 0f
     /** The rear is dark: nothing sampled. */
     @Volatile var dark = false

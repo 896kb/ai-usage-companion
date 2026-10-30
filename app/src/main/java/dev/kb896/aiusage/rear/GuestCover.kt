@@ -25,6 +25,11 @@ import java.util.concurrent.TimeUnit
  * command's picture ([screencap]), drawn on the layer's software canvas — slower (a PNG),
  * once. Neither: no cover, and the guest arrives as it always did.
  *
+ * A GUEST ON A PRIVATE DISPLAY IS NOT IN THAT PICTURE. Its layer and strip are ours, not in the
+ * display's window tree that captureDisplay reads, so its picture was of the panel underneath: on
+ * Close the app vanished, and a photo of the panel slid off the panel (seen 2026-10-30). What
+ * leaves there is the app, so the caller composes it ([ofPicture], RearUserService.privatePicture).
+ *
  * A picture with secure layers in it (a banking app, DRM video) shows them black: that is
  * not what was on the rear, so there is no cover then either.
  *
@@ -86,6 +91,17 @@ internal class GuestCover private constructor(
             }
             val picture = if (shot == null) runCatching { screencap() }.getOrNull() else null
             if (shot == null && picture == null) { once("no picture of the rear — guests arrive uncovered"); return null }
+            return make(layerStack, rear, shot, picture, frameLeftOut = shot?.leftOut == true)
+        }
+
+        /**
+         * [picture], [rear]'s whole size (taken over: recycled here), as a cover. The frame is not
+         * in it. Null, nothing left behind, where there can be none.
+         */
+        fun ofPicture(layerStack: Int, rear: RearGeometry, picture: Bitmap): GuestCover? =
+            make(layerStack, rear, null, picture, frameLeftOut = true)
+
+        private fun make(layerStack: Int, rear: RearGeometry, shot: RearCapture.Shot?, picture: Bitmap?, frameLeftOut: Boolean): GuestCover? {
             var layer: SurfaceControl? = null
             try {
                 layer = ShellLayer.create(
@@ -109,12 +125,13 @@ internal class GuestCover private constructor(
                 t.setVisibility(layer, true).apply()
                 t.close()
                 committed.await(COMMIT_WAIT_MS, TimeUnit.MILLISECONDS)
-                return GuestCover(layer, shot?.buffer, frameLeftOut = shot?.leftOut == true)
+                return GuestCover(layer, shot?.buffer, frameLeftOut)
             } catch (e: Throwable) {
                 if (e is ShellLayer.Untrusted) once("no trusted overlay (${e.message}) — guests arrive uncovered")
                 else Log.w(TAG, "guest cover: no layer: ${e.message}")
                 ShellLayer.remove(layer)
                 runCatching { shot?.buffer?.close() }
+                runCatching { picture?.recycle() }
                 if (e is InterruptedException) Thread.currentThread().interrupt()
                 return null
             }

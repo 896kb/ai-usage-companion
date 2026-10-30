@@ -1221,12 +1221,17 @@ class RearUserService : IRearService.Stub {
         // then read as closed by the user, not retried.
         backedTask = -1
         val wantPrivate = GuestShape.onPrivateDisplay(pkg, portalConfined)
-        // The same app, in the other place than it is: it ends there, and starts here.
-        guest?.takeIf { it.pkg == pkg && it.onPrivate != wantPrivate }?.let { endForRelaunch(it) }
+        // The same app, in the other place than it is: it ends there, and starts here. Its picture
+        // taken first, while there is one, and carried through to the reveal: taken after, it would
+        // be of the panel, shown for the length of the start. Whatever does not use it, this lets go.
+        val carried = guest?.takeIf { it.pkg == pkg && it.onPrivate != wantPrivate }?.let { g ->
+            (if (!dozing) coverRear(displayId) else null).also { endForRelaunch(g) }
+        }
+        try {
         if (wantPrivate) {
             guest?.takeIf { it.pkg == pkg }?.let { return@synchronized openAgainOnPrivate(it, component, displayId) }
             val pd = openPrivate(pkg)
-            if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd)
+            if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried)
             Log.w(TAG, "portal: no private display — $pkg on the whole rear instead")
         }
         // One guest at a time: the old one goes to the front, alive — never killed. Not yet:
@@ -1256,7 +1261,7 @@ class RearUserService : IRearService.Stub {
             // (one guest to the next) is left out of the picture, and the live one stays up
             // over it the whole way; where it could not be left out, it is in the picture,
             // and the live one fades out as it goes and back in after the reveal.
-            val cover = if (first && arriving && !dozing) coverRear(displayId) else null
+            val cover = if (first && arriving && !dozing) carried ?: coverRear(displayId) else null
             if (cover != null && !cover.frameLeftOut) frame.hide()
             if (first && old != null) {
                 moveToDisplay(old.task, 0); shapeForFront(old.task)
@@ -1309,6 +1314,10 @@ class RearUserService : IRearService.Stub {
         }
         endGuest("did not stay on the rear")
         false
+        } finally {
+            // Safe on one its reveal has already taken off.
+            carried?.remove()
+        }
     }
 
     /** The rear's layer stack for the guests' covers, read once. */
@@ -1319,6 +1328,14 @@ class RearUserService : IRearService.Stub {
      * when there can be none, and the guest arrives uncovered, as it always did.
      */
     private fun coverRear(displayId: Int): GuestCover? {
+        // A guest on a private display up: what shows is our layers, which the rear's capture has
+        // nothing of. Its own picture, or none: never the panel's in its place.
+        val g = guest
+        if (g != null && g.onPrivate && g.onTop) {
+            val cover = privatePicture()?.let { GuestCover.ofPicture(coverStack, geometry, it) }
+            Log.i(TAG, if (cover != null) "portal: the rear covered with ${g.pkg}'s own picture" else "portal: no picture of ${g.pkg} — no cover")
+            return cover
+        }
         val at = android.os.SystemClock.uptimeMillis()
         return GuestCover.up(coverStack, geometry, displayId, frame.currentLayer) { screencapRear() }
             ?.also {
@@ -1376,6 +1393,47 @@ class RearUserService : IRearService.Stub {
                 try { syncAppRect(why) } catch (e: Throwable) { Log.w(TAG, "portal: the app's rectangle not read", e) }
             }, APP_RECT_SOON_MS)
         }
+    }
+
+    /**
+     * What the rear shows of a private guest, as a whole-rear picture: the strip in its colour and
+     * the app's layer right of it (RearCapture.layer, the strip's capture, all of it). The frame is
+     * not in it: live, over any cover. Null: no capture, or secure content, which comes back black
+     * and is not what was there. A software bitmap, so that nothing of it depends on the layer going
+     * on existing; the caller's. Before the task ends or the display goes: it is all there is of it.
+     */
+    private fun privatePicture(): android.graphics.Bitmap? {
+        val pd = privateDisplay ?: return null
+        val rear = geometry
+        val area = GuestShape.appArea(rear)
+        return runCatching {
+            val shot = ShellLayer.lease(listOf(pd.layer)) { live ->
+                live.firstOrNull()?.let { RearCapture.layer(it, android.graphics.Rect(0, 0, area.width, area.height)) }
+            } ?: return@runCatching null
+            try {
+                if (shot.secure) return@runCatching null
+                val hw = android.graphics.Bitmap.wrapHardwareBuffer(shot.buffer, shot.space) ?: return@runCatching null
+                val app = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                hw.recycle()
+                val out = android.graphics.Bitmap.createBitmap(rear.widthPx, rear.heightPx, android.graphics.Bitmap.Config.ARGB_8888)
+                val c = android.graphics.Canvas(out)
+                c.drawColor(strip.color)
+                c.drawBitmap(app, area.left.toFloat(), area.top.toFloat(), null)
+                app.recycle()
+                out
+            } finally {
+                runCatching { shot.buffer.close() }
+            }
+        }.onFailure { Log.w(TAG, "portal: no picture of the app: ${(it.cause ?: it).message}") }.getOrNull()
+    }
+
+    /**
+     * Before a cover slides off the panel as a private guest leaves: the panel has only just been
+     * told it is no longer covered (through the app, a broadcast), and has to have drawn again to be
+     * live under the picture. Not for what was never covered.
+     */
+    private fun awaitPanelLive(g: Guest) {
+        if (g.onPrivate) Thread.sleep(PANEL_LIVE_MS)
     }
 
     /** A new display for [pkg] at its density, not yet anyone's; null where it cannot be had. Under [placing]. */
@@ -1438,7 +1496,7 @@ class RearUserService : IRearService.Stub {
      * that gave no task is tried once through the front (HyperOS has been seen to abort starts
      * under the keyguard, [show]). [pd] is this function's until it is the guest's. Under [placing].
      */
-    private fun launchOnPrivate(pkg: String, component: String, displayId: Int, pd: PrivateDisplay): Boolean {
+    private fun launchOnPrivate(pkg: String, component: String, displayId: Int, pd: PrivateDisplay, carried: GuestCover? = null): Boolean {
         val old = guest
         var landed = false
         repeat(2) { attempt ->
@@ -1452,7 +1510,7 @@ class RearUserService : IRearService.Stub {
                 } else endGuest("never started")
                 return false
             }
-            val cover = if (!landed && !dozing) coverRear(displayId) else null
+            val cover = if (!landed && !dozing) carried ?: coverRear(displayId) else null
             if (cover != null && !cover.frameLeftOut) frame.hide()
             if (!landed) {
                 landed = true
@@ -2592,12 +2650,16 @@ class RearUserService : IRearService.Stub {
             backWorker.execute {
                 // Still the guest it was swiped for, on top.
                 val now = guest?.takeIf { it.task == g.task && it.onTop } ?: return@execute
-                if (now.onPrivate && privateDisplay?.takeIf { it.displayId == now.privateDisplay }?.back() == true) {
+                val pd = privateDisplay?.takeIf { now.onPrivate && it.displayId == now.privateDisplay }
+                // Before the key: if it closes the app, this is all there will be of it.
+                val picture = if (pd != null && !dozing) privatePicture() else null
+                if (pd?.back() == true) {
                     Log.i(TAG, "portal: Back for ${now.pkg} (task ${now.task}): a key on display ${now.privateDisplay}")
                     backedTask = now.task
-                    afterBack(now, type = -1)
+                    afterPrivateBack(now, picture)
                     return@execute
                 }
+                picture?.recycle()
                 val o = SystemBack.invoke(now.task, geometry)
                 val what = when {
                     o.error != null -> "failed — ${o.error}"
@@ -2670,6 +2732,59 @@ class RearUserService : IRearService.Stub {
                 PortalAction.AfterBack.UNKNOWN -> Unit
             }
         }.apply { isDaemon = true; name = "portal-back-check"; start() }
+    }
+
+    /**
+     * After a Back key on a private guest, with its [picture] from just before it (null: none).
+     * Most Backs are the app's own, and nothing happens here. One that closes it or puts its task
+     * behind asks for it not to be visible at once, while what it draws goes on for a moment: so
+     * that is watched for (TaskRead, a read, for [BACK_WATCH_MS] and no more), and as it is seen the
+     * picture goes up over the layer, the guest ends or goes behind under it, and the picture slides
+     * off the panel, as the app does on the rear. Without a picture the layer just goes. Where the
+     * system cannot be asked, the checks every guest gets ([afterBack]).
+     */
+    private fun afterPrivateBack(g: Guest, picture: android.graphics.Bitmap?) {
+        guarded {
+            var used = false
+            try {
+                val began = android.os.SystemClock.uptimeMillis()
+                var read: TaskRead.Read
+                while (true) {
+                    if (guest?.task != g.task) return@guarded
+                    read = TaskRead.of(g.task)
+                    if (read == TaskRead.Unread) { afterBack(g, -1); return@guarded }
+                    if (read == TaskRead.Gone || (read as? TaskRead.Seen)?.visibleRequested == false) break
+                    if (android.os.SystemClock.uptimeMillis() - began >= BACK_WATCH_MS) return@guarded
+                    Thread.sleep(BACK_WATCH_POLL_MS)
+                }
+                used = true
+                val cover = picture?.let { GuestCover.ofPicture(coverStack, geometry, it) }
+                try {
+                    // Going, and not yet gone: a moment to tell closing from moved behind.
+                    val until = android.os.SystemClock.uptimeMillis() + BACK_GONE_MS
+                    while (read != TaskRead.Gone && android.os.SystemClock.uptimeMillis() < until) {
+                        Thread.sleep(BACK_WATCH_POLL_MS)
+                        read = TaskRead.of(g.task)
+                    }
+                    synchronized(placing) {
+                        if (guest?.task != g.task) return@guarded
+                        if (read == TaskRead.Gone) {
+                            val ms = android.os.SystemClock.uptimeMillis() - began
+                            if (dozing) dropGuest("its task closed on Back, $ms ms after it")
+                            else endGuest("its task closed on Back, $ms ms after it")
+                        } else if (markOnTop(g.task, false)) {
+                            Log.i(TAG, "portal: ${g.pkg} went behind on Back — the guest still, behind")
+                            guestBehind(g.pkg)
+                        }
+                        if (cover != null) reveal(cover, "the panel", rearDisplay(), { awaitPanelLive(g) }) { panelShown(g) }
+                    }
+                } finally {
+                    cover?.remove()
+                }
+            } finally {
+                if (!used) picture?.recycle()
+            }
+        }.apply { isDaemon = true; name = "portal-private-back"; start() }
     }
 
     /** [g]'s task still on the rear — or on the front behind the keyguard, as Panel hides it. */
@@ -3090,7 +3205,7 @@ class RearUserService : IRearService.Stub {
             // Nothing moves: the panel is under the layers, and comes out from under them.
             PortalAction.Step.HIDE_LAYERS -> synchronized(placing) {
                 val g = guest ?: return
-                covered("the panel", { panelShown(g) }) {
+                covered("the panel", { panelShown(g) }, { awaitPanelLive(g) }) {
                     markOnTop(g.task, false)
                     guestBehind(g.pkg)
                     true
@@ -3175,7 +3290,7 @@ class RearUserService : IRearService.Stub {
             // the rear at once. Covered, and the panel revealed as Panel reveals it.
             PortalAction.Step.FRONT -> synchronized(placing) {
                 val g = guest ?: return
-                covered("the panel", { panelShown(g) }) {
+                covered("the panel", { panelShown(g) }, { awaitPanelLive(g) }) {
                     guestAction("front")
                     guest == null
                 }
@@ -3183,7 +3298,7 @@ class RearUserService : IRearService.Stub {
             // On a private display there is no close to see, only a layer gone: covered too.
             PortalAction.Step.CLOSE -> if (guest?.onPrivate != true) guestAction("close") else synchronized(placing) {
                 val g = guest ?: return
-                covered("the panel", { panelShown(g) }) {
+                covered("the panel", { panelShown(g) }, { awaitPanelLive(g) }) {
                     guestAction("close")
                     guest == null
                 }
@@ -4044,6 +4159,13 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         private const val DRAWN_POLL_MS = 20L
         /** The keep-alive's goes at reshaping a guest before it is left as it is (logged once). */
         private const val PLACE_TRIES = 3
+        /** How long after a Back key a private guest is watched for closing, and how often. */
+        private const val BACK_WATCH_MS = 800L
+        private const val BACK_WATCH_POLL_MS = 24L
+        /** Not asked to be visible: how long its task is given to go, before it counts as moved behind. */
+        private const val BACK_GONE_MS = 300L
+        /** How long a panel just uncovered gets to draw before the picture over it slides off. */
+        private const val PANEL_LIVE_MS = 120L
         /** After a change that relayouts a private guest, how long before where it stands is read. */
         private const val APP_RECT_SOON_MS = 500L
         /** A start on a private display that shows no task by then is taken as refused. */
