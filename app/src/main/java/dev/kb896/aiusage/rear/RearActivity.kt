@@ -910,6 +910,10 @@ class RearActivity : Activity() {
         if (dial.cameraTipUp) return
         inAod = true
         window.decorView.removeCallbacks(sleepPanel)
+        // A spent lock still handing back is over: always-on keeps the slider, and the
+        // queued hand-back would otherwise unlock it under the dim without leaving always-on.
+        window.decorView.removeCallbacks(restorePanel)
+        awaitingDoze = false
         if (!holding) holdScreen(true)
         dial.aod = true
         dial.ringsClosed = true
