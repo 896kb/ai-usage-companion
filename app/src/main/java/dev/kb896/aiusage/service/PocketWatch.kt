@@ -160,6 +160,7 @@ class PocketWatch(private val context: Context, private val bridge: ShizukuBridg
         when (a) {
             PocketMode.Act.SLEEP -> sleep()
             PocketMode.Act.RESTORE -> restore()
+            PocketMode.Act.SWITCH_OFF -> switchOff()
             PocketMode.Act.NONE -> Unit
         }
     }
@@ -182,6 +183,19 @@ class PocketWatch(private val context: Context, private val bridge: ShizukuBridg
                 Log.w(TAG, "pocket: the back could not be switched off — left as it is")
                 handler.post { mode.refused(); sync() }
             }
+        }
+    }
+
+    /**
+     * Covered while the back was already going dark (the double tap's dim): off now, and no
+     * pocket — the shell's is ended at once, without a light, so nothing is held off and the
+     * way out has nothing to undo. The panel is not told: the display going dark under its
+     * dim is the double tap's ordinary end (RearActivity.endDim).
+     */
+    private fun switchOff() {
+        Log.i(TAG, "pocket: covered while going dark — switching the back off now")
+        worker.execute {
+            if (bridge.pocketSleep()) bridge.pocketEnd(light = false)
         }
     }
 

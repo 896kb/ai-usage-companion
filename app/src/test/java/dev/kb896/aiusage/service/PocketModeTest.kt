@@ -87,10 +87,12 @@ class PocketModeTest {
         assertFalse(p.pocketed)
     }
 
-    @Test fun `a back already letting go on its own is left to it`() {
+    @Test fun `a back already letting go goes off now, and the way out leaves it off`() {
         val p = litAndCovered()
-        assertEquals(Act.NONE, p.due(d, lettingGo = true))
+        assertEquals(Act.SWITCH_OFF, p.due(d, lettingGo = true))
         assertFalse(p.pocketed)
+        p.lit(false, d + 50)
+        assertEquals(Act.NONE, p.reading(covered = false, now = d + 2_000))
     }
 
     @Test fun `lit by something else while still in the pocket goes off again after the debounce`() {

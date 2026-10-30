@@ -33,6 +33,11 @@ class PocketMode(private val debounceMs: Long) {
         SLEEP,
         /** Out of the pocket: switch the back on, the slider up. */
         RESTORE,
+        /**
+         * Switch the back off now, but NOT as a pocket: it was already on its way to dark (the
+         * double tap's dim), so the way out leaves it dark — it was put to sleep, not pocketed.
+         */
+        SWITCH_OFF,
     }
 
     /** The last reading. */
@@ -91,17 +96,19 @@ class PocketMode(private val debounceMs: Long) {
 
     /**
      * The count's end. [lettingGo]: the panel has let go of the display already and the back
-     * is on its way to dark on its own (the idle sleep, the double tap's dim, a spent lock) —
-     * switching it off now would make it something to bring back, which it was not going to
-     * be. Marked [pocketed] at once, not when the shell says it is done, so a way out of the
-     * pocket arriving in between still brings the back back.
+     * is on its way to dark on its own (the idle sleep, the double tap's dim, a spent lock).
+     * It still goes off now — left to its timeout it stayed lit up to ten seconds under the
+     * cover, which in the hand read as pocket mode not working (2026-10-30) — but as
+     * [Act.SWITCH_OFF], not a pocket: it was going dark anyway, so the way out leaves it dark.
+     * Otherwise marked [pocketed] at once, not when the shell says it is done, so a way out
+     * of the pocket arriving in between still brings the back back.
      */
     fun due(now: Long, lettingGo: Boolean): Act {
         val at = dueAt()
         if (at < 0 || now < at) return Act.NONE
-        // The count is over either way: letting go, there is nothing left to count to.
+        // The count is over either way.
         coveredSince = -1L
-        if (lettingGo) return Act.NONE
+        if (lettingGo) return Act.SWITCH_OFF
         pocketed = true
         return Act.SLEEP
     }
