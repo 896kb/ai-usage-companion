@@ -501,6 +501,10 @@ class RearActivity : Activity() {
         // through being let go after an earlier lock ran out — and call off the hand-back
         // that release queued, because the lock has just been given a fresh reason.
         dial.onNeedsScreen = {
+            // Arriving during the double tap's dim it is a wake, as it would be in the dark:
+            // the dim called off and the slider up (lockPanel). Left alone it was shown under
+            // the veil — the hold refused while the dim runs — and went dark with the display.
+            if (sleepStage.dimming) lockPanel()
             window.decorView.removeCallbacks(restorePanel)
             awaitingDoze = false
             holdScreen(true)
@@ -608,6 +612,10 @@ class RearActivity : Activity() {
      * notification finished arriving.
      */
     private fun lockPanel() {
+        // During the double tap's dim this is a wake like one in the dark: the dim is called
+        // off first, or the hold below is refused (holdScreen) and the card is shown under
+        // the veil, to go dark with the display a few seconds later.
+        if (sleepStage.dimming) endDim(off = false)
         // CALL OFF ANY RESTORE ALREADY IN FLIGHT. A lock that expired a moment ago has a
         // hand-back queued for a few seconds' time, and a notification arriving inside
         // that window would otherwise be shown for a second and then have the panel
