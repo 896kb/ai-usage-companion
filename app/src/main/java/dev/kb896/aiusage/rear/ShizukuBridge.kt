@@ -564,6 +564,10 @@ class ShizukuBridge(private val context: Context) {
      * the back left as it is. Wakes work again either way — here at once, in the shell when
      * the call lands. Blocking, like [pocketSleep].
      */
+    /** Since the last touch on the back, or null: unbound, an older shell, or no touch read yet. */
+    fun msSinceRearTouch(): Long? =
+        runCatching { service?.msSinceRearTouch() }.getOrNull()?.takeIf { it >= 0 }
+
     fun pocketEnd(light: Boolean) {
         pocketed = false
         val display = rearDisplayId()

@@ -19,6 +19,15 @@ class PocketModeTest {
         assertEquals(Act.NONE, reading(covered = true, now = at))
     }
 
+    @Test fun `a cover while the back is being touched is a hand, and the count starts over`() {
+        val p = litAndCovered()
+        // The control centre pulled down past the lens: a touch in the last moments.
+        assertEquals(Act.NONE, p.due(d, lettingGo = false, touching = true))
+        assertFalse(p.pocketed)
+        assertEquals(2 * d, p.dueAt())
+        assertEquals(Act.SLEEP, p.due(2 * d, lettingGo = false, touching = false))
+    }
+
     @Test fun `covered while lit for the debounce switches the back off`() {
         val p = litAndCovered()
         assertEquals(d, p.dueAt())

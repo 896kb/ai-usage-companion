@@ -149,4 +149,10 @@ interface IRearService {
     // Out of the pocket ([light]: switch the back on again) or the pocket called off (the
     // switch turned off, the watch gone): wakeOwn lights the back again either way.
     void pocketEnd(int displayId, boolean light) = 30;
+
+    /**
+     * Milliseconds since the rear touchscreen last reported a touch (elapsedRealtime), or -1
+     * when it has reported none (or is not being read). Pocket mode's "the hand, not a pocket".
+     */
+    long msSinceRearTouch() = 31;
 }

@@ -103,9 +103,13 @@ class PocketMode(private val debounceMs: Long) {
      * Otherwise marked [pocketed] at once, not when the shell says it is done, so a way out
      * of the pocket arriving in between still brings the back back.
      */
-    fun due(now: Long, lettingGo: Boolean): Act {
+    fun due(now: Long, lettingGo: Boolean, touching: Boolean = false): Act {
         val at = dueAt()
         if (at < 0 || now < at) return Act.NONE
+        // [touching]: the back was touched a moment ago — the cover is the hand using it (the
+        // control centre pulled down past the lens switched the back off, 2026-10-30), not a
+        // pocket. The count starts over from now; a pocket does not swipe.
+        if (touching) { coveredSince = now; return Act.NONE }
         // The count is over either way.
         coveredSince = -1L
         if (lettingGo) return Act.SWITCH_OFF

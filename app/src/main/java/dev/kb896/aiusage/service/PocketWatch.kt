@@ -145,7 +145,9 @@ class PocketWatch(private val context: Context, private val bridge: ShizukuBridg
 
     /** The debounce's end. A back the panel is already letting go of is left to go (PocketMode.due). */
     private val due = Runnable {
-        act(mode.due(SystemClock.uptimeMillis(), lettingGo = bridge.isDozing()))
+        val touchedAgo = bridge.msSinceRearTouch()
+        act(mode.due(SystemClock.uptimeMillis(), lettingGo = bridge.isDozing(),
+            touching = touchedAgo != null && touchedAgo < RearActivity.POCKET_TOUCH_QUIET_MS))
         sync()
     }
 

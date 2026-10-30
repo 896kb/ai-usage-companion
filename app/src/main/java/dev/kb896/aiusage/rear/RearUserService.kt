@@ -1934,7 +1934,14 @@ class RearUserService : IRearService.Stub {
     }
 
     /** One touch, on the reader thread. */
+    /** When the rear touchscreen last reported anything (elapsedRealtime); 0 before the first. */
+    @Volatile private var lastRearTouchAt = 0L
+
+    override fun msSinceRearTouch(): Long =
+        lastRearTouchAt.let { if (it == 0L) -1L else android.os.SystemClock.elapsedRealtime() - it }
+
     private fun onRearTouch(e: RearTouches.Event, from: EdgeGestures) {
+        lastRearTouchAt = android.os.SystemClock.elapsedRealtime()
         var back = false
         synchronized(sheetLock) {
             if (from !== gestures) return
