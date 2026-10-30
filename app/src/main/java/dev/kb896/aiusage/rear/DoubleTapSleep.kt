@@ -31,9 +31,11 @@ class DoubleTapSleep {
     }
 
     companion object {
-        /** the window's brightness while dimmed, on the 0..1 override scale */
-        const val DIM_BRIGHTNESS = 0.12f
-        /** how much of the content the veil hides, so the dim reads even where the brightness override is ignored */
-        const val VEIL_ALPHA = 0.3f
+        /**
+         * How much of the content the veil hides — the whole dim. Not the backlight: an
+         * override is one fixed level, brighter than a panel already turned right down.
+         * Always-on's veil, so the two dims read alike.
+         */
+        const val VEIL_ALPHA = 0.6f
     }
 }

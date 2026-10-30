@@ -722,11 +722,12 @@ class RearActivity : Activity() {
         // counts as fresh user activity; released 40 ms before the power-off, that poke
         // landed after it and lit the display straight back up (seen 2026-09-17). Released
         // here, it is spent during the dim, and the off 7.5 s later has nothing to fight.
-        // The dim itself is a window attribute and needs no hold to keep applying.
+        // The dim itself is a view and needs no hold to keep applying.
         if (holding) holdScreen(false)
         dial.ringsClosed = true
         dial.videoPaused = true // the video stops on its frame while the panel dims
-        window.attributes = window.attributes.apply { screenBrightness = DoubleTapSleep.DIM_BRIGHTNESS }
+        // A veil only, never the backlight: a fixed brightness override is BRIGHTER than a
+        // panel auto-brightness has turned right down (0.045 over 0.019, seen 2026-10-30).
         val v = veil ?: View(this).apply {
             setBackgroundColor(Color.BLACK)
             alpha = DoubleTapSleep.VEIL_ALPHA
