@@ -1016,10 +1016,12 @@ class RearDialView(context: Context) : View(context) {
     /**
      * A page that has settled into always-on wants no more frames than the slider needs —
      * or the charge cell, which plays through when the charger lands and was crawling
-     * along on the minute tick before this.
+     * along on the minute tick before this. Or the notification strip: cards still up or
+     * queued when the peek ended stood frozen mid-strip until the minute tick.
      */
     private fun frozen(now: Long): Boolean =
-        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating() && now >= clockRollUntil
+        aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating() && now >= clockRollUntil &&
+            noticesIdle(SystemClock.elapsedRealtime())
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -5809,8 +5811,17 @@ class RearDialView(context: Context) : View(context) {
      * putting the display out mid-movement would cut the last notification in half.
      */
     private fun lockSpent(nowReal: Long): Boolean =
-        notice == null && pending.isEmpty() && leaving == null &&
-            noticeSlideNow(nowReal) <= 0.001f && chargeAt == 0L
+        noticesIdle(nowReal) && chargeAt == 0L
+
+    /** Nothing up, queued or turning on the notification strip, and the strip retracted (NoticeStrip). */
+    private fun noticesIdle(nowReal: Long): Boolean =
+        NoticeStrip.idle(notice != null, pending.size, leaving != null, noticeSlideNow(nowReal))
+
+    /**
+     * The same, for the activity: always-on's notification peek lasts until this, the grace
+     * after the last card being only its least — see RearActivity.peekForNotice.
+     */
+    val noticesIdle: Boolean get() = noticesIdle(SystemClock.elapsedRealtime())
 
     /** 0 while the artwork holds the slot, 1 while the controls do. */
     private fun mediaSwap(nowMs: Long): Float {

@@ -271,6 +271,8 @@ class RearActivity : Activity() {
         const val TABLE_SETTLE_MS = 1_000L
         /** how long a notification keeps an always-on panel out of its dim, from the last card */
         const val NOTICE_GRACE_MS = 6_000L
+        /** how often an always-on peek past its grace looks again for the strip to be done */
+        const val PEEK_RECHECK_MS = 250L
 
         /**
          * The shortest gap between two requests to be moved back to the panel.
@@ -950,8 +952,24 @@ class RearActivity : Activity() {
      * A notification in always-on lifts the dim: the panel lights up fully with the card,
      * the slider still up and the page still guarded, and dims again once the last card
      * has had its time — each new card starts that clock over, the lock's own renewal.
+     *
+     * "Had its time" is the strip's, not a clock's: the grace is only the least of it. A
+     * burst plays its queued cards one after another for longer than that, and ending the
+     * peek on the grace froze the page with the strip mid-card until the minute tick. So it
+     * ends once the strip has retracted with nothing queued (RearDialView.noticesIdle),
+     * looked at again every [PEEK_RECHECK_MS] — or at once on a display that is not lit,
+     * where the strip draws no frames to get anywhere and nobody would see it.
      */
-    private val endPeek: Runnable = Runnable { dial.aodPeek = false }
+    private val endPeek: Runnable = Runnable {
+        if (!dial.noticesIdle && display?.state == android.view.Display.STATE_ON) {
+            window.decorView.postDelayed(endPeekRef, PEEK_RECHECK_MS)
+            return@Runnable
+        }
+        dial.aodPeek = false
+    }
+
+    /** [endPeek] re-arming itself needs a name for itself. */
+    private val endPeekRef: Runnable get() = endPeek
     private fun peekForNotice() {
         if (!inAod) return
         dial.aodPeek = true
@@ -1399,6 +1417,7 @@ class RearActivity : Activity() {
         window.decorView.removeCallbacks(restorePanel)
         window.decorView.removeCallbacks(restoreBrightness)
         window.decorView.removeCallbacks(sleepPanel)
+        window.decorView.removeCallbacks(endPeek)
         pocketWatch(false)
         tableWatch(false)
         runCatching {
