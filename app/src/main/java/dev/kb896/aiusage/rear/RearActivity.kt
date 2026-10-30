@@ -500,8 +500,21 @@ class RearActivity : Activity() {
             holdScreen(true)
             armSleep()
         }
-        // Somebody is looking at it. Same effect, different reason — see onInteraction.
-        dial.onInteraction = { armSleep() }
+        // Somebody is looking at it. Same effect, different reason — see onInteraction. And
+        // a touch after the idle let go takes the hold back (TouchHold): re-arming alone left
+        // the display to go dark ten seconds after the touch, on HyperOS's own timeout.
+        dial.onInteraction = {
+            if (TouchHold.retake(
+                    holding = holding,
+                    lit = display?.state == android.view.Display.STATE_ON,
+                    dimming = sleepStage.dimming,
+                    lettingGo = awaitingDoze,
+                    sleptByDoubleTap = sleptByDoubleTap,
+                    inAod = inAod,
+                )
+            ) holdScreen(true)
+            armSleep()
+        }
         setContentView(dial)
         // See MEDIA_SYNC: this process may have been created long after the media
         // session was, and there is no other way for it to find out.
