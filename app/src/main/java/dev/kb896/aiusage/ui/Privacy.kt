@@ -20,7 +20,7 @@ import android.widget.Toast
 object Privacy {
 
     /** The privacy policy, on the panel's site: the General tab's row and the notice. */
-    const val POLICY_URL = "https://rear.896.ro/privacy/"
+    const val POLICY_URL = "https://rear.896.ro/en/privacy/"
 
     /**
      * The notice's version. Bump it when [NOTICE] changes in a way someone who has read the
