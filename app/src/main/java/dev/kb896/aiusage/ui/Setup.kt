@@ -36,6 +36,13 @@ object Setup {
         val open: (() -> Intent)?,
         /** What a tap does when it is not an intent. */
         val kind: Kind = Kind.OPEN,
+        /**
+         * What is said before the tap opens anything (Privacy.disclose), or null when the
+         * step opens nothing that grants access. [next] is the line after it: where the
+         * Continue leads, when that is not the page the step's title already names.
+         */
+        val access: Privacy.Access? = null,
+        val next: String? = null,
     ) {
         val checkable get() = satisfied != null
     }
@@ -97,6 +104,12 @@ object Setup {
                 satisfied = shizukuRunning,
                 open = { shizukuIntent(context) },
                 kind = Kind.OPEN,
+                // Said here, at the first of the two Shizuku rows, as well as at the second:
+                // installing and starting Shizuku is already the decision to lend this app
+                // shell rights, so what they are used for belongs before it, not after.
+                access = Privacy.Access.SHIZUKU,
+                next = "Next: Shizuku's own app, or its site (shizuku.rikka.app) while it " +
+                    "is not installed.",
             ),
             Step(
                 title = "Allow this app in Shizuku",
@@ -107,6 +120,8 @@ object Setup {
                 satisfied = shizukuRunning && shizukuGranted,
                 open = null,
                 kind = Kind.SHIZUKU,
+                access = Privacy.Access.SHIZUKU,
+                next = "Next: Shizuku asks whether this app may use it.",
             ),
             // Xiaomi's rear-screen app is not a step any more: removing or restoring it is
             // the settings' show/hide toggle, offered once the steps here are done — see
@@ -121,6 +136,8 @@ object Setup {
                     "its last reading — showing old numbers as though they were current.",
                 satisfied = (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
                     .isIgnoringBatteryOptimizations(context.packageName),
+                access = Privacy.Access.BATTERY,
+                next = "Next: this app's page in Android's settings. Set its battery use to no restrictions.",
                 open = {
                     // The app's own battery page. ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
                     // shows a system dialog instead, and on HyperOS that dialog does not
@@ -141,6 +158,8 @@ object Setup {
                 // this is advice with a button, not a box that could ever tick, and it
                 // is shown as such rather than as a step the user keeps failing.
                 satisfied = null,
+                access = Privacy.Access.AUTOSTART,
+                next = "Next: HyperOS's Autostart list. Turn it on for this app.",
                 open = {
                     Intent().setClassName(
                         "com.miui.securitycenter",
