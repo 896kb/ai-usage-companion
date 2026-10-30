@@ -1445,7 +1445,7 @@ where they disagree shows it.
 
 - **A Xiaomi 17 Pro, 17 Pro Max, 18 Pro or 18 Pro Max.** The app is built around the rear display's
   size, position and lens geometry. It will not do anything useful on another phone.
-- **HyperOS 3 / 4 and newer, Android 16 and newer.** Runs on `3.0.318.0` and `OS4.0.5.0`. The
+- **HyperOS 3 / 4 and newer, Android 16 / 17 and newer.** Runs on `3.0.318.0` and `OS4.0.5.0`. The
   placement mechanism depends on system internals that have already changed once between
   releases, so a new HyperOS version may need re-verifying.
 - **[Shizuku](https://shizuku.rikka.app/)**, running. Non-negotiable — see below.
