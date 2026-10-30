@@ -71,6 +71,7 @@ open class GlassButton @JvmOverloads constructor(
             paint.color = (tint and 0x00FFFFFF) or (0xBF shl 24)
             canvas.drawRoundRect(rect, r, r, paint)
         }
+        drawFace(canvas, w, h, r)
         Pane.glow(canvas, 0f, 0f, w, h, r, press.progress, press.x, press.y)
         val ink = if (tint != 0) 0xFFFFFFFF.toInt() else Ink.primary(lum)
         // setTextColor invalidates, and this runs from onDraw — an unconditional call
@@ -79,6 +80,9 @@ open class GlassButton @JvmOverloads constructor(
         super.onDraw(canvas)
         canvas.restore()
     }
+
+    /** Over the glass and under the glow and the text, in the pressed scale: a subclass's own face (StoreButton's icon). */
+    protected open fun drawFace(canvas: Canvas, w: Float, h: Float, r: Float) {}
 }
 
 /** The same capsule around an icon. The trash button is an ImageButton, so this exists. */

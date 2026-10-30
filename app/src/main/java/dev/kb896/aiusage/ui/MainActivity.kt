@@ -145,6 +145,10 @@ class MainActivity : ComponentActivity() {
         rowsHadAccess = access
         syncFromConfig()
         stopWatchingConfig = ConfigStore(this).listen { syncFromConfig() }
+        // A newer release: the card at the top. Checked here too (when it's time), so opening
+        // the app finds a release the poll loop has not got to.
+        renderUpdate()
+        lifecycleScope.launch { if (dev.kb896.aiusage.service.UpdateCheck.maybe(this@MainActivity)) renderUpdate() }
         // A pinned app installed or removed while away: the preview's portal follows, as the back's does.
         loadPortalPreview(ConfigStore(this).load().portalApps, again = true)
         // Have the user service bound before any row needs it. Placement used to bind
@@ -631,6 +635,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The update card under the preview (UpdateCard), there until this build is the release
+     * the two-hourly check found. The notification says it once; this every time the screen
+     * is opened. See UpdateCheck.
+     */
+    private fun renderUpdate() {
+        val release = dev.kb896.aiusage.service.UpdateCheck.available(this)
+        findViewById<View>(R.id.card_update).visibility = if (release == null) View.GONE else View.VISIBLE
+        val rows = findViewById<LinearLayout>(R.id.update_rows)
+        if (release == null) { rows.removeAllViews(); return }
+        UpdateCard.fill(rows, release) { intent ->
+            runCatching { startActivity(intent) }.onFailure { toast("Could not open that") }
+        }
+    }
+
     /** Whether notification access was held when the rows were last built; rebuilt when it changes. */
     private var rowsHadAccess: Boolean? = null
 
@@ -1054,22 +1073,6 @@ class MainActivity : ComponentActivity() {
         mediaRows.removeAllViews()
         aodRows.removeAllViews()
         portalRows.removeAllViews()
-        // A newer release, found by the two-hourly check: a row at the top with its notes,
-        // there until this build is that version. The notification says it once; this
-        // says it every time the screen is opened. See UpdateCheck.
-        dev.kb896.aiusage.service.UpdateCheck.available(this)?.let { release ->
-            SettingsRows.navigation(generalRows, "Update available: ${release.tag} — download") {
-                startActivity(
-                    android.content.Intent(
-                        android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(dev.kb896.aiusage.service.UpdateCheck.APK),
-                    ),
-                )
-            }
-            val notes = dev.kb896.aiusage.service.UpdateCheck.plain(release.notes)
-                .lineSequence().filter { it.isNotBlank() }.take(4).joinToString("\n")
-            if (notes.isNotEmpty()) SettingsRows.note(generalRows, notes)
-        }
         val store = ConfigStore(this)
 
         fun write(edit: (PanelConfig) -> PanelConfig) {

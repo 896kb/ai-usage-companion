@@ -16,6 +16,8 @@
     <!-- so the app may ask whether HyperOS's rear-screen app is installed (Setup.kt) -->
     <queries>
         <package android:name="com.xiaomi.subscreencenter" />
+        <!-- The 896 Store, so a new release can be updated through it (UpdateCard). -->
+        <package android:name="dev.kb896.store" />
         <!-- App Portal: the apps a person can pin, and their icons on the back. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

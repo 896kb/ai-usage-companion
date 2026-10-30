@@ -21,9 +21,10 @@ import okhttp3.Request
 
 /**
  * Every two hours, ask GitLab for the newest release. If it is newer than this build, say so
- * once, in a notification that carries the release notes and opens the APK's permanent
- * address — the same one the site's buttons use. Nothing is downloaded by the app itself;
- * the browser does that, and the user installs.
+ * once, in a notification that carries the release notes; the settings screen also shows it
+ * at the top (UpdateCard). Both update through the 896 Store when it is on the phone, else
+ * offer to get the store or the APK's permanent address — the same one the site's buttons
+ * use. Nothing is downloaded by the app itself.
  *
  * A dev build compares by its base version: 0.7.4-dev is the work after 0.7.3, so a
  * 0.7.4 release does not nag it, and a 0.7.5 does.
@@ -36,25 +37,46 @@ object UpdateCheck {
     private const val EVERY_MS = 2L * 60 * 60 * 1000
     private const val API = "https://gitlab.com/api/v4/projects/85495687/releases?per_page=1"
     const val APK = "https://gitlab.com/896kb/ai-usage-companion/-/releases/permalink/latest/downloads/ai-usage-companion.apk"
-    const val RELEASES = "https://gitlab.com/896kb/ai-usage-companion/-/releases"
+    /** The 896 Store, and the site to get it from. */
+    const val STORE = "dev.kb896.store"
+    const val STORE_SITE = "https://store.896.ro/"
 
     data class Release(val tag: String, val notes: String)
 
     private val client by lazy { OkHttpClient() }
 
-    /** The daily check, from the poll loop. Cheap when it is not time yet. */
-    suspend fun maybe(context: Context) {
+    /**
+     * The store's page for this app, starting the update; a store too old for the link just
+     * opens. Null without the store.
+     */
+    fun inStore(context: Context): Intent? {
+        val link = Intent(Intent.ACTION_VIEW, Uri.parse("kb896store://app/${context.packageName}?update=1")).setPackage(STORE)
+        return if (link.resolveActivity(context.packageManager) != null) link
+        else context.packageManager.getLaunchIntentForPackage(STORE)
+    }
+
+    fun view(url: String) = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+
+    fun version(context: Context): String = BuildConfig.VERSION_NAME
+
+    /**
+     * The two-hourly check, from the poll loop and the settings screen. Cheap when it is not
+     * time yet. True when it found a newer release than this build.
+     */
+    suspend fun maybe(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
-        if (now - prefs.getLong("last_check", 0L) < EVERY_MS) return
+        if (now - prefs.getLong("last_check", 0L) < EVERY_MS) return false
         prefs.edit().putLong("last_check", now).apply()
         val release = withContext(Dispatchers.IO) {
             runCatching { fetch() }.onFailure { Log.w(TAG, "check failed: ${it.message}") }.getOrNull()
-        } ?: return
-        if (!newer(release.tag, BuildConfig.VERSION_NAME)) return
-        if (prefs.getString("notified", "") == release.tag) return
+        } ?: return false
+        if (!newer(release.tag, BuildConfig.VERSION_NAME)) return false
+        val told = prefs.getString("notified", "") == release.tag
+        // The notes again even when told: an edited release reads right on the card.
         prefs.edit().putString("notified", release.tag).putString("notes", release.notes).apply()
-        notify(context, release)
+        if (!told) notify(context, release)
+        return true
     }
 
     /** The release the check last found, while it is still newer than this build; for the settings screen's row. */
@@ -102,20 +124,22 @@ object UpdateCheck {
             NotificationChannel(CHANNEL, "Updates", NotificationManager.IMPORTANCE_DEFAULT)
                 .apply { description = "A new release of this app, once, with its notes." },
         )
-        fun open(url: String, code: Int): PendingIntent = PendingIntent.getActivity(
-            context, code, Intent(Intent.ACTION_VIEW, Uri.parse(url)),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        fun open(intent: Intent, code: Int): PendingIntent = PendingIntent.getActivity(
+            context, code, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        // As the card: the store first, and with it on the phone the only way.
+        val link = inStore(context)
+        val store = open(link ?: view(STORE_SITE), 3)
         val version = release.tag.removePrefix("v")
-        val text = plain(release.notes).ifBlank { "Tap to download." }
+        val text = plain(release.notes).ifBlank { "Tap to update." }
         val n = Notification.Builder(context, CHANNEL)
             .setContentTitle("AI Usage $version is out — you have ${BuildConfig.VERSION_NAME}")
             .setContentText(text.lineSequence().firstOrNull().orEmpty())
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(open(APK, 1))
-            .addAction(Notification.Action.Builder(null, "Download APK", open(APK, 1)).build())
-            .addAction(Notification.Action.Builder(null, "All releases", open(RELEASES, 2)).build())
+            .setContentIntent(store)
+            .addAction(Notification.Action.Builder(null, "Update via 896 Store", store).build())
+            .apply { if (link == null) addAction(Notification.Action.Builder(null, "Update", open(view(APK), 1)).build()) }
             .setAutoCancel(true)
             .build()
         mgr.notify(NOTIFICATION_ID, n)

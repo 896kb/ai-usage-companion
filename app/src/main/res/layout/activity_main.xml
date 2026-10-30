@@ -51,6 +51,23 @@
             android:orientation="vertical"
             android:padding="24dp">
 
+        <!-- A newer release (UpdateCard): first, right under the preview, over every tab. -->
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_update"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/update_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <!-- Section: recovery instructions, sliders and text unchanged, only the card
              that groups them is new. -->
         <dev.kb896.aiusage.ui.glass.GlassCard
