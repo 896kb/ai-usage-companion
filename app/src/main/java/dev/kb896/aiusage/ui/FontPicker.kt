@@ -20,7 +20,8 @@ import dev.kb896.aiusage.ui.glass.Ink
  * chosen one ticked. Import first, then the theme's own face, the two the app ships,
  * imported ones (a long press removes them) and the phone's families — found in the
  * background, as that means opening every font file on it, with a glass spinner turning meanwhile.
- * The spinner fades out and the fonts slide in from the left, fading up one after another.
+ * They come ten at a time as the list is scrolled (LazyRows), each sliding in from the left as it
+ * fades up, and the spinner stays under them until the last page is in.
  */
 object FontPicker {
 
@@ -113,38 +114,41 @@ object FontPicker {
         scroll.doOnLayout { scroll.layoutParams = scroll.layoutParams.apply { height = scroll.height } }
         faced.forEach { (row, face) -> dress(row, face) }
 
-        Thread {
-            val found = PanelFonts.system().map { it to PanelType.face(res, theme, it) }
+        // Finding the families reads each file's name; building a face opens the font for real,
+        // so that is what goes ten at a time, on one thread, as the list is scrolled (LazyRows).
+        val faces = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "font-faces").apply { isDaemon = true } }
+        dialog.setOnDismissListener { faces.shutdownNow() }
+        fun finish() {
+            looking.animate().alpha(0f).setDuration(SPINNER_OUT_MS).withEndAction { box.removeView(looking) }
+        }
+        faces.execute {
+            val found = PanelFonts.system()
             box.post {
                 if (!dialog.isShowing) return@post
-                // The spinner fades out; then the fonts come in one after another, each
-                // sliding in from the left as it fades up, a beat behind the one above.
-                looking.animate().alpha(0f).setDuration(SPINNER_OUT_MS).withEndAction {
-                    var at = box.indexOfChild(looking)
-                    box.removeView(looking)
-                    if (found.isEmpty()) { box.removeView(phoneHeading); return@withEndAction }
-                    val from = -dp(context, 28).toFloat()
-                    found.forEachIndexed { i, (font, face) ->
-                        row(font.name, font, face, at++).apply {
-                            alpha = 0f
-                            translationX = from
-                            animate().alpha(1f).translationX(0f)
-                                // Capped, so a long list below the fold is not still waiting
-                                // its turn when it is scrolled to.
-                                .setStartDelay(ROW_STAGGER_MS * minOf(i, ROW_STAGGER_CAP))
-                                .setDuration(ROW_IN_MS)
-                                .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
+                if (found.isEmpty()) { box.removeView(phoneHeading); box.removeView(looking); return@post }
+                val paged = Paged(found.size)
+                LazyRows.attach(scroll, box, paged) { page, done ->
+                    runCatching {
+                        faces.execute {
+                            val built = page.map { found[it] to PanelType.face(res, theme, found[it]) }
+                            box.post {
+                                if (!dialog.isShowing) return@post
+                                // The spinner stays under the list until the last page is in.
+                                var at = box.indexOfChild(looking)
+                                built.forEachIndexed { i, (font, face) ->
+                                    LazyRows.arrive(row(font.name, font, face, at++), i)
+                                }
+                                if (!paged.hasMore) finish()
+                                done()
+                            }
                         }
                     }
                 }
             }
-        }.start()
+        }
     }
 
     private const val SPINNER_OUT_MS = 160L
-    private const val ROW_IN_MS = 240L
-    private const val ROW_STAGGER_MS = 35L
-    private const val ROW_STAGGER_CAP = 14
 
     private fun dp(context: Context, value: Int) =
         (value * context.resources.displayMetrics.density).toInt()
