@@ -33,4 +33,10 @@ class PagedTest {
     @Test fun `content shorter than the view is always near its end`() {
         assertTrue(LazyRows.nearEnd(contentHeight = 200, viewHeight = 600, scrollY = 0, margin = 300))
     }
+
+    @Test fun `the room kept is the rows to come at the loaded rows' average`() {
+        assertEquals(1300, LazyRows.fillerHeight(remaining = 13, loaded = 10, loadedHeight = 1000))
+        assertEquals(0, LazyRows.fillerHeight(remaining = 0, loaded = 23, loadedHeight = 2300))
+        assertEquals(0, LazyRows.fillerHeight(remaining = 13, loaded = 0, loadedHeight = 0))
+    }
 }

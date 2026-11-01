@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import androidx.core.view.doOnNextLayout
 import androidx.lifecycle.lifecycleScope
 import dev.kb896.aiusage.data.PortalApps
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,11 @@ object AppPicker {
         }
         val count = SettingsRows.note(column, countNote(current.size))
         val looking = dev.kb896.aiusage.ui.glass.GlassSpinner(activity).also { column.addView(it) }
+        // The rows go in here, so the room kept for the rest stays under them (LazyRows).
+        val rows = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(rows)
+        val filler = android.view.View(activity)
+        column.addView(filler, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0))
         // The sheet's height from the start, so the rows arriving don't stretch it.
         var filling = true
         val scroll = object : ScrollView(activity) {
@@ -72,9 +78,9 @@ object AppPicker {
             if (!dialog.isShowing) return
             for (i in page) {
                 val app = apps[i]
-                val before = column.childCount
+                val before = rows.childCount
                 var setBack: (Boolean) -> Unit = {}
-                setBack = SettingsRows.toggle(column, app.label, app.pkg in current) { on ->
+                setBack = SettingsRows.toggle(rows, app.label, app.pkg in current) { on ->
                     val next = PortalApps.pinned(current, app.pkg, on)
                     val refused = on && app.pkg !in next
                     // Full: the tick goes back off (under ORIGINAL that calls here again, unpinning nothing).
@@ -82,7 +88,7 @@ object AppPicker {
                     current = next
                     count.text = countNote(current.size, refused)
                 }
-                for (at in before until column.childCount) LazyRows.arrive(column.getChildAt(at), i - page.first)
+                for (at in before until rows.childCount) LazyRows.arrive(rows.getChildAt(at), i - page.first)
             }
             done()
         }
@@ -94,15 +100,18 @@ object AppPicker {
             }
             if (!dialog.isShowing) return@launch
             looking.animate().alpha(0f).setDuration(SPINNER_OUT_MS).withEndAction {
-                column.removeView(looking)
-                val paged = Paged(apps.size)
-                LazyRows.attach(scroll, column, paged) { page, done ->
-                    addPage(apps, page) {
-                        if (!paged.hasMore) filling = false
-                        done()
+                // Laid out without the spinner first: the rows' height is measured from here.
+                filler.doOnNextLayout {
+                    val paged = Paged(apps.size)
+                    LazyRows.attach(scroll, filler, paged, apps.size) { page, done ->
+                        addPage(apps, page) {
+                            if (!paged.hasMore) filling = false
+                            done()
+                        }
                     }
+                    if (apps.isEmpty()) filling = false
                 }
-                if (apps.isEmpty()) filling = false
+                column.removeView(looking)
             }
         }
     }

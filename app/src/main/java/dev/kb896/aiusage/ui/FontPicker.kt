@@ -103,6 +103,9 @@ object FontPicker {
         }
         val phoneHeading = heading("On this phone")
         val looking = dev.kb896.aiusage.ui.glass.GlassSpinner(context).also { box.addView(it) }
+        // The room kept for the fonts still to come (LazyRows): under the rows and the spinner.
+        val filler = android.view.View(context)
+        box.addView(filler, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0))
 
         val scroll = ScrollView(context).apply { addView(box) }
         // No title: the row that opened it already says Font, and the list starts at once.
@@ -127,7 +130,7 @@ object FontPicker {
                 if (!dialog.isShowing) return@post
                 if (found.isEmpty()) { box.removeView(phoneHeading); box.removeView(looking); return@post }
                 val paged = Paged(found.size)
-                LazyRows.attach(scroll, box, paged) { page, done ->
+                LazyRows.attach(scroll, filler, paged, found.size) { page, done ->
                     runCatching {
                         faces.execute {
                             val built = page.map { found[it] to PanelType.face(res, theme, found[it]) }
