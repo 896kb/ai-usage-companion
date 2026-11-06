@@ -2,6 +2,8 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
+![Everything on the back of a Xiaomi 17 Pro: the clock and its live backgrounds, notifications, the control centre, an app with the keyboard, media with lyrics, always-on](assets/rear-panel.mp4)
+
 Xiaomi's rear display does a little. Magic Rear replaces it with a panel that does a lot, on the
 **Xiaomi 18 Pro / MAX & Xiaomi 17 Pro / MAX**. It used to be called AI Usage: the AI usage readout
 is still here, as one feature among many.
