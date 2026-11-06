@@ -39,4 +39,11 @@ class PagedTest {
         assertEquals(0, LazyRows.fillerHeight(remaining = 0, loaded = 23, loadedHeight = 2300))
         assertEquals(0, LazyRows.fillerHeight(remaining = 13, loaded = 0, loadedHeight = 0))
     }
+
+    @Test fun `a row taken back comes again with the next page`() {
+        val p = Paged(23)
+        p.next()
+        p.unload()
+        assertEquals(9..18, p.next())
+    }
 }

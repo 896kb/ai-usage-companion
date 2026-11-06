@@ -27,7 +27,7 @@ object UpdateCard {
         val context = into.context
         into.removeAllViews()
         into.addView(TextView(context).apply {
-            text = "AI Usage ${release.tag.removePrefix("v")} is out"
+            text = "Magic Rear ${release.tag.removePrefix("v")} is out"
             dev.kb896.aiusage.ui.glass.CardTitle.style(this)
         })
         val notes = UpdateCheck.plain(release.notes).lineSequence().filter { it.isNotBlank() }.take(3).toList()

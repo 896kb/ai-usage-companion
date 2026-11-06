@@ -137,10 +137,17 @@ class GlassPainter {
          * For a backdrop drawn in the same space as the panes over it — the portal sheet's.
          */
         local: Boolean = false,
+        /**
+         * Its corners one by one (top left, top right, bottom right, bottom left), for a pane whose
+         * corners differ, as [shape] does: the lens and the rim then follow them too. Null: [radius]
+         * all round.
+         */
+        radii: FloatArray? = null,
     ): Boolean {
         val w = rect.width()
         val h = rect.height()
         if (w < 1f || h < 1f) return false
+        val rr = radii ?: floatArrayOf(radius, radius, radius, radius)
 
         // GLASS WITH NOTHING BEHIND IT IS STILL GLASS, and this is the common case rather
         // than a failure. Only the OVERLAYS can bend the panel: the scene is recorded and
@@ -158,7 +165,7 @@ class GlassPainter {
         // No source, or one with nothing recorded in it, is the same case: nothing to bend.
         val recorder = canvas as? RecordingCanvas
         if (recorder == null || source == null || !source.hasDisplayList()) {
-            return drawUnbacked(canvas, rect, radius, tint, shape, rim)
+            return drawUnbacked(canvas, rect, radius, tint, shape, rim, rr)
         }
 
         val paneNode = nextNode()
@@ -225,7 +232,7 @@ class GlassPainter {
         //
         // It also costs nothing to remove: the blur was a second full-size pass over
         // every pane, on a display that redraws at 120Hz while anything is moving.
-        paneNode.setRenderEffect(if (refract) lensFor(w, h, radius, aberration) else null)
+        paneNode.setRenderEffect(if (refract) lensFor(w, h, radius, aberration, rr) else null)
 
         canvas.save()
         if (shape != null) {
@@ -260,7 +267,7 @@ class GlassPainter {
         // and a bevelled object, which has a lit side.
         val edge = if (held) Glass.ambient else Glass.highlight
         edge.setFloatUniform("size", w, h)
-        edge.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+        edge.setFloatUniform("cornerRadii", rr[0], rr[1], rr[2], rr[3])
         if (!held) edge.setColorUniform("color", Glass.LIGHT_COLOR)
         edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
         edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
@@ -310,6 +317,7 @@ class GlassPainter {
         tint: Int,
         shape: Path?,
         rim: Boolean,
+        rr: FloatArray,
     ): Boolean {
         if (!canvas.isHardwareAccelerated) return false
         if (tint ushr 24 != 0) {
@@ -323,21 +331,29 @@ class GlassPainter {
 
         val edge = Glass.highlight
         edge.setFloatUniform("size", rect.width(), rect.height())
-        edge.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+        edge.setFloatUniform("cornerRadii", rr[0], rr[1], rr[2], rr[3])
         edge.setColorUniform("color", Glass.LIGHT_COLOR)
         edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
         edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
-        canvas.save()
-        canvas.translate(rect.left, rect.top)
         panePaint.shader = edge
         panePaint.style = Paint.Style.STROKE
         panePaint.strokeWidth = Glass.RIM_WIDTH
-        canvas.drawRoundRect(
-            Glass.RIM_WIDTH / 2f, Glass.RIM_WIDTH / 2f,
-            rect.width() - Glass.RIM_WIDTH / 2f, rect.height() - Glass.RIM_WIDTH / 2f,
-            radius, radius, panePaint,
-        )
-        canvas.restore()
+        if (shape != null) {
+            // Round the shape itself, as the backed pane's rim is: see drawPane.
+            rimShift.setTranslate(rect.left, rect.top)
+            edge.setLocalMatrix(rimShift)
+            canvas.drawPath(shape, panePaint)
+            edge.setLocalMatrix(null)
+        } else {
+            canvas.save()
+            canvas.translate(rect.left, rect.top)
+            canvas.drawRoundRect(
+                Glass.RIM_WIDTH / 2f, Glass.RIM_WIDTH / 2f,
+                rect.width() - Glass.RIM_WIDTH / 2f, rect.height() - Glass.RIM_WIDTH / 2f,
+                radius, radius, panePaint,
+            )
+            canvas.restore()
+        }
         panePaint.shader = null
         panePaint.style = Paint.Style.FILL
         return true
@@ -368,11 +384,15 @@ class GlassPainter {
         h: Float,
         radius: Float,
         aberration: Float,
+        rr: FloatArray,
     ): RenderEffect {
-        val key = (Math.round(w).toLong() shl 40) or
+        // The corners one by one only where they differ from [radius]: one more lens for a pane
+        // whose corner follows the display, the same key as ever for every other.
+        val corners = if (rr.all { it == radius }) 0L else rr.contentHashCode().toLong() shl 48
+        val key = ((Math.round(w).toLong() shl 40) or
             (Math.round(h).toLong() shl 24) or
             (Math.round(radius).toLong() shl 8) or
-            Math.round(aberration * 8f).toLong().coerceIn(0L, 255L)
+            Math.round(aberration * 8f).toLong().coerceIn(0L, 255L)) xor corners
         lensCache[key]?.let { return it }
 
         val short = minOf(w, h)
@@ -387,7 +407,7 @@ class GlassPainter {
         val shader = if (aberration > 0f) Glass.dispersion else Glass.refraction
         shader.setFloatUniform("size", w, h)
         shader.setFloatUniform("offset", 0f, 0f)
-        shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+        shader.setFloatUniform("cornerRadii", rr[0], rr[1], rr[2], rr[3])
         shader.setFloatUniform(
             "refractionHeight", minOf(short * Glass.HEIGHT, Glass.HEIGHT_MAX),
         )

@@ -32,7 +32,7 @@ class RampColorTest {
     }
 
     @Test fun `hits each stop exactly`() {
-        assertEquals(hex(0xFFB5BD68.toInt()), hex(RampColor.at(0.00f)))
+        assertEquals(hex(0xFFB14CFF.toInt()), hex(RampColor.at(0.00f)))
         assertEquals(hex(0xFFF0C674.toInt()), hex(RampColor.at(0.40f)))
         assertEquals(hex(0xFFDE935F.toInt()), hex(RampColor.at(0.70f)))
         assertEquals(hex(0xFFCC6666.toInt()), hex(RampColor.at(0.90f)))
@@ -42,8 +42,8 @@ class RampColorTest {
     // Reference values computed with half-up rounding per channel. Asserted
     // within ±1 per channel — see assertCloseTo above for why.
     @Test fun `interpolates between stops`() {
-        // 0.15 sits 37.5% from #b5bd68 toward #f0c674
-        assertCloseTo(0xFFCBC06D.toInt(), RampColor.at(0.15f), 0.15f)
+        // 0.15 sits 37.5% from #B14CFF toward #f0c674
+        assertCloseTo(0xFFC97ACB.toInt(), RampColor.at(0.15f), 0.15f)
         // 0.45 sits 16.67% from #f0c674 toward #de935f
         assertCloseTo(0xFFEDBE71.toInt(), RampColor.at(0.45f), 0.45f)
         // 0.72 sits 10% from #de935f toward #cc6666

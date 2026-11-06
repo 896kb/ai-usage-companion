@@ -12,6 +12,11 @@ class Paged(private val total: Int, private val size: Int = LazyRows.PAGE) {
 
     val hasMore: Boolean get() = loaded < total
 
+    /** One row taken back (it moved to a place past what is loaded): the next page starts a row earlier. */
+    fun unload() {
+        if (loaded > 0) loaded--
+    }
+
     fun next(): IntRange? {
         if (!hasMore) return null
         val from = loaded
@@ -46,7 +51,7 @@ object LazyRows {
     /**
      * Loads [paged] above [filler], the last child of the list inside [scroll]. [load] builds one
      * page and calls its second argument once its rows are in, on the main thread, so a page is
-     * never asked for twice.
+     * never asked for twice. Call it outside a layout pass (see [more]'s post).
      */
     fun attach(scroll: ScrollView, filler: View, paged: Paged, total: Int, load: (IntRange, () -> Unit) -> Unit) {
         var busy = false
@@ -64,10 +69,14 @@ object LazyRows {
                 loaded = page.last + 1
                 // Measured only once the new rows are laid out; they may not fill the sheet yet.
                 filler.doOnNextLayout {
-                    filler.layoutParams = filler.layoutParams.apply {
-                        height = fillerHeight(total - loaded, loaded, filler.top - rowsTop)
+                    // After the pass, not in it: a view still reads as layout-requested until
+                    // its listeners have run, and a size set here belongs to the next one.
+                    filler.post {
+                        filler.layoutParams = filler.layoutParams.apply {
+                            height = fillerHeight(total - loaded, loaded, filler.top - rowsTop)
+                        }
+                        more()
                     }
-                    more()
                 }
             }
         }

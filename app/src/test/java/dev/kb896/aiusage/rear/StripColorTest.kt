@@ -70,8 +70,55 @@ class StripColorTest {
     }
 
     @Test fun `the strip itself is the lens column, the display's whole height`() {
-        assertEquals(296 to 572, StripColor.stripSize(RearGeometry.PRO17))
-        assertEquals(296 to 596, StripColor.stripSize(RearGeometry(976, 596, 296, 110, 450)))
+        assertEquals(listOf(GuestShape.Bounds(0, 0, 296, 572)), StripColor.around(RearGeometry.PRO17))
+        assertEquals(listOf(GuestShape.Bounds(0, 0, 296, 596)), StripColor.around(RearGeometry(976, 596, 296, 110, 450)))
+    }
+
+    @Test fun `a narrower app has the colour either side of it`() {
+        assertEquals(
+            listOf(GuestShape.Bounds(0, 0, 296, 572), GuestShape.Bounds(296, 0, 366, 572), GuestShape.Bounds(835, 0, 904, 572)),
+            StripColor.around(RearGeometry.PRO17, GuestShape.Bounds(366, 0, 835, 572)),
+        )
+    }
+
+    @Test fun `a keyboard stops the bars above it, not the lens column`() {
+        assertEquals(
+            listOf(GuestShape.Bounds(0, 0, 296, 572), GuestShape.Bounds(296, 0, 366, 330), GuestShape.Bounds(835, 0, 904, 330)),
+            StripColor.around(RearGeometry.PRO17, GuestShape.Bounds(366, 0, 835, 572), keyboardTop = 330),
+        )
+    }
+
+    @Test fun `a keyboard over a shorter app's bottom bar takes it`() {
+        assertEquals(
+            listOf(GuestShape.Bounds(0, 0, 296, 572), GuestShape.Bounds(296, 0, 904, 40)),
+            StripColor.around(RearGeometry.PRO17, GuestShape.Bounds(296, 40, 904, 532), keyboardTop = 300),
+        )
+    }
+
+    @Test fun `the keyboard is looked for in the middle of the wider bar, in the display's pixels`() {
+        val area = GuestShape.appArea(RearGeometry.PRO17)
+        // Bolt: x 366-835 of the rear, bars 70 left and 69 right.
+        assertEquals(GuestShape.Bounds(34, 0, 36, 572), StripColor.keyboardProbe(RearGeometry.PRO17, GuestShape.Bounds(366, 0, 835, 572), area))
+        assertEquals(GuestShape.Bounds(575, 0, 577, 572), StripColor.keyboardProbe(RearGeometry.PRO17, GuestShape.Bounds(300, 0, 840, 572), area))
+        assertEquals(null, StripColor.keyboardProbe(RearGeometry.PRO17, area, area))
+    }
+
+    @Test fun `a keyboard starts at the first row that is not the bar's black`() {
+        val black = 0xFF000000.toInt()
+        val keys = 0xFF202124.toInt()
+        assertEquals(330, StripColor.keyboardTop(IntArray(572) { if (it >= 330) keys else black }))
+        assertEquals(330, StripColor.keyboardTop(IntArray(286) { if (it >= 165) keys else black }, scale = 0.5f))
+        assertEquals(null, StripColor.keyboardTop(IntArray(572) { black }))
+        assertEquals("a sliver is not a keyboard", null, StripColor.keyboardTop(IntArray(572) { if (it >= 560) keys else black }))
+        // As read on the phone: a black band under the keys, and black between rows of them.
+        assertEquals(330, StripColor.keyboardTop(IntArray(572) { if (it in 330..540 && it % 50 != 0) keys else black }))
+    }
+
+    @Test fun `a shorter app has it above and below too`() {
+        assertEquals(
+            listOf(GuestShape.Bounds(0, 0, 296, 572), GuestShape.Bounds(296, 0, 904, 40), GuestShape.Bounds(296, 532, 904, 572)),
+            StripColor.around(RearGeometry.PRO17, GuestShape.Bounds(296, 40, 904, 532)),
+        )
     }
 
     @Test fun `a letterboxed app's colour is read off its own left edge, not the black bar`() {

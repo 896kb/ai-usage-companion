@@ -4,10 +4,7 @@ import android.content.Context
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.LinearLayout
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
 import dev.kb896.aiusage.Panel
@@ -30,14 +27,48 @@ object SettingsRows {
     /** A colour dot at the end of a row: a circle, so as tall as it is wide. */
     const val SWATCH_DP = 36
 
+    /** Every row's label, whichever kind of row it is. */
+    private const val ROW_SP = 14f
+
     /** Which set of controls a row builds. Read once per row, not cached, so a theme
      *  change picked up on rebuild needs nothing here to invalidate. */
     private fun glass(context: Context) = UiTheme.isGlass(context)
+
+    private fun rowLabel(context: Context, text: String) = TextView(context).apply {
+        this.text = text
+        textSize = ROW_SP
+        setTextColor(Panel.Palette.FG)
+        UiType.dress(this)
+    }
+
+    /**
+     * Rows that belong to the one above, indented. Empty until something is added to it, so
+     * it can be made before knowing whether any of them apply.
+     */
+    fun sub(parent: LinearLayout): LinearLayout {
+        val context = parent.context
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(context, 16), 0, 0, 0)
+            parent.addView(this)
+        }
+    }
 
     /** A label over a control: the card title's look (CardTitle), the same everywhere. */
     private fun label(context: Context, text: String) = TextView(context).apply {
         this.text = text
         dev.kb896.aiusage.ui.glass.CardTitle.style(this)
+    }
+
+    /**
+     * A card's title, at its top: the card title's look, and no gap above it when it is the first
+     * thing in the card, as Theme's and Background's sit. A note's gap put the titles added since
+     * lower in their cards than those.
+     */
+    fun title(parent: LinearLayout, text: String): TextView {
+        val view = label(parent.context, text)
+        parent.addView(view, rowParams(if (parent.childCount == 0) 0 else dp(parent.context, 10)))
+        return view
     }
 
     /**
@@ -316,27 +347,52 @@ object SettingsRows {
             gravity = Gravity.CENTER_VERTICAL
         }
         row.addView(
-            TextView(context).apply {
-                text = name
-                textSize = 13f
-                setTextColor(Panel.Palette.FG)
-                typeface = UiType.of(context)
-            },
+            rowLabel(context, name),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         row.addView(swatch(context, colour, onPick))
         parent.addView(row, rowParams(dp(context, 8)))
     }
 
-    /** A row that opens something else. The chevron is the whole affordance. */
-    fun navigation(parent: LinearLayout, name: String, onClick: () -> Unit) {
-        navigationButton(parent, name, onClick)
+    /**
+     * A glass button that does something when tapped: its name, what it stands at now if anything,
+     * and an icon. [submenu]: it opens a sheet of this app's, and has the menu icon; otherwise it
+     * runs something, and has the arrow. [link]: it opens a web page, and has the link icon.
+     * [icon], for one with an icon of its own: edit, reset.
+     */
+    fun navigation(parent: LinearLayout, name: String, value: String? = null, submenu: Boolean = false, link: Boolean = false, icon: Int? = null, onClick: () -> Unit): View {
+        val context = parent.context
+        val icon = icon ?: if (link) R.drawable.ic_link else if (submenu) R.drawable.ic_menu else R.drawable.ic_open
+        return opener(context, name, value, icon, onClick).also { parent.addView(it, rowParams(dp(context, 8))) }
+    }
+
+    private fun named(name: String, value: String?) = if (value.isNullOrEmpty()) name else "$name: $value"
+
+    private fun opener(context: Context, name: String, value: String?, icon: Int, onClick: () -> Unit) =
+        GlassButton(context).apply {
+            text = named(name, value)
+            textSize = ROW_SP
+            setTextColor(Panel.Palette.FG)
+            typeface = UiType.of(context)
+            iconEnd(this, icon)
+            setOnClickListener { onClick() }
+        }
+
+    /**
+     * [icon] at the end of [button], its text centred on the button as if it were not there: the
+     * same icon unseen at the start takes the same room.
+     */
+    fun iconEnd(button: TextView, icon: Int) {
+        val context = button.context
+        val unseen = context.getDrawable(icon)!!.mutate().apply { alpha = 0 }
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(unseen, null, context.getDrawable(icon), null)
     }
 
     /** As [navigation], but hands back the button for callers that must relabel it. */
     fun navigationButton(
         parent: LinearLayout,
         name: String,
+        icon: Int? = null,
         onClick: () -> Unit,
     ): android.widget.Button {
         val context = parent.context
@@ -344,10 +400,11 @@ object SettingsRows {
         // android.widget.Button (AccountSettingsSheet's reveal toggle) keep working under
         // either theme without knowing which one built it.
         return (if (glass(context)) GlassButton(context) else android.widget.Button(context)).apply {
-            text = "$name  ›"
+            text = name
             textSize = 14f
             setTextColor(Panel.Palette.FG)
             typeface = UiType.of(context)
+            icon?.let { iconEnd(this, it) }
             setOnClickListener { onClick() }
             parent.addView(this, rowParams(dp(context, 8)))
         }
@@ -374,37 +431,19 @@ object SettingsRows {
         onClick: () -> Unit,
     ) {
         val context = parent.context
-        // Read once per row, as the helper's own doc comment says — UiTheme.isGlass hits
-        // ConfigStore.load, which decodes a SharedPreferences string, so a call per button
-        // is a needless decode of the same value twice for one row.
-        val isGlass = glass(context)
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        // Same GlassButton-under-GLASS substitution as navigationButton, for both the
-        // row's own button and its move handle.
-        row.addView((if (isGlass) GlassButton(context) else android.widget.Button(context)).apply {
-            text = "$name  ›"
-            textSize = 14f
-            setTextColor(Panel.Palette.FG)
-            typeface = UiType.of(context)
-            layoutParams = LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener { onClick() }
-        })
-        row.addView((if (isGlass) GlassButton(context) else android.widget.Button(context)).apply {
-            text = "↑"
-            textSize = 15f
+        row.addView(opener(context, name, null, R.drawable.ic_person, onClick), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // Disabled and dimmed on the first row rather than absent: see canMoveUp.
+        row.addView(GlassIconButton(context).apply {
+            setImageResource(R.drawable.ic_arrow_up)
+            contentDescription = "Move $name up"
             isEnabled = canMoveUp
-            setTextColor(if (canMoveUp) Panel.Palette.WORK else Panel.Palette.DIM)
-            typeface = UiType.of(context)
+            alpha = if (canMoveUp) 1f else 0.35f
             setOnClickListener { onMoveUp() }
-            // A gap from the account's own button: two glass capsules touching read as one.
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { marginStart = dp(context, 10) }
-        })
+        }, LinearLayout.LayoutParams(dp(context, 44), dp(context, 44)).apply { marginStart = dp(context, 10) })
         parent.addView(row, rowParams(dp(context, 8)))
     }
 
@@ -428,7 +467,7 @@ object SettingsRows {
             val switch = android.widget.Switch(context)
             parent.addView(switch.apply {
                 text = name
-                textSize = 13f
+                textSize = ROW_SP
                 isChecked = initial
                 setTextColor(Panel.Palette.FG)
                 typeface = UiType.of(context)
@@ -451,11 +490,7 @@ object SettingsRows {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        row.addView(TextView(context).apply {
-            text = name
-            textSize = 13f
-            typeface = UiType.of(context)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(rowLabel(context, name), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         // The 896 Store's toggle, copied whole (ui/liquid/LiquidToggle): the app's own
         // stuttered, the store's runs smoothly. On is the app's accent.
         val liquid = dev.kb896.aiusage.ui.liquid.LiquidToggle(context).apply {
@@ -468,13 +503,10 @@ object SettingsRows {
     }
 
     /**
-     * A choice from a fixed set.
-     *
-     * [onChange] ignores the selection the adapter makes while being populated —
-     * setSelection fires the listener too, and reacting to it would write the seeded
-     * value back over the stored one on every open.
+     * A choice from a fixed set with every answer in view as a pill, under its name: for the
+     * few choices worth seeing whole and changing often. The rest are [choice].
      */
-    fun choice(
+    fun pills(
         parent: LinearLayout,
         name: String,
         options: List<String>,
@@ -482,59 +514,51 @@ object SettingsRows {
         onChange: (Int) -> Unit,
     ) {
         val context = parent.context
-        // GlassSegmented replaces the Spinner outright under GLASS: a dropdown menu opens
-        // an opaque platform overlay that the theme has no way to make of glass, and with
-        // three or four options a segmented control reads faster than a menu anyway.
-        if (glass(context)) {
-            parent.addView(label(context, name), rowParams(dp(context, if (parent.childCount == 0) 0 else 10)))
-            parent.addView(GlassSegmented(context, options, selected).apply { this.onChange = onChange },
-                rowParams(dp(context, 4)))
-            return
-        }
-        val spinner = Spinner(context).apply {
-            // A custom adapter, because a Spinner inflates its rows from a SYSTEM layout
-            // — the closed view and every dropdown item — so neither the palette nor the
-            // font sweep in applyPalette can ever reach them. They came out in the
-            // platform sans on a screen that is otherwise entirely monospaced, which is
-            // exactly the mismatch that made them look pasted in.
-            // The theme's face. A Spinner inflates from a SYSTEM layout, so applyPalette's
-            // sweep never reaches these rows and they have to be styled here.
-            val mono = UiType.of(context)
-            val axes = UiType.variation(context)
-            adapter = object : ArrayAdapter<String>(
-                context, android.R.layout.simple_spinner_dropdown_item, options
-            ) {
-                private fun style(view: View, dropdown: Boolean): View {
-                    (view as? TextView)?.apply {
-                        typeface = mono
-                        fontVariationSettings = axes
-                        textSize = 14f
-                        setTextColor(Panel.Palette.FG)
-                        // The open list draws over whatever is behind it, so it needs its
-                        // own background or it renders as text on the panel underneath.
-                        if (dropdown) setBackgroundColor(Panel.Palette.BG)
-                    }
-                    return view
-                }
-
-                override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup) =
-                    style(super.getView(position, convertView, parent), false)
-
-                override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup) =
-                    style(super.getDropDownView(position, convertView, parent), true)
-            }
-            setSelection(selected.coerceIn(0, options.size - 1), false)
-            var seeded = false
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                    if (!seeded) { seeded = true; return }
-                    onChange(pos)
-                }
-                override fun onNothingSelected(p: AdapterView<*>?) = Unit
-            }
-        }
         parent.addView(label(context, name), rowParams(dp(context, if (parent.childCount == 0) 0 else 10)))
-        parent.addView(spinner, rowParams(dp(context, 2)))
+        parent.addView(GlassSegmented(context, options, selected).apply { this.onChange = onChange }, rowParams(dp(context, 4)))
+    }
+
+    /**
+     * A choice from a fixed set: its name and the current answer on one row, the same row as
+     * anything else that opens something. The answers are in a modal of real rows (see Modal).
+     * [onChange] only for a different answer.
+     */
+    fun choice(
+        parent: LinearLayout,
+        name: String,
+        options: List<String>,
+        selected: Int,
+        icon: Int = R.drawable.ic_menu,
+        onChange: (Int) -> Unit,
+    ) {
+        val context = parent.context
+        var current = selected.coerceIn(0, options.size - 1)
+        lateinit var row: View
+        row = navigation(parent, name, options[current], icon = icon) {
+            val column = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(context, 20), dp(context, 4), dp(context, 20), 0)
+            }
+            val dialog = Modal.builder(context).setTitle(name).setView(column).setNegativeButton("Cancel", null).create()
+            options.forEachIndexed { i, option ->
+                column.addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    minimumHeight = dp(context, 44)
+                    addView(rowLabel(context, option), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    if (i == current) addView(rowLabel(context, "\u2713").apply { setTextColor(Ink.accent(0f)) })
+                    setOnClickListener {
+                        dialog.dismiss()
+                        if (i != current) {
+                            current = i
+                            (row as TextView).text = named(name, option)
+                            onChange(i)
+                        }
+                    }
+                })
+            }
+            Modal.show(dialog)
+        }
     }
 
     private fun dp(context: Context, value: Int) =

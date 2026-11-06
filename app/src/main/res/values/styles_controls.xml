@@ -3,7 +3,7 @@
     <!--
       Panel-matched controls. The colours are Panel.Palette's, repeated here because a
       layout cannot read a Kotlin object — if the palette moves, these move with it.
-        BG #1D1F21   TRACK #2A2C2E   WORK/green #B5BD68   FG #C5C8C6   DIM #555555
+        BG #1D1F21   TRACK #2A2C2E   WORK/green #B14CFF   FG #C5C8C6   DIM #555555
     -->
     <style name="PanelSeekBar" parent="@android:style/Widget.Material.SeekBar">
         <item name="android:progressDrawable">@drawable/seek_track</item>

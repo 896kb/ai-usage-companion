@@ -14,9 +14,9 @@ import org.junit.Test
 class PanelConfigPocketTest {
     private val lenient = Json { ignoreUnknownKeys = true }
 
-    @Test fun `off by default, and a config from before it decodes off`() {
-        assertFalse(PanelConfig().pocketMode)
-        assertFalse(lenient.decodeFromString(PanelConfig.serializer(), "{}").pocketMode)
+    @Test fun `on by default, and a config from before it decodes on`() {
+        assertTrue(PanelConfig().pocketMode)
+        assertTrue(lenient.decodeFromString(PanelConfig.serializer(), "{}").pocketMode)
     }
 
     @Test fun `an aodPocket already on stays on`() {

@@ -1,9 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      The face colour of the icon's squircle, sampled from the artwork: whatever a launcher's
-      mask shows beyond the squircle's own rounded corners is this, so the shape reads as
-      one piece. The mascot and the squircle are a rendered image, mipmap/ic_launcher_fg.
+      The icon's purple at its edges, for what a launcher's mask shows past the artwork: the
+      artwork is full-bleed, rendered in mipmap/ic_launcher_fg, and larger than the visible part.
     -->
-    <color name="ic_launcher_background">#FDFB76</color>
+    <color name="ic_launcher_background">#5906D4</color>
 </resources>

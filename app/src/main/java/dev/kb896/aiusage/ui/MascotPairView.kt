@@ -46,7 +46,7 @@ class MascotPairView @JvmOverloads constructor(
     private val bodyTween = ColorTween()
     private val accentTween = ColorTween()
 
-    var bodyColor: Int = MascotRenderer.BODY_GREEN
+    var bodyColor: Int = MascotRenderer.BODY_PURPLE
         set(value) { field = value; invalidate() }
 
     var accentColor: Int = MascotRenderer.ACCENT_ORANGE

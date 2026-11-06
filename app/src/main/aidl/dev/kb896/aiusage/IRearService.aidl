@@ -155,4 +155,8 @@ interface IRearService {
      * when it has reported none (or is not being read). Pocket mode's "the hand, not a pocket".
      */
     long msSinceRearTouch() = 31;
+    // The notifications the list over a guest shows, whole (ShellNotices.encode), with every
+    // change and on (re)connect. [pop]: the key of one that has just arrived, for its banner;
+    // empty for none. oneway: nothing waits on it.
+    oneway void setNotices(in Bundle list, String pop) = 32;
 }

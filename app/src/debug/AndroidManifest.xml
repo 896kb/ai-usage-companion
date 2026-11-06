@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Made-up notifications for filming, from adb only (shell holds DUMP). -->
+        <receiver
+            android:name=".service.DemoNotifyReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="${applicationId}.DEMO_NOTIFY" />
+            </intent-filter>
+        </receiver>
+        <!-- A settings change from adb, applied live (see DemoConfigReceiver). -->
+        <receiver
+            android:name=".service.DemoConfigReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="${applicationId}.DEMO_CONFIG" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

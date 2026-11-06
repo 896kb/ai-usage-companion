@@ -83,7 +83,14 @@ class RearActivity : Activity() {
          */
         const val ACTION_NOTIFICATION_REMOVED = "dev.kb896.aiusage.NOTIFICATION_REMOVED"
         const val ACTION_NOTIFICATIONS_ACTIVE = "dev.kb896.aiusage.NOTIFICATIONS_ACTIVE"
+        /** With [ACTION_NOTIFICATIONS_ACTIVE]: every card goes, the old keyless ones too (the debug build's clear, for filming). */
+        const val EXTRA_NOTIFICATIONS_EVERYTHING = "dev.kb896.aiusage.extra.NOTIFICATIONS_EVERYTHING"
         const val EXTRA_NOTIFICATION_KEYS = "keys"
+        const val ACTION_NOTICES_LIST = "dev.kb896.aiusage.NOTICES_LIST"
+        const val EXTRA_NOTICES_PKGS = "pkgs"
+        const val EXTRA_NOTICES_APPS = "apps"
+        const val EXTRA_NOTICES_TITLES = "titles"
+        const val EXTRA_NOTICES_TEXTS = "texts"
         const val ACTION_DISMISS_NOTIFICATION = "dev.kb896.aiusage.DISMISS_NOTIFICATION"
         const val ACTION_NOTIFICATIONS_SYNC = "dev.kb896.aiusage.NOTIFICATIONS_SYNC"
 
@@ -352,6 +359,7 @@ class RearActivity : Activity() {
                 // And the hold, for the same new process: it starts thinking the panel awake.
                 ACTION_MIRROR_SYNC -> {
                     guardSent = null
+                    dial.publishNotices()
                     lastMirror?.let { announceGuard(it.aod || it.locked) }
                     announceHold()
                     dial.republishMirror()
@@ -392,6 +400,7 @@ class RearActivity : Activity() {
                 ACTION_NOTIFICATION_REMOVED -> dial.removeNotice(intent.getStringExtra(EXTRA_NOTIFICATION_KEY).orEmpty())
                 ACTION_NOTIFICATIONS_ACTIVE -> dial.keepNotices(
                     intent.getStringArrayExtra(EXTRA_NOTIFICATION_KEYS)?.toSet() ?: emptySet(),
+                    everything = intent.getBooleanExtra(EXTRA_NOTIFICATIONS_EVERYTHING, false),
                 )
                 ACTION_MEDIA -> dial.showMedia(
                     intent.getBooleanExtra(EXTRA_MEDIA_ACTIVE, false),
@@ -495,6 +504,13 @@ class RearActivity : Activity() {
         dial.onAutoBrightness = { on ->
             sendBroadcast(Intent(ACTION_SET_REAR_AUTO_BRIGHTNESS).setPackage(packageName).putExtra(EXTRA_AUTO_BRIGHTNESS, on))
         }
+        // The list, for the shell's over any page, now and with every change.
+        dial.onNoticesChanged = { keys, pkgs, apps, titles, texts ->
+            sendBroadcast(Intent(ACTION_NOTICES_LIST).setPackage(packageName)
+                .putExtra(EXTRA_NOTIFICATION_KEYS, keys).putExtra(EXTRA_NOTICES_PKGS, pkgs).putExtra(EXTRA_NOTICES_APPS, apps)
+                .putExtra(EXTRA_NOTICES_TITLES, titles).putExtra(EXTRA_NOTICES_TEXTS, texts))
+        }
+        dial.publishNotices()
         // A card swiped away here: the relay clears it on the front if matching is on.
         dial.onNoticeDismissed = { key ->
             sendBroadcast(Intent(ACTION_DISMISS_NOTIFICATION).setPackage(packageName).putExtra(EXTRA_NOTIFICATION_KEY, key))

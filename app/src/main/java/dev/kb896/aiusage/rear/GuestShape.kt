@@ -33,10 +33,9 @@ object GuestShape {
      * rectangle in that display's pixels (TaskRead), moved right of the lenses and kept within the
      * area. Unread or empty: the whole area, which is what a full-width app reads anyway. A
      * letterboxed one is narrower, black either side: Bolt, at x 70–539 of 608, is x 366–835 here
-     * (measured 2026-10-30).
+     * (measured 2026-10-30). [area]: where the display's layer stands, the whole rear for a wide one.
      */
-    fun appOnRear(rear: RearGeometry, onDisplay: Bounds?): Bounds {
-        val area = appArea(rear)
+    fun appOnRear(rear: RearGeometry, onDisplay: Bounds?, area: Bounds = appArea(rear)): Bounds {
         if (onDisplay == null) return area
         val left = (onDisplay.left + area.left).coerceAtLeast(area.left)
         val top = onDisplay.top.coerceAtLeast(area.top)
@@ -44,6 +43,16 @@ object GuestShape {
         val bottom = onDisplay.bottom.coerceAtMost(area.bottom)
         return if (right > left && bottom > top) Bounds(left, top, right, bottom) else area
     }
+
+    /**
+     * An app over the whole rear (a wide private display) that came out letterboxed under the
+     * lenses: [app] (appOnRear) starts left of the cutout, but not at the edge, and is no wider
+     * than the area right of the cameras. Android centres a portrait app on the whole width and
+     * the cutout does not move it (Calculator: x 218–687, measured 2026-11-06); right of the
+     * cameras it fits whole and loses nothing.
+     */
+    fun letterboxedUnderLenses(rear: RearGeometry, app: Bounds): Boolean =
+        app.left in 1 until rear.cutoutPx && app.width <= appArea(rear).width
 
     /** The whole of [rear]: what a fullscreen task's bounds read there. */
     fun full(rear: RearGeometry) = Bounds(0, 0, rear.widthPx, rear.heightPx)

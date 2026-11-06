@@ -83,6 +83,7 @@ class ShizukuBridge(private val context: Context) {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
+            notices?.let { b -> runCatching { service?.setNotices(b, "") } }
             runCatching { service?.setPanelGuarded(panelGuarded) }
             // A new shell process starts awake (dozing false): a panel asleep on purpose
             // would otherwise be read and woken as if it were not. But only what this process
@@ -607,7 +608,31 @@ class ShizukuBridge(private val context: Context) {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** What the shell service tells this process (IRearEvents); handed over on every (re)connect. */
+    @Volatile private var notices: android.os.Bundle? = null
+
+    /** The notifications over a guest, now or when it connects. [pop]: a key that has just arrived, for its banner. */
+    fun setNotices(list: android.os.Bundle, pop: String) {
+        notices = list
+        if (service == null) { bind(); return }
+        runCatching { service?.setNotices(list, pop) }.onFailure { Log.w(TAG, "notices: ${it.message}") }
+    }
+
     private val events = object : IRearEvents.Stub() {
+        // A row swiped away over a guest: gone from the panel's list too, and from the front if
+        // they are kept the same (PanelConfig.matchFrontNotifications), as the panel's own swipe is.
+        override fun onNoticeDismissed(key: String?) {
+            if (key.isNullOrEmpty()) return
+            dev.kb896.aiusage.service.BackNotices.removed(context, key)
+            context.sendBroadcast(
+                android.content.Intent(RearActivity.ACTION_NOTIFICATION_REMOVED).setPackage(context.packageName)
+                    .putExtra(RearActivity.EXTRA_NOTIFICATION_KEY, key),
+            )
+            if (!key.startsWith(RearDialView.KEYLESS) && dev.kb896.aiusage.data.ConfigStore(context).load().matchFrontNotifications) context.sendBroadcast(
+                android.content.Intent(RearActivity.ACTION_DISMISS_NOTIFICATION).setPackage(context.packageName)
+                    .putExtra(RearActivity.EXTRA_NOTIFICATION_KEY, key),
+            )
+        }
+
         override fun onPortalDpi(pkg: String?, dpi: Int) {
             if (pkg.isNullOrEmpty() || pkg.length > 255) return
             mainHandler.post { this@ShizukuBridge.onPortalDpi(pkg, dpi) }

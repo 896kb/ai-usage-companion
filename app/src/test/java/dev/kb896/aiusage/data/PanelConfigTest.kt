@@ -194,4 +194,17 @@ class PanelConfigTest {
         assertEquals(false, c.styleFor(0).showMascot)
         assertEquals(true, c.styleFor(1).showMascot)
     }
+
+    @Test fun `the old default green becomes the purple, a picked colour stays`() {
+        val raw = PanelConfig.encode(PanelConfig(
+            titleColor = 0xFFB5BD68.toInt(), closeColor = 0xFF123456.toInt(), portalFrameColor = 0xFF28FF85.toInt(),
+            clockColor = 0xFFE7FF00.toInt(), rampColors = listOf(0xFFB5BD68.toInt(), 0xFF654321.toInt()),
+        ))
+        val back = PanelConfig.decode(raw)
+        assertEquals(dev.kb896.aiusage.Panel.Palette.WORK, back.titleColor)
+        assertEquals(0xFF123456.toInt(), back.closeColor)
+        assertEquals(dev.kb896.aiusage.Panel.Palette.WORK, back.portalFrameColor)
+        assertEquals(0xFFC26BFF.toInt(), back.clockColor)
+        assertEquals(listOf(dev.kb896.aiusage.Panel.Palette.WORK, 0xFF654321.toInt()), back.rampColors)
+    }
 }

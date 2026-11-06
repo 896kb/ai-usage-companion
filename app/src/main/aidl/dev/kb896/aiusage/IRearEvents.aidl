@@ -31,4 +31,6 @@ oneway interface IRearEvents {
     // A guest on a private display is up (true) or hidden (false), in our layers over the panel:
     // the panel, still resumed under them, stands down (ACTION_PORTAL_COVERED).
     void onPanelCovered(boolean covered) = 8;
+    // A row of the notifications over a guest was swiped away.
+    void onNoticeDismissed(String key) = 9;
 }

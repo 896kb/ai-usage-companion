@@ -93,4 +93,18 @@ class GuestShapeTest {
         assertEquals(GuestShape.appArea(pro), GuestShape.appOnRear(pro, GuestShape.Bounds(0, 0, 0, 0)))
         assertEquals(GuestShape.Bounds(296, 0, 904, 572), GuestShape.appOnRear(pro, GuestShape.Bounds(-20, -5, 900, 900)))
     }
+
+    @Test fun `over the whole rear, a letterboxed app under the lenses goes right of the cameras`() {
+        val pro = RearGeometry.PRO17
+        val full = GuestShape.full(pro)
+        // Calculator over the whole rear, centred on the whole width, as measured.
+        val calculator = GuestShape.appOnRear(pro, GuestShape.Bounds(218, 0, 687, 572), full)
+        assertEquals(GuestShape.Bounds(218, 0, 687, 572), calculator)
+        assertTrue(GuestShape.letterboxedUnderLenses(pro, calculator))
+        // A full-width app (its content kept clear by the cutout) is not; nor one already right of them.
+        assertFalse(GuestShape.letterboxedUnderLenses(pro, full))
+        assertFalse(GuestShape.letterboxedUnderLenses(pro, GuestShape.Bounds(366, 0, 835, 572)))
+        // Wider than the area right of the cameras: it would not fit there either.
+        assertFalse(GuestShape.letterboxedUnderLenses(pro, GuestShape.Bounds(100, 0, 804, 572)))
+    }
 }

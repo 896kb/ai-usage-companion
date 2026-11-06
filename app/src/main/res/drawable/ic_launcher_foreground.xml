@@ -1,38 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  The mascot as a silhouette, for THEMED icons only (the adaptive icon's monochrome
-  layer): the same nine-rect rig the panel draws. The icon itself is a rendered image,
-  mipmap/ic_launcher_fg, with the face colour in values/ic_launcher_background.
-
-  Sized to 32 of the 108dp canvas, at the user's direction — a small mark on a large
-  field of colour. Sizing here is purely a look; the ceilings below are the ones that
-  are NOT free choices, and are recorded so nobody raises this back into them:
-
-    * 72, the nominal safe zone, clips. The figure is wider than it is tall and its hands
-      stick out at mid-height, which is exactly where a circular mask is widest, so a
-      round launcher shaves the hands' corners.
-    * 64 cleared the mask but read as too heavy — the mark crowded its own background.
-
-  Centred on both axes, which is why the offsets are derived from W rather than typed.
-
-  Coordinates stay in the source rig's units and the group does the fitting, so these
-  numbers can be compared against WalkRig and MascotFrames directly.
--->
+<!-- The icon's silhouette for themed icons: the back's glass, its two lenses, a wand. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <group
-        android:translateX="38.0000"
-        android:translateY="41.1402"
-        android:scaleX="0.299065"
-        android:scaleY="0.299065">
-        <path
-            android:fillColor="#B5BD68"
-            android:pathData="M11,60h11v26h-11z M32,60h11v26h-11z M64,60h11v26h-11z M85,60h11v26h-11z M11,0h85v65h-85z M85,21h22v23h-22z M0,21h22v23h-22z" />
-        <path
-            android:fillColor="#1D1F21"
-            android:pathData="M75,11h11v11h-11z M21,11h11v11h-11z" />
-    </group>
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="5" android:fillColor="#00000000"
+        android:pathData="M39,34H69A15,15 0 0 1 84,49V59A15,15 0 0 1 69,74H39A15,15 0 0 1 24,59V49A15,15 0 0 1 39,34z"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M42,45.5m-7,0a7,7 0 1,1 14,0a7,7 0 1,1 -14,0M42,62.5m-7,0a7,7 0 1,1 14,0a7,7 0 1,1 -14,0"/>
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:pathData="M56,65L74,47"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M61,42l1.6,3.4 3.4,1.6 -3.4,1.6 -1.6,3.4 -1.6,-3.4 -3.4,-1.6 3.4,-1.6z"/>
 </vector>

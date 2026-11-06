@@ -280,6 +280,8 @@ class UsagePollService : Service() {
             // And its switches: silent, Bluetooth, mobile data, Wi-Fi.
             addAction(RearActivity.ACTION_GET_QUICK)
             addAction(RearActivity.ACTION_SET_QUICK)
+            // The panel's list of notifications, for the shell's over any page.
+            addAction(RearActivity.ACTION_NOTICES_LIST)
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
         // This process may be new while the panel is not: the bridge starts unguarded, and the
         // panel says its guard only when it changes. Asked for again now that ACTION_GUARDED
@@ -443,6 +445,19 @@ class UsagePollService : Service() {
                 brightnessWorker.execute {
                     sendRearBrightness()
                 }
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_NOTICES_LIST) {
+                val keys = intent.getStringArrayExtra(RearActivity.EXTRA_NOTIFICATION_KEYS).orEmpty()
+                val pkgs = intent.getStringArrayExtra(RearActivity.EXTRA_NOTICES_PKGS).orEmpty()
+                val apps = intent.getStringArrayExtra(RearActivity.EXTRA_NOTICES_APPS).orEmpty()
+                val titles = intent.getStringArrayExtra(RearActivity.EXTRA_NOTICES_TITLES).orEmpty()
+                val texts = intent.getStringArrayExtra(RearActivity.EXTRA_NOTICES_TEXTS).orEmpty()
+                BackNotices.replace(this@UsagePollService, keys.indices.map { i ->
+                    dev.kb896.aiusage.rear.NoticeShade.Item(
+                        keys[i], pkgs.getOrElse(i) { "" }, apps.getOrElse(i) { "" }, titles.getOrElse(i) { "" }, texts.getOrElse(i) { "" },
+                    )
+                })
                 return
             }
             if (intent?.action == RearActivity.ACTION_GET_QUICK) {
@@ -771,7 +786,7 @@ class UsagePollService : Service() {
     private fun notification(): Notification {
         val mgr = getSystemService(NotificationManager::class.java)
         mgr.createNotificationChannel(
-            NotificationChannel(CHANNEL, "AI Usage", NotificationManager.IMPORTANCE_LOW))
+            NotificationChannel(CHANNEL, "Magic Rear", NotificationManager.IMPORTANCE_LOW))
         // Tapping the notification re-places the panel. This is the only recovery path
         // that does not require opening the app, and it exists because the panel can
         // end up in states the watchdog cannot see — a task that still exists while
@@ -782,7 +797,7 @@ class UsagePollService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = Notification.Builder(this, CHANNEL)
-            .setContentTitle("AI Usage")
+            .setContentTitle("Magic Rear")
             // The empty state only — IslandNotification.decorate replaces this the
             // moment there are readings. It used to say "tap to show on the rear panel",
             // which was an instruction, and placing the panel by hand stopped being a

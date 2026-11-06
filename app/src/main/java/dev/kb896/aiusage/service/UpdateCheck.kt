@@ -135,7 +135,7 @@ object UpdateCheck {
         val version = release.tag.removePrefix("v")
         val text = plain(release.notes).ifBlank { "Tap to update." }
         val n = Notification.Builder(context, CHANNEL)
-            .setContentTitle("AI Usage $version is out — you have ${BuildConfig.VERSION_NAME}")
+            .setContentTitle("Magic Rear $version is out — you have ${BuildConfig.VERSION_NAME}")
             .setContentText(text.lineSequence().firstOrNull().orEmpty())
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setSmallIcon(R.drawable.ic_notification)

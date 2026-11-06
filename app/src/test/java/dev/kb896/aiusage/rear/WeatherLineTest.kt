@@ -17,6 +17,13 @@ class WeatherLineTest {
         assertEquals("0°", WeatherLine.temperature(r(-0.4f)))
     }
 
+    @Test fun `fahrenheit converts before rounding`() {
+        assertEquals("58°", WeatherLine.temperature(r(14.4f), fahrenheit = true))
+        assertEquals("32°", WeatherLine.temperature(r(0f), fahrenheit = true))
+        assertEquals("-40°", WeatherLine.temperature(r(-40f), fahrenheit = true))
+        assertEquals("58° · Rain", WeatherLine.text(r(14.4f, 61), fahrenheit = true))
+    }
+
     @Test fun `the words are a middle dot and the condition`() {
         assertEquals(" · Rain", WeatherLine.words(r(14.4f, 61)))
         assertEquals(" · Snow", WeatherLine.words(r(1.6f, 73)))

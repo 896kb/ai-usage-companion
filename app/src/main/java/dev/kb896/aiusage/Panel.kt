@@ -20,8 +20,8 @@ object Panel {
     object Palette {
         const val BG = 0xFF1D1F21.toInt()
         const val FG = 0xFFC5C8C6.toInt()
-        const val PERSONAL = 0xFFFFFF78.toInt()
-        const val WORK = 0xFFB5BD68.toInt()
+        const val PERSONAL = 0xFFD9A8FF.toInt()
+        const val WORK = 0xFFB14CFF.toInt()
         const val DIM = 0xFF555555.toInt()
         const val TRACK = 0xFF2A2C2E.toInt()
         const val RULE = 0xFF2F3234.toInt()
@@ -42,7 +42,7 @@ object Panel {
 
     /** Ramp stops as (position, argb), ascending by position. */
     val RAMP_STOPS: List<Pair<Float, Int>> = listOf(
-        0.00f to 0xFFB5BD68.toInt(),
+        0.00f to 0xFFB14CFF.toInt(),
         0.40f to 0xFFF0C674.toInt(),
         0.70f to 0xFFDE935F.toInt(),
         0.90f to 0xFFCC6666.toInt(),

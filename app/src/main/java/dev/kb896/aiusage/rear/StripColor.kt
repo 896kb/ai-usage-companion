@@ -2,8 +2,9 @@ package dev.kb896.aiusage.rear
 
 /**
  * The colour of the camera strip (x < Panel.CUTOUT_RIGHT) beside a guest on a private display
- * (PrivateDisplay): the app's own background, read off its leftmost columns, so the strip reads as
- * part of it — or black where there is no one colour to take. Pure; CameraStrip shows it.
+ * (PrivateDisplay), and of whatever else of the rear the app leaves bare (a portrait app's bars):
+ * the app's own background, read off its leftmost columns, so the strip reads as part of it — or
+ * black where there is no one colour to take. Pure; CameraStrip shows it.
  *
  * [pick]: per channel, the median of the sampled pixels; the edge is uniform enough when
  * every channel's median absolute deviation is within [MAD_LIMIT] — text or an icon
@@ -31,8 +32,66 @@ object StripColor {
         return GuestShape.Bounds(x, app.top, x + SAMPLE_W, app.bottom)
     }
 
-    /** The strip's own size on [rear], in its pixels: the lens column, the whole height. */
-    fun stripSize(rear: RearGeometry): Pair<Int, Int> = rear.cutoutPx to rear.heightPx
+    /**
+     * What the colour covers on [rear], in its pixels, with [app] standing where it does: all that
+     * is not the app, the lens column first. Only the lens column for an app filling its area.
+     * [keyboardTop]: where a keyboard on the app's display starts ([keyboardTop]'s reading), null
+     * with none: it is the display's whole width, so the bars stop above it; the lens column, not
+     * the display's, does not.
+     */
+    fun around(rear: RearGeometry, app: GuestShape.Bounds = GuestShape.appArea(rear), keyboardTop: Int? = null): List<GuestShape.Bounds> {
+        val lens = minOf(rear.cutoutPx, app.left)
+        val bottom = keyboardTop?.coerceIn(0, rear.heightPx) ?: rear.heightPx
+        return listOf(
+            GuestShape.Bounds(0, 0, lens, rear.heightPx),
+            GuestShape.Bounds(lens, 0, app.left, bottom),
+            GuestShape.Bounds(app.right, 0, rear.widthPx, bottom),
+            GuestShape.Bounds(app.left, 0, app.right, minOf(app.top, bottom)),
+            GuestShape.Bounds(app.left, app.bottom, app.right, bottom),
+        ).filter { it.width > 0 && it.height > 0 }
+    }
+
+    /** A bar narrower than this is not read for a keyboard. */
+    const val PROBE_MIN_BAR = 6
+    const val PROBE_W = 2
+
+    /**
+     * Where on the app's layer (its display's pixels) a keyboard is looked for: a thin column in
+     * the middle of the wider of the bars beside [app], its whole height; null with no bar to look
+     * in (an app the display's width: the keyboard is over the app, nothing of ours over it).
+     * Letterbox bars are black in the picture, and only the keyboard, the whole display wide,
+     * draws there.
+     */
+    fun keyboardProbe(rear: RearGeometry, app: GuestShape.Bounds, area: GuestShape.Bounds): GuestShape.Bounds? {
+        val left = app.left - area.left
+        val right = area.right - app.right
+        val (from, width) = if (left >= right) area.left to left else app.right to right
+        if (width < PROBE_MIN_BAR) return null
+        val x = from - area.left + width / 2 - PROBE_W / 2
+        return GuestShape.Bounds(x, 0, x + PROBE_W, area.height)
+    }
+
+    /** Less than this of not-black in a bar is not a keyboard. */
+    const val KEYBOARD_MIN_PX = 40
+    /** Over this, in any channel, a pixel is not the bar's black. */
+    const val NOT_BLACK = 12
+
+    /**
+     * From one column of a bar, top to bottom (ARGB, [scale] rows per display pixel): where a
+     * keyboard starts, in display pixels — the first row that is not the bar's black — or null
+     * where there is too little of that to be one. Not "the run that reaches the bottom": Gboard
+     * leaves a black band under its keys, and its theme may have black between them (read on the
+     * phone 2026-11-06: black, keys, a light row, keys, black at the bottom).
+     */
+    fun keyboardTop(column: IntArray, scale: Float = 1f): Int? {
+        val first = column.indexOfFirst(::notBlack)
+        if (first < 0) return null
+        if (column.count(::notBlack) / scale < KEYBOARD_MIN_PX) return null
+        return (first / scale).toInt()
+    }
+
+    private fun notBlack(c: Int) =
+        ((c shr 16) and 0xFF) > NOT_BLACK || ((c shr 8) and 0xFF) > NOT_BLACK || (c and 0xFF) > NOT_BLACK
 
     /** The strip's colour for [pixels] (ARGB, alpha ignored): opaque, or black. */
     fun pick(pixels: IntArray): Int {

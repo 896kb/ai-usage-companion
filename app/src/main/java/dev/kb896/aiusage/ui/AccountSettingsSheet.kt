@@ -111,7 +111,7 @@ object AccountSettingsSheet {
             })
 
             if (record != null) {
-                SettingsRows.navigation(connection, "SIGN OUT") {
+                SettingsRows.navigation(connection, "Sign out", icon = R.drawable.ic_logout) {
                     // Confirmed, because it is not undoable by tapping again: signing back
                     // in means a browser round trip, or finding the credential JSON a
                     // second time.
@@ -136,7 +136,7 @@ object AccountSettingsSheet {
                     )
                 }
             } else {
-                SettingsRows.navigation(connection, "CONNECT THIS ACCOUNT") {
+                SettingsRows.navigation(connection, "Connect this account", icon = R.drawable.ic_login) {
                     chooseConnection(context, account) { build() }
                 }
             }
@@ -157,17 +157,17 @@ object AccountSettingsSheet {
             // them, animating, so a colour is judged on the artwork it will appear on
             // rather than on a square.
             val mascots = MascotPairView(context).apply {
-                bodyColor = style.mascotBody ?: MascotRenderer.BODY_GREEN
+                bodyColor = style.mascotBody ?: MascotRenderer.BODY_PURPLE
                 accentColor = style.mascotAccent
                     ?: if (index == 1) MascotRenderer.ACCENT_WORK else MascotRenderer.ACCENT_ORANGE
             }
             looks.addView(mascots, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(context, 8) })
 
             SettingsRows.colorGrid(looks, listOf(
-                SettingsRows.Swatch("ACCENT", style.accent ?: account.accent) { c ->
+                SettingsRows.Swatch("Accent", style.accent ?: account.accent) { c ->
                     write { it.copy(accounts = it.withStyle(index) { s -> s.copy(accent = c) }) }
                 },
-                SettingsRows.Swatch("MASCOT", style.mascotBody ?: MascotRenderer.BODY_GREEN) { c ->
+                SettingsRows.Swatch("Mascot", style.mascotBody ?: MascotRenderer.BODY_PURPLE) { c ->
                     // Updated in place rather than by rebuilding: a rebuild would restart
                     // both clips from frame zero on every colour change, so the artwork
                     // would twitch each time the picker was used.
@@ -234,10 +234,10 @@ object AccountSettingsSheet {
             val paired = canPair
             val rings = card("Rings")
             fun ringRows(name: String, spec: RingSpec, fresh: () -> RingSpec, put: (PanelConfig, RingSpec) -> PanelConfig) {
-                SettingsRows.choice(rings, "$name window", windowNames, RingWindow.entries.indexOf(spec.window)) { pos ->
+                SettingsRows.choice(rings, "$name window", windowNames, RingWindow.entries.indexOf(spec.window), icon = R.drawable.ic_schedule) { pos ->
                     write { cfg -> put(cfg, fresh().copy(window = RingWindow.entries[pos])) }
                 }
-                SettingsRows.choice(rings, "$name shows", metricNames, RingMetric.entries.indexOf(spec.metric)) { pos ->
+                SettingsRows.choice(rings, "$name shows", metricNames, RingMetric.entries.indexOf(spec.metric), icon = R.drawable.ic_eye) { pos ->
                     write { cfg -> put(cfg, fresh().copy(metric = RingMetric.entries[pos])) }
                 }
             }
@@ -322,11 +322,11 @@ object AccountSettingsSheet {
                     val hideNow = Runnable {
                         Unlock.lock()
                         applyMask(true)
-                        toggle.text = "REVEAL  ›"
+                        toggle.text = "Reveal"
                     }
 
                     toggle = SettingsRows.navigationButton(details,
-                        if (Unlock.isUnlocked()) "HIDE" else "REVEAL") {
+                        if (Unlock.isUnlocked()) "Hide" else "Reveal", R.drawable.ic_eye) {
                         if (Unlock.isUnlocked()) {
                             details.removeCallbacks(hideNow)
                             hideNow.run()
@@ -335,7 +335,7 @@ object AccountSettingsSheet {
                             Unlock.require(activity, "To show this account's details") { ok ->
                                 if (ok) {
                                     applyMask(false)
-                                    toggle.text = "HIDE  ›"
+                                    toggle.text = "Hide"
                                     // Auto-hide, for the case none of the other triggers
                                     // catch: no lock, no hide, no navigation — a phone
                                     // simply put down with the details on screen.
@@ -345,9 +345,8 @@ object AccountSettingsSheet {
                             }
                         }
                     }
-                    // Its own width, not the card's: one action, not a row.
                     toggle.layoutParams = (toggle.layoutParams as LinearLayout.LayoutParams).apply {
-                        width = wrap; topMargin = dp(context, 14)
+                        topMargin = dp(context, 14)
                     }
 
                     // Already unlocked when the sheet was rebuilt — a colour edit
@@ -361,7 +360,7 @@ object AccountSettingsSheet {
                     // whoever wakes the phone, is the case this gate exists for.
                     val watcher = Unlock.observeScreenOff(context) {
                         applyMask(true)
-                        toggle.text = "REVEAL  ›"
+                        toggle.text = "Reveal"
                     }
                     sheetReceivers += watcher
                 }
@@ -422,7 +421,7 @@ object AccountSettingsSheet {
             .setView(box)
             .setNegativeButton("Cancel", null)
             .create()
-        SettingsRows.navigation(box, "SIGN IN WITH A BROWSER") {
+        SettingsRows.navigation(box, "Sign in with a browser", icon = R.drawable.ic_globe) {
             dialog.dismiss()
             (context as? MainActivity)?.signInFor(account) { failure ->
                 android.widget.Toast.makeText(context,
@@ -430,7 +429,7 @@ object AccountSettingsSheet {
                 onDone()
             }
         }
-        SettingsRows.navigation(box, "IMPORT A TOKEN") {
+        SettingsRows.navigation(box, "Import a token", icon = R.drawable.ic_key) {
             dialog.dismiss()
             promptForToken(context, account, onDone)
         }

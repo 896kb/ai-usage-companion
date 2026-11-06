@@ -71,7 +71,7 @@ class MascotScaleTest {
      * looked like a dead end at first.
      */
     private fun bodyPixel(clip: MascotFrames.Clip) = clip.frames.flatten()
-        .filter { it.color == MascotRenderer.BODY_GREEN }
+        .filter { it.color == MascotRenderer.BODY_PURPLE }
         .groupingBy { it.w }.eachCount()
         .maxByOrNull { it.value }?.key
 

@@ -18,8 +18,9 @@ import android.view.SurfaceControl
 import java.lang.reflect.Method
 
 /**
- * A guest kept right of the cameras: the app on a virtual display of its own, that display's
- * picture on a layer of ours right of the lenses. Owned by RearUserService, one at a time.
+ * A guest of the App Portal: the app on a virtual display of its own, that display's picture on a
+ * layer of ours right of the lenses, or over the whole rear for one not kept right of the cameras
+ * (see [open]: the keyboard). Owned by RearUserService, one at a time.
  *
  * WHY NOT THE REAR ITSELF. A task confined on display 1 (multi-window bounds, x 296–904) read
  * right to the window manager and was composed at x 0 by HyperOS whatever it was nudged with
@@ -36,8 +37,11 @@ import java.lang.reflect.Method
  *
  * OPAQUE, as a backdrop. A portrait-locked app letterboxes on this landscape display and
  * `wm set-ignore-orientation-request -d N true` did not take on this firmware (the spike's first
- * try; it is still said once, in [open]'s caller, in case another does). Whatever the app leaves
- * clear would show the panel through: marked opaque, the layer has no holes, and they read black.
+ * try; it is still said once, in [open]'s caller, in case another does). The bars come out
+ * black in the display's picture, not clear (tried 2026-11-06: a strip under the layer did not
+ * show through them), and marked opaque nothing of ours under it shows anywhere. The camera
+ * strip's layer paints over those bars in the app's colour (StripColor.around), leaving out the
+ * keyboard where it reaches into them (CameraStrip.keyboardTop).
  *
  * TOUCH IS INJECTED, on a thread of its own ([forward]): the reader must never wait for a binder
  * call, however quick (~0.5 ms, read to inject, in the spike). Back is a key on this display
@@ -55,8 +59,10 @@ internal class PrivateDisplay private constructor(
     /** What shows it, for the strip's capture: hold with ShellLayer.lease. */
     val layer: SurfaceControl,
     private val surface: Surface,
-    private val width: Int,
-    private val height: Int,
+    /** Where its layer stands on the rear: right of the lenses, or the whole rear when [wide]. */
+    val area: GuestShape.Bounds,
+    /** Over the whole rear, lenses and all: an app not kept right of the cameras. */
+    val wide: Boolean,
     private var dpi: Int,
     private val wakeIt: () -> Unit,
 ) {
@@ -93,7 +99,7 @@ internal class PrivateDisplay private constructor(
     @Synchronized
     fun density(wanted: Int): Boolean {
         if (released || wanted == dpi) return false
-        return runCatching { vd.resize(width, height, wanted) }
+        return runCatching { vd.resize(area.width, area.height, wanted) }
             .onSuccess { dpi = wanted; Log.i(TAG, "private display $displayId: at $wanted dpi") }
             .onFailure { Log.w(TAG, "private display $displayId: resize refused: ${it.message}") }
             .isSuccess
@@ -241,12 +247,42 @@ internal class PrivateDisplay private constructor(
         }
 
         /**
-         * A new display right of [rear]'s lenses at [dpi], its layer made and hidden. Null, with
-         * nothing left behind and the reason logged, where it cannot be: the caller then has the
-         * guest on the whole rear. [wake]: lights this display when asked by [ensureAwake].
+         * The display made with [cutout], as display 1 has it; null, logged, where this firmware
+         * will not, and the caller makes one without.
          */
-        fun open(context: Context, layerStack: Int, rear: RearGeometry, dpi: Int, wake: (Int) -> Unit): PrivateDisplay? {
-            val area = GuestShape.appArea(rear)
+        private fun withCutout(dm: DisplayManager, area: GuestShape.Bounds, dpi: Int, s: Surface, cutout: android.view.DisplayCutout): VirtualDisplay? =
+            try {
+                val b = android.hardware.display.VirtualDisplayConfig.Builder("ai-usage-portal", area.width, area.height, dpi)
+                    .setSurface(s).setFlags(FLAGS)
+                b.javaClass.getMethod("setDisplayCutout", android.view.DisplayCutout::class.java).invoke(b, cutout)
+                dm.createVirtualDisplay(b.build(), null, null)
+                    .also { Log.i(TAG, "private display: the rear's cutout, ${cutout.safeInsetLeft} px left") }
+            } catch (e: Exception) {
+                Log.w(TAG, "private display: no cutout (${(e.cause ?: e).javaClass.simpleName}: ${(e.cause ?: e).message}) — the app may go under the lenses")
+                null
+            }
+
+        /**
+         * A new display right of [rear]'s lenses at [dpi], or over the whole rear when [wide], its
+         * layer made and hidden. Null, with nothing left behind and the reason logged, where it
+         * cannot be: the caller then has the guest on the rear itself. [wake]: lights this display
+         * when asked by [ensureAwake].
+         *
+         * WIDE, FOR THE KEYBOARD. An app on display 1 itself never gets one: HyperOS refuses any
+         * window there as the keyboard's target (MiuiSplitInputMethodImpl.shouldUpdateImeTargetForBackScreen,
+         * "Don't update ime target for back screen!", for display 1 whatever the lock; read from
+         * miui-services.jar 2026-11-06). On a display of ours it opens there (RearKeyboard), front
+         * locked or not, so the apps that fill the rear are on one of these too.
+         *
+         * WITH THE REAR'S CUTOUT. On display 1 an app keeps right of the lenses unless it asks to
+         * draw under them (its layoutInDisplayCutoutMode): that display has a cutout, 296 px on the
+         * left. A virtual display has none, so a wide one is given display 1's own
+         * (VirtualDisplayConfig.Builder.setDisplayCutout, hidden, Android 16; the display service
+         * takes it as it is, VirtualDisplayAdapter): Brave there kept right, its keyboard too, as on
+         * the rear (the owner, 2026-11-06, without it: both under the lenses).
+         */
+        fun open(context: Context, layerStack: Int, rear: RearGeometry, dpi: Int, wide: Boolean, wake: (Int) -> Unit): PrivateDisplay? {
+            val area = if (wide) GuestShape.full(rear) else GuestShape.appArea(rear)
             var layer: SurfaceControl? = null
             var surface: Surface? = null
             return try {
@@ -258,11 +294,16 @@ internal class PrivateDisplay private constructor(
                 SurfaceControl.Transaction().use { it.setPosition(made, area.left.toFloat(), area.top.toFloat()).apply() }
                 val s = Surface(made)
                 surface = s
-                val vd = displays(context).createVirtualDisplay("ai-usage-portal", area.width, area.height, dpi, s, FLAGS)
+                val dm = displays(context)
+                val cutout = if (wide) dm.getDisplay(dev.kb896.aiusage.Panel.DISPLAY_ID)?.cutout else null
+                val vd = (cutout?.let { withCutout(dm, area, dpi, s, it) }
+                    ?: dm.createVirtualDisplay("ai-usage-portal", area.width, area.height, dpi, s, FLAGS))
                     ?: throw IllegalStateException("createVirtualDisplay gave nothing")
                 val id = vd.display.displayId
-                Log.i(TAG, "private display $id: ${area.width}x${area.height} at $dpi dpi, layer at x ${area.left}, flags 0x${FLAGS.toString(16)}")
-                PrivateDisplay(id, vd, made, s, area.width, area.height, dpi) { wake(id) }
+                // Before any guest is started on it: a keyboard asked for there stays there.
+                RearKeyboard.showOn(id)
+                Log.i(TAG, "private display $id: ${area.width}x${area.height} at $dpi dpi, layer at x ${area.left}${if (wide) " (the whole rear)" else ""}, flags 0x${FLAGS.toString(16)}")
+                PrivateDisplay(id, vd, made, s, area, wide, dpi) { wake(id) }
             } catch (e: Throwable) {
                 Log.w(TAG, "private display: none (${e.javaClass.simpleName}: ${e.message})")
                 ShellLayer.remove(layer)

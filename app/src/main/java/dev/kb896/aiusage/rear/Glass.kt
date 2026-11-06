@@ -396,7 +396,14 @@ half4 main(float2 coord) {
     //
     // Premultiplied by coverage, like the rest of this, so the wash stops at the letter's
     // edge instead of laying a rectangle of colour over the margin.
-    color.rgb = mix(color.rgb, tint.rgb * v.a, tint.a);
+    //
+    // LIT FROM WITHIN: the colour itself, as bright as what the glass bends there and never
+    // below a floor. Over a dark panel a wash alone took the dark with it, and the figure read
+    // as a dim grey of its colour; here the light and dark of the glass, the bevel's highlight
+    // included, are the colour's own light and dark.
+    half lum = dot(color.rgb, half3(0.299, 0.587, 0.114)) / max(v.a, 0.001);
+    half3 lit = tint.rgb * clamp(0.62 + 0.75 * lum, 0.0, 1.35);
+    color.rgb = mix(color.rgb, lit * v.a, tint.a);
     return color;
 }"""
 
@@ -476,13 +483,13 @@ half4 main(float2 coord) {
     const val SDF_LIGHT_ANGLE = 45f
 
     /**
-     * How opaque the liquid's colour is, laid over the charge figure.
+     * How much of the figure is its colour, lit by what the glass bends (see the shader).
      *
-     * A fifth. Eighty-five per cent was the first attempt and it buried the glass; at this
-     * weight the hue is unmistakable and every bit of refraction still reads through it,
-     * which is the whole difference between tinted glass and coloured type.
+     * Most of it. At 0.40 of a flat wash the colour was lost over a dark panel; lit from
+     * within, the glass's light and dark, its bevel and what it bends still show at this
+     * weight, so it reads as glass in its real colour rather than as coloured type.
      */
-    const val SDF_TINT = 0.40f
+    const val SDF_TINT = 0.78f
 
     /**
      * How thick the glass ring's band is, against the reading's own stroke.

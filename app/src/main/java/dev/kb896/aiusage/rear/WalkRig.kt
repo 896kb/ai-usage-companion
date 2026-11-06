@@ -74,7 +74,7 @@ object WalkRig {
     const val HEADROOM = 90f / VB_H
 
     /** The rig's colours as the source draws them. Defaults only — see [draw]. */
-    const val BODY_COLOR = 0xFFB5BD68.toInt()
+    const val BODY_COLOR = 0xFFB14CFF.toInt()
     private const val EYE_COLOR = 0xFF1D1F21.toInt()
 
     // --- easings -------------------------------------------------------------------

@@ -5,7 +5,6 @@ import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.doOnLayout
 import dev.kb896.aiusage.R
@@ -92,7 +91,7 @@ object FontPicker {
                 box.addView(this, at)
             }
 
-        SettingsRows.navigation(box, "Import a font file") { dialog.dismiss(); onImport() }
+        SettingsRows.navigation(box, "Import a font file", icon = R.drawable.ic_upload) { dialog.dismiss(); onImport() }
         val own = PanelType.face(res, theme, null)
         row("Theme default", null, own)
         for (font in PanelFonts.bundled) row(font.name, font, PanelType.face(res, theme, font))
@@ -107,9 +106,9 @@ object FontPicker {
         val filler = android.view.View(context)
         box.addView(filler, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0))
 
-        val scroll = ScrollView(context).apply { addView(box) }
-        // No title: the row that opened it already says Font, and the list starts at once.
+        val scroll = dev.kb896.aiusage.ui.glass.SoftEdgeScrollView(context).apply { addView(box) }
         dialog = Modal.show(Modal.builder(context)
+            .setTitle("Font")
             .setView(scroll)
             .setNegativeButton("Close", null))
         // The sheet keeps the height it opened at: the phone's fonts arriving scroll inside

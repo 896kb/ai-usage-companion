@@ -15,7 +15,7 @@ class PanelConfigPortalTest {
         assertFalse("portalFrameColor" in old)
         val c = PanelConfig.decode(old)
         assertEquals(emptyList<String>(), c.portalApps)
-        assertEquals(0xFF28FF85.toInt(), c.portalFrameColor)
+        assertEquals(0xFFB14CFF.toInt(), c.portalFrameColor)
     }
 
     @Test fun `pinned apps keep their order through a save`() {

@@ -24,7 +24,7 @@ object MascotRenderer {
      * configured colour can be swapped in at draw time — the frames are generated data
      * and are not regenerated per user.
      */
-    const val BODY_GREEN = 0xFFB5BD68.toInt()
+    const val BODY_PURPLE = 0xFFB14CFF.toInt()
 
     /** The second account's accent, swapped in for the first's. */
     const val ACCENT_WORK = 0xFF006EFF.toInt()
@@ -144,7 +144,7 @@ object MascotRenderer {
         accent: Int = ACCENT_ORANGE,
         dead: Boolean = false,
         holes: Boolean = false,
-        bodyColor: Int = BODY_GREEN,
+        bodyColor: Int = BODY_PURPLE,
     ) {
         val w = h * clip.aspect
         val frame = clip.frames[((nowMs / clip.frameMs) % clip.frames.size).toInt()]
@@ -174,7 +174,7 @@ object MascotRenderer {
             if (dead && isEye(r.color)) continue
             body.color = when (r.color) {
                 ACCENT_ORANGE -> accent
-                BODY_GREEN -> bodyColor
+                BODY_PURPLE -> bodyColor
                 else -> r.color
             }
             canvas.drawRect(

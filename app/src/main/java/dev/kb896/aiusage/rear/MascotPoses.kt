@@ -23,7 +23,7 @@ import kotlin.math.sin
  * stays recognisably the same animal.
  *
  * Colour rules are the renderer's, and both are load-bearing:
- *  * body parts take [MascotRenderer.BODY_GREEN] exactly, or the user's chosen mascot
+ *  * body parts take [MascotRenderer.BODY_PURPLE] exactly, or the user's chosen mascot
  *    colour will not reach them
  *  * eyes take Palette.BG exactly, which is what marks them as holes to punch rather
  *    than shapes to paint — see MascotRenderer.draw
@@ -53,7 +53,7 @@ internal object MascotPoses {
     // declared after it reads as 0 while the frames are being generated. The ghost's eye
     // colour was exactly that: every eye came out fully transparent, a face-less figure
     // that no compiler warning and no crash would have mentioned.
-    private const val BODY = MascotRenderer.BODY_GREEN
+    private const val BODY = MascotRenderer.BODY_PURPLE
     private const val EYE = dev.kb896.aiusage.Panel.Palette.BG
     private const val ACCENT = MascotRenderer.ACCENT_ORANGE
 

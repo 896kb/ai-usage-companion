@@ -475,7 +475,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
 
         /** GlassSlider's track and fill over a dark ground (ui.glass.Ink.track, .ACCENT). */
         private const val GLASS_TRACK = 0x5C787880
-        private const val GLASS_ACCENT = 0xFFE7FF00.toInt()
+        private const val GLASS_ACCENT = 0xFFC26BFF.toInt()
 
         /** A held thumb's size: GlassSlider's swell; the flat square's a little. */
         private const val GLASS_HELD = 1.5f

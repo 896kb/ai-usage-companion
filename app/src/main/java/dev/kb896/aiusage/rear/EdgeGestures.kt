@@ -19,6 +19,8 @@ import kotlin.math.abs
  *   sideways — the control centre's pull, which the caller opens only over a guest (over
  *   our panel the panel's own control centre has it) — then [Action.TopPullMove] every
  *   move, and [Action.TopPullEnd] at the lift; nothing if it turns out not to be a pull.
+ * - The top edge's other half ([NoticeShade.startsPull]): [Action.NoticePullStart] and on, as the
+ *   control centre's, for the notifications over a guest (ShellNotices).
  * Where the bottom and right bands meet (the bottom-right corner), the pull wins. Anything
  * else is nobody's.
  *
@@ -59,6 +61,10 @@ class EdgeGestures(
         data class TopPullStart(val y: Float) : Action
         data class TopPullMove(val y: Float) : Action
         data class TopPullEnd(val y: Float) : Action
+        /** The notifications' pull, from the top edge's other half (NoticeShade.startsPull). */
+        data class NoticePullStart(val y: Float) : Action
+        data class NoticePullMove(val y: Float) : Action
+        data class NoticePullEnd(val y: Float) : Action
         data object Back : Action
         /** A finger landed on the sheet. */
         data class SheetDown(val x: Float, val y: Float) : Action
@@ -72,12 +78,15 @@ class EdgeGestures(
         data object Cancel : Action
     }
 
-    private enum class Kind { NONE, PULL, TOP, BACK, SHEET }
+    private enum class Kind { NONE, PULL, TOP, NOTICES, BACK, SHEET }
 
     /** Whether the sheet is up, for fingers that land from now on. Set by the caller. */
     var sheet = false
 
     private var kind = Kind.NONE
+
+    /** The gesture going is on the Back band (its landing there, not the sheet's, a pull's or a top edge's): BackChevron's to show. */
+    val onBackBand: Boolean get() = kind == Kind.BACK
     private var committed = false
     private var downX = 0f
     private var downY = 0f
@@ -92,6 +101,7 @@ class EdgeGestures(
             val stale = when {
                 kind == Kind.PULL && committed -> listOf(Action.PullEnd(lastY))
                 kind == Kind.TOP && committed -> listOf(Action.TopPullEnd(lastY))
+                kind == Kind.NOTICES && committed -> listOf(Action.NoticePullEnd(lastY))
                 kind == Kind.SHEET && committed -> listOf(if (sideways) Action.SlideEnd(lastX) else Action.PullEnd(lastY))
                 kind == Kind.SHEET -> listOf(Action.Cancel)
                 else -> emptyList()
@@ -102,6 +112,7 @@ class EdgeGestures(
                 sheet -> Kind.SHEET
                 PortalPull.startsPull(e.x, e.y, usableLeft) -> Kind.PULL
                 ControlCenter.startsPull(e.x, e.y, usableLeft) -> Kind.TOP
+                NoticeShade.startsPull(e.x, e.y, usableLeft) -> Kind.NOTICES
                 e.x >= BACK_LEFT -> Kind.BACK
                 else -> Kind.NONE
             }
@@ -123,6 +134,12 @@ class EdgeGestures(
                 abs(e.x - downX) >= SLOP || downY - e.y >= SLOP -> { kind = Kind.NONE; emptyList() }
                 else -> emptyList()
             }
+            Kind.NOTICES -> when {
+                committed -> listOf(Action.NoticePullMove(e.y))
+                e.y - downY >= SLOP && e.y - downY > abs(e.x - downX) -> { committed = true; listOf(Action.NoticePullStart(e.y)) }
+                abs(e.x - downX) >= SLOP || downY - e.y >= SLOP -> { kind = Kind.NONE; emptyList() }
+                else -> emptyList()
+            }
             Kind.SHEET -> sheetMove(e)
             else -> emptyList()
         } }
@@ -130,6 +147,7 @@ class EdgeGestures(
             val out = when (kind) {
                 Kind.PULL -> if (committed) listOf(Action.PullEnd(e.y)) else emptyList()
                 Kind.TOP -> if (committed) listOf(Action.TopPullEnd(e.y)) else emptyList()
+                Kind.NOTICES -> if (committed) listOf(Action.NoticePullEnd(e.y)) else emptyList()
                 Kind.BACK -> if ((downX - e.x) - abs(e.y - downY) >= BACK_TRAVEL) listOf(Action.Back) else emptyList()
                 Kind.SHEET -> sheetUp(e)
                 Kind.NONE -> emptyList()

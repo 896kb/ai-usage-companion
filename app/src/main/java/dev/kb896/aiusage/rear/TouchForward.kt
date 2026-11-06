@@ -35,10 +35,15 @@ class TouchForward(
     private val maxY: Int,
     private val rearW: Int,
     private val rearH: Int,
-    private val appX: Int,
+    appX: Int,
     private val backLeft: Float,
     private val slop: Float,
 ) {
+    /**
+     * Where the app's display starts on the rear: right of the lenses, or 0 for one over the whole
+     * rear (the lenses then the app's too). Set by the service as the guest changes; read at a landing.
+     */
+    @Volatile var appX: Int = appX
 
     /** One motion event: pointer ids (sorted) and their places on the display, at [atMs], its gesture begun at [downMs]. */
     class Out(val action: Int, val ids: IntArray, val xs: FloatArray, val ys: FloatArray, val downMs: Long, val atMs: Long) {

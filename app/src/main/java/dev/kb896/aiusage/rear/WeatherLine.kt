@@ -38,12 +38,16 @@ object WeatherLine {
      */
     const val PLACE_BASELINE = 439f
 
-    fun temperature(reading: WeatherReading): String = "${Math.round(reading.temperatureC)}°"
+    /** Whole degrees, in Fahrenheit when [fahrenheit]; the readings themselves are always Celsius. */
+    fun temperature(reading: WeatherReading, fahrenheit: Boolean = false): String {
+        val t = if (fahrenheit) reading.temperatureC * 9f / 5f + 32f else reading.temperatureC
+        return "${Math.round(t)}°"
+    }
 
     /** The separator and the word, apart from the figure: the line draws them in two inks. */
     fun words(reading: WeatherReading): String = " · ${reading.condition.word}"
 
-    fun text(reading: WeatherReading): String = temperature(reading) + words(reading)
+    fun text(reading: WeatherReading, fahrenheit: Boolean = false): String = temperature(reading, fahrenheit) + words(reading)
 
     /** The reading names its icon; the panel owns the objects. Unknown names get a cloud. */
     fun icon(name: String): PanelIcons.Icon = when (name) {

@@ -8,9 +8,10 @@
 <dev.kb896.aiusage.ui.glass.GlassCard xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:layout_marginTop="14dp"
     android:orientation="vertical">
 
-    <!-- A label at the card's top, like Theme's, and the card open: no accordion. -->
+    <!-- Hidden by Diagnostics.install, whose switch stands for it and opens the card. -->
     <TextView
         android:id="@+id/debug_heading"
         android:layout_width="match_parent"
@@ -23,6 +24,7 @@
     <LinearLayout
         android:id="@+id/debug_body"
         android:tag="debug_rows"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">

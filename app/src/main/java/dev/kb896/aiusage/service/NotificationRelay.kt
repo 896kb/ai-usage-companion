@@ -87,6 +87,7 @@ class NotificationRelay : NotificationListenerService() {
                 RearActivity.ACTION_DISMISS_NOTIFICATION ->
                     intent.getStringExtra(RearActivity.EXTRA_NOTIFICATION_KEY)?.takeIf { it.isNotEmpty() }?.let { key ->
                         runCatching { cancelNotification(key) }.onFailure { Log.w(TAG, "dismiss failed: ${it.message}") }
+                        BackNotices.removed(this@NotificationRelay, key)
                     }
                 RearActivity.ACTION_NOTIFICATIONS_SYNC -> sendActive()
             }
@@ -97,6 +98,7 @@ class NotificationRelay : NotificationListenerService() {
     private fun sendActive() {
         if (!ConfigStore(this).load().matchFrontNotifications) return
         val keys = runCatching { activeNotifications }.getOrNull()?.map { it.key } ?: return
+        BackNotices.keep(this, keys.toSet())
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATIONS_ACTIVE).setPackage(packageName)
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_KEYS, keys.toTypedArray()),
@@ -108,6 +110,7 @@ class NotificationRelay : NotificationListenerService() {
         // Gone, so the same key posted again later is new again — whatever the switches say.
         seen.forget(sbn.key)
         if (!ConfigStore(this).load().matchFrontNotifications) return
+        BackNotices.removed(this, sbn.key)
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION_REMOVED).setPackage(packageName)
                 .putExtra(RearActivity.EXTRA_NOTIFICATION_KEY, sbn.key),
@@ -247,6 +250,10 @@ class NotificationRelay : NotificationListenerService() {
         next: Pair<String, String>?,
         config: dev.kb896.aiusage.data.PanelConfig,
     ) {
+        BackNotices.posted(
+            this,
+            dev.kb896.aiusage.rear.NoticeShade.Item(sbn.key, sbn.packageName, app, title.orEmpty(), body.orEmpty()),
+        )
         sendBroadcast(
             Intent(RearActivity.ACTION_NOTIFICATION)
                 .setPackage(packageName)

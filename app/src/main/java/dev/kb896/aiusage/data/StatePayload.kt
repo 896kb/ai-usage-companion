@@ -45,7 +45,10 @@ object StatePayload {
         weather: WeatherReading? = null,
     ): String = buildJsonObject {
         put("fetchedAt", state.fetchedAt)
-        put("config", Json.parseToJsonElement(PanelConfig.encode(config)))
+        // "auto" degrees are settled here, in the app, whose locale is the user's; the back's
+        // shell process may not share it.
+        val crossing = config.copy(temperatureUnit = TemperatureUnit.resolve(config.temperatureUnit))
+        put("config", Json.parseToJsonElement(PanelConfig.encode(crossing)))
         putJsonArray("accounts") {
             for (s in state.statuses) {
                 addJsonObject {

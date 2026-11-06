@@ -44,13 +44,16 @@ internal object ShellLayer {
      */
     const val Z_FRAME = Int.MAX_VALUE
     const val Z_SHEET = Int.MAX_VALUE - 1
-    const val Z_BLOCKER = Int.MAX_VALUE - 2
+    const val Z_BANNER = Int.MAX_VALUE - 2
+    const val Z_BLOCKER = Int.MAX_VALUE - 3
     /** A guest's arrival (GuestCover): over every app, under the sheet, so a pull meanwhile still opens over it. */
-    const val Z_COVER = Int.MAX_VALUE - 3
-    /** The camera strip beside a guest kept right of the cameras (CameraStrip): over every app, under the cover. */
-    const val Z_STRIP = Int.MAX_VALUE - 4
+    const val Z_COVER = Int.MAX_VALUE - 4
+    /** The Back chevron over a guest on a private display (BackChevron): over its picture, under the cover. */
+    const val Z_CHEVRON = Int.MAX_VALUE - 5
+    /** The camera strip beside a guest kept right of the cameras (CameraStrip): over its picture, under the chevron. */
+    const val Z_STRIP = Int.MAX_VALUE - 6
     /** The picture of a guest on a private display (PrivateDisplay): over every app, under the strip beside it. */
-    const val Z_APP = Int.MAX_VALUE - 5
+    const val Z_APP = Int.MAX_VALUE - 7
 
     /** How long [removeAll] waits for a capture holding layers ([lease]) before it lets them go anyway. */
     private const val LEASE_WAIT_MS = 200L

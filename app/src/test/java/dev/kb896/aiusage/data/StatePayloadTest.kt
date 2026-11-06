@@ -45,6 +45,8 @@ class StatePayloadTest {
             title = "PANEL",
             showClock = true,
             ringLayout = RingLayout(cx = 161, cyFirst = 150, cySecond = 430, radius = 120, stroke = 20),
+            // A settled unit: "auto" is resolved on the way out, so it would not come back as itself.
+            temperatureUnit = TemperatureUnit.CELSIUS,
         )
         val back = StatePayload.decode(StatePayload.encode(state, config))
         assertEquals(config, back.config)
@@ -53,7 +55,8 @@ class StatePayloadTest {
 
     /** A payload written before configs existed must still decode, with defaults. */
     @Test fun `a payload with no config yields defaults`() {
-        assertEquals(PanelConfig.DEFAULT, StatePayload.decode(StatePayload.encode(state)).config)
+        val settled = PanelConfig.DEFAULT.copy(temperatureUnit = TemperatureUnit.resolve(TemperatureUnit.AUTO))
+        assertEquals(settled, StatePayload.decode(StatePayload.encode(state)).config)
     }
 
     @Test fun `garbage yields an empty state AND a default config`() {

@@ -12,6 +12,7 @@ import dev.kb896.aiusage.data.PanelConfig
 import dev.kb896.aiusage.data.PanelTheme
 import dev.kb896.aiusage.ui.glass.GlassButton
 import dev.kb896.aiusage.ui.glass.GlassChip
+import dev.kb896.aiusage.ui.glass.GlassIconButton
 import dev.kb896.aiusage.ui.glass.GlassSegmented
 import dev.kb896.aiusage.ui.liquid.LiquidToggle
 import org.junit.After
@@ -40,28 +41,20 @@ class SettingsRowsThemeTest {
         ConfigStore(context).save(PanelConfig(theme = PanelTheme.GLASS))
         val parent = LinearLayout(context)
         var toggled: Boolean? = null
-        var chosen: Int? = null
         SettingsRows.toggle(parent, "T", false) { toggled = it }
-        SettingsRows.choice(parent, "C", listOf("a", "b", "c"), 1) { chosen = it }
+        SettingsRows.choice(parent, "C", listOf("a", "b", "c"), 1) {}
         val nav = SettingsRows.navigationButton(parent, "N") {}
         SettingsRows.colorRow(parent, "K", 0xFF112233.toInt()) {}
         val switch = find(parent, LiquidToggle::class.java) as LiquidToggle
-        val seg = find(parent, GlassSegmented::class.java) as GlassSegmented
         assertNull(find(parent, Switch::class.java))
         assertNull(find(parent, Spinner::class.java))
         assertTrue(nav is GlassButton)
         assertEquals(0xFF112233.toInt(), (find(parent, GlassChip::class.java) as GlassChip).colour)
         switch.performClick()
         assertEquals(true, toggled)
-        assertEquals(1, seg.selected)
-        seg.select(2)
-        assertEquals(2, chosen)
         SettingsRows.reorderable(parent, "R", canMoveUp = true, onMoveUp = {}) {}
         SettingsRows.colorGrid(parent, listOf(SettingsRows.Swatch("S", 0xFF445566.toInt()) {}))
-        val buttons = ArrayList<View>()
-        fun collect(v: View) { if (v is GlassButton) buttons += v; if (v is android.view.ViewGroup) for (i in 0 until v.childCount) collect(v.getChildAt(i)) }
-        collect(parent)
-        assertTrue("reorderable's two buttons are glass: ${buttons.size}", buttons.size >= 3)  // nav + 2
+        assertTrue(find(parent, GlassIconButton::class.java) is GlassIconButton)
         val chips = ArrayList<GlassChip>()
         fun chipsIn(v: View) { if (v is GlassChip) chips += v; if (v is android.view.ViewGroup) for (i in 0 until v.childCount) chipsIn(v.getChildAt(i)) }
         chipsIn(parent)

@@ -80,6 +80,8 @@ class ShellOverlay(
     private val layer: String,
     private val what: String,
     private val content: Content,
+    /** The live blur under it; false, the dim alone (the notifications' list, to try without). */
+    private val blurs: Boolean = true,
 ) {
 
     /** What one sheet draws. Its methods run on the render thread, under [DRAW]. */
@@ -265,10 +267,17 @@ class ShellOverlay(
         // As the frame: if the hardware canvas is refused, the software one (flat buttons).
         var hardware = true
         var blurred = -1
+        // How it ran, said once it ends: frames drawn, and the ones that took longer than a frame.
+        val opened = System.nanoTime()
+        var frames = 0
+        var slow = 0
+        var worst = 0L
+        try {
         while (!Thread.currentThread().isInterrupted && gen == r.gen) {
             val began = System.nanoTime()
             val v = version.get()
-            if (v != drawn || moving) {
+            val drawing = v != drawn || moving
+            if (drawing) {
                 val canvas = if (hardware) {
                     try { surface.lockHardwareCanvas() } catch (e: Throwable) {
                         Log.w(TAG, "$what: hardware canvas refused (${e.message}); software")
@@ -292,12 +301,25 @@ class ShellOverlay(
                 }
                 // With the frame it goes with, and only when it moves.
                 val radius = blurPx(p)
-                if (radius != blurred && blur(r, radius)) blurred = radius
+                if (blurs && radius != blurred && blur(r, radius)) blurred = radius
                 drawn = v
                 synchronized(progressLock) { if (gen == r.gen) onProgress?.invoke(p) }
             }
             val took = (System.nanoTime() - began) / 1_000_000
-            Thread.sleep(maxOf(FRAME_MS - took, 1L))
+            if (drawing) {
+                frames++
+                if (took > SLOW_MS) slow++
+                if (took > worst) worst = took
+            }
+            // MOVING, it draws again at once: posting a frame waits for the display to take one, so
+            // the display's own rate paces it. A fixed sleep after each capped it at 60 a second and
+            // out of step with the display, which is what made the sheet and the list stutter.
+            // At rest, it only looks for changes now and then. The software canvas has no such wait.
+            Thread.sleep(if (moving && hardware) 0L else maxOf(FRAME_MS - took, 1L))
+        }
+        } finally {
+            val ms = (System.nanoTime() - opened) / 1_000_000
+            if (frames > 0) Log.i(TAG, "$what: $frames frames in $ms ms, $slow over ${SLOW_MS} ms, the slowest $worst ms")
         }
     }
 
@@ -344,6 +366,8 @@ class ShellOverlay(
     companion object {
         private const val TAG = "AiUsageRear"
         private const val FRAME_MS = 16L
+        /** A frame that took longer than this was late at 60 a second. */
+        private const val SLOW_MS = 17L
         private const val JOIN_MS = 300L
         /** After a failure, pulls do not try again for this long. */
         private const val RETRY_NS = 5_000_000_000L
@@ -376,6 +400,28 @@ class ShellOverlay(
          * The hidden Transaction.setBackgroundBlurRadius(SurfaceControl, int), looked up once
          * as ShellLayer looks up setLayerStack; null where the firmware has none (logged once).
          */
+        /**
+         * The blur under [layer] at [radius] SurfaceFlinger px, in [t]: for a layer of the shell's
+         * that is not a sheet (the notification's banner). False where the firmware has no such call.
+         */
+        internal fun blurUnder(t: SurfaceControl.Transaction, layer: SurfaceControl, radius: Int): Boolean {
+            val call = backgroundBlur ?: return false
+            return runCatching { call.invoke(t, layer, radius) }.isSuccess
+        }
+
+        /** The hidden Transaction.setCornerRadius(SurfaceControl, float), as [blurUnder]'s blur; false without it. */
+        internal fun roundCorners(t: SurfaceControl.Transaction, layer: SurfaceControl, radius: Float): Boolean {
+            val call = cornerRadius ?: return false
+            return runCatching { call.invoke(t, layer, radius) }.isSuccess
+        }
+
+        private val cornerRadius: java.lang.reflect.Method? by lazy {
+            runCatching {
+                SurfaceControl.Transaction::class.java
+                    .getMethod("setCornerRadius", SurfaceControl::class.java, Float::class.javaPrimitiveType)
+            }.getOrNull()
+        }
+
         private val backgroundBlur: java.lang.reflect.Method? by lazy {
             runCatching {
                 SurfaceControl.Transaction::class.java

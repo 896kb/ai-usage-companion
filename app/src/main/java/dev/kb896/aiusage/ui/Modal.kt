@@ -27,6 +27,30 @@ import dev.kb896.aiusage.R
  */
 object Modal {
 
+    /**
+     * The icon that says what a dialog's button says, for the words that have one: yes is a tick,
+     * no a cross, delete a bin. Null: the words stay, for what an icon would only make a guess of
+     * (Sign out, Import, Reset).
+     */
+    fun iconFor(text: CharSequence?): Int? = when (text?.toString()) {
+        "Use it", "Done", "OK", "Continue" -> R.drawable.ic_check
+        "Cancel", "Close", "Keep" -> R.drawable.ic_close
+        "Remove" -> R.drawable.ic_trash
+        "Unpin" -> R.drawable.ic_pinned
+        else -> null
+    }
+
+    /** The button's words for its icon, kept for a screen reader. Its colour follows the text's (GlassSheet). */
+    private fun iconize(button: android.widget.Button) {
+        val icon = iconFor(button.text) ?: return
+        button.contentDescription = button.text
+        button.text = ""
+        button.minWidth = 0
+        button.minimumWidth = 0
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0)
+        button.compoundDrawablePadding = 0
+    }
+
     fun builder(context: Context): AlertDialog.Builder =
         AlertDialog.Builder(
             context,
@@ -74,6 +98,9 @@ object Modal {
             }
         }
         dialog.window?.decorView?.let(::walk)
+        for (which in intArrayOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
+            dialog.getButton(which)?.let(::iconize)
+        }
         // Glass grows when pressed and rims sit on edges: nothing in a dialog clips it.
         dialog.window?.decorView?.let { dev.kb896.aiusage.ui.glass.Unclip.tree(it) }
 

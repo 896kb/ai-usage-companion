@@ -229,9 +229,16 @@ class RearDialView(context: Context) : View(context) {
     private fun refreshLuminance() {
         when (config.effectiveBackdrop) {
             dev.kb896.aiusage.data.BackdropKind.SHADER -> {
-                if (lumKey == "silk") return
-                lumKey = "silk"
-                dev.kb896.aiusage.ui.glass.Silk.cells(GlassLuminance.SIDE).copyInto(lumCells)
+                val key = "shader|" + silkLook()
+                if (lumKey == key) return
+                lumKey = key
+                if (metalOn) dev.kb896.aiusage.ui.glass.LiquidMetal.cells(GlassLuminance.SIDE, config.metal).copyInto(lumCells)
+                else if (bendsOn) dev.kb896.aiusage.ui.glass.ColorBends.cells(
+                    GlassLuminance.SIDE, Panel.WIDTH, Panel.HEIGHT, config.bends,
+                ).copyInto(lumCells)
+                else dev.kb896.aiusage.ui.glass.Silk.cells(
+                    GlassLuminance.SIDE, config.shaderColor, config.shaderColor2, config.shaderScale, config.shaderRotation,
+                ).copyInto(lumCells)
                 return
             }
             dev.kb896.aiusage.data.BackdropKind.VIDEO -> {
@@ -589,6 +596,7 @@ class RearDialView(context: Context) : View(context) {
 
     /** The ten, flattened. Two separators no notification text will contain. */
     private fun saveHistory() {
+        publishNotices()
         panelPrefs.edit().putString(
             KEY_HISTORY,
             history.joinToString(RECORD_SEP) {
@@ -597,6 +605,21 @@ class RearDialView(context: Context) : View(context) {
             },
         ).apply()
     }
+
+    /** The list as it now stands, for the shell's over any page: one list, this one. */
+    var onNoticesChanged: ((keys: Array<String>, pkgs: Array<String>, apps: Array<String>, titles: Array<String>, texts: Array<String>) -> Unit)? = null
+
+    fun publishNotices() {
+        val cb = onNoticesChanged ?: return
+        val list = history.toList()
+        cb(
+            list.map(::listKey).toTypedArray(), list.map { it.pkg }.toTypedArray(), list.map { it.app }.toTypedArray(),
+            list.map { it.title }.toTypedArray(), list.map { it.text }.toTypedArray(),
+        )
+    }
+
+    /** A card from before keys were kept has none: one that is the same for the same card, to dismiss it by. */
+    private fun listKey(n: Notice): String = n.key.ifEmpty { "$KEYLESS${(n.pkg + n.title + n.text).hashCode()}" }
 
     private data class Notice(
         val app: String,
@@ -3300,7 +3323,7 @@ class RearDialView(context: Context) : View(context) {
         val index = config.orderedAccounts(Account.entries.size).firstOrNull() ?: 0
         return colorFor(
             "ambient:body",
-            config.styleFor(index).mascotBody ?: MascotRenderer.BODY_GREEN,
+            config.styleFor(index).mascotBody ?: MascotRenderer.BODY_PURPLE,
         )
     }
 
@@ -3940,6 +3963,47 @@ class RearDialView(context: Context) : View(context) {
     }
 
     @Suppress("ClickableViewAccessibility")   // the rear panel has no accessibility path
+    private var noticeEdge = false
+    private var noticeEdgeTaken = false
+    private var noticeEdgeX = 0f
+    private var noticeEdgeY = 0f
+
+    /**
+     * A drag down from the top edge's right half is the notifications' pull, on every page: the
+     * shell service opens the list (ShellNotices), so here it only must not also move the page.
+     * A tap there is still whatever it was, and the gesture is only taken once it is that drag;
+     * whatever had begun under it is cancelled.
+     */
+    private fun noticePullTouch(event: android.view.MotionEvent): Boolean {
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                noticeEdgeTaken = false
+                noticeEdgeX = event.x
+                noticeEdgeY = event.y
+                noticeEdge = !aod && onlyAccount == null && config.showNotifications &&
+                    NoticeShade.startsPull(event.x, event.y, Panel.CUTOUT_RIGHT.toFloat())
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dy = event.y - noticeEdgeY
+                if (noticeEdge && !noticeEdgeTaken && dy >= EdgeGestures.SLOP && dy > kotlin.math.abs(event.x - noticeEdgeX)) {
+                    noticeEdge = false
+                    val cancel = android.view.MotionEvent.obtain(event).apply { action = android.view.MotionEvent.ACTION_CANCEL }
+                    onTouchEvent(cancel)
+                    cancel.recycle()
+                    noticeEdgeTaken = true
+                }
+                return noticeEdgeTaken
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                val taken = noticeEdgeTaken
+                noticeEdge = false
+                noticeEdgeTaken = false
+                return taken
+            }
+        }
+        return false
+    }
+
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
             onInteraction?.invoke()
@@ -3959,6 +4023,7 @@ class RearDialView(context: Context) : View(context) {
         // only thing with an answer, and it consumes the gesture either way so that
         // nothing underneath sees it.
         if (locked) return lockTouch(event)
+        if (noticePullTouch(event)) return true
         val onCamera = !ambient && near(cameraButton, event.x, event.y)
         // In ambient mode the whole panel is the way back, not just the button. The
         // mascot is walking and the button is a 16-unit disc on the back of a phone
@@ -4018,10 +4083,9 @@ class RearDialView(context: Context) : View(context) {
                 // on the page is still turning the page, which is how you get back down
                 // to the readout. Noted on the way down because that is when the finger
                 // chose, not when it has moved far enough to say so.
-                // The Info page with notifications on it: a swipe down pulls them into view
-                // and, off the cards, a swipe up puts them back (NoticeReveal). On the cards,
-                // up and down turns them and a swipe right sends one away.
-                onReveal = noticing >= 0.999f
+                // No more pulling them into view on the Info page: the top edge's right half
+                // brings them down on any page (ShellNotices).
+                onReveal = false
                 onWheel = onReveal && noticesShown && event.y < wheelGrabBottom() && shownHistory().isNotEmpty()
                 wheelDownAt = noticeWheelAt
                 // The wheel claims the gesture by itself. It used to ride on the pager's
@@ -4609,32 +4673,9 @@ class RearDialView(context: Context) : View(context) {
         // there was a screen to show it on, and the display knows that exactly.
         if (display?.state == android.view.Display.STATE_OFF) return
 
-        // Admitted, so it is worth keeping the display up for. After the drop check on
-        // purpose: something that will never be shown is not a reason to light anything.
+        // Worth keeping the display up for: the shell's banner is on its way (ShellNotices), on
+        // any page. The panel draws no strip of its own any more; this is only the list's store.
         keepAwakeFor()
-
-        // QUEUED, not raced. Notifications arrive in bursts — a group syncing, a chat
-        // catching up — and replacing on arrival meant each one was on screen for
-        // however long the next took to turn up. Three of them inside a second is three
-        // wheel turns and nothing anybody could read, which looks like a fault rather
-        // than like three messages.
-        //
-        // So an arrival while one is showing goes to the back of the queue, and the
-        // promotion happens on the panel's own clock — see [promoteNotices]. The strip
-        // stays open across the whole burst and only the content turns over.
-        if (notice == null) {
-            // Nothing showing: straight up, and no wheel. The first notice of a run
-            // arrives into an empty strip that is itself sliding in, and turning at the
-            // same time would have it enter twice over.
-            notice = next
-            noticeAt = now
-        } else if (!sameAs(notice, next)) {
-            // BOUNDED. A queue that grows without limit turns a notification storm into
-            // minutes of strip long after the phone has gone quiet, and the oldest
-            // unshown message is the one least worth waiting for.
-            while (pending.size >= MAX_QUEUED) pending.removeFirst()
-            pending.addLast(next)
-        }
         invalidate()
     }
 
@@ -6635,6 +6676,7 @@ class RearDialView(context: Context) : View(context) {
     private fun connected(account: Account): Boolean =
         state.statuses.firstOrNull { it.account == account }?.connected ?: true
 
+
     /** The accounts the readout shows, in the user's order: those with a credential. */
     private fun shownAccounts(): List<Int> =
         orderedAccounts().filter { i -> Account.entries.getOrNull(i)?.let { connected(it) } ?: false }
@@ -7141,7 +7183,7 @@ class RearDialView(context: Context) : View(context) {
                 canvas, clip, now, x, top, h, mascotPaint, deadEye,
                 accent = mascotAccentOf(account),
                 bodyColor = colorFor("body:${account.name}",
-                    config.styleFor(account.ordinal).mascotBody ?: MascotRenderer.BODY_GREEN),
+                    config.styleFor(account.ordinal).mascotBody ?: MascotRenderer.BODY_PURPLE),
                 dead = accountMascot(account) == MascotMood.DEAD,
             )
         }
@@ -8044,6 +8086,7 @@ class RearDialView(context: Context) : View(context) {
     /** The line's two strings, held against the reading that spelled them. See below. */
     private var lineFor: dev.kb896.aiusage.data.WeatherReading? = null
     private var lineTemp = ""
+    private var lineFahrenheit = false
     private var lineWords = ""
 
     /**
@@ -8072,9 +8115,11 @@ class RearDialView(context: Context) : View(context) {
         // minutes, on a page redrawn at the display's full rate — built per frame they are
         // garbage by the thousand for two words. Identity is the right key: a reading is
         // replaced wholesale when it changes, and the same object always reads the same.
-        if (reading !== lineFor) {
+        val fahrenheit = config.temperatureUnit == dev.kb896.aiusage.data.TemperatureUnit.FAHRENHEIT
+        if (reading !== lineFor || fahrenheit != lineFahrenheit) {
             lineFor = reading
-            lineTemp = WeatherLine.temperature(reading)
+            lineFahrenheit = fahrenheit
+            lineTemp = WeatherLine.temperature(reading, fahrenheit)
             lineWords = WeatherLine.words(reading)
         }
         val temp = lineTemp
@@ -8965,14 +9010,14 @@ class RearDialView(context: Context) : View(context) {
         if (key.isEmpty()) return
         pending.removeAll { it.key == key }
         notice?.let { if (it.key == key) noticeAt = SystemClock.elapsedRealtime() - NOTICE_MS - 1 }
-        val i = history.indexOfFirst { it.key == key }
+        val i = history.indexOfFirst { listKey(it) == key }
         if (i >= 0) removeHistoryAt(i, fromBack = false)
     }
 
     /** What is on the front now (Match the front notifications): cards whose notification left go. */
-    fun keepNotices(active: Set<String>) {
-        pending.removeAll { it.key.isNotEmpty() && it.key !in active }
-        val keep = dev.kb896.aiusage.data.NoticeMatch.keep(history.map { it.key }, active)
+    fun keepNotices(active: Set<String>, everything: Boolean = false) {
+        pending.removeAll { everything || it.key.isNotEmpty() && it.key !in active }
+        val keep = if (everything) history.map { false } else dev.kb896.aiusage.data.NoticeMatch.keep(history.map { it.key }, active)
         if (keep.all { it }) return
         val before = history.toList()
         val atBefore = noticeWheelAt
@@ -11103,6 +11148,34 @@ class RearDialView(context: Context) : View(context) {
     private val silkSpeed = SpeedRamp()
     private val silkShift = android.graphics.Matrix()
     private var silkTime = 0f
+    private var silkLookKey: String? = null
+
+    /** The Color Bends, the other shader: the same clock, in seconds. */
+    private val bends by lazy {
+        dev.kb896.aiusage.ui.glass.ColorBends.create().apply {
+            setFloatUniform("size", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        }
+    }
+    private val bendsOn get() = config.shader == "bends"
+    /** The liquid metal, the third: the same clock, in seconds. */
+    private val metal by lazy {
+        dev.kb896.aiusage.ui.glass.LiquidMetal.create().apply {
+            setFloatUniform("resolution", Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat())
+        }
+    }
+    private val metalOn get() = config.shader == "metal"
+    /** The shader chosen: the silk, the bends or the metal. */
+    private val shaderNow: android.graphics.RuntimeShader get() = when {
+        metalOn -> metal
+        bendsOn -> bends
+        else -> silk
+    }
+
+    /** The chosen shader's look, as one key: what it is set again for, and the brightness map read for. */
+    private fun silkLook() =
+        if (metalOn) "metal|${config.metal}"
+        else if (bendsOn) "bends|${config.bends}"
+        else "silk|${config.shaderColor}|${config.shaderColor2}|${config.shaderScale}|${config.shaderRotation}"
     private var silkLastMs = 0L
 
     /**
@@ -11124,16 +11197,40 @@ class RearDialView(context: Context) : View(context) {
         if (silkLastMs != 0L) silkTime += 0.1f * (frameNowMs - silkLastMs) / 1000f * speed
         val moving = speed > 0f || silkSpeed.turning(frameNowMs)
         silkLastMs = if (moving) frameNowMs else 0L
-        silk.setFloatUniform("time", silkTime)
-        silkShift.setTranslate(parallaxDx, parallaxDy)
-        silk.setLocalMatrix(silkShift)
+        // The silk's time is a tenth of the wall's, as its original; the bends' is in seconds.
+        when {
+            metalOn -> metal.setFloatUniform("time", silkTime * 10f)
+            bendsOn -> bends.setFloatUniform("time", silkTime * 10f)
+            else -> silk.setFloatUniform("time", silkTime)
+        }
+        // The look chosen for it, set again only when it changes.
+        val look = silkLook()
+        if (silkLookKey != look) {
+            silkLookKey = look
+            if (metalOn) dev.kb896.aiusage.ui.glass.LiquidMetal.look(metal, config.metal)
+            else if (bendsOn) dev.kb896.aiusage.ui.glass.ColorBends.look(bends, config.bends)
+            else dev.kb896.aiusage.ui.glass.Silk.look(
+                silk, config.shaderColor, config.shaderColor2, config.shaderScale, config.shaderRotation,
+            )
+        }
+        if (bendsOn || metalOn) {
+            // The bends lean toward the parallax as the original's do toward the mouse, and the
+            // metal's stripes with it; the shift taken back out of pixels, y up.
+            val px = -parallaxDx / (Parallax.MARGIN * Panel.WIDTH)
+            val py = parallaxDy / (Parallax.MARGIN * Panel.HEIGHT)
+            if (metalOn) dev.kb896.aiusage.ui.glass.LiquidMetal.pointer(metal, px, py)
+            else dev.kb896.aiusage.ui.glass.ColorBends.pointer(bends, px, py)
+        } else {
+            silkShift.setTranslate(parallaxDx, parallaxDy)
+            silk.setLocalMatrix(silkShift)
+        }
         if (moving) animating = true
     }
 
     private fun drawSilkBackdrop(canvas: Canvas) {
         val fade = aodFade(frameNowMs)
         if (fade >= 0.999f) return
-        silkPaint.shader = silk
+        silkPaint.shader = shaderNow
         silkPaint.colorFilter = if (fade > 0f) {
             val keep = (255 * (1f - fade)).toInt().coerceIn(0, 255)
             android.graphics.LightingColorFilter((keep shl 16) or (keep shl 8) or keep, 0)
@@ -11352,7 +11449,7 @@ class RearDialView(context: Context) : View(context) {
      * cached bitmap.
      */
     private fun liveGround(): android.graphics.Shader? = when (config.effectiveBackdrop) {
-        dev.kb896.aiusage.data.BackdropKind.SHADER -> silk
+        dev.kb896.aiusage.data.BackdropKind.SHADER -> shaderNow
         dev.kb896.aiusage.data.BackdropKind.VIDEO -> videoGround()
         // A picture that moves with the parallax is a live ground too: a cached one would be rebuilt every frame.
         dev.kb896.aiusage.data.BackdropKind.IMAGE -> if (parallaxOn) imageGround() else null
@@ -11553,28 +11650,28 @@ class RearDialView(context: Context) : View(context) {
             workTimes = arrayOf("2h58m", "1d22h", "1d22h")),
         // ---- the media page, three segments, because it does three things -------------
         //
-        // A track playing, then the SAME track paused, then a different one: the change
-        // is the point. The record crosses, the name rolls over on its wheel and the
-        // transport shows what it is for. One long segment would have shown a record
-        // turning and nothing happening to it.
+        // A track playing, then paused, then playing again louder: the front preview's
+        // made-up Bladee "Apple", cover and all. The transport and the volume strip show what
+        // they are for; one long segment would have shown a record turning and nothing
+        // happening to it.
         DemoStep(7f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
             personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
             workBars = floatArrayOf(0.60f, 0.41f, 0.33f),
             personalTimes = arrayOf("1h47m", "3d19h", "3d19h"),
             workTimes = arrayOf("2h58m", "1d22h", "1d22h"),
-            track = "Windowlicker", artist = "Aphex Twin", volume = 0.30f),
+            track = "Apple", artist = "Bladee", volume = 0.30f),
         DemoStep(4f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
             personalBars = floatArrayOf(0.45f, 0.50f, 0.38f),
             workBars = floatArrayOf(0.60f, 0.41f, 0.33f),
             personalTimes = arrayOf("1h44m", "3d19h", "3d19h"),
             workTimes = arrayOf("2h55m", "1d22h", "1d22h"),
-            track = "Windowlicker", artist = "Aphex Twin", playing = false, volume = 0.72f),
+            track = "Apple", artist = "Bladee", playing = false, volume = 0.72f),
         DemoStep(7f, PAGE_MEDIA, MascotMood.WALK, MascotMood.MUSCLE,
             personalBars = floatArrayOf(0.46f, 0.50f, 0.38f),
             workBars = floatArrayOf(0.61f, 0.41f, 0.33f),
             personalTimes = arrayOf("1h41m", "3d19h", "3d19h"),
             workTimes = arrayOf("2h52m", "1d22h", "1d22h"),
-            track = "Xtal", artist = "Aphex Twin", volume = 0.55f),
+            track = "Apple", artist = "Bladee", volume = 0.55f),
         // Back to the readout for the charging cell, which is drawn over whatever page is
         // showing but belongs with the readings.
         DemoStep(7f, PAGE_READOUT, MascotMood.WALK, MascotMood.CONFETTI, charge = true,
@@ -11765,6 +11862,15 @@ class RearDialView(context: Context) : View(context) {
      * demo shows the same movement a thumb would produce — the point is to film the
      * transition, not to arrive.
      */
+    /** The made-up track's cover (res/raw/preview_cover.jpg, as the front preview's) as a file. */
+    private fun demoCover(): String = runCatching {
+        val file = java.io.File(context.cacheDir, "demo-cover.jpg")
+        if (!file.exists()) context.resources.openRawResource(dev.kb896.aiusage.R.raw.preview_cover).use { input ->
+            file.outputStream().use { input.copyTo(it) }
+        }
+        file.path
+    }.getOrDefault("")
+
     private fun driveDemo() {
         val step = demoNow() ?: run {
             demoStep = -1
@@ -11773,6 +11879,8 @@ class RearDialView(context: Context) : View(context) {
             demoOwnsMedia = false
             return
         }
+        // Asked as the demo starts, so the sheet is there before the media page comes round.
+        fetchDemoLyrics()
         // A demo that lets the display doze halfway through a take is not a demo.
         animating = true
         keepAwakeFor()
@@ -11788,17 +11896,54 @@ class RearDialView(context: Context) : View(context) {
         // else. A demo that set the fields directly would show the new title already in
         // place, which is the one thing worth filming about a track change.
         if (step.track.isNotEmpty()) {
+            // THE SONG'S OWN CLOCK: it runs while playing and holds while paused, across the
+            // media segments, so the bar and the lyrics move as a real track's do.
+            val now = SystemClock.elapsedRealtime()
+            if (demoTrackAt == 0L) demoTrackPos = DEMO_TRACK_FROM_MS
+            else if (demoTrackPlaying) demoTrackPos += now - demoTrackAt
+            demoTrackAt = now
+            demoTrackPlaying = step.playing
+            val lrc = demoLrc
             demoOwnsMedia = true
             demoPushing = true
             showMedia(
                 active = true, title = step.track, artist = step.artist,
                 playing = step.playing,
+                // The front preview's made-up record, so the film shows the same one it does.
+                artPath = demoCover(),
                 durationMs = DEMO_TRACK_MS,
-                positionMs = (DEMO_TRACK_MS * DEMO_TRACK_AT).toLong(),
-                positionAtMs = SystemClock.elapsedRealtime(),
+                positionMs = demoTrackPos.coerceAtMost(DEMO_TRACK_MS),
+                positionAtMs = now,
+                lyricsLrc = lrc,
+                lyricsFor = if (lrc.isEmpty()) "" else step.track + " " + step.artist + " " + (DEMO_TRACK_MS / 1000L),
             )
             demoPushing = false
+        } else {
+            // Off the media page the song starts over next time round.
+            demoTrackAt = 0L
         }
+    }
+
+    private var demoTrackPos = 0L
+    private var demoTrackAt = 0L
+    private var demoTrackPlaying = false
+    @Volatile private var demoLrc = ""
+    private var demoLyricsAsked = false
+
+    /**
+     * The demo track's synced lyrics, from LRCLIB as a real track's are (MediaWatcher), asked
+     * once per process off the draw; the media segments come round long after it answers.
+     */
+    private fun fetchDemoLyrics() {
+        if (demoLyricsAsked) return
+        demoLyricsAsked = true
+        Thread {
+            demoLrc = runCatching {
+                dev.kb896.aiusage.data.LyricsApi(okhttp3.OkHttpClient())
+                    .fetch("Apple", "Bladee", "Apple", DEMO_TRACK_MS / 1000L)
+            }.getOrNull().orEmpty()
+            android.util.Log.i("AiUsageDemo", "demo lyrics: ${if (demoLrc.isEmpty()) "none" else "${demoLrc.lines().size} lines"}")
+        }.apply { isDaemon = true; name = "demo-lyrics"; start() }
     }
 
     /**
@@ -12311,6 +12456,7 @@ class RearDialView(context: Context) : View(context) {
         private const val PANEL_PREFS = "rear_panel"
         private const val KEY_PAGE = "page"
         private const val KEY_HISTORY = "notices"
+        const val KEYLESS = "keyless:"
         /** The Info page's notifications, put away by a swipe to the right. */
         private const val FIELD_SEP = "\u0001"
         private const val RECORD_SEP = "\u0002"
@@ -12699,8 +12845,10 @@ class RearDialView(context: Context) : View(context) {
         private const val DEMO_WHEEL_PERIOD = 6f
 
         /** Long enough that the playback ring is visibly part-way round, not near an end. */
-        private const val DEMO_TRACK_MS = 254_000L
-        private const val DEMO_TRACK_AT = 0.38f
+        /** Bladee's "Apple" as LRCLIB has it: 1:44. */
+        private const val DEMO_TRACK_MS = 104_000L
+        /** Just before its first line, so the lyrics start as the media page comes up. */
+        private const val DEMO_TRACK_FROM_MS = 7_500L
 
         /** A charge worth filming: past the halfway mark, so the cell is visibly full. */
         private const val DEMO_CHARGE = 68

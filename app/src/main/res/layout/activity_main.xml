@@ -130,7 +130,7 @@
             android:id="@+id/setup_heading"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="ONBOARDING"
+            android:text="Onboarding"
             android:textSize="12sp"
             android:visibility="gone" />
 
@@ -187,9 +187,24 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
+        <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_look"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/look_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
         <!--
             ONE SECTION FOR ONE THING. The panel has a single background — a colour, a
-            picture, a video or a shader — chosen here, first in General, with only the
+            picture, a video or a shader — chosen here, in General, with only the
             chosen kind's controls under the choice. See MainActivity.bindBackdrop.
 
             There is no switch on the heading. There was, and it offered a choice between
@@ -222,6 +237,21 @@
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
         <dev.kb896.aiusage.ui.glass.GlassCard
+            android:id="@+id/card_weather"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/weather_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        </dev.kb896.aiusage.ui.glass.GlassCard>
+
+        <dev.kb896.aiusage.ui.glass.GlassCard
             android:id="@+id/card_general"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -236,125 +266,20 @@
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
-        <View
-            android:id="@+id/rule_advanced"
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="16dp" />
-
+        <!-- The people who helped. Last on the screen in a release build. See Credits. -->
         <dev.kb896.aiusage.ui.glass.GlassCard
-            android:id="@+id/card_advanced"
+            android:id="@+id/card_credits"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
             android:orientation="vertical">
 
-        <!-- A label at the card's top, like Theme's, and the card open: no accordion. -->
-        <TextView
-            android:id="@+id/geo_heading"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Advanced"
-            android:textSize="13sp" />
-
+        <!-- Advanced, Credits and the privacy policy: MainActivity.buildSettingsRows. -->
         <LinearLayout
-            android:id="@+id/geo_body"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/geo_hint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="For a phone whose rear display is not the one this was measured on — a larger model, say. Both rings share X and radius so they cannot drift apart. Changes show on the back as you drag."
-            android:textSize="10sp" />
-
-        <LinearLayout
-            android:id="@+id/advanced_rows"
+            android:id="@+id/about_rows"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
-
-        <TextView
-            android:id="@+id/geo_cx_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="RING X"
-            android:textSize="11sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassSlider
-            style="@style/PanelSeekBar"
-            android:id="@+id/geo_cx"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/geo_cy1_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="PERSONAL Y"
-            android:textSize="11sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassSlider
-            style="@style/PanelSeekBar"
-            android:id="@+id/geo_cy1"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/geo_cy2_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="WORK Y"
-            android:textSize="11sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassSlider
-            style="@style/PanelSeekBar"
-            android:id="@+id/geo_cy2"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/geo_radius_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="RADIUS"
-            android:textSize="11sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassSlider
-            style="@style/PanelSeekBar"
-            android:id="@+id/geo_radius"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/geo_stroke_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="STROKE"
-            android:textSize="11sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassSlider
-            style="@style/PanelSeekBar"
-            android:id="@+id/geo_stroke"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <dev.kb896.aiusage.ui.glass.GlassButton
-            android:id="@+id/geo_reset"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Reset to measured defaults"
-            android:textSize="13sp" />
-
-        </LinearLayout>
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
@@ -367,33 +292,6 @@
             android:id="@+id/debug_slot"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
-
-        <!-- The people who helped. Last on the screen, in every build. See Credits. -->
-        <dev.kb896.aiusage.ui.glass.GlassCard
-            android:id="@+id/card_credits"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:orientation="vertical">
-
-        <dev.kb896.aiusage.ui.glass.GlassButton
-            android:id="@+id/credits"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Credits"
-            android:textSize="13sp" />
-
-        <!-- The privacy policy, on rear.896.ro: the notice shows once, this stays. See Privacy. -->
-        <dev.kb896.aiusage.ui.glass.GlassButton
-            android:id="@+id/privacy_policy"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Privacy policy"
-            android:textSize="13sp" />
-
-        </dev.kb896.aiusage.ui.glass.GlassCard>
 
         </LinearLayout>
 
@@ -416,7 +314,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="PANEL"
+            android:text="Panel"
             android:textSize="12sp" />
 
         <dev.kb896.aiusage.ui.glass.GlassCard
@@ -425,10 +323,17 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+        <LinearLayout
+            android:id="@+id/accounts_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
         <TextView
             android:id="@+id/settings_title_label"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:text="Title"
             android:textSize="13sp" />
 
@@ -470,22 +375,11 @@
 
         <!-- The bottom artwork, in the usage card with the page's other settings rather than
              a card of its own. -->
-        <TextView
-            android:id="@+id/settings_art_label"
+        <LinearLayout
+            android:id="@+id/art_rows"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="8dp"
-            android:text="Bottom artwork"
-            android:textSize="13sp" />
-
-        <dev.kb896.aiusage.ui.glass.GlassButton
-            android:id="@+id/art_pick"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Choose an image"
-            android:textSize="13sp" />
+            android:orientation="vertical" />
 
         </dev.kb896.aiusage.ui.glass.GlassCard>
 
@@ -505,7 +399,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="CLOCK PAGE"
+            android:text="Clock page"
             android:textSize="12sp" />
 
         <dev.kb896.aiusage.ui.glass.GlassCard
@@ -537,7 +431,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="MEDIA PAGE"
+            android:text="Media page"
             android:textSize="12sp" />
 
         <dev.kb896.aiusage.ui.glass.GlassCard
@@ -569,7 +463,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="ALWAYS-ON"
+            android:text="Always-on"
             android:textSize="12sp" />
 
         <dev.kb896.aiusage.ui.glass.GlassCard
@@ -595,12 +489,13 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-        <!-- The portal's guide (PortalGuideCard): above the settings until it is done. -->
+        <!-- The portal's guide (PortalGuideCard): above the settings until it is done. Its gap is below
+             it, so the settings start where every other tab's do when it is gone. -->
         <dev.kb896.aiusage.ui.glass.GlassCard
             android:id="@+id/card_portal_guide"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"
             android:orientation="vertical"
             android:visibility="gone">
 
@@ -616,7 +511,6 @@
             android:id="@+id/card_portal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:orientation="vertical">
 
         <LinearLayout
@@ -654,7 +548,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            android:text="ON THE BACK"
+            android:text="On the back"
             android:textSize="12sp" />
 
         <!-- The app's icon and name, above the preview. Filled from the installed app's own

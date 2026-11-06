@@ -58,14 +58,14 @@ object Ink {
 
     /** The slider fill and the segmented selection. LiquidSlider.kt:59-60. */
     /**
-     * The app's accent, #E7FF00 — the bottom bar's open tab, the confirm in every dialog,
+     * The app's accent, #C26BFF — the bottom bar's open tab, the confirm in every dialog,
      * a slider's fill, a switch that is on, the font list's tick. The one place it is
      * written; styles_dialog.xml repeats it for what the framework tints.
      */
     @Suppress("UNUSED_PARAMETER")
     fun accent(luminance: Float): Int = ACCENT
 
-    const val ACCENT = 0xFFE7FF00.toInt()
+    const val ACCENT = 0xFFC26BFF.toInt()
 
     /** An inactive track. LiquidToggle.kt:59-60: grey at 0.2 light, 0.36 dark. */
     fun track(luminance: Float): Int =

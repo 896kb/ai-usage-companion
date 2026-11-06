@@ -9,7 +9,7 @@ import kotlin.math.sin
  * The front screen's background: "Silk", from Vue Bits (vue-bits.dev/backgrounds/silk,
  * DavidHDev, after React Bits), its fragment shader translated to AGSL line for line,
  * with the settings it was chosen at: speed 3.3, scale 1.3, noise intensity 3, rotation 45°,
- * colour #49701D.
+ * colour #5B21B6.
  *
  * One shader for every place the background is seen: the root draws it, and every pane of
  * glass refracts it (Backdrop.shader), so the glass bends the silk as it moves rather than
@@ -26,12 +26,14 @@ object Silk {
     const val NOISE = 3f
     /** 45°, in radians — the original's rotation control, which takes radians. */
     const val ROTATION = 0.7853982f
-    const val COLOR = 0xFF49701D.toInt()
+    /** The app's purple: the settings above are as chosen, the colour was #49701D then. */
+    const val COLOR = 0xFF5B21B6.toInt()
 
     private const val SRC = """
 uniform float2 size;
 uniform float time;
 uniform half3 color;
+uniform half3 color2;
 uniform float speed;
 uniform float scale;
 uniform float rotation;
@@ -67,7 +69,8 @@ half4 main(float2 coord) {
                                      0.02 * tOffset) +
                              sin(20.0 * (tex.x + tex.y - 0.1 * tOffset)));
 
-    half4 col = half4(color, 1.0) * half4(pattern) - half(rnd / 15.0 * noiseIntensity);
+    // From color2 in the folds to color on the crests: the original's color * pattern when color2 is black.
+    half4 col = half4(mix(color2, color, half(pattern)), 1.0) - half(rnd / 15.0 * noiseIntensity);
     return half4(clamp(col.rgb, 0.0, 1.0), 1.0);
 }"""
 
@@ -85,6 +88,7 @@ half4 main(float2 coord) {
         RuntimeShader(SRC).apply {
             setFloatUniform("color",
                 ((COLOR shr 16) and 0xFF) / 255f, ((COLOR shr 8) and 0xFF) / 255f, (COLOR and 0xFF) / 255f)
+            setFloatUniform("color2", 0f, 0f, 0f)
             setFloatUniform("speed", SPEED)
             setFloatUniform("scale", SCALE)
             setFloatUniform("rotation", ROTATION)
@@ -92,6 +96,20 @@ half4 main(float2 coord) {
             setFloatUniform("time", 0f)
             setFloatUniform("size", 1f, 1f)
         }
+
+    /**
+     * [shader] set to a look of its own (the back's choice): [color] on the crests, [color2] in
+     * the folds, [scale] for how often the folds repeat, turned by [rotationDeg] degrees.
+     */
+    fun look(shader: RuntimeShader, color: Int, color2: Int, scale: Float, rotationDeg: Int) {
+        fun rgb(name: String, c: Int) = shader.setFloatUniform(
+            name, ((c shr 16) and 0xFF) / 255f, ((c shr 8) and 0xFF) / 255f, (c and 0xFF) / 255f,
+        )
+        rgb("color", color)
+        rgb("color2", color2)
+        shader.setFloatUniform("scale", scale)
+        shader.setFloatUniform("rotation", Math.toRadians(rotationDeg.toDouble()).toFloat())
+    }
 
     fun size(w: Int, h: Int) { shader.setFloatUniform("size", w.toFloat(), h.toFloat()) }
 
@@ -136,21 +154,24 @@ half4 main(float2 coord) {
      * on the CPU as [still] is: what the back's glass reads when the silk is behind it.
      * Rec.709, as GlassLuminance.of weighs a colour.
      */
-    fun cells(side: Int): FloatArray {
-        val r = ((COLOR shr 16) and 0xFF) / 255f
-        val g = ((COLOR shr 8) and 0xFF) / 255f
-        val b = (COLOR and 0xFF) / 255f
+    /** The brightness map at a [look]: the back's chosen one; the front's own by default. */
+    fun cells(
+        side: Int, color: Int = COLOR, color2: Int = 0xFF000000.toInt(),
+        scale: Float = SCALE, rotationDeg: Int = 45,
+    ): FloatArray {
+        fun ch(c: Int, shift: Int) = ((c shr shift) and 0xFF) / 255f
         val grain = 0.5f / 15f * NOISE
-        val c = cos(ROTATION); val s = sin(ROTATION)
+        val a = Math.toRadians(rotationDeg.toDouble()).toFloat()
+        val c = cos(a); val s = sin(a)
         return FloatArray(side * side) { i ->
-            val u = ((i % side) + 0.5f) / side * SCALE
-            val v = (1f - ((i / side) + 0.5f) / side) * SCALE
-            val tx = (c * u + s * v) * SCALE
-            var ty = (-s * u + c * v) * SCALE
+            val u = ((i % side) + 0.5f) / side * scale
+            val v = (1f - ((i / side) + 0.5f) / side) * scale
+            val tx = (c * u + s * v) * scale
+            var ty = (-s * u + c * v) * scale
             ty += 0.03f * sin(8f * tx)
             val pattern = 0.6f + 0.4f * sin(5f * (tx + ty + cos(3f * tx + 5f * ty)) + sin(20f * (tx + ty)))
-            fun ch(k: Float) = (k * pattern - grain).coerceIn(0f, 1f)
-            0.2126f * ch(r) + 0.7152f * ch(g) + 0.0722f * ch(b)
+            fun mix(shift: Int) = (ch(color2, shift) + (ch(color, shift) - ch(color2, shift)) * pattern - grain).coerceIn(0f, 1f)
+            0.2126f * mix(16) + 0.7152f * mix(8) + 0.0722f * mix(0)
         }
     }
 }

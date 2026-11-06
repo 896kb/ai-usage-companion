@@ -49,7 +49,7 @@ import android.view.SurfaceControl
  */
 class PortalFrame(private val layerStack: Int, private val rear: RearGeometry) {
 
-    @Volatile private var color = 0xFF28FF85.toInt()
+    @Volatile private var color = 0xFFB14CFF.toInt()
     /** What it runs round: the render thread reads it each frame ([follow]). */
     @Volatile private var shapes: List<ElectricBorder.Shape> = shapesFor(rear)
     @Volatile private var thread: Thread? = null

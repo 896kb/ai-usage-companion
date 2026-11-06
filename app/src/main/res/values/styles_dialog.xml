@@ -12,7 +12,7 @@
       level does not travel into all of them. Modal walks the finished dialog for that.
 
       Colours are Panel.Palette's, repeated because a style cannot read a Kotlin object.
-        BG #1D1F21   FG #C5C8C6   DIM #555555   WORK/green #B5BD68   RULE #2F3234
+        BG #1D1F21   FG #C5C8C6   DIM #555555   WORK/green #B14CFF   RULE #2F3234
     -->
     <style name="PanelDialog" parent="@android:style/Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/dialog_bg</item>
@@ -20,8 +20,8 @@
         <!-- Buttons, the text cursor, the EditText underline and every other tinted
              control take this. It was the single loudest stock colour: a blue "IMPORT"
              on a green-and-grey panel app. -->
-        <item name="android:colorAccent">#B5BD68</item>
-        <item name="android:colorControlActivated">#B5BD68</item>
+        <item name="android:colorAccent">#B14CFF</item>
+        <item name="android:colorControlActivated">#B14CFF</item>
         <item name="android:colorControlNormal">#555555</item>
 
         <item name="android:textColorPrimary">#C5C8C6</item>
@@ -33,7 +33,7 @@
     </style>
 
     <style name="PanelDialog.Title" parent="@android:style/TextAppearance.Material.DialogWindowTitle">
-        <item name="android:textColor">#B5BD68</item>
+        <item name="android:textColor">#B14CFF</item>
         <item name="android:textSize">15sp</item>
     </style>
 
@@ -48,7 +48,7 @@
         <item name="android:windowIsFloating">true</item>
         <!-- The front's accent, the colour the bottom bar shows the open tab in
              (Ink.ACCENT), for cursors and anything else the framework tints. -->
-        <item name="android:colorAccent">#E7FF00</item>
-        <item name="android:colorControlActivated">#E7FF00</item>
+        <item name="android:colorAccent">#C26BFF</item>
+        <item name="android:colorControlActivated">#C26BFF</item>
     </style>
 </resources>

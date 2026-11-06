@@ -31,7 +31,8 @@ object PortalGuideCard {
     val GESTURES = listOf(
         "Swipe up from the bottom: the portal. Once more, with an app open there: its DPI slider.",
         "Swipe in from the right edge: Back, inside the app.",
-        "Pull down from the top, right of the cameras: the control centre.",
+        "Pull down from the top, on the left: the control centre.",
+        "Pull down from the top, on the right: your notifications. Swipe one sideways to dismiss it.",
         "Double tap: the back sleeps — not on the media buttons, nor in the control centre.",
     )
 
@@ -87,7 +88,7 @@ object PortalGuideCard {
     }
 
     /**
-     * The gesture sketch on its own, in a dialog — for the row at the bottom of the tab once
+     * The gestures' picture on its own, in a dialog — for the row at the bottom of the tab once
      * the card is down. [onTile], given while the tile is not in the panel yet, adds a button
      * for it: a card dismissed early would otherwise leave no way to ask.
      */
@@ -133,7 +134,17 @@ object PortalGuideCard {
     /** The sketch, then what each zone does. */
     private fun sketch(into: LinearLayout) {
         val context = into.context
-        into.addView(GestureSketchView(context), rowParams(context, 10))
+        // Where the gestures land, on the phone's own back: tools/portal-guide-still.py in the notes.
+        into.addView(android.widget.ImageView(context).apply {
+            setImageResource(R.drawable.portal_guide)
+            adjustViewBounds = true
+            contentDescription = "The back of the phone, with where each gesture starts"
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: android.view.View, outline: android.graphics.Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(context, 20).toFloat())
+            }
+        }, rowParams(context, 10))
         GESTURES.forEach { SettingsRows.note(into, "·  $it") }
     }
 
@@ -141,7 +152,7 @@ object PortalGuideCard {
     private fun step(into: LinearLayout, n: Int, title: String, done: Boolean, onClick: () -> Unit) {
         val context = into.context
         into.addView(GlassButton(context).apply {
-            text = if (done) "${mark(n, true)}$title" else "${mark(n, false)}$title  ›"
+            text = if (done) "${mark(n, true)}$title" else "${mark(n, false)}$title"
             textSize = 14f
             isEnabled = !done
             setTextColor(if (done) Panel.Palette.WORK else Panel.Palette.FG)

@@ -79,6 +79,10 @@ object GlassSheet {
         for (which in intArrayOf(AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
             dialog.getButton(which)?.setTextColor(Ink.secondary(lum))
         }
+        // An icon in place of the words (Modal) is inked as they would be.
+        for (which in intArrayOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
+            dialog.getButton(which)?.let { it.compoundDrawableTintList = it.textColors }
+        }
     }
 
     private fun stateList(enabled: Int, disabled: Int) = android.content.res.ColorStateList(

@@ -216,9 +216,15 @@ class EdgeGesturesTest {
     }
 
     @Test fun `only over the left half of the usable area, right at the top`() {
-        assertEquals(emptyList<Action>(), run(Down(800f, 10f, 0), Move(800f, 100f, 10), Up(800f, 200f, 20)))
         assertEquals(emptyList<Action>(), run(Down(400f, 80f, 0), Move(400f, 150f, 10), Up(400f, 200f, 20)))
         assertEquals(emptyList<Action>(), run(Down(200f, 10f, 0), Move(200f, 100f, 10), Up(200f, 200f, 20)))
+    }
+
+    @Test fun `the top edge's right half is the notifications' pull`() {
+        assertEquals(
+            listOf(Action.NoticePullStart(100f), Action.NoticePullEnd(200f)),
+            run(Down(800f, 10f, 0), Move(800f, 100f, 10), Up(800f, 200f, 20)),
+        )
     }
 
     @Test fun `a sideways or upward drag from the top band is not a pull`() {

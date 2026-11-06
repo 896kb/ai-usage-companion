@@ -45,6 +45,14 @@ internal class PortalSheetPreview(context: Context) : View(context) {
             invalidate()
         }
 
+    /** How far open, 0 shut to 1 open, as the back's sheet is under the finger or settling (PanelPreviewView.portal). */
+    var progress = 1f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
     private var labels: List<String> = emptyList()
     private var icons: List<Bitmap?> = emptyList()
 
@@ -74,17 +82,21 @@ internal class PortalSheetPreview(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         val w = Panel.WIDTH.toFloat(); val h = Panel.HEIGHT.toFloat()
+        // The dim comes in with the sheet, as the back's (ShellOverlay.dimColor).
+        val dimAlpha = dim.alpha
+        dim.alpha = Math.round(dimAlpha * progress)
         canvas.drawRect(0f, 0f, w, h, dim)
+        dim.alpha = dimAlpha
         val key = config.portalGrid to labels.size
         val layout = laid?.takeIf { laidFor == key }
             ?: PortalSheet.layout(key.first, key.second, guestOnTop = null, lensRight = rear.cutoutPx.toFloat()).also { laid = it; laidFor = key }
         painter.draw(
-            canvas, progress = 1f, scroll = 0f, layout = layout, page = 0f, icons = icons, labels = labels,
+            canvas, progress = progress, scroll = 0f, layout = layout, page = 0f, icons = icons, labels = labels,
             guestOnTop = false, names = config.portalAppNames,
         )
         if (!config.portalBorder) return
         // At the frame's opacity as one picture, as its layer is on the back.
-        val saved = canvas.saveLayerAlpha(0f, 0f, w, h, Math.round(255 * PortalFrame.ALPHA))
+        val saved = canvas.saveLayerAlpha(0f, 0f, w, h, Math.round(255 * PortalFrame.ALPHA * progress))
         try {
             border.draw(canvas, shapes, config.portalFrameColor, (AnimationUtils.currentAnimationTimeMillis() - born) / 1000f)
         } finally {

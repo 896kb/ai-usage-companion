@@ -110,7 +110,7 @@ object Privacy {
             "With notification access the back can show other apps' notifications and control " +
                 "what is playing. It shows a notification's app and title — the message text " +
                 "only if you turn that on — and the back faces away from you, so people behind " +
-                "you can read it; with \"match the front notifications\" on, swiping a card away " +
+                "you can read it; with \"Sync with front notifications\" on, swiping a card away " +
                 "on the back clears it on the phone too. Notifications are never stored or sent " +
                 "off the phone; what is playing leaves it only for lyrics, if you turn them on.",
         ),

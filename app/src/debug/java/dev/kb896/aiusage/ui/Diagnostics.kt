@@ -59,8 +59,18 @@ object Diagnostics {
             onReset()
         }
 
-        // Open, like every other card: the label sits at its top and there is nothing to
-        // expand. And in the front's face, not the old monospaced one.
+        // Shut until asked for, at the foot of General: a switch at the card's top opens it.
+        val body = slot.findViewById<View>(R.id.debug_body)
+        slot.findViewById<View>(R.id.debug_heading).visibility = View.GONE
+        val opener = android.widget.LinearLayout(slot.context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        (body.parent as ViewGroup).addView(opener, 0)
+        SettingsRows.toggle(opener, "Debug", false) { on ->
+            body.visibility = if (on) View.VISIBLE else View.GONE
+        }
+
+        // In the front's face, not the old monospaced one.
         for (id in intArrayOf(R.id.debug_heading, R.id.preview_label, R.id.preview_text,
                 R.id.mascot_heading, R.id.calls_heading, R.id.calls_text)) {
             UiType.dress(slot.findViewById<TextView>(id))

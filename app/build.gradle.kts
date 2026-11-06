@@ -33,7 +33,7 @@ android {
         versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.9.89-dev"
         ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        manifestPlaceholders["appLabel"] = "AI Usage"
+        manifestPlaceholders["appLabel"] = "Magic Rear"
     }
 
     compileOptions {
@@ -67,7 +67,7 @@ android {
             // Debug builds are their own app (dev.kb896.<app>.dev, "(dev)", a "dev" tab on the
             // icon from src/debug/res), so one installs beside the release instead of over it.
             applicationIdSuffix = ".dev"
-            manifestPlaceholders["appLabel"] = "AI Usage (dev)"
+            manifestPlaceholders["appLabel"] = "Magic Rear (dev)"
         }
         release {
             isMinifyEnabled = true

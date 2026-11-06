@@ -235,6 +235,38 @@ enum class VideoPlayMode { LINEAR, YOYO, LINEAR_LOOP, PING_PONG }
  * it plays. The clip is already cropped, scaled to the rear display and trimmed — the
  * trim and crop are kept to reopen the editor where it was left.
  */
+/**
+ * The Color Bends shader's look (PanelConfig.shader "bends"): Vue Bits' demo settings until
+ * chosen, in the app's purple. See ui.glass.ColorBends.
+ */
+@Serializable
+data class BendsConfig(
+    val color: Int = 0xFFB14CFF.toInt(),
+    /** Degrees. */
+    val rotation: Int = 90,
+    val scale: Float = 1f,
+    val frequency: Float = 1f,
+    val bandWidth: Float = 6f,
+)
+
+/**
+ * The liquid metal shader's look (PanelConfig.shader "metal"): metal-fx's presets, or a tint
+ * of its own ("tint"), over Paper's "Backdrop" settings. See ui.glass.LiquidMetal.
+ */
+@Serializable
+data class MetalConfig(
+    /** "silver", "gold", "chromatic" or "tint". */
+    val preset: String = "silver",
+    /** The colour-burn tint for "tint": its alpha is how much. */
+    val tint: Int = 0xCCC26BFF.toInt(),
+    /** Stripe density, 1 to 10. */
+    val repetition: Float = 1.5f,
+    /** Which way the stripes run, in degrees. */
+    val angle: Int = 90,
+    /** The noise warping the stripes, 0 to 1. */
+    val distortion: Float = 0.1f,
+)
+
 @Serializable
 data class VideoConfig(
     val originalUri: String? = null,
@@ -436,6 +468,11 @@ data class PanelConfig(
     val weatherLon: Double? = null,
     /** Ask the phone where it is before each fetch. Needs the coarse permission. */
     val weatherUseDevice: Boolean = false,
+    /**
+     * The weather line's degrees: "auto", "c" or "f". Auto is resolved in the app process before the
+     * config crosses to the back (see [StatePayload.encode]), so the back only ever sees "c" or "f".
+     */
+    val temperatureUnit: String = TemperatureUnit.AUTO,
 
     /**
      * Walk the panel through itself, on a loop, with nobody touching it.
@@ -483,7 +520,7 @@ data class PanelConfig(
      * key would have quietly turned it off for everybody who had turned it on.
      */
     @SerialName("aodPocket")
-    val pocketMode: Boolean = false,
+    val pocketMode: Boolean = true,
     /**
      * "Match the front notifications": a notification that leaves the front leaves the
      * back's list too, the list is brought in line with the front whenever the relay
@@ -606,6 +643,14 @@ data class PanelConfig(
     val backdrop: ArtConfig = ArtConfig(),
     /** Which background the panel has; null in configs saved before there was a choice. See [effectiveBackdrop]. */
     val backdropKind: BackdropKind? = null,
+    /** The shader background's colour (BackdropKind.SHADER): Silk's purple until one is chosen. */
+    val shaderColor: Int = 0xFF5B21B6.toInt(),
+    /** The shader's second colour, in the folds between the crests: black, as the original. */
+    val shaderColor2: Int = 0xFF000000.toInt(),
+    /** How often the shader's folds repeat: Silk's own 1.3 until chosen. */
+    val shaderScale: Float = 1.3f,
+    /** The shader's turn, in degrees: Silk's own 45 until chosen. */
+    val shaderRotation: Int = 45,
     val video: VideoConfig = VideoConfig(),
     /**
      * Depth for the background (a picture, a video, the shader): it shifts a little as the
@@ -615,8 +660,10 @@ data class PanelConfig(
     val parallaxScroll: Boolean = false,
     /** The back's glass, once chosen in Glass settings; null keeps each piece's built-in tint. */
     val glassStyle: GlassStyle? = null,
-    /** The Shader background's choice. Only the front screen's silk, for now. */
+    /** The Shader background's choice: "silk" (the front's own), "bends" (Color Bends) or "metal". */
     val shader: String = "silk",
+    val bends: BendsConfig = BendsConfig(),
+    val metal: MetalConfig = MetalConfig(),
     /** Appearance per account, by index. Short lists are fine — a missing entry is
      *  the same as an entry of all-nulls: use the built-ins. */
     val accounts: List<AccountStyle> = listOf(AccountStyle(), AccountStyle()),
@@ -626,8 +673,8 @@ data class PanelConfig(
      * so an app that renames its main activity in an update still opens.
      */
     val portalApps: List<String> = emptyList(),
-    /** The portal frame's colour (see PortalFrame). Default the original Electric Border's green. */
-    val portalFrameColor: Int = 0xFF28FF85.toInt(),
+    /** The portal frame's colour (see PortalFrame). Default the app's purple. */
+    val portalFrameColor: Int = 0xFFB14CFF.toInt(),
     /**
      * App Portal: a density of its own for an app on the back, by package, in dpi. Some apps
      * are unreadable at the rear's default density; the shell applies an entry only while
@@ -644,6 +691,8 @@ data class PanelConfig(
      * the names' room (PortalSheet.icon).
      */
     val portalAppNames: Boolean = true,
+    /** A notification pops up as a banner on the back as it arrives. The pull-down list is there either way. */
+    val noticesOverApps: Boolean = true,
     /**
      * App Portal: apps kept right of the cameras on the rear ("Keep right of the cameras" in
      * the app's sheet on the front and under the DPI slider on the back), by package: each runs on
@@ -794,6 +843,25 @@ data class PanelConfig(
         /** Never throws. A config that cannot be read is a config that was not set. */
         fun decode(raw: String?): PanelConfig =
             if (raw.isNullOrBlank()) DEFAULT
-            else try { json.decodeFromString(serializer(), raw) } catch (e: Exception) { DEFAULT }
+            else try { json.decodeFromString(serializer(), repurpled(raw)) } catch (e: Exception) { DEFAULT }
+
+        /**
+         * The app's old colours become the purple wherever a stored config has them, in any field
+         * and any account's: defaults are stored written out (encodeDefaults), so without this a
+         * phone updating would keep the green and the yellow on its back. An exact match, so
+         * any other colour somebody picked stays. In the text, for there being dozens of fields.
+         */
+        private fun repurpled(raw: String): String {
+            if (OLD_COLORS.keys.none { raw.contains(it) }) return raw
+            return OLD_COLOR_VALUE.replace(raw) { OLD_COLORS[it.value] ?: it.value }
+        }
+
+        private val OLD_COLORS = mapOf(
+            0xFFB5BD68.toInt() to Panel.Palette.WORK,
+            0xFF28FF85.toInt() to Panel.Palette.WORK,
+            0xFFE7FF00.toInt() to 0xFFC26BFF.toInt(),
+            0xFFFFFF78.toInt() to Panel.Palette.PERSONAL,
+        ).entries.associate { (old, new) -> old.toString() to new.toString() }
+        private val OLD_COLOR_VALUE = Regex("""(?<=[:\[,])-?\d+(?=[,\]\}])""")
     }
 }

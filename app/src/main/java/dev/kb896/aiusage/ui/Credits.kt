@@ -30,7 +30,7 @@ object Credits {
             setPadding(dp(context, 20), dp(context, 4), dp(context, 20), 0)
         }
         for (person in PEOPLE) {
-            SettingsRows.navigation(box, person.name) {
+            SettingsRows.navigation(box, person.name, link = true) {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(person.url)))
             }
             SettingsRows.note(box, person.why)

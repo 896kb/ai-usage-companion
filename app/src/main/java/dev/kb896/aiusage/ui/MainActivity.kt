@@ -183,12 +183,9 @@ class MainActivity : ComponentActivity() {
         bindPreview()
         bindSettings()
         buildSettingsRows()
-        bindArt()
         bindBackdrop()
         bindDiagnostics()
         buildDebugRows()
-        bindAdvancedToggle()
-        bindGeometrySliders()
         bindTabs()
         bindHeader()
         // The activity's findViewById, not the band's: inside apply {} the band's own would
@@ -198,10 +195,6 @@ class MainActivity : ComponentActivity() {
             host = this@MainActivity.findViewById(R.id.root_host)
         }
         bindPinned()
-        findViewById<Button>(R.id.credits).setOnClickListener { Credits.show(this) }
-        // Beside the credits, in every build, and not only in the notice: a notice closed once
-        // is gone, and the policy has to stay findable after it.
-        findViewById<Button>(R.id.privacy_policy).setOnClickListener { Privacy.openPolicy(this) }
 
         // Selectable and copyable (long-press -> Copy), but never editable — this
         // field only ever displays a command MainActivity wrote, never accepts
@@ -276,13 +269,13 @@ class MainActivity : ComponentActivity() {
         dev.kb896.aiusage.ui.glass.Unclip.tree(findViewById(R.id.settings_layout))
         // The cards' titles, one look (CardTitle) — after the font sweep, which would put the
         // weight back, and before the theme's early return, which skipped it under GLASS.
-        for (id in intArrayOf(R.id.geo_heading, R.id.backdrop_heading, R.id.settings_title_label, R.id.settings_art_label)) {
+        for (id in intArrayOf(R.id.backdrop_heading, R.id.settings_title_label)) {
             dev.kb896.aiusage.ui.glass.CardTitle.style(findViewById(id))
         }
 
         if (glass) {
             // The hairlines are the ORIGINAL screen's structure; cards are this one's.
-            listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings, R.id.rule_pinned, R.id.rule_advanced)
+            listOf(R.id.rule_1, R.id.rule_2, R.id.rule_settings, R.id.rule_pinned)
                 .forEach { findViewById<View>(it).visibility = View.GONE }
             // Headings sit over the wallpaper, outside any card, so each takes its own cell.
             host.doOnLayout { inkHeadings() }
@@ -306,7 +299,6 @@ class MainActivity : ComponentActivity() {
             setTextColor(Panel.Palette.FG)
             setHintTextColor(Panel.Palette.DIM)
         }
-        findViewById<TextView>(R.id.geo_hint).setTextColor(Panel.Palette.DIM)
     }
 
     /**
@@ -314,12 +306,12 @@ class MainActivity : ComponentActivity() {
      * now runs on every scroll frame, and a list built there is a per-frame allocation.
      */
     private val headingIds = intArrayOf(R.id.preview_heading, R.id.setup_heading,
-        R.id.settings_heading, R.id.settings_art_label, R.id.backdrop_heading,
+        R.id.settings_heading, R.id.backdrop_heading,
         R.id.clock_heading, R.id.media_heading, R.id.aod_heading)
 
     /**
-     * The bottom bar: the panel's info page (clock, date, notices), its usage page, its media page, and
-     * always-on — the order the pages sit in on the back. Each tab shows its own section
+     * The bottom bar: the panel's clock page (clock, date, notices), its media page, the portal,
+     * always-on, and the usage page. Each tab shows its own section
      * of settings (the usage tab also holds everything general) and has the preview show
      * that screen. Onboarding and recovery stay above every tab.
      */
@@ -335,6 +327,8 @@ class MainActivity : ComponentActivity() {
         val reach = ((64f * dev.kb896.aiusage.ui.liquid.SCALE + 10f + 12f) * resources.displayMetrics.density).toInt()
         scroll.setPadding(scroll.paddingLeft, scroll.paddingTop, scroll.paddingRight, reach)
         scroll.setOnScrollChangeListener { _, _, _, _, _ -> backdrop.changed() }
+        // A listener of its own, not the scroll's one: Backdrop.track sets that one after this.
+        scroll.viewTreeObserver.addOnScrollChangedListener { peekNotice() }
         tabBackdrop = backdrop
         // The silk moves under it: the bar's glass is drawn again with each of its frames.
         dev.kb896.aiusage.ui.glass.Backdrop.onFrame += { backdrop.changed() }
@@ -342,12 +336,11 @@ class MainActivity : ComponentActivity() {
         val lum = dev.kb896.aiusage.ui.glass.Backdrop.luminanceOf(host)
         val tabs = listOf(
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_general, "General"),
-            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_info, "Info"),
-            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_usage, "Usage"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_info, "Clock"),
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_media, "Media"),
-            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_aod, "Always-on"),
-            // Last, so the saved indices of the tabs before it stay where they were.
             dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_portal, "Portal"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_aod, "Always-on"),
+            dev.kb896.aiusage.ui.liquid.SettingsTab(R.drawable.ic_tab_usage, "Usage"),
         )
         bar.setContent {
             dev.kb896.aiusage.ui.liquid.SettingsTabBar(
@@ -431,6 +424,33 @@ class MainActivity : ComponentActivity() {
             graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
             refreshPreview()
         }
+        // To see how notifications look on the back without waiting for real ones: four made up,
+        // a second apart, through the same doors the relay uses (the panel's list, and the shell's
+        // banner and pull-down through BackNotices). Debug builds only, as this card is.
+        SettingsRows.navigation(holder, "Send fake notifications") {
+            val fakes = listOf(
+                Triple("Messages", "Ana", "Are we still on for tonight?"),
+                Triple("Mail", "Your order has shipped", "Arriving Tuesday between 10:00 and 14:00"),
+                Triple("Calendar", "Stand-up in 10 minutes", "Room 4 · with the team"),
+                Triple("Music", "New release", "An album you follow is out now"),
+            )
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            fakes.forEachIndexed { i, (app, title, text) ->
+                handler.postDelayed({
+                    val key = "fake:${System.currentTimeMillis()}:$i"
+                    sendBroadcast(Intent(RearActivity.ACTION_NOTIFICATION).setPackage(packageName)
+                        .putExtra(RearActivity.EXTRA_NOTIFICATION_APP, app)
+                        .putExtra(RearActivity.EXTRA_NOTIFICATION_PKG, packageName)
+                        .putExtra(RearActivity.EXTRA_NOTIFICATION_KEY, key)
+                        .putExtra(RearActivity.EXTRA_NOTIFICATION_TITLE, title)
+                        .putExtra(RearActivity.EXTRA_NOTIFICATION_TEXT, text))
+                    dev.kb896.aiusage.service.BackNotices.posted(
+                        this, dev.kb896.aiusage.rear.NoticeShade.Item(key, packageName, app, title, text),
+                    )
+                }, i * 1_500L)
+            }
+            toast("Four notifications on their way to the back")
+        }
         dev.kb896.aiusage.ui.glass.Unclip.tree(holder)
     }
 
@@ -447,7 +467,7 @@ class MainActivity : ComponentActivity() {
      * showing just appears. A change mid-slide finishes the slide in flight at once.
      */
     private fun showTab(i: Int) {
-        val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_usage, R.id.tab_media, R.id.tab_aod, R.id.tab_portal)
+        val sections = intArrayOf(R.id.tab_general, R.id.tab_clock, R.id.tab_media, R.id.tab_portal, R.id.tab_aod, R.id.tab_usage)
         val prev = shownTab
         shownTab = i
         // An account page open over Usage leaves with the tab, as Usage would.
@@ -485,6 +505,7 @@ class MainActivity : ComponentActivity() {
         }
         // The Portal tab shows the portal's sheet open over the panel, as the back does.
         preview.portal(i == TAB_PORTAL)
+        peekNotice()
         inkHeadings()
     }
 
@@ -493,6 +514,28 @@ class MainActivity : ComponentActivity() {
      * way, both on screen together in tab_pages — a tab change, or an account page opening
      * over Usage and closing again.
      */
+    /**
+     * A notification pops in on the preview while the General tab's Notifications settings are
+     * wholly in view between the pinned preview and the bottom bar, and goes again once they are
+     * not (PanelPreviewView.notice).
+     */
+    private fun peekNotice() {
+        val preview = findViewById<PanelPreviewView>(R.id.panel_preview) ?: return
+        val card = findViewById<View>(R.id.card_general)
+        if (shownTab != TAB_GENERAL || card == null || !card.isShown || card.height == 0) { preview.notice(false); return }
+        val at = IntArray(2)
+        card.getLocationOnScreen(at)
+        val top = at[1]
+        val bottom = top + card.height
+        val pinned = findViewById<View>(R.id.pinned)
+        pinned.getLocationOnScreen(at)
+        val above = at[1] + pinned.height
+        val bar = findViewById<View>(R.id.tab_bar)
+        bar.getLocationOnScreen(at)
+        val below = at[1]
+        preview.notice(top >= above && bottom <= below)
+    }
+
     private fun slideSections(incoming: View, outgoing: View, dir: Float) {
         incoming.animate().cancel()
         outgoing.animate().cancel()
@@ -776,26 +819,6 @@ class MainActivity : ComponentActivity() {
             StatePayload.encode(graph.repository.state.value, ConfigStore(this@MainActivity).load(), WeatherPoll.latest))
     }
 
-    /**
-     * Live ring tuning. Each slider writes through to GeometryStore and pushes the
-     * result to the panel on every move, so the rings track the drag on the rear
-     * display in real time — the same nudge mechanism the adb calibration used, minus
-     * the adb.
-     *
-     * Only fromUser events are acted on. setProgress() during setup fires the listener
-     * too, and reacting to that would broadcast five times on every open and — worse —
-     * write the seeded values back over stored ones.
-     */
-    /**
-     * The advanced section stays COLLAPSED until asked for.
-     *
-     * These sliders exist for a phone whose rear display is not the one the defaults
-     * were measured against — a larger model in the same family, where the panel is a
-     * different size and the lenses sit elsewhere. That is a real need, and it is also
-     * a need almost nobody has: on the measured device the defaults are already right,
-     * and five sliders that can only make a correct layout wrong do not belong in front
-     * of someone who just installed the app.
-     */
     /**
      * Diagnostics, if this variant has any. The release variant's Diagnostics is a no-op
      * with the same signature, so there is no BuildConfig check here and nothing to
@@ -1083,7 +1106,11 @@ class MainActivity : ComponentActivity() {
 
         val glass = dev.kb896.aiusage.ui.glass.UiTheme.isGlass(this)
         val container = findViewById<LinearLayout>(R.id.settings_rows)
-        val advanced = findViewById<LinearLayout>(R.id.advanced_rows)
+        val accountsRows = findViewById<LinearLayout>(R.id.accounts_rows)
+        val artRows = findViewById<LinearLayout>(R.id.art_rows)
+        val lookRows = findViewById<LinearLayout>(R.id.look_rows)
+        val weatherRows = findViewById<LinearLayout>(R.id.weather_rows)
+        val aboutRows = findViewById<LinearLayout>(R.id.about_rows)
         // One container per tab of the bottom bar — see bindTabs. General holds what is not
         // one page's: the look, the camera and game, notifications and the weather. The
         // usage page, the info page, the media page and always-on each have their own.
@@ -1093,13 +1120,18 @@ class MainActivity : ComponentActivity() {
         val aodRows = findViewById<LinearLayout>(R.id.aod_rows)
         val portalRows = findViewById<LinearLayout>(R.id.portal_rows)
         container.removeAllViews()
-        advanced.removeAllViews()
+        accountsRows.removeAllViews()
+        artRows.removeAllViews()
+        lookRows.removeAllViews()
+        weatherRows.removeAllViews()
+        aboutRows.removeAllViews()
         generalRows.removeAllViews()
         clockRows.removeAllViews()
         mediaRows.removeAllViews()
         aodRows.removeAllViews()
         portalRows.removeAllViews()
         val store = ConfigStore(this)
+        SettingsRows.iconEnd(findViewById(R.id.show_button), R.drawable.ic_eye)
 
         fun write(edit: (PanelConfig) -> PanelConfig) {
             val config = edit(store.load())
@@ -1126,23 +1158,25 @@ class MainActivity : ComponentActivity() {
         // looks like. A theme decides the face, the glyphs and whether surfaces refract —
         // see PanelTheme — so finding it at the bottom of a list of colours would be
         // finding out afterwards that half of them meant something else.
-        SettingsRows.choice(
-            generalRows,
+        // Glass first. Not the enum's order, which is older than this list.
+        val themes = listOf(dev.kb896.aiusage.data.PanelTheme.GLASS, dev.kb896.aiusage.data.PanelTheme.ORIGINAL)
+        SettingsRows.pills(
+            lookRows,
             "Theme",
-            dev.kb896.aiusage.data.PanelTheme.entries.map { it.name },
-            config.theme.ordinal,
+            themes.map { it.name.lowercase().replaceFirstChar(Char::uppercase) },
+            themes.indexOf(config.theme),
         ) { i ->
             // The back's look only: the front is glass whichever it is (UiTheme). Rebuilt,
             // for the rows that belong to one theme: Glass settings, a notification's colour.
-            write { it.copy(theme = dev.kb896.aiusage.data.PanelTheme.entries[i]) }
+            write { it.copy(theme = themes[i]) }
             buildSettingsRows()
         }
         // The back's glass, under the theme that has it: see GlassSettings.
-        if (config.theme.isGlass) SettingsRows.navigation(generalRows, "GLASS SETTINGS") {
+        if (config.theme.isGlass) SettingsRows.navigation(lookRows, "Glass settings", icon = R.drawable.ic_drop) {
             GlassSettings.show(this, store.load()) { style -> write { it.copy(glassStyle = style) } }
         }
         // The panel's face, over the theme's own: the app's two, the phone's, or a file.
-        SettingsRows.navigation(generalRows, "Font: ${config.font?.name ?: "Theme default"}") {
+        SettingsRows.navigation(lookRows, "Font", config.font?.name ?: "Theme default", icon = R.drawable.ic_font) {
             FontPicker.show(
                 this, config.theme, config.font,
                 onPick = ::setFont,
@@ -1155,30 +1189,6 @@ class MainActivity : ComponentActivity() {
                 },
             )
         }
-        // A look over whichever theme: the panel on a curved tube. Off by default —
-        // it bends the picture, and touches with it. See CrtScreen.
-        SettingsRows.toggle(
-            generalRows, "CRT screen", config.crt,
-        ) { on -> write { it.copy(crt = on) } }
-        // The table lights glow on every page of the panel, not the clock's alone: General's.
-        SettingsRows.toggleWithColor(
-            generalRows, "Table lights", config.showTableLights, config.tableTint,
-            onChange = { on -> write { it.copy(showTableLights = on) } },
-            onPick = { c -> write { it.copy(tableColor = c) } },
-        )
-        // General's, not always-on's: it works whenever the back is lit, the full panel and
-        // a guest on top as well as always-on (PocketWatch). Off by default — on a phone
-        // whose rear proximity sensor reads covered in the hand, it is the back switching
-        // off for no reason anyone can see. The note says what it does, there being nothing
-        // on the back to show it.
-        SettingsRows.toggle(
-            generalRows, "Pocket mode", config.pocketMode,
-        ) { on -> write { it.copy(pocketMode = on) } }
-        SettingsRows.note(
-            generalRows,
-            "When something covers the back — a pocket, a bag — it switches off, and comes back as it was, with the slider up, once uncovered.",
-        )
-
         // Accounts are #1 and #2, never "personal" and "work". Those were this author's
         // two accounts, not a taxonomy — someone else has a client and a side project,
         // or one account and nothing else. The number is the identity; the name is
@@ -1186,12 +1196,13 @@ class MainActivity : ComponentActivity() {
         // Accounts in DISPLAY order, numbered by where they appear rather than by which
         // enum entry they are — the number is a position on the panel, and moving a row
         // is meant to change it.
+        SettingsRows.title(accountsRows, "Usage page")
         val order = config.orderedAccounts(Account.entries.size)
         order.forEachIndexed { position, index ->
             val account = Account.entries[index]
             val name = config.styleFor(index).label ?: account.label
             SettingsRows.reorderable(
-                container,
+                accountsRows,
                 "#${position + 1}  $name",
                 canMoveUp = position > 0,
                 onMoveUp = {
@@ -1239,6 +1250,7 @@ class MainActivity : ComponentActivity() {
         // the word "show" in a row that is visibly a show/hide control is filler.
         // The clock page's own — the big clock, the date line, the battery over the clock —
         // apart from the Usage tab's, which are the readout's corner row (PanelConfig.infoClock).
+        SettingsRows.title(clockRows, "Clock page")
         SettingsRows.toggleWithColor(
             clockRows, "Time", config.infoClockOn, config.infoClockTint,
             onChange = { on -> write { it.copy(infoClock = on) } },
@@ -1248,15 +1260,6 @@ class MainActivity : ComponentActivity() {
             clockRows, "Date", config.infoDateOn, config.infoDateTint,
             onChange = { on -> write { it.copy(infoDate = on) } },
             onPick = { c -> write { it.copy(infoDateColor = c) } },
-        )
-        // No switch: the line shows whenever there is a reading, and the Weather rows
-        // below decide that. Only the colour is a choice, so only a swatch is offered.
-        // Off leaves only the weather on the glass — rain when it rains, with no degrees
-        // or place spelled out.
-        SettingsRows.toggleWithColor(
-            clockRows, "Weather line", config.showWeatherLine, config.weatherTint,
-            onChange = { on -> write { it.copy(showWeatherLine = on) } },
-            onPick = { c -> write { it.copy(weatherColor = c) } },
         )
         // The lights round the margin when the phone lies on its face — see table
         // mode in the README. They follow the clock's colour unless told otherwise.
@@ -1286,68 +1289,17 @@ class MainActivity : ComponentActivity() {
             onChange = { on -> write { it.copy(showCloseInfo = on) } },
             onPick = { c -> write { it.copy(closeInfoColor = c) } },
         )
-        SettingsRows.toggle(generalRows, "Notifications", config.showNotifications) { on ->
-            write { it.copy(showNotifications = on) }
-            if (on) askNotificationAccess("Notifications on the back") { write { it.copy(showNotifications = false) } }
-            buildSettingsRows()
-        }
-        // A SEPARATE switch, and deliberately so. This display faces away from its owner,
-        // so everything on it is shown to whoever is behind them. Knowing a message
-        // arrived and broadcasting what it said are different decisions.
-        if (config.showNotifications) {
-            if (!Setup.notificationAccess(this)) {
-                SettingsRows.navigation(generalRows, "  ↳ allow notification access") { discloseNotificationAccess() }
-            }
-            SettingsRows.toggle(
-                generalRows, "  ↳ include the message text", config.showNotificationText,
-            ) { on -> write { it.copy(showNotificationText = on) } }
-            // The back's list follows the front's: cleared there, gone here; swiped away
-            // here, cleared there. Turned on, the relay is asked what is there now.
-            SettingsRows.toggle(
-                generalRows, "  ↳ match the front notifications", config.matchFrontNotifications,
-            ) { on ->
-                write { it.copy(matchFrontNotifications = on) }
-                if (on) sendBroadcast(Intent(RearActivity.ACTION_NOTIFICATIONS_SYNC).setPackage(packageName))
-            }
-            // Named rows, not a swatch beside the switch: a colour next to "Notifications"
-            // left it to be guessed what it coloured.
-            SettingsRows.colorRow(
-                generalRows, "  ↳ text", config.notificationTint,
-            ) { c -> write { it.copy(notificationColor = c) } }
-            // Only the original theme's cards are painted; under glass they are glass.
-            if (!config.theme.isGlass) SettingsRows.colorRow(
-                generalRows, "  ↳ background", config.notificationGround,
-            ) { c -> write { it.copy(notificationBg = c) } }
-        }
-        // NOT a "show" row like the ones above it — it changes nothing on the panel, only
-        // how long the panel is there. Placed with them anyway because it is the same
-        // kind of decision: one switch, one behaviour, no submenu.
-        SettingsRows.toggle(
-            aodRows, "Keep panel awake", config.keepPanelAwake,
-        ) { on -> write { it.copy(keepPanelAwake = on) } }
-        // The rear screen's always-on: dim and frozen instead of dark, asleep only in a
-        // pocket, the slider one double tap away. See RearActivity.enterAod.
-        SettingsRows.toggle(
-            aodRows, "Always-on display", config.alwaysOn,
-        ) { on -> write { it.copy(alwaysOn = on) }; buildSettingsRows() }
-        if (config.alwaysOn) {
-            SettingsRows.toggle(
-                aodRows, "  ↳ clock", config.aodClock,
-            ) { on -> write { it.copy(aodClock = on) } }
-            SettingsRows.toggle(
-                aodRows, "  ↳ battery", config.aodBattery,
-            ) { on -> write { it.copy(aodBattery = on) } }
-            SettingsRows.toggle(
-                aodRows, "  ↳ date", config.aodDate,
-            ) { on -> write { it.copy(aodDate = on) } }
-            SettingsRows.toggle(
-                aodRows, "  ↳ weather line", config.aodWeather,
-            ) { on -> write { it.copy(aodWeather = on) } }
-        }
+        // Off leaves only the weather on the glass — rain when it rains, with no degrees
+        // or place spelled out.
+        SettingsRows.toggleWithColor(
+            clockRows, "Weather line", config.showWeatherLine, config.weatherTint,
+            onChange = { on -> write { it.copy(showWeatherLine = on) } },
+            onPick = { c -> write { it.copy(weatherColor = c) } },
+        )
         // One choice with four answers rather than switches, which would let
         // somebody ask for rain and snow at once.
-        SettingsRows.choice(
-            generalRows, "Weather", listOf("None", "Auto", "Rain", "Storm", "Snow"),
+        SettingsRows.pills(
+            weatherRows, "Weather", listOf("None", "Auto", "Rain", "Storm", "Snow"),
             when (config.weather) {
                 Weather.AUTO -> 1
                 Weather.RAIN -> 2
@@ -1384,7 +1336,7 @@ class MainActivity : ComponentActivity() {
             }
             return what + "Weather by Open-Meteo · what you type here is sent to it to find the place"
         }
-        SettingsRows.textField(generalRows, "Place", config.weatherPlace, 40) { typed ->
+        SettingsRows.textField(weatherRows, "Place", config.weatherPlace, 40) { typed ->
             write { it.copy(weatherPlace = typed) }
             geocodeJob?.cancel()
             geocodeJob = lifecycleScope.launch {
@@ -1400,9 +1352,9 @@ class MainActivity : ComponentActivity() {
                 if (place != null) WeatherPoll.nudge()
             }
         }
-        placeNote = SettingsRows.note(generalRows, placeNoteText(config))
+        placeNote = SettingsRows.note(weatherRows, placeNoteText(config))
 
-        SettingsRows.toggle(generalRows, "Use the phone's location", config.weatherUseDevice) { on ->
+        SettingsRows.toggle(weatherRows, "Use the phone's location", config.weatherUseDevice) { on ->
             val allowed = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
             when {
@@ -1418,15 +1370,106 @@ class MainActivity : ComponentActivity() {
                 ) { askLocation.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION) }
             }
         }
+        // Degrees for the weather line. Auto follows the phone's region, and its Regional
+        // preferences where Android has them; the pill says which that came to.
+        val units = dev.kb896.aiusage.data.TemperatureUnit.ALL
+        val autoIs = if (dev.kb896.aiusage.data.TemperatureUnit.resolve(units[0]) == "f") "°F" else "°C"
+        SettingsRows.pills(weatherRows, "Temperature", listOf("Auto ($autoIs)", "°C", "°F"),
+            units.indexOf(config.temperatureUnit).coerceAtLeast(0)) { i ->
+            write { it.copy(temperatureUnit = units[i]) }
+        }
+        SettingsRows.title(generalRows, "Notifications")
+        // One row, its switch and its colour, the same as every other coloured switch.
+        SettingsRows.toggleWithColor(
+            generalRows, "Show on the back", config.showNotifications, config.notificationTint,
+            onChange = { on ->
+                write { it.copy(showNotifications = on) }
+                if (on) askNotificationAccess("Notifications on the back") { write { it.copy(showNotifications = false) } }
+                buildSettingsRows()
+            },
+            onPick = { c -> write { it.copy(notificationColor = c) } },
+        )
+        // A SEPARATE switch, and deliberately so. This display faces away from its owner,
+        // so everything on it is shown to whoever is behind them. Knowing a message
+        // arrived and broadcasting what it said are different decisions.
+        if (config.showNotifications) {
+            val under = SettingsRows.sub(generalRows)
+            if (!Setup.notificationAccess(this)) {
+                SettingsRows.navigation(under, "Allow notification access", icon = R.drawable.ic_bell) { discloseNotificationAccess() }
+            }
+            SettingsRows.toggle(
+                under, "Include the message text", config.showNotificationText,
+            ) { on -> write { it.copy(showNotificationText = on) } }
+            SettingsRows.toggle(
+                under, "Pop up as they arrive", config.noticesOverApps,
+            ) { on -> write { it.copy(noticesOverApps = on) } }
+            // The back's list follows the front's: cleared there, gone here; swiped away
+            // here, cleared there. Turned on, the relay is asked what is there now.
+            SettingsRows.toggle(
+                under, "Sync with front notifications", config.matchFrontNotifications,
+            ) { on ->
+                write { it.copy(matchFrontNotifications = on) }
+                if (on) sendBroadcast(Intent(RearActivity.ACTION_NOTIFICATIONS_SYNC).setPackage(packageName))
+            }
+            // Only the original theme's cards are painted; under glass they are glass.
+            if (!config.theme.isGlass) SettingsRows.colorRow(
+                under, "Background", config.notificationGround,
+            ) { c -> write { it.copy(notificationBg = c) } }
+        }
+        // NOT a "show" row like the ones above it — it changes nothing on the panel, only
+        // how long the panel is there. Placed with them anyway because it is the same
+        // kind of decision: one switch, one behaviour, no submenu.
+        SettingsRows.title(aodRows, "Always-on")
+        SettingsRows.toggle(
+            aodRows, "Keep panel awake", config.keepPanelAwake,
+        ) { on -> write { it.copy(keepPanelAwake = on) } }
+        // The rear screen's always-on: dim and frozen instead of dark, asleep only in a
+        // pocket, the slider one double tap away. See RearActivity.enterAod.
+        SettingsRows.toggle(
+            aodRows, "Always-on display", config.alwaysOn,
+        ) { on -> write { it.copy(alwaysOn = on) }; buildSettingsRows() }
+        if (config.alwaysOn) {
+            val under = SettingsRows.sub(aodRows)
+            SettingsRows.toggle(
+                under, "Clock", config.aodClock,
+            ) { on -> write { it.copy(aodClock = on) } }
+            SettingsRows.toggle(
+                under, "Battery", config.aodBattery,
+            ) { on -> write { it.copy(aodBattery = on) } }
+            SettingsRows.toggle(
+                under, "Date", config.aodDate,
+            ) { on -> write { it.copy(aodDate = on) } }
+            SettingsRows.toggle(
+                under, "Weather line", config.aodWeather,
+            ) { on -> write { it.copy(aodWeather = on) } }
+        }
         // APP PORTAL: other apps on the back, opened from a pull up from the bottom edge.
+        SettingsRows.title(portalRows, "App Portal")
         SettingsRows.note(portalRows, "Pull up from the bottom of the back to open apps there. A swipe in from the right edge is the app's Back.")
         shownPortalDpi = config.portalDpi
         fun pickPortalApps() {
-            AppPicker.show(this, config.portalApps) { pinned ->
-                write { it.copy(portalApps = pinned, portalDpi = it.portalDpi.filterKeys { k -> k in pinned },
-                    portalConfined = it.portalConfined.filter { k -> k in pinned }.toSet()) }
-                buildSettingsRows()
-            }
+            AppPicker.show(this, object : AppPicker.Actions {
+                override fun pinned() = store.load().portalApps
+                override fun pin(pkg: String, on: Boolean): Boolean {
+                    val next = PortalApps.pinned(store.load().portalApps, pkg, on)
+                    if (on && pkg !in next) return false
+                    write {
+                        it.copy(portalApps = next, portalDpi = it.portalDpi.filterKeys { k -> k in next },
+                            portalConfined = it.portalConfined.filter { k -> k in next }.toSet())
+                    }
+                    return true
+                }
+                override fun moveUp(pkg: String) { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) } }
+                override fun settings(pkg: String, label: String, changed: () -> Unit) {
+                    val now = store.load()
+                    PortalAppSheet.show(
+                        this@MainActivity, pkg, label, now.portalDpi[pkg], pkg in now.portalConfined,
+                        onDpi = { dpi -> write { c -> c.copy(portalDpi = if (dpi == null) c.portalDpi - pkg else c.portalDpi + (pkg to dpi)) } },
+                        onConfined = { on -> write { c -> c.copy(portalConfined = if (on) c.portalConfined + pkg else c.portalConfined - pkg) } },
+                        onUnpin = { pin(pkg, false); changed() },
+                    )
+                }
+            }) { buildSettingsRows() }
         }
         // The guide (PortalGuide): a card over the tab's settings until its three steps are
         // ticked or it is dismissed, then a row at the tab's foot. A guide finished by a pin
@@ -1448,37 +1491,11 @@ class MainActivity : ComponentActivity() {
                 },
             )
         }
-        SettingsRows.navigation(portalRows, "Apps in the portal (${config.portalApps.size})") { pickPortalApps() }
+        SettingsRows.navigation(portalRows, "Apps in the portal", config.portalApps.size.toString(), icon = R.drawable.ic_tab_portal) { pickPortalApps() }
         // Rows × columns a page; more pinned apps than that go on further pages on the back.
-        SettingsRows.choice(
+        SettingsRows.pills(
             portalRows, "Apps per page", PortalGrid.entries.map { it.label }, config.portalGrid.ordinal,
         ) { i -> write { it.copy(portalGrid = PortalGrid.entries[i]) } }
-        config.portalApps.forEachIndexed { i, pkg ->
-            // One lookup per pinned app, not the whole launcher list: this runs on every rebuild.
-            val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
-                .getOrDefault(pkg)
-            SettingsRows.reorderable(
-                portalRows, config.portalDpi[pkg]?.let { "  $label · $it dpi" } ?: "  $label", canMoveUp = i > 0,
-                onMoveUp = { write { it.copy(portalApps = PortalApps.movedUp(it.portalApps, pkg)) }; buildSettingsRows() },
-                onClick = {
-                    PortalAppSheet.show(
-                        this, pkg, label, config.portalDpi[pkg], pkg in config.portalConfined,
-                        onDpi = { dpi ->
-                            write { c -> c.copy(portalDpi = if (dpi == null) c.portalDpi - pkg else c.portalDpi + (pkg to dpi)) }
-                            buildSettingsRows()
-                        },
-                        onConfined = { on ->
-                            write { c -> c.copy(portalConfined = if (on) c.portalConfined + pkg else c.portalConfined - pkg) }
-                        },
-                        onUnpin = {
-                            write { it.copy(portalApps = PortalApps.pinned(it.portalApps, pkg, on = false), portalDpi = it.portalDpi - pkg,
-                                portalConfined = it.portalConfined - pkg) }
-                            buildSettingsRows()
-                        },
-                    )
-                },
-            )
-        }
         SettingsRows.toggle(portalRows, "Show app names", config.portalAppNames) { on ->
             write { it.copy(portalAppNames = on) }
         }
@@ -1491,7 +1508,7 @@ class MainActivity : ComponentActivity() {
         )
         // The guide's card down, its sketch stays a tap away — with the tile's button while
         // the tile is still missing, for a card dismissed before it was added.
-        if (!guide.card) SettingsRows.navigation(portalRows, "How to use the portal") {
+        if (!guide.card) SettingsRows.navigation(portalRows, "How to use the portal", icon = R.drawable.ic_help) {
             PortalGuideCard.showHelp(this, if (store.load().portalTileAdded) null else ({ askPortalTile() }))
         }
         // DEBUG BUILDS ONLY. The demo replaces real readings with invented ones and real
@@ -1507,132 +1524,186 @@ class MainActivity : ComponentActivity() {
         // notification-access step. Someone turning this on and finding it dead has the
         // reason one row up rather than in an accordion they have not opened.
         // the cover, lyrics and colour rows live under this switch: rebuild so they appear now
+        SettingsRows.title(mediaRows, "Media page")
         SettingsRows.toggle(mediaRows, "Media controls", config.showMedia) { on ->
             write { it.copy(showMedia = on) }
             if (on) askNotificationAccess("Media controls") { write { it.copy(showMedia = false) } }
             buildSettingsRows()
         }
         if (config.showMedia) {
+            val under = SettingsRows.sub(mediaRows)
             if (!Setup.notificationAccess(this)) {
-                SettingsRows.navigation(mediaRows, "  ↳ allow notification access") { discloseNotificationAccess() }
+                SettingsRows.navigation(under, "Allow notification access", icon = R.drawable.ic_bell) { discloseNotificationAccess() }
             }
             // The cover first, right under the switch: the page's biggest thing.
-            SettingsRows.choice(
-                mediaRows, "  ↳ cover", listOf("SQUARE", "VINYL"),
+            SettingsRows.pills(
+                under, "Cover", listOf("Square", "Vinyl"),
                 config.mediaArt.ordinal,
             ) { i ->
                 write { it.copy(mediaArt = dev.kb896.aiusage.data.MediaArt.entries[i]) }
             }
-            // A colour for each part of the page, named for what it paints rather than one
-            // swatch beside the switch for all of it.
-            SettingsRows.colorRow(mediaRows, "  ↳ playback ring", config.mediaPlaybackTint) { c ->
-                write { it.copy(mediaPlaybackColor = c) }
-            }
-            SettingsRows.colorRow(mediaRows, "  ↳ volume ring", config.mediaVolumeTint) { c ->
-                write { it.copy(mediaVolumeColor = c) }
-            }
-            SettingsRows.colorRow(mediaRows, "  ↳ buttons", config.mediaButtonsTint) { c ->
-                write { it.copy(mediaButtonsColor = c) }
-            }
-            SettingsRows.colorRow(mediaRows, "  ↳ title", config.mediaTitleTint) { c ->
-                write { it.copy(mediaTitleColor = c) }
-            }
-            SettingsRows.colorRow(mediaRows, "  ↳ artist", config.mediaArtistTint) { c ->
-                write { it.copy(mediaArtistColor = c) }
-            }
+            // A colour for each part of the page, named for what it paints, on the page's own card
+            // rather than in a sheet of their own.
+            SettingsRows.colorRow(under, "Playback ring", config.mediaPlaybackTint) { c -> write { it.copy(mediaPlaybackColor = c) } }
+            SettingsRows.colorRow(under, "Volume ring", config.mediaVolumeTint) { c -> write { it.copy(mediaVolumeColor = c) } }
+            SettingsRows.colorRow(under, "Buttons", config.mediaButtonsTint) { c -> write { it.copy(mediaButtonsColor = c) } }
+            SettingsRows.colorRow(under, "Title", config.mediaTitleTint) { c -> write { it.copy(mediaTitleColor = c) } }
+            SettingsRows.colorRow(under, "Artist", config.mediaArtistTint) { c -> write { it.copy(mediaArtistColor = c) } }
             // Its own row and its own warning, because it is the only setting in this app
             // that sends anything anywhere. The note is not a disclaimer — it is the
             // information needed to make the choice, so it sits with the switch rather
             // than in a document nobody opens.
-            SettingsRows.toggle(mediaRows, "  ↳ lyrics", config.showLyrics) { on ->
-                // Turning it OFF wipes what was fetched. A feature that gathered data
-                // should not leave the data behind when it is switched off; anything else
-                // makes "off" mean "stopped collecting" rather than "undone".
-                if (!on) {
-                    dev.kb896.aiusage.data.LyricsCache(
-                        java.io.File(filesDir, "lyrics"),
-                    ).clear()
-                }
-                write { it.copy(showLyrics = on) }
-                buildSettingsRows() // the note under this row says what the switch does
-            }
-            // Their colour, under their switch: only while there are lyrics to colour.
-            if (config.showLyrics) SettingsRows.colorRow(mediaRows, "      lyrics colour", config.mediaLyricsTint) { c ->
-                write { it.copy(mediaLyricsColor = c) }
-            }
+            SettingsRows.toggleWithColor(
+                under, "Lyrics", config.showLyrics, config.mediaLyricsTint,
+                onChange = { on ->
+                    // Turning it OFF wipes what was fetched. A feature that gathered data
+                    // should not leave the data behind when it is switched off; anything else
+                    // makes "off" mean "stopped collecting" rather than "undone".
+                    if (!on) {
+                        dev.kb896.aiusage.data.LyricsCache(
+                            java.io.File(filesDir, "lyrics"),
+                        ).clear()
+                    }
+                    write { it.copy(showLyrics = on) }
+                    buildSettingsRows() // the note under this row says what the switch does
+                },
+                onPick = { c -> write { it.copy(mediaLyricsColor = c) } },
+            )
             SettingsRows.note(
-                mediaRows,
+                under,
                 if (config.showLyrics) {
-                    "     sends each track's name, artist, album and length to lrclib.net"
+                    "Sends each track's name, artist, album and length to lrclib.net."
                 } else {
-                    "     off — nothing about what you play leaves the phone"
+                    "Off: nothing about what you play leaves the phone."
                 },
             )
+            SettingsRows.navigation(under, "How to use the media page", icon = R.drawable.ic_help) { MediaGuide.show(this) }
         }
-        if (config.showMedia && !NotificationManagerCompat.getEnabledListenerPackages(this)
-                .contains(packageName)
-        ) {
-            SettingsRows.note(
-                mediaRows,
-                "  ↳ needs notification access — see ONBOARDING",
+
+        // Long-press re-crops what is already there, without going back through the picker
+        // to choose the same file again.
+        SettingsRows.navigation(artRows, "Bottom artwork", icon = R.drawable.ic_image) { pickArt.launch("image/*") }.setOnLongClickListener {
+            val path = ConfigStore(this).load().art.imagePath
+            if (path == null) toast("No image chosen yet") else cropArtwork(path, reuseTransform = true)
+            true
+        }
+
+        SettingsRows.navigation(aboutRows, "Advanced", icon = R.drawable.ic_tune) { showAdvanced() }
+        // For the fun of it, not needed for anything: in a sheet of their own off General.
+        SettingsRows.navigation(aboutRows, "Fun", icon = R.drawable.ic_sparkle) {
+            val now = store.load()
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                val pad = (20 * resources.displayMetrics.density).toInt()
+                setPadding(pad, 0, pad, 0)
+            }
+            // A look over whichever theme: the panel on a curved tube. Off by default —
+            // it bends the picture, and touches with it. See CrtScreen.
+            SettingsRows.toggle(column, "CRT screen", now.crt) { on -> write { it.copy(crt = on) } }
+            // The table lights glow on every page of the panel, not the clock's alone.
+            SettingsRows.toggleWithColor(
+                column, "Table lights", now.showTableLights, now.tableTint,
+                onChange = { on -> write { it.copy(showTableLights = on) } },
+                onPick = { c -> write { it.copy(tableColor = c) } },
             )
+            Modal.show(Modal.builder(this).setTitle("Fun").setView(column).setPositiveButton("Done", null))
         }
-
-        // No colour grid here any more. Every panel colour now sits on the row of the
-        // thing it paints — a grid made sense while they were a set chosen against each
-        // other, and once each one had an owner it was just a second place to look.
-        // The ramp keeps its grid in ADVANCED, where the five ARE chosen as a set.
-
-        // Rings. Each picks an account, a window, and what to show about it.
-        // The ramp belongs in ADVANCED. It is five colours that already work together,
-        // and the common case for touching them is not "I want a different green" but
-        // "I am adapting this to a different display" — the same reason the ring geometry
-        // lives there.
-        // For a bug report: what the system says about the rear display, gathered through
-        // Shizuku and copied to the clipboard. The panel dying on someone else's phone is
-        // a question about their firmware, and this is the shortest way to ask it.
-        SettingsRows.navigation(advanced, "Copy rear-display report") { copyRearReport() }
-        SettingsRows.colorGrid(advanced, config.rampColors.mapIndexed { i, colour ->
-            SettingsRows.Swatch("RAMP ${i + 1}", colour) { c ->
-                write { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
-            }
-        })
-
-        // Last row of the last section, and the only destructive control in the app.
-        // It used to be debug-only, on the reasoning that a user has no business
-        // wiping their own configuration — but they do: a panel tuned into a corner is
-        // easier to start over than to unpick, and "reinstall the app" was the only
-        // way out. What made it dangerous was being one tap from a colour swatch, and
-        // that is what the confirmation fixes.
-        dev.kb896.aiusage.ui.glass.GlassButton(this).apply {
-            text = "Reset every setting to its default"
-            textSize = 14f
-            // The one filled button in the app. Everything else is text on the panel's
-            // own ground, so a solid red block cannot be mistaken for one of them — which
-            // matters for the only control here that destroys something. Red text alone
-            // said the same thing far too quietly, in a list where a dim label and a
-            // bright one are both just labels.
-            //
-            // Under GLASS the capsule takes CRIT as its tint, the same hue-blend every
-            // other tinted button uses; under ORIGINAL it stays the flat red block.
-            if (glass) {
-                tint = Panel.Palette.CRIT
-            } else {
-                setTextColor(android.graphics.Color.WHITE)
-                background = getDrawable(R.drawable.button_danger)
-            }
-            setCompoundDrawablesRelativeWithIntrinsicBounds(
-                R.drawable.ic_reset, 0, 0, 0)
-            compoundDrawablePadding = (10 * resources.displayMetrics.density).toInt()
-            typeface = UiType.of(this@MainActivity)
-            setOnClickListener { confirmResetEverything() }
-            advanced.addView(this, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = (16 * resources.displayMetrics.density).toInt() })
-        }
+        SettingsRows.navigation(aboutRows, "Credits", icon = R.drawable.ic_heart) { Credits.show(this) }
+        // In every build, and not only in the notice: a notice closed once is gone, and the
+        // policy has to stay findable after it.
+        SettingsRows.navigation(aboutRows, "Privacy policy", link = true) { Privacy.openPolicy(this) }
         // Rows rebuilt are rows that clip again: let the glass in them draw past them.
         dev.kb896.aiusage.ui.glass.Unclip.tree(findViewById(R.id.settings_layout))
+    }
+
+    /**
+     * Advanced, in a modal off General: what almost nobody needs and a phone other than the one
+     * this was measured on might. The rings' place and size (changes show on the back as they are
+     * dragged), the ramp, the report for a bug, and the reset, which sits here so that it is never
+     * one tap from a colour.
+     */
+    private fun showAdvanced() {
+        val store = ConfigStore(this)
+        fun save(edit: (PanelConfig) -> PanelConfig) {
+            val config = edit(store.load())
+            store.save(config)
+            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
+            refreshPreview()
+        }
+        val dp = resources.displayMetrics.density
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((20 * dp).toInt(), 0, (20 * dp).toInt(), 0)
+        }
+        val scroll = object : dev.kb896.aiusage.ui.glass.SoftEdgeScrollView(this@MainActivity) {
+            override fun onMeasure(w: Int, h: Int) {
+                val cap = (resources.displayMetrics.heightPixels * 0.6f).toInt()
+                super.onMeasure(w, MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST))
+            }
+        }.apply { addView(column) }
+        val dialog = Modal.builder(this).setTitle("Advanced").setView(scroll).setPositiveButton("Done", null).create()
+
+        fun fill() {
+            column.removeAllViews()
+            val config = store.load()
+            var current = config.effectiveRingLayout
+            // It works whenever the back is lit, the panel and a guest on top as well as always-on
+            // (PocketWatch). A switch, for a phone whose rear proximity sensor reads covered in the hand.
+            SettingsRows.toggle(column, "Pocket mode", config.pocketMode) { on -> save { it.copy(pocketMode = on) } }
+            SettingsRows.note(column, "When something covers the back, like a pocket or a bag, it switches off, and comes back as it was, with the slider up, once uncovered.")
+            SettingsRows.note(column, "For a phone whose rear display is not the one this was measured on. Both rings share X and radius, so they cannot drift apart. Changes show on the back as you drag.")
+            data class Ring(val name: String, val range: IntRange, val get: (RingLayout) -> Int, val set: (Int) -> RingLayout)
+            listOf(
+                Ring("Ring X", RingLayout.CX_RANGE, { it.cx }, { current.copy(cx = it) }),
+                Ring("First Y", RingLayout.CY_FIRST_RANGE, { it.cyFirst }, { current.copy(cyFirst = it) }),
+                Ring("Second Y", RingLayout.CY_SECOND_RANGE, { it.cySecond }, { current.copy(cySecond = it) }),
+                Ring("Radius", RingLayout.RADIUS_RANGE, { it.radius }, { current.copy(radius = it) }),
+                Ring("Stroke", RingLayout.STROKE_RANGE, { it.stroke }, { current.copy(stroke = it) }),
+            ).forEach { r ->
+                SettingsRows.slider(
+                    column, r.range.last - r.range.first, r.get(current) - r.range.first,
+                    text = { "${r.name}  ${it + r.range.first}" },
+                    onMove = { p ->
+                        current = r.set(p + r.range.first)
+                        save { it.copy(ringLayout = current) }
+                    },
+                    onDone = {},
+                )
+            }
+            SettingsRows.navigation(column, "Reset the rings to measured defaults", icon = R.drawable.ic_reset) {
+                save { it.copy(ringLayout = RingLayout.forDevice()) }
+                toast("Ring geometry reset")
+                fill()
+            }
+            // The ramp is five colours that already work together, chosen as a set.
+            SettingsRows.colorGrid(column, config.rampColors.mapIndexed { i, colour ->
+                SettingsRows.Swatch("Ramp ${i + 1}", colour) { c ->
+                    save { cfg -> cfg.copy(rampColors = cfg.rampColors.toMutableList().also { it[i] = c }) }
+                }
+            })
+            // For a bug report: what the system says about the rear display, gathered through
+            // Shizuku and copied to the clipboard. The panel dying on someone else's phone is
+            // a question about their firmware, and this is the shortest way to ask it.
+            SettingsRows.navigation(column, "Copy rear-display report", icon = R.drawable.ic_copy) { copyRearReport() }
+            // The only destructive control in the app, and the one filled button.
+            dev.kb896.aiusage.ui.glass.GlassButton(this).apply {
+                text = "Reset every setting to its default"
+                textSize = 14f
+                tint = Panel.Palette.CRIT
+                SettingsRows.iconEnd(this, R.drawable.ic_reset)
+                typeface = UiType.of(this@MainActivity)
+                setOnClickListener {
+                    dialog.dismiss()
+                    confirmResetEverything()
+                }
+                column.addView(this, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = (16 * dp).toInt() })
+            }
+        }
+        fill()
+        Modal.show(dialog)
     }
 
     /**
@@ -1783,7 +1854,7 @@ class MainActivity : ComponentActivity() {
             textSize = 11f
             setTextColor(Panel.Palette.FG)
             typeface = UiType.of(this@MainActivity)
-            text = "OPACITY  ${(opacity * 100).toInt()}%"
+            text = "Opacity  ${(opacity * 100).toInt()}%"
         }
         sheet.addView(opacityLabel, android.widget.LinearLayout.LayoutParams(
             android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -1815,7 +1886,7 @@ class MainActivity : ComponentActivity() {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
                 opacity = progress / 100f
                 view.imageAlpha = opacity
-                opacityLabel.text = "OPACITY  $progress%"
+                opacityLabel.text = "Opacity  $progress%"
                 behindRow.visibility = if (progress < 100) View.VISIBLE else View.GONE
             }
             override fun onStartTrackingTouch(bar: SeekBar) {}
@@ -1887,8 +1958,6 @@ class MainActivity : ComponentActivity() {
                         dev.kb896.aiusage.data.BackdropKind.VIDEO ->
                             if (config.video.clipPath == null) { pickVideo.launch(arrayOf("video/*")); bindBackdrop() }
                             else saveBackdrop { it.copy(backdropKind = picked) }
-                        // Not offered yet: said so, and the choice goes back to what it was.
-                        dev.kb896.aiusage.data.BackdropKind.SHADER -> { toast("Coming soon"); bindBackdrop() }
                         else -> saveBackdrop { it.copy(backdropKind = picked) }
                     }
                 }
@@ -1899,14 +1968,14 @@ class MainActivity : ComponentActivity() {
                 SettingsRows.colorRow(rows, "Colour", config.background) { c -> saveBackdrop { it.copy(background = c) } }
             dev.kb896.aiusage.data.BackdropKind.IMAGE -> {
                 val path = config.backdrop.imagePath
-                if (path != null) SettingsRows.navigation(rows, "Edit image") { cropBackdrop(path, reuseTransform = true) }
-                SettingsRows.navigation(rows, if (path != null) "Choose another" else "Choose image") {
+                if (path != null) SettingsRows.navigation(rows, "Edit image", icon = R.drawable.ic_edit) { cropBackdrop(path, reuseTransform = true) }
+                SettingsRows.navigation(rows, if (path != null) "Choose another" else "Choose image", icon = R.drawable.ic_image) {
                     pickBackdrop.launch("image/*")
                 }
             }
             dev.kb896.aiusage.data.BackdropKind.VIDEO -> {
                 val set = config.video.clipPath != null
-                if (set) SettingsRows.navigation(rows, "Edit video") {
+                if (set) SettingsRows.navigation(rows, "Edit video", icon = R.drawable.ic_edit) {
                     val uri = config.video.originalUri
                     if (dev.kb896.aiusage.ui.video.VideoFiles.canOpen(this, uri)) editVideo(android.net.Uri.parse(uri))
                     else {
@@ -1915,7 +1984,7 @@ class MainActivity : ComponentActivity() {
                         pickVideo.launch(arrayOf("video/*"))
                     }
                 }
-                SettingsRows.navigation(rows, if (set) "Choose another" else "Choose video") {
+                SettingsRows.navigation(rows, if (set) "Choose another" else "Choose video", icon = R.drawable.ic_video) {
                     pickVideo.launch(arrayOf("video/*"))
                 }
                 // How it plays: once, there and back, round and round, or forward and back.
@@ -1946,12 +2015,85 @@ class MainActivity : ComponentActivity() {
             }
             // One shader for now, shown as the choice it will be among others.
             // The same gap under the kinds as the rows the other kinds put there.
-            dev.kb896.aiusage.data.BackdropKind.SHADER ->
+            dev.kb896.aiusage.data.BackdropKind.SHADER -> {
+                val shaders = listOf("silk", "bends", "metal")
                 rows.addView(
-                    dev.kb896.aiusage.ui.glass.GlassSegmented(this, listOf("Silk"), 0),
+                    dev.kb896.aiusage.ui.glass.GlassSegmented(
+                        this, listOf("Silk", "Color bends", "Metal"), shaders.indexOf(config.shader).coerceAtLeast(0),
+                    ).apply { onChange = { i -> saveBackdrop { it.copy(shader = shaders[i]) } } },
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                         .apply { topMargin = (8 * resources.displayMetrics.density).toInt() },
                 )
+                // Live under the finger, without rebuilding the card the slider sits in.
+                fun saveLive(edit: (PanelConfig) -> PanelConfig) {
+                    val store = ConfigStore(this)
+                    val next = edit(store.load())
+                    store.save(next)
+                    graph.bridge.update(StatePayload.encode(graph.repository.state.value, next, WeatherPoll.latest))
+                    refreshPreview()
+                }
+                // A slider over a range of tenths: [lo] to [hi], showing the value as [label] does.
+                fun tenths(name: String, lo: Float, hi: Float, now: Float, label: (Float) -> String, set: (PanelConfig, Float) -> PanelConfig) =
+                    SettingsRows.slider(rows, Math.round((hi - lo) * 10), Math.round((now - lo) * 10),
+                        text = { "$name  ${label(lo + it / 10f)}" },
+                        onMove = { p -> saveLive { set(it, lo + p / 10f) } },
+                        onDone = {},
+                    )
+                if (config.shader == "metal") {
+                    val m = config.metal
+                    val presets = listOf("silver", "gold", "chromatic", "tint")
+                    SettingsRows.pills(rows, "Finish", listOf("Silver", "Gold", "Chromatic", "Colour"),
+                        presets.indexOf(m.preset).coerceAtLeast(0)) { i -> saveBackdrop { it.copy(metal = it.metal.copy(preset = presets[i])) } }
+                    if (m.preset == "tint") {
+                        // The colour opaque in the picker; the burn's amount stays the tint's alpha.
+                        SettingsRows.colorRow(rows, "Colour", m.tint or 0xFF000000.toInt()) { c ->
+                            saveBackdrop { it.copy(metal = it.metal.copy(tint = (c and 0xFFFFFF) or (it.metal.tint and 0xFF000000.toInt()))) }
+                        }
+                        SettingsRows.slider(rows, 100, Math.round(((m.tint ushr 24) and 0xFF) / 2.55f),
+                            text = { "Tint  $it%" },
+                            onMove = { p -> saveLive { c -> c.copy(metal = c.metal.copy(tint = (c.metal.tint and 0xFFFFFF) or (Math.round(p * 2.55f) shl 24))) } },
+                            onDone = {},
+                        )
+                    }
+                    tenths("Repetition", 1f, 10f, m.repetition, { "×%.1f".format(it) }) { c, v -> c.copy(metal = c.metal.copy(repetition = v)) }
+                    SettingsRows.slider(rows, 360, m.angle,
+                        text = { "Angle  $it°" },
+                        onMove = { p -> saveLive { it.copy(metal = it.metal.copy(angle = p)) } },
+                        onDone = {},
+                    )
+                    SettingsRows.slider(rows, 100, Math.round(m.distortion * 100),
+                        text = { "Distortion  $it%" },
+                        onMove = { p -> saveLive { it.copy(metal = it.metal.copy(distortion = p / 100f)) } },
+                        onDone = {},
+                    )
+                } else if (config.shader == "bends") {
+                    val b = config.bends
+                    SettingsRows.colorRow(rows, "Colour", b.color) { c -> saveBackdrop { it.copy(bends = it.bends.copy(color = c)) } }
+                    SettingsRows.slider(rows, 360, b.rotation,
+                        text = { "Rotation  $it°" },
+                        onMove = { p -> saveLive { it.copy(bends = it.bends.copy(rotation = p)) } },
+                        onDone = {},
+                    )
+                    tenths("Scale", 0.2f, 5f, b.scale, { "×%.1f".format(it) }) { c, v -> c.copy(bends = c.bends.copy(scale = v)) }
+                    tenths("Frequency", 0.1f, 5f, b.frequency, { "×%.1f".format(it) }) { c, v -> c.copy(bends = c.bends.copy(frequency = v)) }
+                    tenths("Band width", 1f, 20f, b.bandWidth, { "%.1f".format(it) }) { c, v -> c.copy(bends = c.bends.copy(bandWidth = v)) }
+                } else {
+                    SettingsRows.colorRow(rows, "Colour", config.shaderColor) { c -> saveBackdrop { it.copy(shaderColor = c) } }
+                    SettingsRows.colorRow(rows, "Second colour", config.shaderColor2) { c -> saveBackdrop { it.copy(shaderColor2 = c) } }
+                    // Shown against Silk's own scale, 1.3, as ×1; up to a scale of 2. A twentieth at a time.
+                    val own = dev.kb896.aiusage.ui.glass.Silk.SCALE
+                    SettingsRows.slider(rows, 27, Math.round((config.shaderScale - 0.65f) * 20).coerceIn(0, 27),
+                        text = { "Repetition  ×%.2f".format((0.65f + it / 20f) / own) },
+                        onMove = { p -> saveLive { it.copy(shaderScale = 0.65f + p / 20f) } },
+                        onDone = {},
+                    )
+                    SettingsRows.slider(rows, 360, config.shaderRotation,
+                        text = { "Rotation  $it°" },
+                        onMove = { p -> saveLive { it.copy(shaderRotation = p) } },
+                        onDone = {},
+                    )
+                }
+            }
         }
         // Depth, for anything but a flat colour: the background shifts as the phone tilts and
         // as the pages scroll. Pictures and new clips keep real pixels past the frame for it.
@@ -1994,21 +2136,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun bindArt() {
-        val pick = findViewById<Button>(R.id.art_pick)
-        pick.setOnClickListener { pickArt.launch("image/*") }
-        // Long-press re-crops what is already there, without going back through the
-        // picker to choose the same file again.
-        pick.setOnLongClickListener {
-            val path = ConfigStore(this).load().art.imagePath
-            if (path == null) toast("No image chosen yet") else cropArtwork(path, reuseTransform = true)
-            true
-        }
-    }
-
     private fun bindDiagnostics() {
         // Restoring the built-in mark is the only reset left in here — wiping every
-        // setting moved to ADVANCED, behind a confirmation, where a user can reach it.
+        // setting moved to Advanced, behind a confirmation, where a user can reach it.
         Diagnostics.install(findViewById(R.id.debug_slot)) {
             buildSettingsRows()
             refreshPreview()
@@ -2020,81 +2150,6 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Advanced is an open card now, like every other: nothing to expand. */
-    private fun bindAdvancedToggle() = Unit
-
-    /**
-     * Live ring tuning, writing through to the panel config on every move.
-     *
-     * These edit the same PanelConfig everything else does and reach the panel by the
-     * same payload, so the rings track the drag on the rear display in real time. They
-     * previously wrote to a separate GeometryStore with its own broadcast — two stores
-     * and two channels aimed at one panel, which is how a panel ends up drawing one
-     * source's numbers with another's layout.
-     *
-     * Only fromUser events are acted on. setProgress() during seeding fires the listener
-     * too, and reacting to that would push five times on every open and — worse — write
-     * the seeded values back over stored ones.
-     */
-    private fun bindGeometrySliders() {
-        val store = ConfigStore(this)
-        var current = store.load().effectiveRingLayout
-
-        data class Slider(
-            val bar: SeekBar, val label: TextView, val name: String,
-            val range: IntRange, val get: () -> Int, val set: (Int) -> RingLayout,
-        )
-
-        val sliders = listOf(
-            Slider(findViewById(R.id.geo_cx), findViewById(R.id.geo_cx_label), "RING X",
-                RingLayout.CX_RANGE, { current.cx }, { current.copy(cx = it) }),
-            Slider(findViewById(R.id.geo_cy1), findViewById(R.id.geo_cy1_label), "FIRST Y",
-                RingLayout.CY_FIRST_RANGE, { current.cyFirst }, { current.copy(cyFirst = it) }),
-            Slider(findViewById(R.id.geo_cy2), findViewById(R.id.geo_cy2_label), "SECOND Y",
-                RingLayout.CY_SECOND_RANGE, { current.cySecond }, { current.copy(cySecond = it) }),
-            Slider(findViewById(R.id.geo_radius), findViewById(R.id.geo_radius_label), "RADIUS",
-                RingLayout.RADIUS_RANGE, { current.radius }, { current.copy(radius = it) }),
-            Slider(findViewById(R.id.geo_stroke), findViewById(R.id.geo_stroke_label), "STROKE",
-                RingLayout.STROKE_RANGE, { current.stroke }, { current.copy(stroke = it) }),
-        )
-
-        fun seed() {
-            for (s in sliders) {
-                s.bar.max = s.range.last - s.range.first
-                s.bar.progress = s.get() - s.range.first
-                s.label.text = "${s.name}  ${s.get()}"
-            }
-        }
-        seed()
-
-        fun pushLayout(layout: RingLayout) {
-            val config = store.load().copy(ringLayout = layout)
-            store.save(config)
-            graph.bridge.update(StatePayload.encode(graph.repository.state.value, config, WeatherPoll.latest))
-            refreshPreview()
-        }
-
-        for (s in sliders) {
-            s.bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
-                    if (!fromUser) return
-                    val value = progress + s.range.first
-                    current = s.set(value)
-                    s.label.text = "${s.name}  $value"
-                    pushLayout(current)
-                }
-                override fun onStartTrackingTouch(bar: SeekBar) {}
-                override fun onStopTrackingTouch(bar: SeekBar) {}
-            })
-        }
-
-        findViewById<Button>(R.id.geo_reset).setOnClickListener {
-            current = RingLayout.forDevice()
-            seed()
-            pushLayout(current)
-            toast("Ring geometry reset")
-        }
-    }
-
     /**
      * The grant button IS the status.
      *
@@ -2320,7 +2375,7 @@ class MainActivity : ComponentActivity() {
                 recoveryScroll.visibility = View.GONE
             }
         }
-        recoveryDisplayAbsent.text = "Rear panel not found — this build only supports the Xiaomi 17 Pro, 17 Pro Max, 18 Pro and 18 Pro Max."
+        recoveryDisplayAbsent.text = "Rear panel not found — this build only supports the Xiaomi 18 Pro / MAX & Xiaomi 17 Pro / MAX."
         recoveryDisplayAbsent.visibility = if (s.rearDisplayId < 0) View.VISIBLE else View.GONE
         collapseEmptyCards()
     }
@@ -2381,7 +2436,7 @@ class MainActivity : ComponentActivity() {
                     toast("Shizuku's service did not answer — is Shizuku running?")
                     return@withContext
                 }
-                val text = "AI Usage ${dev.kb896.aiusage.BuildConfig.VERSION_NAME}\n$report"
+                val text = "Magic Rear ${dev.kb896.aiusage.BuildConfig.VERSION_NAME}\n$report"
                 getSystemService(android.content.ClipboardManager::class.java)
                     .setPrimaryClip(android.content.ClipData.newPlainText("rear-display report", text))
                 Modal.show(Modal.builder(this@MainActivity)
@@ -2422,10 +2477,10 @@ class MainActivity : ComponentActivity() {
         /** The bottom bar's tabs, in its order. See bindTabs. */
         private const val TAB_GENERAL = 0
         private const val TAB_INFO = 1
-        private const val TAB_USAGE = 2
-        private const val TAB_MEDIA = 3
+        private const val TAB_MEDIA = 2
+        private const val TAB_PORTAL = 3
         private const val TAB_AOD = 4
-        private const val TAB_PORTAL = 5
+        private const val TAB_USAGE = 5
         /** How long a change of tab slides its sections. */
         private const val TAB_SLIDE_MS = 320L
 
