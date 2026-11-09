@@ -21,7 +21,7 @@ class RearUserService : IRearService.Stub {
      * Shizuku 13+ hands a Context of our package here: the shell sheet reads the panel's
      * font through its Resources (see ShellFont).
      */
-    @Suppress("unused") constructor(context: Context) { this.context = context }
+    @Suppress("unused") constructor(context: Context) { this.context = context; watchFrontLock() }
 
     private var context: Context? = null
 
@@ -101,6 +101,7 @@ class RearUserService : IRearService.Stub {
         }
         // DPI changes not yet handed on go now, or they are lost with us.
         flushDpi(all = true)
+        flushWidth(all = true)
         exitProcess(0)
     }
 
@@ -226,6 +227,8 @@ class RearUserService : IRearService.Stub {
 
     override fun setDozing(dozing: Boolean) {
         this.dozing = dozing
+        // The back going to sleep locks it again (BackLock): the next look asks for the code.
+        if (dozing) synchronized(lockGuard) { rearLock.dark() }
         // The panel's own sleep timer can run out while it sits behind a guest; that is
         // not the rear going dark, and the guest on top keeps its frame. A rear that really
         // is dark is seen by the keep-alive (nothing on top) and hides it there.
@@ -494,6 +497,8 @@ class RearUserService : IRearService.Stub {
             cameraWasOnTop = false
             cameraLaunchedAt = android.os.SystemClock.elapsedRealtime()
             watchBandTaps(displayId)
+            // Its fingers read even with the panel asleep under it: the pulls close it (closeCameraFromBack).
+            syncTouchWatch()
         }
         return ok
     }
@@ -555,6 +560,15 @@ class RearUserService : IRearService.Stub {
             try { Thread.sleep(BAND_WATCH_MS) } catch (_: InterruptedException) { return@guarded }
             if (bandTaps === proc) stopBandTaps()
         }.apply { isDaemon = true; name = "camera-band-taps-limit"; start() }
+    }
+
+    /**
+     * The camera we opened closed from the back by a pull or a swipe: Back to it, and its task gone
+     * if Back is not enough ([sendCameraBack], the band tap's own way). Off the touch reader.
+     */
+    private fun closeCameraFromBack(why: String) {
+        Log.i(TAG, "camera close: $why")
+        runCatching { pokeWorker.execute { sendCameraBack(rearDisplay()) } }
     }
 
     private fun stopBandTaps() {
@@ -920,6 +934,8 @@ class RearUserService : IRearService.Stub {
      * it (else the strip goes). In place of a bare frame.show() everywhere.
      */
     private fun chromeShow() {
+        // A guest the back's lock covers shows nothing of itself, its frame neither.
+        if (lockVeiled) { chromeHide(); return }
         frame.follow(if (guest?.keptRight == true) privateApp else null)
         strip.follow(privateApp)
         frame.show()
@@ -1004,8 +1020,20 @@ class RearUserService : IRearService.Stub {
         try {
             val config = StatePayload.decode(payload).config
             frame.style(config.portalFrameColor)
+            portalFrameColor = config.portalFrameColor
+            lockedNoticeText = config.lockedNoticeText
+            shellSheet?.frameColor(config.portalFrameColor)
             frame.allow(config.portalBorder)
+            val shownPkg = guest?.pkg
+            val dpiWas = shownPkg?.let { portalDpi[it] }
+            val widthWas = shownPkg?.let { portalWidth[it] }
             setPortalDpi { dpiEdits.overlay(config.portalDpi, android.os.SystemClock.uptimeMillis()) }
+            val widths = synchronized(dpiLock) { widthEdits.overlay(config.portalWidth, android.os.SystemClock.uptimeMillis()) }
+            if (widths != portalWidth) setPortalWidth { widths }
+            // The guest's DPI or width set on the front: it restarts with it now (sizes read at start).
+            if (shownPkg != null && !sheetUp && (portalDpi[shownPkg] != dpiWas || portalWidth[shownPkg] != widthWas)) {
+                restartGuest(shownPkg, "its size changed on the front")
+            }
             sheetLook = config.theme to config.glassStyle
             controlCenter.theme(config.theme, config.glassStyle, config.background)
             notices.theme(config.theme, config.glassStyle, config.notificationTint, config.notificationGround)
@@ -1024,6 +1052,9 @@ class RearUserService : IRearService.Stub {
             // in its new place — on the mode worker, not this binder thread (update() is the app's).
             val confined = synchronized(dpiLock) { confinedEdits.overlay(config.portalConfined, android.os.SystemClock.uptimeMillis()) }
             if (portalConfined != confined) {
+                // Switched on the front: off is the whole rear even for one seen letterboxed.
+                (portalConfined - confined).forEach(::wantedWhole)
+                wholeAnyway.removeAll(confined - portalConfined)
                 portalConfined = confined
                 syncSheetKeepRight()
                 relaunchLater("its camera area setting changed")
@@ -1097,6 +1128,15 @@ class RearUserService : IRearService.Stub {
      * laid over it until a payload carries them ([dpiEdits]). Written under [dpiLock].
      */
     @Volatile private var portalDpi: Map<String, Int> = emptyMap()
+
+    /**
+     * How wide each app kept right of the cameras is (config.portalWidth, see [GuestWidth]), with
+     * the widths set on the back laid over it until a payload carries them ([widthEdits]).
+     * Written under [dpiLock].
+     */
+    @Volatile private var portalWidth: Map<String, Int> = emptyMap()
+    /** The portal frame's colour, for the sheet's width preview. */
+    @Volatile private var portalFrameColor = 0xFFB14CFF.toInt()
     /** Display 1's own density as the first read found it (its override, else its physical); null before. */
     @Volatile private var densityDefault: Int? = null
 
@@ -1243,8 +1283,12 @@ class RearUserService : IRearService.Stub {
         // The same app, in the other place than it is: it ends there, and starts here. Its picture
         // taken first, while there is one, and carried through to the reveal: taken after, it would
         // be of the panel, shown for the length of the start. Whatever does not use it, this lets go.
-        val carried = guest?.takeIf { it.pkg == pkg && it.keptRight != wantPrivate }?.let { g ->
-            (if (!dozing) coverRear(displayId) else null).also { endForRelaunch(g) }
+        // Restarted for a new size: ended where it is, process and all, and started again.
+        val restart = restartFor == pkg
+        // Read once: the survive wait lets go of [placing], and another open of the same app in it is not a restart.
+        restartFor = null
+        val carried = guest?.takeIf { it.pkg == pkg && (it.keptRight != wantPrivate || restart) }?.let { g ->
+            (if (!dozing) coverRear(displayId) else null).also { endForRelaunch(g, kill = restart) }
         }
         try {
         // Every app on a display of its own, right of the cameras or over the whole rear: on the
@@ -1254,8 +1298,9 @@ class RearUserService : IRearService.Stub {
         val again = guest?.takeIf { it.pkg == pkg }
         if (again != null && again.onPrivate) return@synchronized openAgainOnPrivate(again, component, displayId)
         if (again == null) {
+            freshen(pkg)
             val pd = openPrivate(pkg, wide = !wantPrivate)
-            if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried)
+            if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried).also { if (it) startedHere(pkg) }
             Log.w(TAG, "portal: no private display — $pkg on the rear itself instead")
             if (wantPrivate) privateRefused = true
         }
@@ -1278,7 +1323,7 @@ class RearUserService : IRearService.Stub {
             if (start == Started.ClosedBehindLock) {
                 Log.i(TAG, "portal: $pkg closed itself behind the lock — on a private display instead")
                 val pd = openPrivate(pkg, wide = false)
-                if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried, lockRetried = true)
+                if (pd != null) return@synchronized launchOnPrivate(pkg, component, displayId, pd, carried, lockRetried = true).also { if (it) startedHere(pkg) }
             }
             val task = (start as? Started.Task)?.id
             if (task == null) {
@@ -1326,7 +1371,7 @@ class RearUserService : IRearService.Stub {
             }
             // A task gone within two seconds of the move was a trampoline the move
             // relaunched (Shazam, measured); once more from the start, then give up.
-            Thread.sleep(maxOf(0L, GUEST_SURVIVE_MS - (android.os.SystemClock.uptimeMillis() - movedAt)))
+            if (!surviveWait(movedAt, task)) return@synchronized true
             val entry = GuestTask.byId(exec("am stack list"), task)
             if (entry != null && entry.display == displayId) {
                 guest = Guest(pkg, task, onTop = true, landed = true)
@@ -1352,6 +1397,30 @@ class RearUserService : IRearService.Stub {
             // Safe on one its reveal has already taken off.
             carried?.remove()
         }
+    }
+
+    /**
+     * The wait, from [since], to see a just-started guest's [task] last ([GUEST_SURVIVE_MS]): a
+     * trampoline the start relaunched dies inside it. WITHOUT HOLDING [placing] — the caller's —
+     * which it gives up for the wait (Object.wait) and takes back after: held, a Close, a Front or
+     * the next app asked for in those two seconds waited them out behind it, and read as the
+     * rear being slow to close an app just opened (2026-11-09). False when somebody else changed
+     * the guest meanwhile (closed it, sent it to the front, opened another): the launch is then
+     * over, theirs to have decided, and nothing of it is undone. Under [placing].
+     */
+    private fun surviveWait(since: Long, task: Int): Boolean {
+        val lock = placing as java.lang.Object
+        while (true) {
+            val left = GUEST_SURVIVE_MS - (android.os.SystemClock.uptimeMillis() - since)
+            if (left <= 0) break
+            lock.wait(left)
+        }
+        val g = guest
+        if (g == null || g.task != task) {
+            Log.i(TAG, "portal: task $task changed hands in its survive wait — ${g?.pkg ?: "no guest"} now; the launch is over")
+            return false
+        }
+        return true
     }
 
     /** The rear's layer stack for the guests' covers, read once. */
@@ -1412,10 +1481,13 @@ class RearUserService : IRearService.Stub {
     private fun syncAppRect(why: String) {
         val g = guestRef.get()?.takeIf { it.onPrivate } ?: return
         val seen = TaskRead.of(g.task) as? TaskRead.Seen ?: return
-        val rect = GuestShape.appOnRear(geometry, seen.bounds, privateArea())
+        // In the display's rows, its hidden top among them: the rear's are that many fewer.
+        val hidden = privateDisplay?.takeIf { it.displayId == g.privateDisplay }?.hidden ?: 0
+        val onDisplay = seen.bounds?.let { GuestShape.Bounds(it.left, it.top - hidden, it.right, it.bottom - hidden) }
+        val rect = GuestShape.appOnRear(geometry, onDisplay, privateArea())
         if (rect == privateApp) return
         privateApp = rect
-        if (g.wide && GuestShape.letterboxedUnderLenses(geometry, rect) && letterboxed.add(g.pkg)) {
+        if (g.wide && g.pkg !in wholeAnyway && GuestShape.letterboxedUnderLenses(geometry, rect) && letterboxed.add(g.pkg)) {
             Log.i(TAG, "portal: ${g.pkg} letterboxed under the lenses (x ${rect.left}–${rect.right}) — right of the cameras instead")
             relaunchLater("letterboxed under the lenses")
         }
@@ -1449,7 +1521,7 @@ class RearUserService : IRearService.Stub {
         val area = pd.area
         return runCatching {
             val shot = ShellLayer.lease(listOf(pd.layer)) { live ->
-                live.firstOrNull()?.let { RearCapture.layer(it, android.graphics.Rect(0, 0, area.width, area.height)) }
+                live.firstOrNull()?.let { RearCapture.layer(it, android.graphics.Rect(0, pd.hidden, area.width, pd.hidden + area.height)) }
             } ?: return@runCatching null
             try {
                 if (shot.secure) return@runCatching null
@@ -1483,7 +1555,10 @@ class RearUserService : IRearService.Stub {
     /** A new display for [pkg] at its density, over the whole rear if [wide], not yet anyone's; null where it cannot be had. Under [placing]. */
     private fun openPrivate(pkg: String, wide: Boolean): PrivateDisplay? {
         val ctx = context ?: run { Log.w(TAG, "private display: no Context from this Shizuku"); return null }
-        val pd = PrivateDisplay.open(ctx, coverStack, geometry, RearDensity.ofPrivate(pkg, portalDpi, geometry), wide) { id ->
+        val pd = PrivateDisplay.open(
+            ctx, coverStack, geometry, RearDensity.ofPrivate(pkg, portalDpi, geometry), wide,
+            width = if (wide) null else portalWidth[pkg], hidden = statusBarPx,
+        ) { id ->
             exec("input -d $id keyevent KEYCODE_WAKEUP")
         } ?: return null
         // Said once more for the firmware that takes it: a portrait-locked app fills the display
@@ -1491,6 +1566,28 @@ class RearUserService : IRearService.Stub {
         Log.i(TAG, "private display ${pd.displayId}: ignore orientation: " +
             exec("wm set-ignore-orientation-request -d ${pd.displayId} true; wm get-ignore-orientation-request -d ${pd.displayId}"))
         return pd
+    }
+
+    /**
+     * The status bar's height as apps read it (android:dimen/status_bar_height, the front's): the
+     * rows each private display hides at its top (PrivateDisplay.open, HIDDEN TOP). 0 if unreadable.
+     *
+     * Asked of the overlay service, as the apps' resources resolve it: this process's own system
+     * resources have no overlays, and gave AOSP's 78 px where HyperOS's overlay makes it 150 —
+     * TikTok's tabs still 72 px down (2026-11-08).
+     */
+    private val statusBarPx: Int by lazy {
+        val said = exec("cmd overlay lookup android android:dimen/status_bar_height")
+        val m = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(px|dp|dip)""").find(said)
+        val px = m?.destructured?.let { (n, unit) ->
+            val v = n.toFloat()
+            if (unit == "px") v else v * android.content.res.Resources.getSystem().displayMetrics.density
+        } ?: runCatching {
+            val r = android.content.res.Resources.getSystem()
+            r.getIdentifier("status_bar_height", "dimen", "android").takeIf { it != 0 }?.let { r.getDimensionPixelSize(it).toFloat() }
+        }.getOrNull() ?: 0f
+        Log.i(TAG, "private displays: the top ${px.toInt()} px hidden (status_bar_height: ${said.trim().take(60)})")
+        Math.round(px).coerceIn(0, geometry.heightPx / 2)
     }
 
     /** Where the private guest's display stands on the rear; right of the lenses with none. */
@@ -1513,8 +1610,10 @@ class RearUserService : IRearService.Stub {
      */
     private fun syncPrivate() {
         val g = guestRef.get()
-        val shown = g != null && g.onPrivate && g.onTop
-        touchForward?.appX = if (g?.wide == true) 0 else geometry.cutoutPx
+        val shown = g != null && g.onPrivate && g.onTop && !lockVeiled
+        val area = privateDisplay?.takeIf { it.displayId == g?.privateDisplay }?.area
+        touchForward?.appX = area?.left ?: if (g?.wide == true) 0 else geometry.cutoutPx
+        touchForward?.appW = area?.width ?: 0
         privateDisplay?.takeIf { it.displayId == g?.privateDisplay }?.show(shown)
         if (shown && !panelCovered) privateLit = true // new on top: the hold's next look says if not
         if (!shown) privateAppHolds = false
@@ -1583,7 +1682,7 @@ class RearUserService : IRearService.Stub {
                 reveal(cover, pkg, displayId, { stripFor() }) { drawnOn(pkg, task, pd.displayId, area) }
                 if (guest?.let { it.task == task && it.onTop } == true) chromeShow()
             }
-            Thread.sleep(maxOf(0L, GUEST_SURVIVE_MS - (android.os.SystemClock.uptimeMillis() - startedAt)))
+            if (!surviveWait(startedAt, task)) return true
             if (GuestTask.byId(exec("am stack list"), task)?.display == pd.displayId) {
                 Log.i(TAG, "portal: $pkg is the guest on private display ${pd.displayId}, task $task")
                 guestPlaced(displayId)
@@ -1622,8 +1721,14 @@ class RearUserService : IRearService.Stub {
             val mine = GuestTask.entries(exec("am stack list")).filter { it.pkg == pkg }
             seen = mine.firstOrNull { it.display == display } ?: mine.firstOrNull()
             if (seen == null && !throughFront && now - began >= PRIVATE_NO_TASK_MS) return null
+            // On its own display already: nothing is moved, so nothing waits for it to hold
+            // still. A trampoline's next activity opens on the display of the one that started
+            // it, and the reveal waits for the app's own drawn frame anyway. The settle (a whole
+            // second of the same top) was most of an open's wait (2026-11-09). One seen elsewhere
+            // is moved, and a move does want the app it moves to have settled.
+            if (seen != null && seen.display == display) break
             if (seen != null && settle.feed(seen.top, now)) break
-            Thread.sleep(150)
+            Thread.sleep(START_POLL_MS)
         }
         val entry = seen ?: return null
         if (entry.display != display) {
@@ -1649,14 +1754,103 @@ class RearUserService : IRearService.Stub {
      * it is `am start` on these that has been proven. The app's own saved state is what it comes
      * back with. Under [placing].
      */
-    private fun endForRelaunch(g: Guest) {
-        Log.i(TAG, "portal: ${g.pkg} relaunching, ${if (g.keptRight) "from right of the cameras to the whole rear" else "from the whole rear to right of the cameras"}")
+    private fun endForRelaunch(g: Guest, kill: Boolean = false) {
+        Log.i(TAG, "portal: ${g.pkg} relaunching, " + when {
+            kill -> "process and all, for its new size"
+            g.keptRight -> "from right of the cameras to the whole rear"
+            else -> "from the whole rear to right of the cameras"
+        })
         exec("am stack remove ${g.task}")
         for (i in 0 until RELAUNCH_POLLS) {
             if (GuestTask.byId(exec("am stack list"), g.task) == null) break
             Thread.sleep(RELAUNCH_POLL_MS)
         }
+        if (kill) endProcess(g.pkg)
         dropGuest("relaunching in its new place")
+    }
+
+    // -- sizes read at start --------------------------------------------------------------
+    //
+    // Some apps take their size once, as their process starts, from the display it starts for:
+    // TikTok scales its whole design to that width (ByteDance's screen adaptation). Started on
+    // the front, it kept the front's 1220 px on the back, its bar a quarter of the height at any
+    // DPI; started on the back, it fitted (the owner, 2026-11-08). So an app is started on the
+    // back by us, fresh: one whose process we did not start here is ended first ([freshen]), and
+    // a new DPI or width restarts it ([restartGuest]). Ended as Recents ends an app, never
+    // force-stopped (that would stop its notifications until it is opened again).
+
+    /** The process each app had when we last started it on the back. Under [placing]. */
+    private val startedPids = HashMap<String, Int>()
+
+    /** The app being restarted for a new size ([restartGuest]): its launch ends it first. Under [placing]. */
+    private var restartFor: String? = null
+
+    /** Restart the guest for its size, once the sheet is down: set on the back. Under [sheetLock]. */
+    private var restartAfterSheet: String? = null
+
+    private fun pidOf(pkg: String): Int? = exec("pidof $pkg").trim().split(Regex("\\s+")).firstOrNull()?.toIntOrNull()
+
+    /** [pkg]'s process, started on the back now: remembered, so it is not ended next time. Under [placing]. */
+    private fun startedHere(pkg: String) {
+        pidOf(pkg)?.let { startedPids[pkg] = it } ?: startedPids.remove(pkg)
+    }
+
+    /**
+     * [pkg]'s process ended if it is alive and not one we started on the back: its tasks removed
+     * (out of Recents, as a swipe there), then whatever is left in the background. Under [placing].
+     */
+    private fun freshen(pkg: String) {
+        val pid = pidOf(pkg) ?: return
+        if (startedPids[pkg] == pid) return
+        Log.i(TAG, "portal: $pkg is running from the front (pid $pid) — ended, to start on the back with the back's size")
+        GuestTask.entries(exec("am stack list")).filter { it.pkg == pkg }.forEach { exec("am stack remove ${it.task}") }
+        endProcess(pkg)
+    }
+
+    /**
+     * [pkg] ended, services and all (`am stop-app`), and waited for. Not `am kill`: that only ends
+     * an idle background process, and TikTok's push services kept its alive, so it came back warm
+     * with its old size (2026-11-08). Not `am force-stop` either: stop-app leaves its alarms and
+     * jobs, so it is not left silent. Under [placing].
+     */
+    private fun endProcess(pkg: String) {
+        startedPids.remove(pkg)
+        exec("am stop-app $pkg")
+        for (i in 0 until RELAUNCH_POLLS) {
+            if (pidOf(pkg) == null) return
+            Thread.sleep(RELAUNCH_POLL_MS)
+        }
+        Log.w(TAG, "portal: $pkg still running after stop-app — it keeps the size it started with")
+    }
+
+    /**
+     * [pkg], just closed, ended (`am stop-app`) on the worker, not waited for: unless it has been
+     * opened again since, on the back, by then — that one is not ended. Any thread.
+     */
+    private fun stopAfterClose(pkg: String) {
+        runCatching {
+            modeWorker.execute {
+                synchronized(placing) {
+                    if (guest?.pkg == pkg) { Log.i(TAG, "portal: $pkg opened again before its stop — left running"); return@synchronized }
+                    startedPids.remove(pkg)
+                    exec("am stop-app $pkg")
+                }
+            }
+        }.onFailure { Log.w(TAG, "portal: stop after close not queued: ${it.message}") }
+    }
+
+    /** The guest [pkg] restarted fresh on the back, for a new DPI or width. Off the caller's thread. Any thread. */
+    private fun restartGuest(pkg: String, why: String) {
+        runCatching {
+            modeWorker.execute {
+                synchronized(placing) {
+                    guest?.takeIf { it.pkg == pkg && it.placed } ?: return@synchronized
+                    Log.i(TAG, "portal: $pkg restarting — $why")
+                    restartFor = pkg
+                    try { launchGuest(pkg, rearDisplay()) } finally { restartFor = null }
+                }
+            }
+        }.onFailure { Log.w(TAG, "portal: restart not queued: ${it.message}") }
     }
 
     /**
@@ -1675,13 +1869,22 @@ class RearUserService : IRearService.Stub {
 
     /**
      * Apps seen letterboxed under the lenses over the whole rear (GuestShape.letterboxedUnderLenses):
-     * right of the cameras from then on, in this process, whatever the switch says — which the
-     * sheet then does not offer, as for one here only for this open ([switchHidden]).
+     * right of the cameras from then on, in this process — until somebody switches "Keep right
+     * of the cameras" off for one, which the sheet shows on for them ([wantedWhole]).
      */
     private val letterboxed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
-    /** The sheet's switch is not offered for [g]: it would make no difference, or only fail. */
-    private fun switchHidden(g: Guest?): Boolean = g != null && (g.lockRetried || g.pkg in letterboxed)
+    /**
+     * Apps somebody put on the whole rear by switching "Keep right of the cameras" off: the
+     * letterbox check got them wrong, or they would rather see it, so it leaves them there.
+     */
+    private val wholeAnyway: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** [pkg] switched off: on the whole rear, and kept there. */
+    private fun wantedWhole(pkg: String) {
+        letterboxed.remove(pkg)
+        wholeAnyway.add(pkg)
+    }
 
     /** The next launch is somebody having turned the switch off for the whole rear. Under [placing]. */
     private var wholeRearAsked = false
@@ -1700,7 +1903,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun forwardOpen(): Boolean {
         val g = guestRef.get() ?: return false
-        return g.onPrivate && g.onTop && privateLit && !pocketed && !sheetUp && !controlCenter.isUp && !notices.isUp
+        return g.onPrivate && g.onTop && privateLit && !pocketed && !sheetUp && !controlCenter.isUp && !notices.isUp && !lockVeiled && !pillOwns && !binOwns
     }
 
     /**
@@ -1739,6 +1942,7 @@ class RearUserService : IRearService.Stub {
         val entry = list.firstOrNull { it.task == g.task }
         val rearTask = list.firstOrNull { it.display == displayId }
         val lit = rearLit(displayId) == true
+        lockTick(g, lit)
         val tick = GuestGate.tickPrivate(
             alive = entry != null,
             onDisplay = entry?.display == g.privateDisplay,
@@ -1927,8 +2131,8 @@ class RearUserService : IRearService.Stub {
     private fun stripColor(): Int? {
         val pd = privateDisplay?.takeIf { !it.wide } ?: return null
         return runCatching {
-            val at = StripColor.sample(geometry, privateApp ?: pd.area)
-            val crop = android.graphics.Rect(at.left, at.top, at.right, at.bottom)
+            val at = StripColor.sample(geometry, privateApp ?: pd.area, pd.area.left)
+            val crop = android.graphics.Rect(at.left, at.top + pd.hidden, at.right, at.bottom + pd.hidden)
             // A quarter of the rows: the edge's colour does not need every one, and fewer cost less.
             // Its layer held for the capture (ShellLayer.lease): a close may let it go at any moment.
             val shot = ShellLayer.lease(listOf(pd.layer)) { live ->
@@ -1963,7 +2167,7 @@ class RearUserService : IRearService.Stub {
         val pd = privateDisplay?.takeIf { !it.wide } ?: return null
         val probe = StripColor.keyboardProbe(geometry, privateApp ?: pd.area, pd.area) ?: return -1
         return runCatching {
-            val crop = android.graphics.Rect(probe.left, probe.top, probe.right, probe.bottom)
+            val crop = android.graphics.Rect(probe.left, probe.top + pd.hidden, probe.right, probe.bottom + pd.hidden)
             val shot = ShellLayer.lease(listOf(pd.layer)) { live ->
                 live.firstOrNull()?.let { RearCapture.layer(it, crop, KEYBOARD_SCALE) }
             } ?: return@runCatching null
@@ -2207,10 +2411,20 @@ class RearUserService : IRearService.Stub {
                 shapeForFront(g.task)
                 endGuest("sent to the front")
             }
+            // Out of Recents (its task removed) and ended, services and all ([endProcess]). Not
+            // force-stop: that killed it
+            // but left it in Recents, where it looked still open on the front (the owner,
+            // 2026-11-08), and a force-stopped app gets no notifications or alarms until it is
+            // opened again.
             "close" -> synchronized(placing) {
                 val g = guest ?: return
-                exec("am force-stop ${g.pkg}")
+                exec("am stack remove ${g.task}")
+                // The panel back first, the app ended after it, off this thread: ended first, the
+                // panel waited for a big app's process to die (TikTok's, with its services), and
+                // the Close read as slow (2026-11-09). Its task is already gone, so nothing shows.
+                startedPids.remove(g.pkg)
                 endGuest("closed")
+                stopAfterClose(g.pkg)
             }
             else -> Log.w(TAG, "portal: unknown guest action '$which'")
         }
@@ -2241,7 +2455,7 @@ class RearUserService : IRearService.Stub {
     @Volatile private var rearTouchRetryAt = 0L
     private var warnedNoRearTouch = false
 
-    private fun touchWanted() = placedDisplayId >= 0 && (!dozing || guest?.onTop == true)
+    private fun touchWanted() = placedDisplayId >= 0 && (!dozing || guest?.onTop == true || cameraUp())
 
     /** The watch running if and only if [touchWanted]. Any thread. */
     private fun syncTouchWatch() = synchronized(touchLock) {
@@ -2366,6 +2580,10 @@ class RearUserService : IRearService.Stub {
     private var sliderPkg: String? = null
     private var sliderFrom = 0
     private var sliderAt = 0
+    /** The width slider's drag, as the DPI's: whose, from where, and to where (null: the whole). Under [sheetLock]. */
+    private var widthPkg: String? = null
+    private var widthFrom: Int? = null
+    private var widthAt: Int? = null
     /**
      * And when: a drag is timed from there too. Grabbed at the pull's own time, its first step
      * took "1 ms" and every pull read as a flick. Under [sheetLock].
@@ -2423,14 +2641,16 @@ class RearUserService : IRearService.Stub {
             sheetLook?.let { (theme, style) -> s.theme(theme, style) }
             s.apps(portalApps)
             s.dpiValues(portalDpi)
+            s.widthValues(portalWidth)
+            s.frameColor(portalFrameColor)
             s.dpiDefault(sliderDefault())
-            s.keepRight(guest?.let { keepsRight(it) } == true, hidden = switchHidden(guest))
+            s.keepRight(guest?.let { keepsRight(it) } == true)
             s.grid(portalGrid)
             s.names(portalNames)
             shellSheet = s
             // Again, now that it is published: a setPortalDpi between the first and here told
             // no sheet. The lock makes this one see that write.
-            synchronized(dpiLock) { s.dpiValues(portalDpi) }
+            synchronized(dpiLock) { s.dpiValues(portalDpi); s.widthValues(portalWidth) }
             // And the grid and the names: a payload between the first and here told no sheet.
             s.grid(portalGrid)
             s.names(portalNames)
@@ -2464,7 +2684,8 @@ class RearUserService : IRearService.Stub {
     }
 
     private fun syncSheetGuest() {
-        val g = guest?.takeIf { it.sheetOnTop != null }
+        // A locked sheet offers no guest: no Resume, no sliders, until the code is given.
+        val g = guest?.takeIf { it.sheetOnTop != null && !sheetLocked }
         val was = sheetGuestOnTop
         sheetGuestOnTop = g?.sheetOnTop
         shellSheet?.guest(sheetGuestOnTop, g?.pkg)
@@ -2480,7 +2701,7 @@ class RearUserService : IRearService.Stub {
     private fun syncSheetKeepRight() {
         // Not offered for one here only for this open: with the front locked it runs nowhere
         // else, and the switch could only make it fail (the owner, 2026-10-30).
-        shellSheet?.keepRight(guest?.let { keepsRight(it) } == true, hidden = switchHidden(guest))
+        shellSheet?.keepRight(guest?.let { keepsRight(it) } == true)
     }
 
     /** What the DPI slider stands at for a guest with none of its own: its private display's, or the rear's as read. */
@@ -2537,9 +2758,16 @@ class RearUserService : IRearService.Stub {
         var back = false
         synchronized(sheetLock) {
             if (from !== gestures) return
+            // The screenshot's bin, and the recording's pill: nothing under them sees their finger.
+            if (binTouch(e)) return
+            if (pillTouch(e)) return
+            // A pattern lock's dots take their finger before anything reads it as a pull.
+            if (patternTouch(e)) return
             // The control centre over a guest takes its own first: its top pull, and every
             // finger while it is down (ShellControlCenter.touch).
-            val actions = notices.touch(e, controlCenter.touch(e, from.feed(e), ::controlCenterOpens), ::noticesOpens)
+            // The keypad up over them: its fingers are its own, not the panes' waiting under it.
+            val actions = if (sheetUp && sheetLocked) from.feed(e)
+            else notices.touch(e, controlCenter.touch(e, from.feed(e), ::controlCenterOpens), ::noticesOpens)
             // Xiaomi's chevron is under a private guest's picture, so ours (BackChevron).
             backChevron.touch(e) { from.onBackBand && forwardOpen() }
             for (a in actions) if (sheetAction(a, e.atMs)) back = true
@@ -2978,7 +3206,11 @@ class RearUserService : IRearService.Stub {
                 setPressed(-1)
                 if (sheetAlive()) steady(atMs)
             }
-            EdgeGestures.Action.Back -> return PortalAction.wantsBack(guest?.onTop == true, sheetUp)
+            EdgeGestures.Action.Back -> {
+                // Our Back over the camera we opened: out of it, as the band tap does.
+                if (cameraUp() && !sheetUp && guest?.onTop != true) { closeCameraFromBack("a swipe in from the edge"); return false }
+                return PortalAction.wantsBack(guest?.onTop == true, sheetUp)
+            }
             // The control centre's, taken by it before they get here (ShellControlCenter.touch).
             is EdgeGestures.Action.NoticePullStart, is EdgeGestures.Action.NoticePullMove, is EdgeGestures.Action.NoticePullEnd,
             is EdgeGestures.Action.TopPullStart, is EdgeGestures.Action.TopPullMove, is EdgeGestures.Action.TopPullEnd -> Unit
@@ -2992,9 +3224,24 @@ class RearUserService : IRearService.Stub {
      * [sheetLock].
      */
     private fun openSheet(y: Float, atMs: Long) {
-        if (cameraUp()) return
-        if (!pullOpens()) { Log.i(TAG, "portal sheet: the panel is guarded (lock slider / always-on) — no sheet over it"); return }
+        // Over the camera we opened, the pull is the way out of it, as it is out of everything
+        // else here — not nothing: with Xiaomi's edge swipe not taking it on some phones, the band
+        // tap was the only way back to the clock, and nobody could know of it (a user, 2026-11-09).
+        if (cameraUp()) { closeCameraFromBack("the portal's pull"); return }
+        // The panel's control centre down: this pull is the swipe up closing it, which Xiaomi's
+        // bottom window kept from the panel. It closes; no sheet.
+        if (panelControlCenter && guest?.sheetOnTop != true) {
+            runCatching { events?.onPanelCloseControlCenter() }
+            return
+        }
+        if (!pullOpens()) { Log.i(TAG, "portal sheet: the panel is guarded (lock slider / always-on / control centre) — no sheet over it"); return }
+        // Over a guest: its control centre or notifications down take the pull, not the sheet.
+        if (controlCenter.isUp || notices.isUp) return
         val s = sheetOrNull() ?: return
+        sheetLocked = backLockedSaid()
+        refreshLockKind()
+        clearLockInput()
+        if (sheetLocked) pushLock(s) else s.lock(null)
         syncSheetGuest()
         motion.reset()
         motion.setDetents(PortalSheet.detents(sheetGuestOnTop), atMs)
@@ -3018,6 +3265,11 @@ class RearUserService : IRearService.Stub {
         if (sheetGuestOnTop != null && densityDefault == null) {
             runCatching { densityWorker.execute { syncDensity("the DPI slider wants the display's own") } }
         }
+        beginOnClock(s)
+    }
+
+    /** The sheet brought up on [sheetClock], now that it is set to rise. Under [sheetLock]. */
+    private fun beginOnClock(s: ShellSheet) {
         sheetClock.execute {
             val p = synchronized(sheetLock) { if (!sheetUp || !beginPending) return@execute; motion.position(android.os.SystemClock.uptimeMillis()) }
             val ok = runCatching { s.begin(p) }.getOrElse { Log.w(TAG, "portal sheet: begin threw: ${it.message}"); false }
@@ -3039,6 +3291,200 @@ class RearUserService : IRearService.Stub {
      * the app process: [setPanelGuarded]). Over the panel a pull then opens nothing.
      */
     @Volatile private var panelGuarded = false
+
+    /** The panel's control centre is down (IRearService.setPanelControlCenter). */
+    @Volatile private var panelControlCenter = false
+
+    // -- screenshots and recordings of the back --------------------------------------------
+    //
+    // The control centre's two tiles (ControlCenterLayout.SHOT, RECORD), on the panel's and on the
+    // one over a guest. Made here, by the shell — screencap and screenrecord of the rear's own
+    // display (its physical id, as the cover's capture) — into the app's own external files, and
+    // handed to the app, which puts them in the gallery (CaptureStore). The control centre goes
+    // first, so it is not in the picture; the recording's pill is left out of it (RecordPill).
+
+    private val captureWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("back-capture", r) }
+    }
+    /** The recording's screenrecord, and where it writes; 0 with none running. */
+    @Volatile private var recordPid = 0
+    @Volatile private var recordPath: String? = null
+    private val recordPill by lazy { RecordPill(rearLayerStack(), geometry) }
+    private val shotPolaroid by lazy { ShotPolaroid(rearLayerStack(), geometry) { runCatching { notices.lookNow() }.getOrNull() } }
+    /** A finger on the polaroid, owned from its landing: on its bin, or dragging the card. Under [sheetLock]. */
+    @Volatile private var binOwns = false
+    private var shotDragging = false
+    private var shotDownX = 0f
+    private var shotLastX = 0f
+    private var shotLastAt = 0L
+    private var shotSpeed = 0f
+
+    /**
+     * A finger on the screenshot's polaroid (ShotPolaroid): its bin tapped bins the screenshot; the
+     * card dragged right and let go goes away (the screenshot kept). True when it was the polaroid's.
+     * Under [sheetLock].
+     */
+    private fun binTouch(e: RearTouches.Event): Boolean {
+        if (!binOwns) {
+            if (e !is RearTouches.Down) return false
+            shotDragging = when {
+                shotPolaroid.binAt(e.x, e.y) -> false
+                shotPolaroid.cardAt(e.x, e.y) -> true
+                else -> return false
+            }
+        }
+        when (e) {
+            is RearTouches.Down -> {
+                binOwns = true
+                shotDownX = e.x; shotLastX = e.x; shotLastAt = e.atMs; shotSpeed = 0f
+            }
+            is RearTouches.Move -> if (shotDragging) {
+                val ms = (e.atMs - shotLastAt).coerceAtLeast(1L)
+                shotSpeed = 0.6f * ((e.x - shotLastX) / ms) + 0.4f * shotSpeed
+                shotLastX = e.x; shotLastAt = e.atMs
+                shotPolaroid.drag(e.x - shotDownX)
+            }
+            is RearTouches.Up -> {
+                binOwns = false
+                if (shotDragging) {
+                    // A finger that stopped before lifting is not flicking.
+                    shotPolaroid.release(if (e.atMs - shotLastAt > 80L) 0f else shotSpeed)
+                } else if (shotPolaroid.binAt(e.x, e.y)) {
+                    shotPolaroid.bin()
+                    Log.i(TAG, "capture: the screenshot binned")
+                    runCatching { events?.onDeleteLastShot() }
+                }
+            }
+        }
+        return true
+    }
+
+    /** A finger on the pill, owned from its landing: where it landed and where the pill was, and whether it moved. Under [sheetLock]. */
+    @Volatile private var pillOwns = false
+    private var pillDownX = 0f
+    private var pillDownY = 0f
+    private var pillFrom = 0 to 0
+    private var pillMoved = false
+
+    override fun capture(record: Boolean) {
+        runCatching { captureWorker.execute { if (record) toggleRecording() else screenshot() } }
+    }
+
+    /** Where captures are made: the shell's own space; each is handed to the app open ([handOver]), then gone. */
+    private fun captureDir(): String = "/data/local/tmp/magicrear-captures"
+
+    /** [path] handed to the app open (it copies it to the gallery), and gone from here: an open file outlives its name. */
+    private fun handOver(path: String, video: Boolean) {
+        val f = java.io.File(path)
+        runCatching {
+            android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                events?.onCaptured(pfd, video) ?: Log.w(TAG, "capture: nobody to hand it to")
+            }
+        }.onFailure { Log.w(TAG, "capture: not handed over: ${it.message}") }
+        f.delete()
+    }
+
+    /** The control centres out of the way of a capture, and long enough for them to have gone. On [captureWorker]. */
+    private fun clearForCapture(why: String) {
+        controlCenter.closeNow(why)
+        runCatching { events?.onPanelCloseControlCenter() }
+        Thread.sleep(CAPTURE_CLEAR_MS)
+    }
+
+    private fun screenshot() {
+        val id = rearPhysicalId() ?: run { Log.w(TAG, "capture: no physical id for the rear"); return }
+        clearForCapture("a screenshot")
+        val dir = captureDir()
+        val path = "$dir/shot_${System.currentTimeMillis()}.png"
+        val said = exec("mkdir -p $dir && screencap -d $id -p $path && echo ok")
+        if (!said.endsWith("ok")) { Log.w(TAG, "capture: screencap failed: ${said.take(120)}"); return }
+        Log.i(TAG, "capture: the back's screenshot made")
+        // Shown as taken (ShotPolaroid), from the file itself, before it is handed over and gone.
+        runCatching { android.graphics.BitmapFactory.decodeFile(path) }.getOrNull()?.let { shotPolaroid.play(it) }
+        handOver(path, video = false)
+    }
+
+    /** A recording started, or the one running stopped. On [captureWorker]. */
+    private fun toggleRecording() {
+        if (recordPid > 0) { stopRecording("its tile"); return }
+        val id = rearPhysicalId() ?: run { Log.w(TAG, "capture: no physical id for the rear"); return }
+        clearForCapture("a recording")
+        val dir = captureDir()
+        val path = "$dir/rec_${System.currentTimeMillis()}.mp4"
+        // In the background, its output away (exec waits for a pipe closed), its pid back.
+        val pid = exec("mkdir -p $dir && (screenrecord --display-id $id --time-limit $RECORD_SECONDS $path >/dev/null 2>&1 & echo \$!)")
+            .lines().lastOrNull()?.trim()?.toIntOrNull()
+        if (pid == null || pid <= 0) { Log.w(TAG, "capture: screenrecord did not start"); return }
+        recordPid = pid
+        recordPath = path
+        recordPill.show(android.os.SystemClock.uptimeMillis())
+        controlCenter.lockChanged() // its tile lights
+        runCatching { events?.onRecording(true) }
+        Log.i(TAG, "capture: recording the back (pid $pid, at most $RECORD_SECONDS s)")
+        // Watched to its end: stopped here, by its tile or pill, or by its own time limit.
+        Thread({
+            while (exec("kill -0 $pid 2>/dev/null && echo up") == "up") Thread.sleep(RECORD_POLL_MS)
+            finishRecording(pid)
+        }, "record-watch").apply { isDaemon = true; start() }
+    }
+
+    /** The recording asked to stop: screenrecord finishes its file on an interrupt. Any thread. */
+    private fun stopRecording(why: String) {
+        val pid = recordPid
+        if (pid <= 0) return
+        Log.i(TAG, "capture: recording stopped — $why")
+        exec("kill -INT $pid")
+    }
+
+    /** The recording's process gone: the pill down, the tile dark, the file to the gallery. */
+    private fun finishRecording(pid: Int) {
+        if (recordPid != pid) return
+        recordPid = 0
+        val path = recordPath
+        recordPath = null
+        recordPill.hide()
+        controlCenter.lockChanged()
+        runCatching { events?.onRecording(false) }
+        // A moment for the file to be closed out on disk.
+        Thread.sleep(RECORD_SETTLE_MS)
+        if (path != null) handOver(path, video = true)
+    }
+
+    /**
+     * A finger on the recording's pill, before anything else reads it: dragged, the pill follows;
+     * tapped, the recording stops. True when it was the pill's. Under [sheetLock].
+     */
+    private fun pillTouch(e: RearTouches.Event): Boolean {
+        if (!pillOwns && (e !is RearTouches.Down || !recordPill.contains(e.x, e.y))) return false
+        when (e) {
+            is RearTouches.Down -> {
+                pillOwns = true
+                pillDownX = e.x; pillDownY = e.y
+                pillFrom = recordPill.position
+                pillMoved = false
+            }
+            is RearTouches.Move -> {
+                val dx = e.x - pillDownX
+                val dy = e.y - pillDownY
+                if (!pillMoved && kotlin.math.hypot(dx, dy) > EdgeGestures.SLOP) pillMoved = true
+                if (pillMoved) recordPill.moveTo(pillFrom.first, pillFrom.second, dx, dy)
+            }
+            is RearTouches.Up -> {
+                pillOwns = false
+                // Tapped: it fades at once, as the recording is finished off behind it.
+                if (!pillMoved) { recordPill.hide(); runCatching { captureWorker.execute { stopRecording("its pill") } } }
+            }
+        }
+        return true
+    }
+
+    override fun askBackCode() {
+        openLockPrompt("the panel's control centre")
+    }
+
+    override fun setPanelControlCenter(up: Boolean) {
+        panelControlCenter = up
+    }
 
     override fun setPanelGuarded(guarded: Boolean) {
         if (panelGuarded == guarded) return
@@ -3098,9 +3544,20 @@ class RearUserService : IRearService.Stub {
      * button, the slider's value, its thumb (only a finger on the thumb itself), or nothing.
      */
     private fun pressOf(layout: PortalSheet.Layout, x: Float, y: Float, at: Float) =
-        when (val hit = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.page)) {
+        if (sheetLocked) when (lockMode()) {
+            BackLock.Kind.PASSWORD -> PortalSheet.kbKeyAt(PortalSheet.keyboard(shellSheet?.lensRight ?: geometry.cutoutUnits, kbPage), x, y)
+            BackLock.Kind.PATTERN -> -1
+            else -> PortalSheet.keyAt(keypadNow(), x, y)
+        }.let { if (it < 0) -1 else PortalSheetPainter.PRESS_KEY + it }
+        else when (val hit = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.page)) {
             is PortalSheet.Hit.Button -> hit.index
             PortalSheet.Hit.SliderValue -> PortalSheetPainter.PRESS_VALUE
+            PortalSheet.Hit.WidthValue -> PortalSheetPainter.PRESS_WIDTH_VALUE
+            PortalSheet.Hit.Width -> {
+                val track = layout.width?.track
+                val pkg = sliderGuest()
+                if (track != null && pkg != null && kotlin.math.abs(x - PortalSheet.widthX(track, geometry, portalWidth[pkg])) <= PortalSheet.THUMB / 2) PortalSheetPainter.PRESS_WIDTH_THUMB else -1
+            }
             PortalSheet.Hit.Toggle -> PortalSheetPainter.PRESS_TOGGLE
             PortalSheet.Hit.Slider -> {
                 val track = layout.slider?.track
@@ -3131,6 +3588,7 @@ class RearUserService : IRearService.Stub {
     private fun tap(x: Float, y: Float, atMs: Long) {
         val at = motion.settled(atMs)
         if (at == null || !motion.heading) { motion.resume(atMs); afterMotion(atMs); return }
+        if (sheetLocked) { lockTap(x, y, atMs); return }
         val apps = portalApps
         val onTop = sheetGuestOnTop
         val layout = sheetLayout()
@@ -3174,11 +3632,26 @@ class RearUserService : IRearService.Stub {
                 val pkg = sliderGuest() ?: return
                 if (portalDpi.containsKey(pkg)) setAppDpi(pkg, null)
             }
+            // A tap on the width's track: that width, its box flashed; on its value: the whole.
+            PortalSheet.Hit.Width -> {
+                steady(atMs)
+                val pkg = sliderGuest() ?: return
+                val track = layout.width?.track ?: return
+                val now = portalWidth[pkg]
+                if (kotlin.math.abs(x - PortalSheet.widthX(track, geometry, now)) <= PortalSheet.THUMB / 2) return
+                val w = PortalSheet.widthAt(track, geometry, x)
+                if (w != GuestWidth.clamp(geometry, now)) { setAppWidth(pkg, w); flashWidth(w) }
+            }
+            PortalSheet.Hit.WidthValue -> {
+                steady(atMs)
+                val pkg = sliderGuest() ?: return
+                if (portalWidth.containsKey(pkg)) { setAppWidth(pkg, null); flashWidth(null) }
+            }
             // Shown switched at once, saved through the app, and the app relaunched in its new
             // place when the sheet is down: not under it, whose picture a cover would be of.
             PortalSheet.Hit.Toggle -> {
                 val pkg = sliderGuest()
-                if (pkg == null || switchHidden(guest)) steady(atMs)
+                if (pkg == null) steady(atMs)
                 else {
                     // As the switch shows it. Off, one here only for this open is off for good:
                     // saved off, and the whole rear is tried, with no going back behind the lock.
@@ -3218,7 +3691,7 @@ class RearUserService : IRearService.Stub {
         val at = motion.settled(atMs)
         steady(atMs)
         val layout = sheetLayout()
-        slide = if (at == null || !motion.heading) PortalSheet.Swipe.NONE else PortalSheet.swipe(layout, touchDownY, PortalSheet.scroll(at))
+        slide = if (at == null || !motion.heading || sheetLocked) PortalSheet.Swipe.NONE else PortalSheet.swipe(layout, touchDownY, PortalSheet.scroll(at))
         when (slide) {
             PortalSheet.Swipe.SLIDER -> {
                 val pkg = sliderGuest()
@@ -3229,6 +3702,16 @@ class RearUserService : IRearService.Stub {
                 sliderAt = PortalSheet.sliderDrag(track, sliderFrom, x - touchDownX)
                 setPressed(PortalSheetPainter.PRESS_THUMB)
                 shellSheet?.sliderDrag(sliderAt)
+            }
+            PortalSheet.Swipe.WIDTH -> {
+                val pkg = sliderGuest()
+                val track = layout.width?.track
+                if (pkg == null || track == null) { slide = PortalSheet.Swipe.NONE; return }
+                widthPkg = pkg
+                widthFrom = GuestWidth.clamp(geometry, portalWidth[pkg])
+                widthAt = PortalSheet.widthDrag(track, geometry, widthFrom, x - touchDownX)
+                setPressed(PortalSheetPainter.PRESS_WIDTH_THUMB)
+                shellSheet?.widthDrag(widthAt, dragging = true)
             }
             PortalSheet.Swipe.PAGES -> {
                 stopAnim()
@@ -3247,6 +3730,11 @@ class RearUserService : IRearService.Stub {
                 val dpi = PortalSheet.sliderDrag(track, sliderFrom, x - touchDownX)
                 // Drawn only: each DPI change relayouts the whole display, so none is applied mid-drag.
                 if (dpi != sliderAt) { sliderAt = dpi; shellSheet?.sliderDrag(dpi) }
+            }
+            PortalSheet.Swipe.WIDTH -> {
+                val track = sheetLayout().width?.track ?: return
+                val w = PortalSheet.widthDrag(track, geometry, widthFrom, x - touchDownX)
+                if (w != widthAt) { widthAt = w; shellSheet?.widthDrag(w, dragging = true) }
             }
             PortalSheet.Swipe.PAGES -> shellSheet?.page(pager.drag(x, atMs))
             PortalSheet.Swipe.NONE -> Unit
@@ -3267,6 +3755,14 @@ class RearUserService : IRearService.Stub {
                 if (pkg != null && pkg == sliderGuest() && sliderAt != RearDensity.clamp(sliderFrom)) setAppDpi(pkg, sliderAt)
                 shellSheet?.sliderDrag(null)
                 sliderPkg = null
+            }
+            PortalSheet.Swipe.WIDTH -> {
+                slideMove(x, atMs)
+                setPressed(-1)
+                val pkg = widthPkg
+                if (pkg != null && pkg == sliderGuest() && widthAt != widthFrom) setAppWidth(pkg, widthAt)
+                shellSheet?.widthDrag(widthAt, dragging = false)
+                widthPkg = null
             }
             PortalSheet.Swipe.PAGES -> {
                 pager.release(x, atMs)
@@ -3306,7 +3802,7 @@ class RearUserService : IRearService.Stub {
      * Which of Panel / Resume runs is decided from the guest as it is when the button runs,
      * not as the sheet showed it — and when the guest is already where the button would
      * have put it, neither does; a refused `am start` of the panel changes nothing.
-     * - Front: `move-stack <guest> 0`, Close: `am force-stop` — either way the guest ends and
+     * - Front: `move-stack <guest> 0`, Close: its task removed as Recents does — either way the guest ends and
      *   the panel comes back ([guestAction]).
      * - On a private display: Panel and Resume only hide and show our layers (HIDE_LAYERS,
      *   SHOW_LAYERS), the app alive on its display; Front and Close are the same, and its display
@@ -3576,6 +4072,8 @@ class RearUserService : IRearService.Stub {
         // Changes made while nobody listened go now.
         if (events != null) {
             scheduleDpiFlush()
+            scheduleWidthFlush()
+            syncBackLock(force = true)
             flushConfined()
             if (panelCovered) tellPanelCovered()
         }
@@ -3600,6 +4098,71 @@ class RearUserService : IRearService.Stub {
         // time; each run reads the latest map, so a quick run of changes ends at the last one.
         if (guest?.pkg == pkg) runCatching { densityWorker.execute { syncDensity("$pkg set on the back") } }
         scheduleDpiFlush()
+        // Apps that read their size at start only take it fresh: restarted once the sheet is down.
+        if (guest?.pkg == pkg) restartAfterSheet = pkg
+    }
+
+    /** [portalWidth] set to what [make] returns (under [dpiLock]), and the sheet told. Any thread. */
+    private fun setPortalWidth(make: () -> Map<String, Int>) {
+        synchronized(dpiLock) {
+            portalWidth = make()
+            shellSheet?.widthValues(portalWidth)
+        }
+    }
+
+    /**
+     * [pkg]'s width set to [w] (null: the whole) from the back. Saved through the app as a DPI is;
+     * the app moves into it when the sheet is down ([sheetDown]), not under it. A width is a place
+     * right of the cameras, so an app not kept there is from now on. Under [sheetLock], on the reader.
+     */
+    private fun setAppWidth(pkg: String, w: Int?) {
+        setPortalWidth {
+            widthEdits.put(pkg, w, android.os.SystemClock.uptimeMillis())
+            if (w == null) portalWidth - pkg else portalWidth + (pkg to w)
+        }
+        Log.i(TAG, "portal sheet: $pkg ${w?.let { "$it px wide" } ?: "the whole width"} from the back")
+        if (w != null && guest?.takeIf { it.pkg == pkg }?.let { keepsRight(it) } == false) {
+            setAppConfined(pkg, true)
+            shellSheet?.keepRight(true)
+        }
+        scheduleWidthFlush()
+        // Restarted in it when the sheet is down: not under the sheet, whose picture the cover would be.
+        if (guest?.pkg == pkg) restartAfterSheet = pkg
+    }
+
+    /** The width's box shown a moment for a tap, as a drag shows it. */
+    private fun flashWidth(w: Int?) {
+        val s = shellSheet ?: return
+        s.widthDrag(w, dragging = true)
+        runCatching { sheetClock.schedule({ s.widthDrag(null, dragging = false) }, WIDTH_FLASH_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
+    }
+
+    /** Guarded by [dpiLock], as [dpiEdits]: the widths set on the back until a payload carries them. */
+    private val widthEdits = DpiEdits()
+
+    /** [flushWidth] when the next width falls due. Any thread. */
+    private fun scheduleWidthFlush() {
+        val at = synchronized(dpiLock) { widthEdits.nextDueAt() } ?: return
+        val wait = (at - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0L)
+        runCatching { sheetClock.schedule({ flushWidth() }, wait, java.util.concurrent.TimeUnit.MILLISECONDS) }
+    }
+
+    /** The widths that have fallen due handed to the app process, as [flushDpi] does the DPIs. */
+    private fun flushWidth(all: Boolean = false) {
+        if (events == null) return
+        val due = synchronized(dpiLock) { widthEdits.due(if (all) Long.MAX_VALUE else android.os.SystemClock.uptimeMillis()) }
+        for ((pkg, w) in due) {
+            val ev = events
+            if (ev == null) { synchronized(dpiLock) { widthEdits.unsend(pkg, w) }; continue }
+            runCatching { ev.onPortalWidth(pkg, w ?: 0) }.onFailure {
+                Log.w(TAG, "portal: width for $pkg not handed on: ${it.message}")
+                if (it is android.os.DeadObjectException) {
+                    synchronized(dpiLock) { widthEdits.unsend(pkg, w) }
+                    if (events === ev) events = null
+                }
+            }
+        }
+        if (!all) scheduleWidthFlush()
     }
 
     /** [pkg]'s "Keep right of the cameras" set from the back. Under [sheetLock], on the reader: nothing here waits. */
@@ -3608,6 +4171,7 @@ class RearUserService : IRearService.Stub {
             confinedEdits.put(pkg, on, android.os.SystemClock.uptimeMillis())
             portalConfined = if (on) portalConfined + pkg else portalConfined - pkg
         }
+        if (on) wholeAnyway.remove(pkg) else wantedWhole(pkg)
         Log.i(TAG, "portal sheet: $pkg ${if (on) "kept right of the cameras" else "on the whole rear"}, from the back")
         syncSheetKeepRight()
         flushConfined()
@@ -3666,6 +4230,456 @@ class RearUserService : IRearService.Stub {
             }
         }
         if (!all) scheduleDpiFlush()
+    }
+
+    // -- the back's lock ----------------------------------------------------------------------
+    //
+    // See BackLock. While the phone is locked the portal sheet is a keypad for the phone's own code
+    // (LockCheck asks the system); the right one opens it until the back goes dark or the phone
+    // locks again. A guest up when the back locks goes behind the panel, and Resume wants the code.
+
+    /** Guards [rearLock]. A leaf. */
+    private val lockGuard = Any()
+    private val rearLock = BackLock()
+    /** The phone's lock type, read off `dumpsys lock_settings` ([refreshLockKind]); null until read. */
+    @Volatile private var lockKind: BackLock.Kind? = null
+    /** The open sheet is the lock. Under [sheetLock], read anywhere. */
+    @Volatile private var sheetLocked = false
+    /** The code being typed, its message, and whether one is being checked. Under [sheetLock]. */
+    private val lockEntry = BackLock.Entry()
+    private var lockMessage: String? = null
+    private var lockWrong = false
+    private var lockChecking = false
+
+    /** A password's keyboard page, and a pattern being drawn: its dots, the finger, whether one is down. Under [sheetLock]. */
+    private var kbPage = PortalSheet.KB_LOWER
+    private var patternCells: List<Int> = emptyList()
+    private var patternFinger: Pair<Float, Float>? = null
+    private var patternActive = false
+
+    /**
+     * DEBUG BUILDS ONLY: a lock to try without the phone's own (`setprop debug.magicrear.lockdemo
+     * pin|pattern|password`, "" to end). The sheet is the lock every time it opens, whatever the
+     * phone, and checks against made-up codes, never the system: PIN 1234, a Z pattern (1235789),
+     * the password "magic". For seeing each lock right and wrong.
+     */
+    private fun lockDemo(): BackLock.Kind? {
+        if (!BuildConfig.DEBUG) return null
+        val v = runCatching {
+            Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "debug.magicrear.lockdemo") as? String
+        }.getOrNull()?.trim()?.lowercase()
+        return when (v) { "pin" -> BackLock.Kind.PIN; "pattern" -> BackLock.Kind.PATTERN; "password" -> BackLock.Kind.PASSWORD; else -> null }
+    }
+
+    private fun demoCode(kind: BackLock.Kind) = when (kind) {
+        BackLock.Kind.PATTERN -> "1235789"
+        BackLock.Kind.PASSWORD -> "magic"
+        else -> "1234"
+    }
+
+    /** What takes the code on the sheet: the demo's, else the phone's lock (a PIN until read). */
+    private fun lockMode(): BackLock.Kind = lockDemo() ?: lockKind?.takeIf { it != BackLock.Kind.NONE } ?: BackLock.Kind.PIN
+
+    private val lockWorker by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> guardedThread("back-lock", r) }
+    }
+
+    /**
+     * The front watched for the back's lock: the front going dark, or the phone unlocked and locked
+     * again, locks the back. Read here because the sheet and the keep-alive looked too seldom: a lock,
+     * an unlock on the front and a lock again between two looks left the back open (the owner,
+     * 2026-11-08). Two binder reads every [FRONT_WATCH_MS]; a daemon, gone with the process.
+     */
+    private fun watchFrontLock() {
+        Thread({
+            var frontWasOn: Boolean? = null
+            while (true) {
+                runCatching {
+                    val on = context?.getSystemService(android.hardware.display.DisplayManager::class.java)
+                        ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.state == android.view.Display.STATE_ON
+                    val locked = phoneLocked()
+                    synchronized(lockGuard) {
+                        if (!on && frontWasOn == true) rearLock.dark()
+                        rearLock.seen(locked)
+                    }
+                    frontWasOn = on
+                    syncBackLock()
+                    val backNowLocked = backLockedNow
+                    if (sheetLocked && sheetUp && !backNowLocked) openedElsewhere()
+                    // The phone locked with the back open: what is up locks now, not at the next look.
+                    if (backNowLocked) {
+                        if (sheetUp && !sheetLocked) relockSheet()
+                        guest?.takeIf { it.onTop && it.onPrivate && !lockVeiled }?.let { veil(it) }
+                    }
+                    if (lockVeiled) {
+                        if (!backLocked()) unveil("the phone is unlocked")
+                        else if (rearLit(rearDisplay()) != true) coverShown = false
+                        else if (!coverShown && !sheetUp) { coverShown = true; openLockCover() }
+                    }
+                }
+                Thread.sleep(FRONT_WATCH_MS)
+            }
+        }, "front-lock-watch").apply { isDaemon = true; start() }
+    }
+
+    /** Whether the phone is locked: its keyguard's word, or the lock screen showing where that cannot be had. */
+    private fun phoneLocked(): Boolean = runCatching {
+        context?.getSystemService(android.app.KeyguardManager::class.java)?.isDeviceLocked
+    }.getOrNull() ?: keyguardShowing()
+
+    /**
+     * The back's lock as last looked at ([syncBackLock]): what draws reads, every frame, with no
+     * binder call. Locked until first looked at.
+     */
+    @Volatile private var backLockedNow = true
+    /** Notifications keep their words while locked (PanelConfig.lockedNoticeText). */
+    @Volatile private var lockedNoticeText = false
+
+    /** [backLockedNow] looked at again, and the panel told when it changed (IRearEvents.onBackLock). Any thread. */
+    private fun syncBackLock(force: Boolean = false) {
+        val now = backLocked()
+        if (now == backLockedNow && !force) return
+        backLockedNow = now
+        Log.i(TAG, "back lock: ${if (now) "on" else "off"}")
+        runCatching { events?.onBackLock(now) }
+        // What is up over the back shows it at once, not at its next frame.
+        runCatching { notices.lockChanged() }
+        runCatching { controlCenter.lockChanged() }
+    }
+
+    /** Whether the back is locked now (BackLock). Any thread; one binder call. */
+    private fun backLocked(): Boolean {
+        if (lockDemo() != null) return true
+        val phone = phoneLocked()
+        return synchronized(lockGuard) { rearLock.locked(lockKind, phone) }
+    }
+
+    /** [backLocked], said in the log with why: for a sheet opening, not for every look. */
+    private fun backLockedSaid(): Boolean {
+        val demo = lockDemo()
+        val phone = phoneLocked()
+        val locked = demo != null || synchronized(lockGuard) { rearLock.locked(lockKind, phone) }
+        Log.i(TAG, "back lock: ${if (locked) "locked" else "open"} — phone ${if (phone) "locked" else "unlocked"}, " +
+            "lock ${lockKind ?: "unread"}, given here ${synchronized(lockGuard) { rearLock.unlockedHere }}" + (demo?.let { ", demo $it" } ?: ""))
+        return locked
+    }
+
+    /** The lock type read again, off the caller's thread. */
+    private fun refreshLockKind() {
+        runCatching {
+            lockWorker.execute {
+                BackLock.kindOf(exec("dumpsys lock_settings"))?.let { k ->
+                    if (k != lockKind) { lockKind = k; Log.i(TAG, "back lock: the phone's lock is ${k.name}") }
+                }
+            }
+        }
+    }
+
+    /** The keypad as the sheet lays it out. */
+    private fun keypadNow() = PortalSheet.keypad(shellSheet?.lensRight ?: geometry.cutoutUnits, geometry.fitY / geometry.fitX)
+
+    /** The pattern's dots as the sheet lays them out, round on this rear. */
+    private fun patternNow() = PortalSheet.patternGrid(shellSheet?.lensRight ?: geometry.cutoutUnits, geometry.fitY / geometry.fitX)
+
+    /** The lock drawn as it stands. Under [sheetLock]. */
+    private fun pushLock(s: ShellSheet? = shellSheet) {
+        val kind = lockMode()
+        // Shooting for the site (ShootMode): the demo lock as the real one reads.
+        val demo = if (lockDemo() != null && !ShootMode.capturesShown()) " (demo)" else ""
+        s?.lock(
+            PortalSheetPainter.LockLook(
+                title = when (kind) {
+                    BackLock.Kind.PATTERN -> "Draw pattern$demo"
+                    BackLock.Kind.PASSWORD -> "Enter password$demo"
+                    else -> "Enter PIN$demo"
+                },
+                entered = lockEntry.length, message = lockMessage, wrong = lockWrong, pressedKey = -1,
+                kind = kind, pattern = patternCells, finger = patternFinger, page = kbPage,
+            ),
+        )
+    }
+
+    /** The word for a wrong code of the lock's kind. */
+    private fun wrongWord() = when (lockMode()) {
+        BackLock.Kind.PATTERN -> "Wrong pattern"
+        BackLock.Kind.PASSWORD -> "Wrong password"
+        else -> "Wrong PIN"
+    }
+
+    /** The sheet's lock state back to nothing typed. Under [sheetLock]. */
+    private fun clearLockInput() {
+        lockEntry.clear()
+        lockMessage = null
+        lockWrong = false
+        kbPage = PortalSheet.KB_LOWER
+        patternCells = emptyList()
+        patternFinger = null
+        patternActive = false
+    }
+
+    /**
+     * A finger on a pattern lock, taken from the raw touches before the sheet's gestures see them:
+     * a drag there draws the pattern, not the sheet. True when it was the pattern's. Under [sheetLock].
+     */
+    private fun patternTouch(e: RearTouches.Event): Boolean {
+        val drawing = patternActive
+        if (!sheetUp || !sheetLocked || lockChecking || lockMode() != BackLock.Kind.PATTERN) { patternActive = false; return false }
+        if (!drawing && (e !is RearTouches.Down || motion.settled(e.atMs) == null)) return false
+        val grid = patternNow()
+        val cell = PortalSheet.cellAt(grid, e.x, e.y)
+        when (e) {
+            is RearTouches.Down -> {
+                if (cell < 0) return false
+                patternActive = true
+                patternCells = listOf(cell)
+                patternFinger = e.x to e.y
+                lockMessage = null
+                lockWrong = false
+                pokePanel()
+            }
+            is RearTouches.Move -> {
+                if (cell >= 0) patternCells = PortalSheet.patternAdd(patternCells, cell)
+                patternFinger = e.x to e.y
+            }
+            is RearTouches.Up -> {
+                patternActive = false
+                patternFinger = null
+                if (patternCells.size < BackLock.PATTERN_MIN) {
+                    lockMessage = "Join 4 dots"
+                    lockWrong = true
+                    patternCells = emptyList()
+                } else {
+                    submitLock(PortalSheet.patternCode(patternCells))
+                    return true
+                }
+            }
+        }
+        pushLock()
+        return true
+    }
+
+    /** A tap on the locked sheet: a key, or off the keypad's side a shut. Under [sheetLock]. */
+    private fun lockTap(x: Float, y: Float, atMs: Long) {
+        val lens = shellSheet?.lensRight ?: geometry.cutoutUnits
+        when (lockMode()) {
+            BackLock.Kind.PASSWORD -> {
+                val kb = PortalSheet.keyboard(lens, kbPage)
+                val i = PortalSheet.kbKeyAt(kb, x, y)
+                if (i < 0) { if (x < kb.left - 8f) shutSheet(atMs, null) else steady(atMs); return }
+                steady(atMs)
+                pokePanel()
+                if (lockChecking) return
+                val key = kb.keys[i]
+                when (key.type) {
+                    PortalSheet.KbType.CHAR -> {
+                        if (lockEntry.add(key.ch)) { lockMessage = null; lockWrong = false }
+                        // Shift is for one letter, as a phone's.
+                        if (kbPage == PortalSheet.KB_UPPER) kbPage = PortalSheet.KB_LOWER
+                    }
+                    PortalSheet.KbType.SPACE -> if (lockEntry.add(' ')) { lockMessage = null; lockWrong = false }
+                    PortalSheet.KbType.BACK -> lockEntry.back()
+                    PortalSheet.KbType.SHIFT -> kbPage = if (kbPage == PortalSheet.KB_UPPER) PortalSheet.KB_LOWER else PortalSheet.KB_UPPER
+                    PortalSheet.KbType.MODE -> kbPage = if (kbPage == PortalSheet.KB_SYMBOLS) PortalSheet.KB_LOWER else PortalSheet.KB_SYMBOLS
+                    PortalSheet.KbType.OK -> { submitLock(); return }
+                }
+                pushLock()
+            }
+            BackLock.Kind.PATTERN -> {
+                // Drawn, not tapped (patternTouch): a tap left of the dots shuts, as off any lock.
+                if (x < patternNow().square.left - 24f) shutSheet(atMs, null) else steady(atMs)
+            }
+            else -> {
+                val k = keypadNow()
+                val key = PortalSheet.keyAt(k, x, y)
+                if (key < 0) { if (x < k.keys.first().left - 24f) shutSheet(atMs, null) else steady(atMs); return }
+                steady(atMs)
+                pokePanel()
+                if (lockChecking) return
+                when (key) {
+                    PortalSheet.KEY_BACK -> lockEntry.back()
+                    PortalSheet.KEY_OK -> { submitLock(); return }
+                    else -> PortalSheet.keyDigit(key)?.let { if (lockEntry.add(it)) { lockMessage = null; lockWrong = false } }
+                }
+                pushLock()
+            }
+        }
+    }
+
+    /** The typed code checked by the system, off the reader; the sheet opens on the right one. Under [sheetLock]. */
+    private fun submitLock(given: String? = null) {
+        val code = given ?: lockEntry.text
+        if (code.isEmpty()) return
+        lockEntry.clear()
+        val demo = lockDemo()
+        lockChecking = true
+        lockMessage = "Checking…"
+        lockWrong = false
+        pushLock()
+        runCatching {
+            lockWorker.execute {
+                val result = if (demo != null) {
+                    Thread.sleep(250)
+                    if (code == demoCode(demo)) LockCheck.Result.Right else LockCheck.Result.Wrong
+                } else LockCheck.verify(code)
+                synchronized(sheetLock) {
+                    lockChecking = false
+                    when (result) {
+                        LockCheck.Result.Right -> {
+                            if (demo == null) synchronized(lockGuard) { rearLock.unlocked() }
+                            syncBackLock()
+                            clearLockInput()
+                            Log.i(TAG, "back lock: unlocked with the phone's code")
+                            sheetLocked = false
+                            // Over a covered guest: it shows again, just as it was, and the sheet goes.
+                            if (lockVeiled || lockPrompt) {
+                                // What it covered back behind the sheet, and the sheet down, the code on it as it goes.
+                                lockPrompt = false
+                                unveil("the code")
+                                shutSheet(android.os.SystemClock.uptimeMillis(), null)
+                                return@synchronized
+                            }
+                            lockMessage = null
+                            // The keypad fades away, the apps it gated coming in under it.
+                            shellSheet?.unlockFade()
+                            // The guest's buttons and sliders back, and the sheet's stops with them (on the clock).
+                            syncSheetGuest()
+                            runCatching { sheetClock.execute { restop() } }
+                            return@synchronized
+                        }
+                        LockCheck.Result.Wrong -> { lockMessage = wrongWord(); lockWrong = true }
+                        LockCheck.Result.Throttled -> { lockMessage = "Wait, then retry"; lockWrong = true }
+                        is LockCheck.Result.Failed -> { lockMessage = "Couldn't check"; lockWrong = true }
+                    }
+                    pushLock()
+                }
+            }
+        }.onFailure { lockChecking = false; lockMessage = "Couldn't check"; pushLock() }
+    }
+
+    /**
+     * The keep-alive's look at the lock, with a guest up: the back dark locks it again, and a guest
+     * on top of a locked back goes behind the panel (as Panel), so waking it shows the panel.
+     */
+    private fun lockTick(g: Guest, lit: Boolean) {
+        if (!lit) synchronized(lockGuard) { rearLock.dark() }
+        if (g.onTop && !lockVeiled && backLocked()) veil(g)
+    }
+
+    /**
+     * A guest up when the back locks, covered: it stays where it is, on top, but its picture is
+     * hidden and no finger reaches it ([forwardOpen], [syncPrivate], [chromeShow]); the code comes
+     * over it as the back lights ([watchFrontLock] → [openLockCover]), and the right one shows it
+     * again just as it was. Not sent behind the panel: then the code led to the panel, and the app
+     * had to be resumed (the owner, 2026-11-08).
+     */
+    @Volatile private var lockVeiled = false
+    /** The cover already came up since the back last lit: shut by a finger, it stays shut. */
+    @Volatile private var coverShown = false
+
+    private fun veil(g: Guest) {
+        Log.i(TAG, "back lock: locked with ${g.pkg} up — covered")
+        lockVeiled = true
+        coverShown = false
+        chromeHide()
+        syncPrivate()
+    }
+
+    /**
+     * The phone unlocked (the front) while the back's lock is up: it fades away and what it gated
+     * comes in under it — the apps, or the covered guest as the sheet goes. Any thread holding no sheet lock.
+     */
+    private fun openedElsewhere() {
+        synchronized(sheetLock) {
+            if (!sheetLocked || !sheetUp) return
+            Log.i(TAG, "back lock: the phone was unlocked — the code goes")
+            sheetLocked = false
+            clearLockInput()
+            if (lockVeiled || lockPrompt) {
+                lockPrompt = false
+                unveil("the phone is unlocked")
+                shutSheet(android.os.SystemClock.uptimeMillis(), null)
+                return
+            }
+            shellSheet?.unlockFade()
+            syncSheetGuest()
+            runCatching { sheetClock.execute { restop() } }
+        }
+    }
+
+    /** An open sheet showing the apps turned into the lock: the phone locked under it. Any thread holding no sheet lock. */
+    private fun relockSheet() {
+        synchronized(sheetLock) {
+            if (!sheetUp || sheetLocked) return
+            Log.i(TAG, "back lock: the phone locked with the sheet open — the code")
+            sheetLocked = true
+            clearLockInput()
+            dropChoice()
+            pushLock()
+            syncSheetGuest()
+            runCatching { sheetClock.execute { restop() } }
+        }
+    }
+
+    /** The guest shown again: the code given, or the phone unlocked. */
+    private fun unveil(why: String) {
+        if (!lockVeiled) return
+        lockVeiled = false
+        Log.i(TAG, "back lock: uncovered — $why")
+        syncPrivate()
+        if (guest?.onTop == true) chromeShow()
+    }
+
+    /**
+     * The code asked for over whatever is up, by something the lock holds (a switch, a notification):
+     * the keypad comes up over it, and the right code shuts it again, leaving things as they were,
+     * unlocked. Any thread holding no sheet lock.
+     */
+    private fun openLockPrompt(why: String) {
+        if (!backLockedNow) return
+        // The control centre or list it was asked over stays open under the keypad (ShellLayer.Z_PANES),
+        // and takes no finger while the keypad is up (onRearTouch): the code given, they are there, unlocked.
+        lockPrompt = true
+        raiseLock("asked for by $why")
+    }
+
+    /** The keypad shuts again once the code is given: it was asked for ([openLockPrompt]), not pulled. */
+    @Volatile private var lockPrompt = false
+
+    /** The code over the covered guest, risen as the sheet does, no finger needed. Any thread holding no sheet lock. */
+    private fun openLockCover() {
+        if (!lockVeiled) return
+        raiseLock("over ${guest?.pkg}")
+    }
+
+    /** The keypad risen as the sheet does, no finger needed. Any thread holding no sheet lock. */
+    private fun raiseLock(what: String) {
+        synchronized(sheetLock) {
+            if (sheetUp || cameraUp()) return
+            val s = sheetOrNull() ?: return
+            val now = android.os.SystemClock.uptimeMillis()
+            sheetLocked = true
+            refreshLockKind()
+            clearLockInput()
+            pushLock(s)
+            syncSheetGuest()
+            motion.reset()
+            motion.setDetents(listOf(0f, PortalSheet.OPEN), now)
+            pager.reset()
+            pager.pages = sheetLayout().pages
+            slide = PortalSheet.Swipe.NONE
+            sheetUp = true
+            beginPending = true
+            driving = false
+            gestures?.sheet = true
+            dropChoice()
+            pressed = -1
+            s.page(0f)
+            s.sliderDrag(null)
+            s.position(0f)
+            motion.settle(PortalSheet.OPEN, now)
+            Log.i(TAG, "back lock: the code, $what")
+            beginOnClock(s)
+        }
     }
 
     /** The sheet's first rest open, said to the app once (IRearEvents.onPortalOpened): the front's guide ticks it. */
@@ -3730,6 +4744,10 @@ class RearUserService : IRearService.Stub {
         pressed = -1
         slide = PortalSheet.Swipe.NONE
         sliderPkg = null
+        widthPkg = null
+        lockPrompt = false
+        // A DPI or width set while it was up: the app restarts in it now the sheet is not over it.
+        restartAfterSheet?.let { restartAfterSheet = null; restartGuest(it, "its size changed on the back") }
         gestures?.sheet = false
         motion.reset()
         pager.reset()
@@ -3790,6 +4808,10 @@ class RearUserService : IRearService.Stub {
             events = { events },
             // The portal frame fades under it as under the sheet; the strip pauses its samples.
             onProgress = { frame.controlCenterOpen(it); strip.sheetOpen(it) },
+            locked = { backLockedNow },
+            onLocked = { openLockPrompt("a switch over a guest") },
+            onCapture = { record -> capture(record) },
+            recording = { recordPid > 0 },
         )
     }
 
@@ -3812,6 +4834,8 @@ class RearUserService : IRearService.Stub {
             geometry = { geometry },
             onDismissed = { key -> events?.onNoticeDismissed(key) },
             onProgress = { frame.controlCenterOpen(it); strip.sheetOpen(it) },
+            redact = { backLockedNow && !lockedNoticeText },
+            onLockedTap = { openLockPrompt("a notification") },
         )
     }
     @Volatile private var noticesOn = true
@@ -4366,6 +5390,8 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
         /** How long a task removed for a relaunch is waited for, in looks. */
         private const val RELAUNCH_POLLS = 10
         private const val RELAUNCH_POLL_MS = 50L
+        /** How often a start on a private display looks for its task (`am stack list`, ~30 ms). */
+        private const val START_POLL_MS = 50L
         /** Rows read for the keyboard: half, a 2 px step at its top edge. */
         private const val KEYBOARD_SCALE = 0.5f
         private const val STRIP_SAMPLE_SCALE = 0.25f
@@ -4383,6 +5409,16 @@ dumpsys power 2>/dev/null | sed -n '/^Wake Locks:/,/^${'$'}/p' | head -12
 
         /** The least time between two pokes keeping the panel awake under the sheet. */
         private const val POKE_EVERY_MS = 1_000L
+        /** A capture waits this long for the control centre to have gone from the picture. */
+        private const val CAPTURE_CLEAR_MS = 500L
+        /** A recording's longest, the owner's minute. */
+        private const val RECORD_SECONDS = 60
+        private const val RECORD_POLL_MS = 400L
+        private const val RECORD_SETTLE_MS = 400L
+        /** How often the front is looked at for the back's lock ([watchFrontLock]). */
+        private const val FRONT_WATCH_MS = 750L
+        /** A width tapped on its track: its box shown this long, then faded. */
+        private const val WIDTH_FLASH_MS = 700L
         /**
          * What may go into a shell command as a package or a component: these come from
          * the app's config and from dumps, and this service runs them at shell uid.

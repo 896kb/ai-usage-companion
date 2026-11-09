@@ -82,6 +82,8 @@ class ShellOverlay(
     private val content: Content,
     /** The live blur under it; false, the dim alone (the notifications' list, to try without). */
     private val blurs: Boolean = true,
+    /** Its height among our layers: the portal sheet's, or under it for the panes (ShellLayer.Z_PANES). */
+    private val z: Int = ShellLayer.Z_SHEET,
 ) {
 
     /** What one sheet draws. Its methods run on the render thread, under [DRAW]. */
@@ -174,7 +176,7 @@ class ShellOverlay(
         try {
             // Both made hidden, and shown together below.
             blocker = ShellLayer.create("$layer-blocker", layerStack, ShellLayer.Z_BLOCKER, rear.widthPx, rear.heightPx, trusted = false, visible = false)
-            sheet = ShellLayer.create(layer, layerStack, ShellLayer.Z_SHEET, rear.widthPx, rear.heightPx, trusted = true, visible = false)
+            sheet = ShellLayer.create(layer, layerStack, z, rear.widthPx, rear.heightPx, trusted = true, visible = false)
             // A layer with no buffer has no input window and occludes nothing: the blocker
             // gets one, transparent, once. Assigned first, so a refused post still releases it.
             blockerSurface = Surface(blocker)

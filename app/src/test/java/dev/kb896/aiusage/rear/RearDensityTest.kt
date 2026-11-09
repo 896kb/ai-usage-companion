@@ -30,8 +30,11 @@ class RearDensityTest {
     }
 
     @Test fun `clamp bounds both ends`() {
-        assertEquals(240, RearDensity.clamp(100))
-        assertEquals(240, RearDensity.clamp(-5))
+        assertEquals(100, RearDensity.clamp(100))
+        assertEquals(72, RearDensity.clamp(74))
+        assertEquals(80, RearDensity.clamp(76))
+        assertEquals(72, RearDensity.clamp(50))
+        assertEquals(72, RearDensity.clamp(-5))
         assertEquals(600, RearDensity.clamp(900))
     }
 
@@ -42,6 +45,6 @@ class RearDensityTest {
 
     @Test fun `a private display takes the app's own DPI, clamped`() {
         assertEquals(380, RearDensity.ofPrivate("a", mapOf("a" to 380), RearGeometry.PRO17))
-        assertEquals(240, RearDensity.ofPrivate("a", mapOf("a" to 100), RearGeometry.PRO17))
+        assertEquals(72, RearDensity.ofPrivate("a", mapOf("a" to 40), RearGeometry.PRO17))
     }
 }

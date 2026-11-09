@@ -6,12 +6,14 @@ package dev.kb896.aiusage.rear
  * as long as that app is the live guest — on top or behind the panel — and any other time
  * the display keeps its own.
  *
- * Values are kept between [MIN] and [MAX] dpi, in steps of [STEP]: below 240 everything is
- * huge and above 600 nothing is legible on the small rear panel, and a coarse step keeps the
- * sliders (the front's, the back's) from producing a hundred nearly identical values.
+ * Values are kept between [MIN] and [MAX] dpi, in steps of [STEP]: 72 for whoever wants a
+ * whole tablet's layout on the back (the owner asked, 2026-11-08), above 600 nothing is
+ * legible on the small rear panel, and a coarse step keeps the sliders (the front's, the
+ * back's) from producing a hundred nearly identical values. The steps are the tens, so the
+ * one above [MIN] is 80.
  */
 object RearDensity {
-    const val MIN = 240
+    const val MIN = 72
     const val MAX = 600
     const val STEP = 10
 
@@ -32,6 +34,6 @@ object RearDensity {
     fun ofPrivate(pkg: String, dpi: Map<String, Int>, rear: RearGeometry): Int =
         dpi[pkg]?.let { clamp(it) } ?: privateDefault(rear)
 
-    /** [v] rounded to the nearest [STEP] and held within [MIN]..[MAX]. */
+    /** [v] rounded to the nearest [STEP] and held within [MIN]..[MAX]: 70 and below are [MIN]. */
     fun clamp(v: Int): Int = (Math.round(v / STEP.toFloat()) * STEP).coerceIn(MIN, MAX)
 }

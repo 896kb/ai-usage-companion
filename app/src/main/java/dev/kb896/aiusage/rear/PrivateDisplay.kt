@@ -59,10 +59,16 @@ internal class PrivateDisplay private constructor(
     /** What shows it, for the strip's capture: hold with ShellLayer.lease. */
     val layer: SurfaceControl,
     private val surface: Surface,
-    /** Where its layer stands on the rear: right of the lenses, or the whole rear when [wide]. */
+    /** Where its layer stands on the rear: right of the lenses (as wide as the app is), or the whole rear when [wide]. */
     val area: GuestShape.Bounds,
     /** Over the whole rear, lenses and all: an app not kept right of the cameras. */
     val wide: Boolean,
+    /**
+     * Rows at the display's top that the rear does not show: the display is this much taller than
+     * [area], under a cutout as tall, and its layer stands this much above the rear's top edge.
+     * See [open], HIDDEN TOP. Display rows are rear rows plus this.
+     */
+    val hidden: Int,
     private var dpi: Int,
     private val wakeIt: () -> Unit,
 ) {
@@ -99,7 +105,7 @@ internal class PrivateDisplay private constructor(
     @Synchronized
     fun density(wanted: Int): Boolean {
         if (released || wanted == dpi) return false
-        return runCatching { vd.resize(area.width, area.height, wanted) }
+        return runCatching { vd.resize(area.width, area.height + hidden, wanted) }
             .onSuccess { dpi = wanted; Log.i(TAG, "private display $displayId: at $wanted dpi") }
             .onFailure { Log.w(TAG, "private display $displayId: resize refused: ${it.message}") }
             .isSuccess
@@ -139,7 +145,7 @@ internal class PrivateDisplay private constructor(
         for (i in 0 until n) {
             props[i].id = o.ids[i]
             coords[i].x = o.xs[i]
-            coords[i].y = o.ys[i]
+            coords[i].y = o.ys[i] + hidden
         }
         val e = MotionEvent.obtain(o.downMs, o.atMs, o.action, n, props, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
         try {
@@ -247,18 +253,36 @@ internal class PrivateDisplay private constructor(
         }
 
         /**
-         * The display made with [cutout], as display 1 has it; null, logged, where this firmware
-         * will not, and the caller makes one without.
+         * The display made through VirtualDisplayConfig: with [cutout], as display 1 has it, and,
+         * with [fill], told to ignore what its apps say about their shape. Null, logged, where this
+         * firmware will not, and the caller makes a plain one.
+         *
+         * FILL. A portrait-only app on a landscape display is letterboxed into a column
+         * (letterboxReason FIXED_ORIENTATION: Bolt and TikTok at 469 of 608 px, 2026-11-08). The
+         * per-app overrides for that (OVERRIDE_ANY_ORIENTATION_TO_USER) only act on display 0
+         * (AppCompatAspectRatioOverrides.isSystemOverrideToFullscreenEnabled, read from this
+         * phone's services.jar); a display made with setIgnoreActivitySizeRestrictions, and
+         * trusted, has every app on it treated as resizable, whatever orientation it asks for
+         * (AppCompatOrientationPolicy.overrideOrientationIfNeeded → USER). An app may still opt
+         * out (its ALLOW_ORIENTATION_OVERRIDE property false).
          */
-        private fun withCutout(dm: DisplayManager, area: GuestShape.Bounds, dpi: Int, s: Surface, cutout: android.view.DisplayCutout): VirtualDisplay? =
+        private fun configured(
+            dm: DisplayManager, w: Int, h: Int, dpi: Int, s: Surface,
+            cutout: android.view.DisplayCutout?, fill: Boolean,
+        ): VirtualDisplay? =
             try {
-                val b = android.hardware.display.VirtualDisplayConfig.Builder("ai-usage-portal", area.width, area.height, dpi)
+                val b = android.hardware.display.VirtualDisplayConfig.Builder("ai-usage-portal", w, h, dpi)
                     .setSurface(s).setFlags(FLAGS)
-                b.javaClass.getMethod("setDisplayCutout", android.view.DisplayCutout::class.java).invoke(b, cutout)
+                if (cutout != null) {
+                    b.javaClass.getMethod("setDisplayCutout", android.view.DisplayCutout::class.java).invoke(b, cutout)
+                }
+                if (fill) {
+                    b.javaClass.getMethod("setIgnoreActivitySizeRestrictions", Boolean::class.javaPrimitiveType).invoke(b, true)
+                }
                 dm.createVirtualDisplay(b.build(), null, null)
-                    .also { Log.i(TAG, "private display: the rear's cutout, ${cutout.safeInsetLeft} px left") }
+                    .also { Log.i(TAG, "private display: ${if (cutout != null) "a cutout ${cutout.safeInsetLeft} px left, ${cutout.safeInsetTop} px top; " else ""}${if (fill) "apps fill it" else "apps keep their shape"}") }
             } catch (e: Exception) {
-                Log.w(TAG, "private display: no cutout (${(e.cause ?: e).javaClass.simpleName}: ${(e.cause ?: e).message}) — the app may go under the lenses")
+                Log.w(TAG, "private display: plain (${(e.cause ?: e).javaClass.simpleName}: ${(e.cause ?: e).message}) — no cutout, apps keep their shape")
                 null
             }
 
@@ -280,30 +304,59 @@ internal class PrivateDisplay private constructor(
          * (VirtualDisplayConfig.Builder.setDisplayCutout, hidden, Android 16; the display service
          * takes it as it is, VirtualDisplayAdapter): Brave there kept right, its keyboard too, as on
          * the rear (the owner, 2026-11-06, without it: both under the lenses).
+         *
+         * HIDDEN TOP. Apps take the status bar's height from the system's resources, and on this
+         * phone that is a fixed 150 px (android:dimen/status_bar_height = 150.0px, the front's own
+         * bar), whatever display they are on: TikTok's tabs stood 150 px down the 572 px rear, a
+         * quarter of it, under nothing (2026-11-08). A resource overlay for our displays only is the
+         * root's to make ("Non-root shell cannot fabricate overlays"), so the display is made
+         * [hidden] rows taller, a cutout over them, and its layer raised by as much: what an app
+         * keeps clear for a status bar it believes in, or for the cutout, is off the top of the rear.
          */
-        fun open(context: Context, layerStack: Int, rear: RearGeometry, dpi: Int, wide: Boolean, wake: (Int) -> Unit): PrivateDisplay? {
-            val area = if (wide) GuestShape.full(rear) else GuestShape.appArea(rear)
+        /**
+         * The cutout a display [w] by [h] gets: its top [hidden] rows (HIDDEN TOP), and on a [wide]
+         * one the rear's own lens column ([rearCutout]) moved down by as much. Null with neither.
+         */
+        private fun cutoutFor(wide: Boolean, rearCutout: android.view.DisplayCutout?, w: Int, hidden: Int): android.view.DisplayCutout? {
+            val lens = rearCutout?.takeIf { wide }
+            if (lens == null && hidden <= 0) return null
+            val left = lens?.boundingRectLeft?.let { android.graphics.Rect(it).apply { offset(0, hidden) } } ?: android.graphics.Rect()
+            val top = if (hidden > 0) android.graphics.Rect(0, 0, w, hidden) else android.graphics.Rect()
+            return android.view.DisplayCutout(
+                android.graphics.Insets.of(lens?.safeInsetLeft ?: 0, hidden, 0, 0),
+                left, top, android.graphics.Rect(), android.graphics.Rect(),
+            )
+        }
+
+        fun open(
+            context: Context, layerStack: Int, rear: RearGeometry, dpi: Int, wide: Boolean,
+            width: Int? = null, fill: Boolean = true, hidden: Int = 0, wake: (Int) -> Unit,
+        ): PrivateDisplay? {
+            // Right of the lenses as wide as the app is to be (GuestWidth), centred; or the whole rear.
+            val area = if (wide) GuestShape.full(rear) else GuestWidth.area(rear, width)
             var layer: SurfaceControl? = null
             var surface: Surface? = null
             return try {
                 val made = ShellLayer.create(
-                    "portal-app", layerStack, ShellLayer.Z_APP, area.width, area.height,
+                    "portal-app", layerStack, ShellLayer.Z_APP, area.width, area.height + hidden,
                     trusted = false, visible = false, format = PixelFormat.RGBA_8888, opaque = true,
                 )
                 layer = made
-                SurfaceControl.Transaction().use { it.setPosition(made, area.left.toFloat(), area.top.toFloat()).apply() }
+                SurfaceControl.Transaction().use { it.setPosition(made, area.left.toFloat(), (area.top - hidden).toFloat()).apply() }
                 val s = Surface(made)
                 surface = s
                 val dm = displays(context)
-                val cutout = if (wide) dm.getDisplay(dev.kb896.aiusage.Panel.DISPLAY_ID)?.cutout else null
-                val vd = (cutout?.let { withCutout(dm, area, dpi, s, it) }
-                    ?: dm.createVirtualDisplay("ai-usage-portal", area.width, area.height, dpi, s, FLAGS))
+                val rearCutout = if (wide) dm.getDisplay(dev.kb896.aiusage.Panel.DISPLAY_ID)?.cutout else null
+                val cutout = cutoutFor(wide, rearCutout, area.width, hidden)
+                val tall = area.height + hidden
+                val vd = (configured(dm, area.width, tall, dpi, s, cutout, fill)
+                    ?: dm.createVirtualDisplay("ai-usage-portal", area.width, tall, dpi, s, FLAGS))
                     ?: throw IllegalStateException("createVirtualDisplay gave nothing")
                 val id = vd.display.displayId
                 // Before any guest is started on it: a keyboard asked for there stays there.
                 RearKeyboard.showOn(id)
-                Log.i(TAG, "private display $id: ${area.width}x${area.height} at $dpi dpi, layer at x ${area.left}${if (wide) " (the whole rear)" else ""}, flags 0x${FLAGS.toString(16)}")
-                PrivateDisplay(id, vd, made, s, area, wide, dpi) { wake(id) }
+                Log.i(TAG, "private display $id: ${area.width}x$tall at $dpi dpi, the top $hidden hidden, layer at x ${area.left}${if (wide) " (the whole rear)" else ""}, flags 0x${FLAGS.toString(16)}")
+                PrivateDisplay(id, vd, made, s, area, wide, hidden, dpi) { wake(id) }
             } catch (e: Throwable) {
                 Log.w(TAG, "private display: none (${e.javaClass.simpleName}: ${e.message})")
                 ShellLayer.remove(layer)

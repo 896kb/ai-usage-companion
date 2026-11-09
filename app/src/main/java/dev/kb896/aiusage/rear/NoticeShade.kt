@@ -23,6 +23,8 @@ class NoticeShade(private val left: Float) {
         data class Dismissed(val key: String) : Effect
         /** It will be settled shut at [atMs]. */
         data class ShutAt(val atMs: Long) : Effect
+        /** The row of [key] tapped. */
+        data class Tapped(val key: String) : Effect
         /** All of [keys] dismissed at once, by the clear button; the last of them gone at [doneAtMs]. */
         data class ClearedAll(val keys: List<String>, val doneAtMs: Long) : Effect
     }
@@ -87,16 +89,28 @@ class NoticeShade(private val left: Float) {
 
     val count: Int get() = items.count { it.key !in leaving }
 
+    /**
+     * The pull down and the drag back up to shut, each trailing a finger faster than
+     * ControlCenter.DRAG_SPEED_MAX: a fast pull had the list in at once (the owner, 2026-11-09).
+     */
+    private val pullChase = ControlCenter.Chase()
+    private val closeChase = ControlCenter.Chase()
+
+    /** The drag back up as shown: [closing], or less while it trails a fast finger. */
+    private fun shownClosing(now: Long): Float = closeChase.to(closing, now)
+
     fun beginPull(downY: Float, y: Float, now: Long) {
         pulling = true
         pullFrom = downY
         pullAt = y
+        pullChase.snap(y - downY, now)
         lastPullY = y
         lastPullMs = now
         pullSpeed = 0f
         settleTo = 0f
         scroll = 0f
         closing = 0f
+        closeChase.reset()
     }
 
     fun movePull(y: Float, now: Long) {
@@ -111,7 +125,7 @@ class NoticeShade(private val left: Float) {
         if (!pulling) return emptyList()
         movePull(y, now)
         pulling = false
-        val from = ControlCenter.progress(false, pullAt - pullFrom)
+        val from = ControlCenter.progress(false, pullChase.shown.takeIf { !it.isNaN() } ?: (pullAt - pullFrom))
         return settle(from, ControlCenter.release(false, pullAt - pullFrom, pullSpeed), now)
     }
 
@@ -121,7 +135,7 @@ class NoticeShade(private val left: Float) {
     fun reset() {
         pulling = false
         settleFrom = 0f; settleTo = 0f; settleAt = 0L
-        scroll = 0f; closing = 0f
+        scroll = 0f; closing = 0f; closeChase.reset()
         finger = Finger.NONE
         fingerRow = null; swipeKey = null; swipeDx = 0f; springKey = null
         onClear = false; clearedAt = 0L
@@ -134,13 +148,14 @@ class NoticeShade(private val left: Float) {
         settleTo = if (open) 1f else 0f
         settleAt = now
         closing = 0f
+        closeChase.reset()
         return if (open) emptyList() else listOf(Effect.ShutAt(now + SETTLE_MS))
     }
 
     /** How far open, 0 to 1. */
     fun progress(now: Long): Float {
-        if (pulling) return ControlCenter.progress(false, pullAt - pullFrom)
-        if (closing > 0f) return ControlCenter.progress(true, -closing)
+        if (pulling) return ControlCenter.progress(false, pullChase.to(pullAt - pullFrom, now))
+        if (closing > 0f || closeChase.shown > 0f) return ControlCenter.progress(true, -shownClosing(now))
         val t = ((now - settleAt).toFloat() / SETTLE_MS).coerceIn(0f, 1f)
         val eased = 1f - (1f - t) * (1f - t) * (1f - t)
         return settleFrom + (settleTo - settleFrom) * eased
@@ -159,10 +174,12 @@ class NoticeShade(private val left: Float) {
     /** Something still moves of itself. */
     fun moving(now: Long): Boolean =
         pulling || now - settleAt < SETTLE_MS || leaving.isNotEmpty() ||
+            (finger != Finger.NONE && closeChase.shown != closing) ||
             (springKey != null && now - springAt < SPRING_MS)
 
     fun fingerDown(x: Float, y: Float, now: Long) {
         finger = Finger.UNDECIDED
+        closeChase.snap(closing, now)
         downX = x; downY = y; lastY = y; lastMs = now; speed = 0f
         fromBottom = y >= Panel.HEIGHT - BOTTOM_EDGE
         onClear = clear(now)?.let { c ->
@@ -235,7 +252,7 @@ class NoticeShade(private val left: Float) {
             Finger.UNDECIDED -> when {
                 onClear -> clearAll(now)
                 fingerRow == null -> close(now)
-                else -> emptyList()
+                else -> fingerRow?.let { listOf(Effect.Tapped(it)) } ?: emptyList()
             }
             Finger.NONE -> emptyList()
         }

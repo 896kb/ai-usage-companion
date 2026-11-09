@@ -45,6 +45,12 @@ class TouchForward(
      */
     @Volatile var appX: Int = appX
 
+    /**
+     * How wide the app's display is: to the rear's right edge, or less for an app given a width
+     * of its own (GuestWidth). A finger beside it is held at its edge. 0: to the right edge.
+     */
+    @Volatile var appW: Int = 0
+
     /** One motion event: pointer ids (sorted) and their places on the display, at [atMs], its gesture begun at [downMs]. */
     class Out(val action: Int, val ids: IntArray, val xs: FloatArray, val ys: FloatArray, val downMs: Long, val atMs: Long) {
         val masked: Int get() = action and MotionEvent.ACTION_MASK
@@ -194,7 +200,8 @@ class TouchForward(
     /** [s]'s place from its raw position; true if that moved it. */
     private fun place(s: Slot): Boolean {
         if (s.rawX < 0 || s.rawY < 0) return false
-        val x = (s.rawX * rearW / (maxX + 1f) - appX).coerceIn(0f, rearW - appX - 1f)
+        val w = appW.takeIf { it > 0 } ?: (rearW - appX)
+        val x = (s.rawX * rearW / (maxX + 1f) - appX).coerceIn(0f, w - 1f)
         val y = (s.rawY * rearH / (maxY + 1f)).coerceIn(0f, rearH - 1f)
         val moved = x != s.x || y != s.y
         s.x = x

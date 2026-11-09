@@ -211,6 +211,21 @@ class RearActivity : Activity() {
          * [ACTION_DOZING]: the app process forwards it (IRearService.setPanelGuarded).
          */
         const val ACTION_GUARDED = "dev.kb896.aiusage.GUARDED"
+        /** With [ACTION_GUARDED]: the control centre is down, one of the guards. */
+        const val EXTRA_CONTROL_CENTER = "controlCenter"
+        /** The shell saw a pull up from under Xiaomi's bottom window: the control centre closes. */
+        const val ACTION_CLOSE_CONTROL_CENTER = "dev.kb896.aiusage.CLOSE_CONTROL_CENTER"
+        /** The back's lock came on or went ([EXTRA_BACK_LOCKED]): the shell's word (BackLock). */
+        const val ACTION_BACK_LOCK = "dev.kb896.aiusage.BACK_LOCK"
+        const val EXTRA_BACK_LOCKED = "backLocked"
+        /** The panel asks for the back's code (a held switch tapped): through the app to the shell. */
+        const val ACTION_ASK_CODE = "dev.kb896.aiusage.ASK_CODE"
+        /** The panel's screenshot or recording tile ([EXTRA_RECORD]): through the app to the shell. */
+        const val ACTION_CAPTURE = "dev.kb896.aiusage.CAPTURE"
+        const val EXTRA_RECORD = "record"
+        /** The back's recording began or ended ([EXTRA_RECORDING]): the shell's word, for the tile. */
+        const val ACTION_RECORDING = "dev.kb896.aiusage.RECORDING"
+        const val EXTRA_RECORDING = "recording"
         const val EXTRA_GUARDED = "guarded"
         /**
          * The control centre's brightness (ControlCenter): the panel asks for it
@@ -360,12 +375,15 @@ class RearActivity : Activity() {
                 ACTION_MIRROR_SYNC -> {
                     guardSent = null
                     dial.publishNotices()
-                    lastMirror?.let { announceGuard(it.aod || it.locked) }
+                    lastMirror?.let { announceGuard(it.aod || it.locked || it.controlCenter, it.controlCenter) }
                     announceHold()
                     dial.republishMirror()
                 }
                 // Somebody is using the portal sheet over the panel: not a panel to doze.
                 ACTION_PORTAL_POKE -> if (!inAod) armSleep()
+                ACTION_CLOSE_CONTROL_CENTER -> dial.closeControlCenter()
+                ACTION_BACK_LOCK -> dial.backLocked = intent.getBooleanExtra(EXTRA_BACK_LOCKED, true)
+                ACTION_RECORDING -> dial.recording = intent.getBooleanExtra(EXTRA_RECORDING, false)
                 // Never from a guarded panel (lock slider, pocket lock, always-on): stepping
                 // back would hand the rear to the guest past the guard. No sheet opens over a
                 // guarded panel, so this is only a guard come up between Resume and here.
@@ -468,7 +486,9 @@ class RearActivity : Activity() {
 
         calibrationView = CalibrationView(this)
         dial = RearDialView(this)
-        dial.onMirror = { m -> lastMirror = m; sendMirror(); announceGuard(m.aod || m.locked) }
+        // The control centre down guards it too: a swipe up from the very bottom to close it was
+        // taken as the portal's pull, and opened the sheet over it (the owner, 2026-11-08).
+        dial.onMirror = { m -> lastMirror = m; sendMirror(); announceGuard(m.aod || m.locked || m.controlCenter, m.controlCenter) }
 
         // Fire-and-forget across the process boundary. This process cannot open the
         // camera itself — the Shizuku binding is in the main one — and it deliberately
@@ -501,6 +521,10 @@ class RearActivity : Activity() {
         dial.onBrightness = { value ->
             sendBroadcast(Intent(ACTION_SET_REAR_BRIGHTNESS).setPackage(packageName).putExtra(EXTRA_BRIGHTNESS, value))
         }
+        // Until the shell says, the back is as locked as the phone (BackLock): words hidden, switches held.
+        dial.backLocked = runCatching { getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked }.getOrDefault(true)
+        dial.onAskCode = { sendBroadcast(Intent(ACTION_ASK_CODE).setPackage(packageName)) }
+        dial.onCapture = { record -> sendBroadcast(Intent(ACTION_CAPTURE).setPackage(packageName).putExtra(EXTRA_RECORD, record)) }
         dial.onAutoBrightness = { on ->
             sendBroadcast(Intent(ACTION_SET_REAR_AUTO_BRIGHTNESS).setPackage(packageName).putExtra(EXTRA_AUTO_BRIGHTNESS, on))
         }
@@ -511,10 +535,6 @@ class RearActivity : Activity() {
                 .putExtra(EXTRA_NOTICES_TITLES, titles).putExtra(EXTRA_NOTICES_TEXTS, texts))
         }
         dial.publishNotices()
-        // A card swiped away here: the relay clears it on the front if matching is on.
-        dial.onNoticeDismissed = { key ->
-            sendBroadcast(Intent(ACTION_DISMISS_NOTIFICATION).setPackage(packageName).putExtra(EXTRA_NOTIFICATION_KEY, key))
-        }
         dial.onUnlocked = {
             guardedAfterWake = false
             // A swipe ends the double tap's guard on later wakes; a spent lock's hand-back does not.
@@ -579,7 +599,7 @@ class RearActivity : Activity() {
             IntentFilter().apply {
                 addAction(ACTION_STATE); addAction(ACTION_FINISH); addAction(ACTION_NOTIFICATION)
                 addAction(ACTION_MEDIA); addAction(ACTION_CHARGE); addAction(ACTION_LOCK)
-                addAction(ACTION_MIRROR_SYNC); addAction(ACTION_PORTAL_POKE); addAction(ACTION_PORTAL_STEP_BACK)
+                addAction(ACTION_MIRROR_SYNC); addAction(ACTION_PORTAL_POKE); addAction(ACTION_PORTAL_STEP_BACK); addAction(ACTION_CLOSE_CONTROL_CENTER); addAction(ACTION_BACK_LOCK); addAction(ACTION_RECORDING)
                 addAction(ACTION_PORTAL_COVERED)
                 addAction(ACTION_NOTIFICATION_REMOVED); addAction(ACTION_NOTIFICATIONS_ACTIVE)
                 addAction(ACTION_REAR_BRIGHTNESS)
@@ -941,17 +961,20 @@ class RearActivity : Activity() {
     private var holding = true
 
     /** Last guard sent, null before the first: each instance says it once, then on changes. */
-    private var guardSent: Boolean? = null
+    private var guardSent: Pair<Boolean, Boolean>? = null
 
     /**
      * Tells the app process (and through it the shell) whether the panel is guarded — the lock
      * slider up, which is also the pocket lock and always-on's resting state. Rides on the
      * mirror, which the view publishes whenever either changes.
      */
-    private fun announceGuard(guarded: Boolean) {
-        if (guardSent == guarded) return
-        guardSent = guarded
-        sendBroadcast(Intent(ACTION_GUARDED).setPackage(packageName).putExtra(EXTRA_GUARDED, guarded))
+    private fun announceGuard(guarded: Boolean, controlCenter: Boolean = false) {
+        if (guardSent == guarded to controlCenter) return
+        guardSent = guarded to controlCenter
+        sendBroadcast(
+            Intent(ACTION_GUARDED).setPackage(packageName)
+                .putExtra(EXTRA_GUARDED, guarded).putExtra(EXTRA_CONTROL_CENTER, controlCenter),
+        )
     }
 
     private var lastMirror: RearDialView.Mirror? = null

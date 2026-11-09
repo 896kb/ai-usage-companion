@@ -96,8 +96,28 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         return s.take(n).trimEnd() + "…"
     }
 
-    /** The DPI slider as it is to be drawn: the thumb at [thumbDpi], the value saying [label]. */
-    class SliderLook(val thumbDpi: Int, val label: String)
+    /**
+     * The back's lock as it is to be drawn (BackLock): [title] over a dot for each of the [entered]
+     * characters, the keypad, and [message] under it — red when [wrong]. [pressedKey] is the key
+     * under a finger (PortalSheet.keypad's index), -1 none.
+     */
+    class LockLook(
+        val title: String, val entered: Int, val message: String?, val wrong: Boolean, val pressedKey: Int,
+        /** The keypad shown: a PIN's. Without it only the words (a lock the back cannot take yet). */
+        val keys: Boolean = true,
+        /** What takes the code: a PIN's keypad, a pattern's dots, a password's keyboard. */
+        val kind: BackLock.Kind = BackLock.Kind.PIN,
+        /** A pattern's dots so far, in order, and where the finger is (null: lifted). */
+        val pattern: List<Int> = emptyList(),
+        val finger: Pair<Float, Float>? = null,
+        /** The keyboard's page (PortalSheet.KB_LOWER and the rest). */
+        val page: Int = PortalSheet.KB_LOWER,
+    ) {
+        fun pressing(key: Int) = LockLook(title, entered, message, wrong, key, keys, kind, pattern, finger, page)
+    }
+
+    /** A slider as it is to be drawn: the thumb [fraction] of the way along, the value saying [label]. */
+    class SliderLook(val fraction: Float, val label: String)
 
     /**
      * The sheet at [progress] (0 shut, 1 open), its contents scrolled up by [scroll] (0 to
@@ -133,8 +153,13 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         icons: List<Bitmap?>, labels: List<String>,
         guestOnTop: Boolean, pressed: Int = -1,
         guestIcon: Bitmap? = null, slider: SliderLook? = null, names: Boolean = true,
+        width: SliderLook? = null,
         keepRight: Boolean = false,
         keepRightHidden: Boolean = false,
+        lock: LockLook? = null,
+        keypad: PortalSheet.Keypad? = null,
+        grid: PortalSheet.PatternGrid? = null,
+        keyboard: PortalSheet.Keyboard? = null,
     ) {
         val arrived = Arrival.of(progress)
         if (arrived <= 0.004f) return
@@ -147,12 +172,26 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         try {
             // Faded as one picture, as the control centre is: glass cannot take a paint's alpha.
             if (arrived < 0.996f) canvas.saveLayerAlpha(0f, 0f, w, h, (255 * arrived).toInt())
+            if (lock != null && keypad != null) {
+                when {
+                    lock.kind == BackLock.Kind.PATTERN && grid != null -> drawPattern(canvas, keypad, grid, dy + scroll, lock)
+                    lock.kind == BackLock.Kind.PASSWORD && keyboard != null -> drawKeyboard(canvas, keyboard, dy + scroll, g, lock)
+                    else -> drawLock(canvas, keypad, dy + scroll, g, lock)
+                }
+                return
+            }
             val paging = kotlin.math.abs(page - Math.round(page)) > 0.001f
             faded(canvas, layout.pagesLeft, sides = paging, top = PortalSheet.topFade(scroll)) { c ->
                 drawUpper(c, dy, g, layout, page, icons, labels, guestOnTop, pressed, guestIcon, names)
             }
             val s = layout.slider
-            if (s != null && slider != null && scroll > 0.5f) drawSlider(canvas, s, dy, g, slider, pressed, guestIcon)
+            if (s != null && slider != null && scroll > 0.5f) drawSlider(canvas, s, dy, g, slider, pressed, PRESS_VALUE, PRESS_THUMB) { c, box ->
+                guestIcon?.let { drawAppMark(c, it, box.left, box.top, PortalSheet.SLIDER_ICON) }
+            }
+            val wr = layout.width
+            if (wr != null && width != null && scroll > 0.5f) drawSlider(canvas, wr, dy, g, width, pressed, PRESS_WIDTH_VALUE, PRESS_WIDTH_THUMB) { c, box ->
+                drawWidthMark(c, box)
+            }
             val t = layout.toggle
             if (t != null && !keepRightHidden && scroll > 0.5f) drawToggle(canvas, t, dy, g, keepRight, pressed)
         } finally {
@@ -323,24 +362,170 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * thumb, the thumb, and the value as a button (a tap on it is Default) — three pieces,
      * each grown to [g] about its middle.
      */
-    private fun drawSlider(
+    /**
+     * A slider's row, [dy] down, grown to [g]: [mark] in its icon's box, the track, and the value,
+     * lit while [pressed] is [pressValue], the thumb held while it is [pressThumb].
+     */
+    private inline fun drawSlider(
         canvas: Canvas, s: PortalSheet.Slider, dy: Float, g: Float, look: SliderLook,
-        pressed: Int, guestIcon: Bitmap?,
+        pressed: Int, pressValue: Int, pressThumb: Int, mark: (Canvas, android.graphics.RectF) -> Unit,
     ) {
-        guestIcon?.let { icon ->
-            grown(canvas, s.icon.centerX, s.icon.centerY + dy, g) {
-                drawAppMark(canvas, icon, s.icon.left, s.icon.top + dy, PortalSheet.SLIDER_ICON)
-            }
+        grown(canvas, s.icon.centerX, s.icon.centerY + dy, g) {
+            fillRect.set(s.icon.left, s.icon.top + dy, s.icon.right, s.icon.bottom + dy)
+            mark(canvas, fillRect)
         }
-        grown(canvas, s.track.centerX, s.track.centerY + dy, g) { drawTrack(canvas, s, dy, look, pressed) }
+        grown(canvas, s.track.centerX, s.track.centerY + dy, g) { drawTrack(canvas, s, dy, look, pressed == pressThumb) }
         grown(canvas, s.value.centerX, s.value.centerY + dy, g) {
             val m = text.fontMetrics
             val middle = -(m.ascent + m.descent) / 2f
             buttonRect.set(s.value.left, s.value.top + dy, s.value.right, s.value.bottom + dy)
-            drawButton(canvas, buttonRect, if (pressed == PRESS_VALUE) 0.5f else 0f, false)
+            drawButton(canvas, buttonRect, if (pressed == pressValue) 0.5f else 0f, false)
             canvas.drawText(ellipsize(look.label, buttonRect.width() - 12f), buttonRect.centerX(), buttonRect.centerY() + middle, text)
         }
     }
+
+    /**
+     * The lock, [dy] down, grown to [g]: its words, a dot for each character typed (an empty ring
+     * for none yet), the keys as the sheet's buttons — back and enter as glyphs — and the message.
+     */
+    private fun drawLock(canvas: Canvas, k: PortalSheet.Keypad, dy: Float, g: Float, look: LockLook) {
+        drawLockLine(canvas, k.centerX, k.infoRight - k.infoLeft, k.titleY + dy, k.dotsY + dy, look)
+        // The keys: circles of the sheet's glass, their figures large.
+        val size = text.textSize
+        text.textSize = k.keys[0].height * KEY_TEXT
+        val km = text.fontMetrics
+        val keyMiddle = -(km.ascent + km.descent) / 2f
+        k.keys.forEachIndexed { i, box ->
+            grown(canvas, box.centerX, box.centerY + dy, g) {
+                buttonRect.set(box.left, box.top + dy, box.right, box.bottom + dy)
+                drawButton(canvas, buttonRect, if (look.pressedKey == i) 0.5f else 0f, false, radius = buttonRect.height() / 2, oval = true)
+                val label = when (i) {
+                    PortalSheet.KEY_BACK -> "⌫"
+                    PortalSheet.KEY_OK -> "OK"
+                    else -> PortalSheet.keyDigit(i).toString()
+                }
+                text.color = ink
+                canvas.drawText(label, buttonRect.centerX(), buttonRect.centerY() + keyMiddle, text)
+            }
+        }
+        text.textSize = size
+    }
+
+    /**
+     * The lock's one line at the top, small: what went wrong (red), else a dot for each character
+     * typed, else what to do. [textY] the words' baseline, [dotsY] the dots' middle.
+     */
+    private fun drawLockLine(canvas: Canvas, cx: Float, room: Float, textY: Float, dotsY: Float, look: LockLook) {
+        val size0 = text.textSize
+        text.textSize = size0 * TITLE_SCALE
+        when {
+            look.message != null -> {
+                text.color = if (look.wrong) Panel.Palette.CRIT else ink
+                canvas.drawText(ellipsize(look.message, room), cx, textY, text)
+            }
+            look.entered > 0 -> {
+                val step = LOCK_DOT_R * 3f
+                val shown = minOf(look.entered, (room / step).toInt())
+                markPaint.style = Paint.Style.FILL
+                markPaint.color = ink
+                var x = cx - (shown - 1) * step / 2f
+                repeat(shown) { canvas.drawCircle(x, dotsY, LOCK_DOT_R, markPaint); x += step }
+            }
+            else -> {
+                text.color = ink
+                canvas.drawText(ellipsize(look.title, room), cx, textY, text)
+            }
+        }
+        text.color = ink
+        text.textSize = size0
+    }
+
+    /**
+     * A pattern lock: the nine dots, the ones joined grown into rings, lines from dot to dot and
+     * on to the finger — the accent, red when it was wrong — and the words in their column.
+     */
+    private fun drawPattern(canvas: Canvas, k: PortalSheet.Keypad, grid: PortalSheet.PatternGrid, dy: Float, look: LockLook) {
+        drawLockLine(canvas, k.centerX, k.infoRight - k.infoLeft, k.titleY + dy, k.dotsY + dy, look)
+        val accent = if (look.wrong) Panel.Palette.CRIT else if (theme.isGlass) GLASS_ACCENT else Panel.Palette.WORK
+        val p = markPaint
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeJoin = Paint.Join.ROUND
+        if (look.pattern.isNotEmpty()) {
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = PATTERN_LINE
+            p.color = accent
+            p.alpha = 200
+            val path = Path()
+            look.pattern.forEachIndexed { i, c ->
+                val (x, y) = grid.centers[c]
+                if (i == 0) path.moveTo(x, y + dy) else path.lineTo(x, y + dy)
+            }
+            look.finger?.let { (fx, fy) -> path.lineTo(fx, fy + dy) }
+            canvas.drawPath(path, p)
+            p.alpha = 255
+        }
+        grid.centers.forEachIndexed { i, (x, y) ->
+            val on = i in look.pattern
+            p.style = Paint.Style.FILL
+            p.color = if (on) accent else ink
+            // Ovals in panel units, round on the glass (grid.aspect).
+            val r = if (on) PATTERN_DOT * 1.6f else PATTERN_DOT
+            fillRect.set(x - r * grid.aspect, y + dy - r, x + r * grid.aspect, y + dy + r)
+            canvas.drawOval(fillRect, p)
+            if (on) {
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 2f
+                val ring = grid.reach * 0.7f
+                fillRect.set(x - ring * grid.aspect, y + dy - ring, x + ring * grid.aspect, y + dy + ring)
+                canvas.drawOval(fillRect, p)
+            }
+        }
+    }
+
+    /**
+     * A password lock: the words and a dot for each character on a line at the top, the message
+     * under the dots when there is one, and the keyboard's page under them, its keys the sheet's
+     * glass, rounded.
+     */
+    private fun drawKeyboard(canvas: Canvas, k: PortalSheet.Keyboard, dy: Float, g: Float, look: LockLook) {
+        val size0 = text.textSize
+        drawLockLine(canvas, k.centerX, k.right - k.left, k.titleY + dy, k.dotsY + dy, look)
+        text.textSize = k.keys[0].box.height * KB_TEXT
+        val km = text.fontMetrics
+        val mid = -(km.ascent + km.descent) / 2f
+        k.keys.forEachIndexed { i, key ->
+            val b = key.box
+            grown(canvas, b.centerX, b.centerY + dy, g) {
+                buttonRect.set(b.left, b.top + dy, b.right, b.bottom + dy)
+                val lit = look.pressedKey == i || (key.type == PortalSheet.KbType.SHIFT && look.page == PortalSheet.KB_UPPER)
+                drawButton(canvas, buttonRect, if (lit) 0.5f else 0f, false, radius = minOf(b.width, b.height) * 0.42f)
+                text.color = ink
+                canvas.drawText(key.label, buttonRect.centerX(), buttonRect.centerY() + mid, text)
+            }
+        }
+        text.textSize = size0
+    }
+
+    /** The width slider's mark in [box]: a two-headed arrow between two upright bars, in the ink. */
+    private fun drawWidthMark(canvas: Canvas, box: android.graphics.RectF) {
+        val p = markPaint
+        p.color = ink
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 3f
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeJoin = Paint.Join.ROUND
+        val inset = box.width() * 0.14f
+        val l = box.left + inset; val r = box.right - inset
+        val cy = box.centerY(); val half = box.height() * 0.3f
+        canvas.drawLine(l, cy - half, l, cy + half, p)
+        canvas.drawLine(r, cy - half, r, cy + half, p)
+        val al = l + 7f; val ar = r - 7f; val head = 6f
+        canvas.drawLine(al, cy, ar, cy, p)
+        canvas.drawLine(al, cy, al + head, cy - head, p); canvas.drawLine(al, cy, al + head, cy + head, p)
+        canvas.drawLine(ar, cy, ar - head, cy - head, p); canvas.drawLine(ar, cy, ar - head, cy + head, p)
+    }
+
+    private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /**
      * "Keep right of the cameras", [dy] down, grown to [g]: its row a button as the slider's value
@@ -388,10 +573,9 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * as big and clear glass. ORIGINAL: the front's PanelSeekBar — square track in the
      * panel's TRACK, filled and thumbed in its green.
      */
-    private fun drawTrack(canvas: Canvas, s: PortalSheet.Slider, dy: Float, look: SliderLook, pressed: Int) {
+    private fun drawTrack(canvas: Canvas, s: PortalSheet.Slider, dy: Float, look: SliderLook, held: Boolean) {
         val cy = s.track.centerY + dy
-        val thumbX = PortalSheet.sliderX(s.track, look.thumbDpi)
-        val held = pressed == PRESS_THUMB
+        val thumbX = s.track.left + look.fraction.coerceIn(0f, 1f) * s.track.width
         val glassy = theme.isGlass
         val th = if (glassy) TRACK_H else TRACK_H_FLAT
         val radius = if (glassy) th / 2 else 0f
@@ -449,9 +633,11 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
     private fun drawButton(
         canvas: Canvas, rect: RectF, on: Float, close: Boolean,
         radius: Float = minOf(rect.width(), rect.height()) * CcButton.CORNER,
+        /** The oval in [rect]: a round key on a rear whose panel units are not square (PortalSheet.keypad). */
+        oval: Boolean = false,
     ): Boolean {
         buttonShape.rewind()
-        buttonShape.addRoundRect(rect, radius, radius, Path.Direction.CW)
+        if (oval) buttonShape.addOval(rect, Path.Direction.CW) else buttonShape.addRoundRect(rect, radius, radius, Path.Direction.CW)
         val tint = if (close) Panel.Palette.CRIT and 0x00FFFFFF else 0x00FFFFFF
         val glassy = theme.isGlass && glass.drawPane(canvas, rect, radius, paneTint(rect), shape = buttonShape, source = null, local = true)
         // No mark: the name is the button's, drawn over it in the ink.
@@ -465,6 +651,23 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         const val PRESS_THUMB = 11
         /** [draw]'s pressed: "Keep right of the cameras"'s row. */
         const val PRESS_TOGGLE = 12
+        /** [pressed] for the lock's key i: this plus i. */
+        const val PRESS_KEY = 100
+        /** The lock's dots: their radius, and the most shown in a row. */
+        private const val LOCK_DOT_R = 6f
+        /** A pattern's dots and its line. */
+        private const val PATTERN_DOT = 8f
+        private const val PATTERN_LINE = 10f
+        /** A keyboard key's label, as much of the key's height. */
+        private const val KB_TEXT = 0.34f
+        /** The lock's words, as much of the sheet's text size. */
+        private const val TITLE_SCALE = 0.72f
+        /** A key's figure, as much of the key's height. */
+        private const val KEY_TEXT = 0.34f
+        private const val DOTS_MAX = 16
+        /** The width slider's value, and its thumb held. */
+        const val PRESS_WIDTH_VALUE = 13
+        const val PRESS_WIDTH_THUMB = 14
         private const val KNOB_INSET = 3f
 
         private const val SHADOW = 0xCC000000.toInt()

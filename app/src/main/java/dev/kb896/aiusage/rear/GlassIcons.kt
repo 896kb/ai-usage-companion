@@ -123,6 +123,15 @@ object GlassIcons {
         "m520-66 36-41-34-17q-17-9-21-28t9-34l70-80q5-7 13.5-10.5T610-280q26 0 36.5 23t-6.5 43l-36 41 34 17q17 9 21 28t-9 34l-70 80q-5 7-13.5 10.5T550 0q-26 0-36.5-23t6.5-43Zm-240 0 36-41-34-17q-17-9-21-28t9-34l70-80q5-7 13.5-10.5T370-280q26 0 36.5 23t-6.5 43l-36 41 34 17q17 9 21 28t-9 34l-70 80q-5 7-13.5 10.5T310 0q-26 0-36.5-23t6.5-43Zm20-254q-91 0-155.5-64.5T80-540q0-83 55-145t136-73q32-57 87.5-89.5T480-880q90 0 156.5 57.5T717-679q69 6 116 57t47 122q0 75-52.5 127.5T700-320H300Z",
     )
     /** Material Symbols "notifications_off". */
+    /** Four corners of a frame (drawn here, on Material's grid): the control centre's screenshot. */
+    val SCREENSHOT = Outline(
+        "M120-560v-280h280v80H200v200h-80Zm440-280h280v280h-80v-200H560v-80Zm280 440v280H560v-80h200v-200h80ZM400-120H120v-280h80v200h200v80Z",
+    )
+    /** A ring and a dot (drawn here, on Material's grid): the control centre's recording. */
+    val RECORD = Outline(
+        "M480-880A400 400 0 1 1 480-80A400 400 0 1 1 480-880ZM480-800A320 320 0 1 0 480-160A320 320 0 1 0 480-800ZM480-660A180 180 0 1 1 480-300A180 180 0 1 1 480-660Z",
+    )
+
     val SILENT = Outline(
         "M646-200H200q-17 0-28.5-11.5T160-240q0-17 11.5-28.5T200-280h40v-280q0-33 8.5-65t25.5-61l126 126H288L84-764q-11-11-11-28t11-28q11-11 28-11t28 11l680 680q11 11 11.5 27.5T820-84q-11 11-28 11t-28-11L646-200Zm74-251q0 12-7 22t-18 15q-11 5-23 2.5T652-422L367-707q-7-7-10-15t-3-17q0-11 5.5-21.5T375-776q11-5 22-9t23-7v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v28q80 20 130 85t50 147v109ZM480-80q-30 0-53.5-16.5T403-141q0-8 6.5-13.5T424-160h112q8 0 14.5 5.5T557-141q0 28-23.5 44.5T480-80Z",
     )
@@ -178,6 +187,8 @@ object GlassIcons {
         PanelIcons.DASHBOARD to DASHBOARD,
         PanelIcons.FRONT to FRONT,
         PanelIcons.CLOSE to CLOSE,
+        PanelIcons.SCREENSHOT to SCREENSHOT,
+        PanelIcons.RECORD to RECORD,
     )
 
     /** The glass counterpart of a traced glyph, or null if it has none. */

@@ -173,7 +173,7 @@ private val icon: (String) -> Bitmap?,
      * an X in the text's colour, no words. Its own card-sized shaders would be made again for a
      * circle every frame, so it keeps a NoticeCard of its own.
      */
-    fun drawClear(canvas: Canvas, c: NoticeShade.Clear, look: Look) {
+    fun drawClear(canvas: Canvas, c: NoticeShade.Clear, look: Look, bin: Boolean = false) {
         val r = c.size / 2f
         // A soft bright halo round it, fading out, so it reads over the rows and the blur alike.
         val glowR = r + CLEAR_GLOW
@@ -213,8 +213,21 @@ private val icon: (String) -> Bitmap?,
         val arm = r * 0.32f
         crossPaint.color = look.text
         crossPaint.alpha = (255 * c.alpha).toInt()
-        canvas.drawLine(c.cx - arm, c.cy - arm, c.cx + arm, c.cy + arm, crossPaint)
-        canvas.drawLine(c.cx - arm, c.cy + arm, c.cx + arm, c.cy - arm, crossPaint)
+        if (bin) {
+            // A bin, for a screenshot's delete (ShotPolaroid): its lid and handle, its body, two ribs.
+            val top = c.cy - arm * 0.7f
+            canvas.drawLine(c.cx - arm, top, c.cx + arm, top, crossPaint)
+            canvas.drawLine(c.cx - arm * 0.35f, top - arm * 0.3f, c.cx + arm * 0.35f, top - arm * 0.3f, crossPaint)
+            val l = c.cx - arm * 0.72f; val rr = c.cx + arm * 0.72f; val b = c.cy + arm
+            canvas.drawLine(l, top, l + arm * 0.1f, b, crossPaint)
+            canvas.drawLine(rr, top, rr - arm * 0.1f, b, crossPaint)
+            canvas.drawLine(l + arm * 0.1f, b, rr - arm * 0.1f, b, crossPaint)
+            canvas.drawLine(c.cx - arm * 0.22f, top + arm * 0.35f, c.cx - arm * 0.22f, b - arm * 0.3f, crossPaint)
+            canvas.drawLine(c.cx + arm * 0.22f, top + arm * 0.35f, c.cx + arm * 0.22f, b - arm * 0.3f, crossPaint)
+        } else {
+            canvas.drawLine(c.cx - arm, c.cy - arm, c.cx + arm, c.cy + arm, crossPaint)
+            canvas.drawLine(c.cx - arm, c.cy + arm, c.cx + arm, c.cy - arm, crossPaint)
+        }
     }
 
     /** One line, cut to [width]. */

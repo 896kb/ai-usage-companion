@@ -31,8 +31,8 @@ class SheetMotionTest {
     // -- snapping ------------------------------------------------------------------------
 
     @Test fun `let go slowly, it rests at the nearest stop`() {
-        assertEquals(0f, SheetMotion.snap(noGuest, 120f, 0f), 0f)
-        assertEquals(OPEN, SheetMotion.snap(noGuest, 140f, 0f), 0f)
+        assertEquals(0f, SheetMotion.snap(noGuest, OPEN / 2 - 10f, 0f), 0f)
+        assertEquals(OPEN, SheetMotion.snap(noGuest, OPEN / 2 + 10f, 0f), 0f)
         assertEquals(OPEN, SheetMotion.snap(guest, OPEN + STRIP / 2 - 10f, 0f), 0f)
         assertEquals(REVEALED, SheetMotion.snap(guest, OPEN + STRIP / 2 + 10f, 0f), 0f)
     }
@@ -68,9 +68,10 @@ class SheetMotionTest {
 
     @Test fun `the opening pull stops open even with a guest, the slider takes a swipe of its own`() {
         val m = motion(guest)
-        m.grab(560f, 0)
-        assertEquals(OPEN, m.drag(0f, 100), 0f)
-        assertEquals(OPEN, m.release(0f, 400), 0f)
+        // From the very bottom to the very top: the whole travel, and no further.
+        m.grab(OPEN, 0)
+        assertEquals(OPEN, m.drag(-100f, 100), 0f)
+        assertEquals(OPEN, m.release(-100f, 400), 0f)
     }
 
     @Test fun `a slow pull past halfway opens it, short of that it shuts`() {
@@ -80,8 +81,9 @@ class SheetMotionTest {
 
     @Test fun `open with a guest, a swipe up scrolls on to the slider`() {
         val m = restingAt(OPEN)
-        m.grab(400f, 20_000); m.drag(360f, 20_400); m.drag(300f, 20_800)
-        assertEquals(REVEALED, m.release(300f, 21_000), 0f)
+        // Past halfway to the strip (the slider's, the width's and the switch's rows), slowly.
+        m.grab(400f, 20_000); m.drag(330f, 20_400); m.drag(250f, 20_800)
+        assertEquals(REVEALED, m.release(250f, 21_000), 0f)
     }
 
     @Test fun `open without a guest, a swipe up does nothing`() {
@@ -108,8 +110,9 @@ class SheetMotionTest {
 
     @Test fun `open, a swipe down shuts it`() {
         val m = restingAt(OPEN)
-        m.grab(200f, 20_000); m.drag(300f, 20_400); m.drag(400f, 20_800)
-        assertEquals(0f, m.release(400f, 21_000), 0f)
+        // Down past halfway, slowly.
+        m.grab(100f, 20_000); m.drag(250f, 20_400); m.drag(100f + OPEN / 2 + 20f, 20_800)
+        assertEquals(0f, m.release(100f + OPEN / 2 + 20f, 21_000), 0f)
     }
 
     @Test fun `a flick up from shut opens even a short pull`() {

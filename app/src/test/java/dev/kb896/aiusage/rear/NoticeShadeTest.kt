@@ -51,10 +51,10 @@ class NoticeShadeTest {
         assertEquals(0f, s.rows(2000).single().dx, 0.001f)
     }
 
-    @Test fun `a tap beside the rows shuts it, a tap on one does not`() {
+    @Test fun `a tap beside the rows shuts it, a tap on one says which and does not`() {
         val s = open(1)
         s.fingerDown(500f, NoticeShade.TOP + 10f, 1000)
-        assertTrue(s.fingerUp(500f, NoticeShade.TOP + 10f, 1010).isEmpty())
+        assertTrue(s.fingerUp(500f, NoticeShade.TOP + 10f, 1010).single() is NoticeShade.Effect.Tapped)
         s.fingerDown(500f, 500f, 1100)
         assertTrue(s.fingerUp(500f, 500f, 1110).single() is NoticeShade.Effect.ShutAt)
     }

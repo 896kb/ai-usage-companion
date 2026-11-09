@@ -33,4 +33,21 @@ oneway interface IRearEvents {
     void onPanelCovered(boolean covered) = 8;
     // A row of the notifications over a guest was swiped away.
     void onNoticeDismissed(String key) = 9;
+    // An app kept right of the cameras set to [width] px wide on the back, 0 for the whole width
+    // (PanelConfig.portalWidth): saved, and the payload pushed back, as onPortalDpi.
+    void onPortalWidth(String pkg, int width) = 10;
+    // A pull up from the very bottom with the panel's control centre down: close it, as a swipe up
+    // on it would (IRearService.setPanelControlCenter).
+    void onPanelCloseControlCenter() = 11;
+    // The back's lock (BackLock) came on or went: the panel hides its notifications' words and
+    // locks its control centre while it is on. Said on every change and on (re)connect.
+    void onBackLock(boolean locked) = 12;
+    // A screenshot ([video] false) or recording of the back, made by the shell in its own space and
+    // handed over open ([file], read-only): the app copies it into the gallery. A path in the app's
+    // files was tried first: what the shell writes there the app may not read.
+    void onCaptured(in ParcelFileDescriptor file, boolean video) = 13;
+    // The back's recording began or ended: the panel's recording tile follows.
+    void onRecording(boolean on) = 14;
+    // The screenshot just taken, binned from its polaroid on the back: out of the gallery.
+    void onDeleteLastShot() = 15;
 }

@@ -56,6 +56,18 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
     /** The apps' DPI as the shell has it now (PanelConfig.portalDpi and the back's changes). */
     @Volatile private var dpiValues: Map<String, Int> = emptyMap()
     @Volatile private var dpiDefault: Int? = null
+    /** Every app's width as it stands (GuestWidth), for the guest's width slider. */
+    @Volatile private var widthValues: Map<String, Int> = emptyMap()
+    /** The width being dragged to: null while not dragged, else [Dragged.width] (null: the whole). */
+    @Volatile private var widthDrag: Dragged? = null
+    /** The portal frame's colour, for the width's preview. */
+    @Volatile private var frameColor = 0xFFB14CFF.toInt()
+    /** When the width's preview last turned on or off, and how much of it showed then. */
+    @Volatile private var previewOn = false
+    @Volatile private var previewAt = 0L
+    @Volatile private var previewFrom = 0f
+    /** The back's lock, shown in place of the apps while the phone is locked (BackLock); null: none. */
+    @Volatile private var lockLook: PortalSheetPainter.LockLook? = null
     /** The guest is kept right of the cameras: its switch under the slider. */
     @Volatile private var keepRight = false
     /** No such switch for this open: the app runs nowhere else with the front locked (LockRetry). */
@@ -90,6 +102,7 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
      */
     fun begin(positionStart: Float = 0f): Boolean {
         position(positionStart)
+        shownAt.snap(positionStart, android.os.SystemClock.uptimeMillis())
         return overlay.begin()
     }
 
@@ -98,6 +111,11 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         overlay.end()
         pressed = -1
         page = 0f
+        widthDrag = null
+        lockLook = null
+        fadingLock = null
+        previewOn = false
+        previewFrom = 0f
         sliderDrag = null
         position = 0f
         overlay.changed()
@@ -133,6 +151,62 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
     fun sliderDrag(dpi: Int?) {
         sliderDrag = dpi
         overlay.changed()
+    }
+
+    /** The lock shown in place of the apps, as [look] has it; null to show the apps. */
+    fun lock(look: PortalSheetPainter.LockLook?) {
+        lockLook = look
+        overlay.changed()
+    }
+
+    /** The lock as it was when it began to fade ([unlockFade]), and when; null when not fading. */
+    @Volatile private var fadingLock: PortalSheetPainter.LockLook? = null
+    @Volatile private var fadeAt = 0L
+
+    /** The lock fading away over [UNLOCK_FADE_MS], what it gated coming in under it: the phone was unlocked. */
+    fun unlockFade() {
+        fadingLock = lockLook ?: return
+        fadeAt = android.os.SystemClock.uptimeMillis()
+        lockLook = null
+        overlay.changed()
+    }
+
+    /** A width being dragged to; [width] null is the whole. */
+    class Dragged(val width: Int?)
+
+    /**
+     * The width slider's thumb dragged to [width] (null: the whole), or let go ([dragging]
+     * false). While dragged the portal frame's line runs round the box the app will have,
+     * fading in — whatever the Portal border switch says, since it shows the width, not the
+     * frame — and fades out again when let go.
+     */
+    fun widthDrag(width: Int?, dragging: Boolean) {
+        val was = widthDrag != null
+        widthDrag = if (dragging) Dragged(width) else null
+        if (dragging != was) {
+            val now = android.os.SystemClock.uptimeMillis()
+            previewFrom = previewLevel(now)
+            previewAt = now
+            previewOn = dragging
+        }
+        overlay.changed()
+    }
+
+    /** Every app's width as it stands, for the guest's width slider. */
+    fun widthValues(values: Map<String, Int>) {
+        widthValues = values
+        overlay.changed()
+    }
+
+    /** The portal frame's colour (PanelConfig.portalFrameColor), for the width's preview. */
+    fun frameColor(color: Int) {
+        frameColor = color
+    }
+
+    /** How much of the width's preview shows at [now]: easing towards on or off over [PREVIEW_FADE_MS]. */
+    private fun previewLevel(now: Long): Float {
+        val t = ((now - previewAt) / PREVIEW_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        return if (previewOn) previewFrom + (1f - previewFrom) * t else previewFrom * (1f - t)
     }
 
     /** The pinned apps, in grid order. Their icons are decoded here, on the caller's thread. */
@@ -202,22 +276,44 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         overlay.changed()
     }
 
+    private companion object {
+        /** The width's preview fading in or out. */
+        const val PREVIEW_FADE_MS = 220L
+        /** The lock fading away when the phone is unlocked under it. */
+        const val UNLOCK_FADE_MS = 280L
+    }
+
+    /**
+     * Where the sheet is drawn: its position, but no faster than ControlCenter.DRAG_SPEED_MAX — a
+     * fast pull or flick trails and catches up rather than the sheet appearing at once. Render thread only.
+     */
+    private val shownAt = ControlCenter.Chase()
+
     /** What the overlay draws: the sheet at its position. */
     private inner class Drawing : ShellOverlay.Content {
         override fun frame(): Float {
-            frameAt = position
+            frameAt = shownAt.to(position, android.os.SystemClock.uptimeMillis())
             return PortalSheet.progress(frameAt)
         }
 
         override fun painter(): ShellOverlay.Painter {
             val r = Renderer()
-            return ShellOverlay.Painter { canvas, _ -> r.draw(canvas, frameAt); false }
+            // Another frame while it is still catching up with where it is meant to be.
+            return ShellOverlay.Painter { canvas, _ -> r.draw(canvas, frameAt) || frameAt != position }
         }
     }
 
     /** One run's paints and painter, so an overlapping run shares nothing mutable of ours. */
     private inner class Renderer {
         private val sheetPainter = PortalSheetPainter(PanelTheme.GLASS, face)
+        /** The portal frame's own drawing, at the sheet's size, for the width's preview. */
+        private val border = PortalFrame.Renderer(PortalFrame.cssPx(rear) / rear.fitX)
+        private val inUnits = rear.inPanelUnits()
+        private val keypad = PortalSheet.keypad(rear.cutoutUnits, rear.fitY / rear.fitX)
+        private val dots = PortalSheet.patternGrid(rear.cutoutUnits, rear.fitY / rear.fitX)
+        private val keyboards = HashMap<Int, PortalSheet.Keyboard>()
+        private var previewFor: Int? = -1
+        private var previewShapes: List<ElectricBorder.Shape> = emptyList()
         private var frameLook = look
         /** The last layout and what it was made for, so a frame does not lay the sheet out again. */
         private var laid: PortalSheet.Layout? = null
@@ -229,8 +325,8 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
             sheetPainter.paneTint = { SheetTint.of(frameLook.theme.isGlass, frameLook.style) }
         }
 
-        /** The sheet at [at] on its axis (read once per frame, so the blur goes with what is drawn). */
-        fun draw(canvas: Canvas, at: Float) {
+        /** The sheet at [at] on its axis (read once per frame, so the blur goes with what is drawn). True: another frame, for the preview. */
+        fun draw(canvas: Canvas, at: Float): Boolean {
             val a = apps
             val onTop = guestOnTop
             frameLook = look
@@ -240,19 +336,67 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
             val slider = if (onTop != null) {
                 val own = guestPkg?.let { dpiValues[it] }
                 val dragged = sliderDrag
-                PortalSheetPainter.SliderLook(
-                    // The display's own as read, else this rear's as its geometry says.
-                    thumbDpi = dragged ?: own ?: dpiDefault ?: rear.dpi,
-                    label = PortalSheet.sliderLabel(dragged, own),
-                )
+                // The display's own as read, else this rear's as its geometry says.
+                val thumb = dragged ?: own ?: dpiDefault ?: rear.dpi
+                val fraction = layout.slider?.track?.let { (PortalSheet.sliderX(it, thumb) - it.left) / it.width } ?: 0f
+                PortalSheetPainter.SliderLook(fraction, PortalSheet.sliderLabel(dragged, own))
+            } else null
+            val dragging = widthDrag
+            val shownWidth = if (dragging != null) dragging.width else guestPkg?.let { widthValues[it] }
+            val width = if (onTop != null) {
+                PortalSheetPainter.SliderLook(GuestWidth.fraction(rear, shownWidth), GuestWidth.label(rear, shownWidth))
             } else null
             sheetPainter.theme = frameLook.theme
             sheetPainter.face = face
+            // The lock fading out over what it gated, fading in (unlockFade).
+            val fading = fadingLock
+            val fadeT = if (fading == null) 1f else ((android.os.SystemClock.uptimeMillis() - fadeAt) / UNLOCK_FADE_MS.toFloat()).coerceIn(0f, 1f)
+            if (fading != null && fadeT >= 1f) fadingLock = null
+            if (fading != null && fadeT < 1f) {
+                val out = canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * (1f - fadeT)).toInt())
+                sheetPainter.draw(
+                    canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
+                    guestOnTop = onTop ?: false, lock = fading, keypad = keypad, grid = dots,
+                    keyboard = fading.takeIf { it.kind == BackLock.Kind.PASSWORD }?.let { keyboards.getOrPut(it.page) { PortalSheet.keyboard(rear.cutoutUnits, it.page) } },
+                )
+                canvas.restoreToCount(out)
+            }
+            val inLayer = if (fading != null && fadeT < 1f) canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * fadeT).toInt()) else -1
             sheetPainter.draw(
                 canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, pressed = pressed,
-                guestIcon = guestIcon, slider = slider, names = names, keepRight = keepRight, keepRightHidden = keepRightHidden,
+                guestIcon = guestIcon, slider = slider, names = names, width = width,
+                keepRight = keepRight, keepRightHidden = keepRightHidden,
+                lock = lockLook?.let { l -> if (pressed >= PortalSheetPainter.PRESS_KEY) l.pressing(pressed - PortalSheetPainter.PRESS_KEY) else l },
+                keypad = keypad, grid = dots,
+                keyboard = lockLook?.takeIf { it.kind == BackLock.Kind.PASSWORD }?.let { keyboards.getOrPut(it.page) { PortalSheet.keyboard(rear.cutoutUnits, it.page) } },
             )
+            if (inLayer >= 0) canvas.restoreToCount(inLayer)
+            return drawPreview(canvas, shownWidth, p) || (fading != null && fadeT < 1f)
+        }
+
+        /**
+         * The width's preview: the portal frame's line round the box an app [w] wide stands in,
+         * as much of it as [previewLevel] says, over the sheet. True while it shows or fades.
+         */
+        private fun drawPreview(canvas: Canvas, w: Int?, progress: Float): Boolean {
+            val now = android.os.SystemClock.uptimeMillis()
+            val level = previewLevel(now) * progress
+            if (level <= 0.004f) return previewOn
+            val stepped = GuestWidth.of(rear, w)
+            if (previewFor != stepped) {
+                val a = GuestWidth.area(rear, w)
+                val box = GuestShape.Bounds(
+                    Math.round(a.left / rear.fitX), Math.round(a.top / rear.fitY),
+                    Math.round(a.right / rear.fitX), Math.round(a.bottom / rear.fitY),
+                )
+                previewShapes = PortalFrame.shapesFor(inUnits, box)
+                previewFor = stepped
+            }
+            val layer = canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * level).toInt())
+            border.draw(canvas, previewShapes, frameColor, now / 1000f)
+            canvas.restoreToCount(layer)
+            return true
         }
     }
 }

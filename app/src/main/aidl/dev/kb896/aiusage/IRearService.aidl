@@ -159,4 +159,15 @@ interface IRearService {
     // change and on (re)connect. [pop]: the key of one that has just arrived, for its banner;
     // empty for none. oneway: nothing waits on it.
     oneway void setNotices(in Bundle list, String pop) = 32;
+    // The panel's control centre is down (true) or not. Xiaomi's own window over the rear's
+    // bottom 93 px takes a swipe that starts there, so the panel never sees one closing it: the
+    // shell, which reads the touchscreen itself, closes it (IRearEvents.onPanelCloseControlCenter).
+    oneway void setPanelControlCenter(boolean up) = 33;
+    // Something the back's lock holds was asked for on the panel (a held switch tapped): the
+    // keypad comes up over it, and the right code leaves it where it was.
+    oneway void askBackCode() = 34;
+    // The control centre's screenshot tile ([record] false), or its recording tile ([record] true:
+    // starts one, or stops the one running). The shell captures the back into this app's files and
+    // says so (IRearEvents.onCaptured).
+    oneway void capture(boolean record) = 35;
 }

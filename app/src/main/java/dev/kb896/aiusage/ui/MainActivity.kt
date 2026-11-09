@@ -1253,9 +1253,47 @@ class MainActivity : ComponentActivity() {
         SettingsRows.title(clockRows, "Clock page")
         SettingsRows.toggleWithColor(
             clockRows, "Time", config.infoClockOn, config.infoClockTint,
-            onChange = { on -> write { it.copy(infoClock = on) } },
+            onChange = { on ->
+                write { it.copy(infoClock = on) }
+                buildSettingsRows() // Seconds comes and goes with it
+            },
             onPick = { c -> write { it.copy(infoClockColor = c) } },
         )
+        // Hours and minutes only, as always-on shows them: under Time, and only with it on.
+        if (config.infoClockOn) {
+            // The face: the rolling figures, or hands of glass pills (PillClock).
+            SettingsRows.pills(
+                SettingsRows.sub(clockRows), "Style", listOf("Digital", "Analog"),
+                if (config.analogClock) 1 else 0,
+            ) { i ->
+                write { it.copy(clockFace = if (i == 1) PanelConfig.FACE_ANALOG else PanelConfig.FACE_DIGITAL) }
+                buildSettingsRows() // Vertical comes and goes with the digital face
+            }
+            // The digital face stood on end: hours over minutes over seconds (ClockStack). Always-on's
+            // digital face too.
+            if (!config.analogClock) {
+                SettingsRows.pills(
+                    SettingsRows.sub(clockRows), "Layout", listOf("Horizontal", "Vertical"),
+                    if (config.clockVertical) 1 else 0,
+                ) { i -> write { it.copy(clockVertical = i == 1) } }
+                // Twelve hours with AM/PM, or twenty-four: as the phone tells the time until picked.
+                SettingsRows.pills(
+                    SettingsRows.sub(clockRows), "Hours", listOf("24-hour", "12-hour"),
+                    if (config.twelveHour(android.text.format.DateFormat.is24HourFormat(this))) 1 else 0,
+                ) { i -> write { it.copy(clock12h = i == 1) } }
+            }
+            // How coloured the clock's glass is, digital or analog: clear to as it was.
+            if (config.theme.isGlass) {
+                SettingsRows.slider(
+                    SettingsRows.sub(clockRows), 100, Math.round(config.clockGlassTint * 100f),
+                    text = { "Glass tint  $it%" },
+                    onMove = { p -> write { it.copy(clockGlassTint = p / 100f) } },
+                ) { p -> write { it.copy(clockGlassTint = p / 100f) } }
+            }
+            SettingsRows.toggle(SettingsRows.sub(clockRows), "Seconds", config.clockSeconds) { on ->
+                write { it.copy(clockSeconds = on) }
+            }
+        }
         SettingsRows.toggleWithColor(
             clockRows, "Date", config.infoDateOn, config.infoDateTint,
             onChange = { on -> write { it.copy(infoDate = on) } },
@@ -1400,6 +1438,10 @@ class MainActivity : ComponentActivity() {
             SettingsRows.toggle(
                 under, "Include the message text", config.showNotificationText,
             ) { on -> write { it.copy(showNotificationText = on) } }
+            // Off, as it starts: a locked phone's back shows whose they are, not what they say.
+            SettingsRows.toggle(
+                under, "Show notification text when locked", config.lockedNoticeText,
+            ) { on -> write { it.copy(lockedNoticeText = on) } }
             SettingsRows.toggle(
                 under, "Pop up as they arrive", config.noticesOverApps,
             ) { on -> write { it.copy(noticesOverApps = on) } }
@@ -1432,7 +1474,15 @@ class MainActivity : ComponentActivity() {
             val under = SettingsRows.sub(aodRows)
             SettingsRows.toggle(
                 under, "Clock", config.aodClock,
-            ) { on -> write { it.copy(aodClock = on) } }
+            ) { on -> write { it.copy(aodClock = on) }; buildSettingsRows() } // Style comes and goes with it
+            // Always-on's own face: until picked it shows the clock page's. A different one changes
+            // with the gooey morph going into always-on and out of it (PanelConfig.aodClockFace).
+            if (config.aodClock) {
+                SettingsRows.pills(
+                    under, "Style", listOf("Digital", "Analog"),
+                    if (config.aodAnalogClock) 1 else 0,
+                ) { i -> write { it.copy(aodClockFace = if (i == 1) PanelConfig.FACE_ANALOG else PanelConfig.FACE_DIGITAL) } }
+            }
             SettingsRows.toggle(
                 under, "Battery", config.aodBattery,
             ) { on -> write { it.copy(aodBattery = on) } }
@@ -1455,6 +1505,7 @@ class MainActivity : ComponentActivity() {
                     if (on && pkg !in next) return false
                     write {
                         it.copy(portalApps = next, portalDpi = it.portalDpi.filterKeys { k -> k in next },
+                            portalWidth = it.portalWidth.filterKeys { k -> k in next },
                             portalConfined = it.portalConfined.filter { k -> k in next }.toSet())
                     }
                     return true
@@ -1463,8 +1514,15 @@ class MainActivity : ComponentActivity() {
                 override fun settings(pkg: String, label: String, changed: () -> Unit) {
                     val now = store.load()
                     PortalAppSheet.show(
-                        this@MainActivity, pkg, label, now.portalDpi[pkg], pkg in now.portalConfined,
+                        this@MainActivity, pkg, label, now.portalDpi[pkg], pkg in now.portalConfined, now.portalWidth[pkg],
                         onDpi = { dpi -> write { c -> c.copy(portalDpi = if (dpi == null) c.portalDpi - pkg else c.portalDpi + (pkg to dpi)) } },
+                        // A width is a place right of the cameras: the app is kept there with one.
+                        onWidth = { w ->
+                            write { c ->
+                                if (w == null) c.copy(portalWidth = c.portalWidth - pkg)
+                                else c.copy(portalWidth = c.portalWidth + (pkg to w), portalConfined = c.portalConfined + pkg)
+                            }
+                        },
                         onConfined = { on -> write { c -> c.copy(portalConfined = if (on) c.portalConfined + pkg else c.portalConfined - pkg) } },
                         onUnpin = { pin(pkg, false); changed() },
                     )

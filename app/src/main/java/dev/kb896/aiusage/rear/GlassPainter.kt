@@ -143,8 +143,14 @@ class GlassPainter {
          * all round.
          */
         radii: FloatArray? = null,
+        /**
+         * How far the canvas is turned, in degrees, for a pane drawn rotated (the pill clock's
+         * hands): its rim is lit from the panel's light, not from one that turns with the pane.
+         */
+        lightTurn: Float = 0f,
     ): Boolean {
         val w = rect.width()
+        val light = Glass.LIGHT_ANGLE - Math.toRadians(lightTurn.toDouble()).toFloat()
         val h = rect.height()
         if (w < 1f || h < 1f) return false
         val rr = radii ?: floatArrayOf(radius, radius, radius, radius)
@@ -165,7 +171,7 @@ class GlassPainter {
         // No source, or one with nothing recorded in it, is the same case: nothing to bend.
         val recorder = canvas as? RecordingCanvas
         if (recorder == null || source == null || !source.hasDisplayList()) {
-            return drawUnbacked(canvas, rect, radius, tint, shape, rim, rr)
+            return drawUnbacked(canvas, rect, radius, tint, shape, rim, rr, light)
         }
 
         val paneNode = nextNode()
@@ -199,8 +205,17 @@ class GlassPainter {
             // had the same frozen backdrop this branch exists to prevent. A node that
             // spans the panel from its origin is root-space whatever it is called.
             if (!local && rootSpace(source)) {
-                canvas.getMatrix().mapRect(paneAbs, rect)
-                pane.translate(-paneAbs.left, -paneAbs.top)
+                canvas.getMatrix(paneMatrix)
+                if (axisAligned(paneMatrix)) {
+                    paneMatrix.mapRect(paneAbs, rect)
+                    pane.translate(-paneAbs.left, -paneAbs.top)
+                } else if (sourceToPane(paneMatrix, rect, paneSource)) {
+                    // ROTATED (the pill clock's hands): the bounding box would show the panel
+                    // turned with the pane. Undoing the canvas shows what is under it.
+                    pane.concat(paneSource)
+                } else {
+                    pane.translate(-rect.left, -rect.top)
+                }
             } else {
                 pane.translate(-rect.left, -rect.top)
             }
@@ -269,7 +284,7 @@ class GlassPainter {
         edge.setFloatUniform("size", w, h)
         edge.setFloatUniform("cornerRadii", rr[0], rr[1], rr[2], rr[3])
         if (!held) edge.setColorUniform("color", Glass.LIGHT_COLOR)
-        edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
+        edge.setFloatUniform("angle", light)
         edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
         panePaint.shader = edge
         panePaint.alpha = if (held) (255 * Glass.AMBIENT_ALPHA).toInt() else 255
@@ -318,6 +333,7 @@ class GlassPainter {
         shape: Path?,
         rim: Boolean,
         rr: FloatArray,
+        light: Float = Glass.LIGHT_ANGLE,
     ): Boolean {
         if (!canvas.isHardwareAccelerated) return false
         if (tint ushr 24 != 0) {
@@ -333,7 +349,7 @@ class GlassPainter {
         edge.setFloatUniform("size", rect.width(), rect.height())
         edge.setFloatUniform("cornerRadii", rr[0], rr[1], rr[2], rr[3])
         edge.setColorUniform("color", Glass.LIGHT_COLOR)
-        edge.setFloatUniform("angle", Glass.LIGHT_ANGLE)
+        edge.setFloatUniform("angle", light)
         edge.setFloatUniform("falloff", Glass.LIGHT_FALLOFF)
         panePaint.shader = edge
         panePaint.style = Paint.Style.STROKE
@@ -433,9 +449,29 @@ class GlassPainter {
     private val paneClip = Path()
     private val panePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rimShift = Matrix()
+    private val paneMatrix = Matrix()
+    private val paneSource = Matrix()
 
     companion object {
         /** How many distinct pane shapes to keep lenses for. See lensFor. */
         const val LENS_CACHE_MAX = 96
+
+        /** No rotation or skew: rectangles stay upright. A 90° turn keeps them rectangles, but not upright. */
+        fun axisAligned(m: Matrix): Boolean {
+            val v = FloatArray(9)
+            m.getValues(v)
+            return v[Matrix.MSKEW_X] == 0f && v[Matrix.MSKEW_Y] == 0f
+        }
+
+        /**
+         * Into [out], what draws a root-space backdrop inside a pane at [rect] drawn under
+         * [canvas]: the canvas undone, then the pane's corner made the origin. False when the
+         * canvas cannot be undone (scaled to nothing).
+         */
+        fun sourceToPane(canvas: Matrix, rect: RectF, out: Matrix): Boolean {
+            if (!canvas.invert(out)) return false
+            out.postTranslate(-rect.left, -rect.top)
+            return true
+        }
     }
 }

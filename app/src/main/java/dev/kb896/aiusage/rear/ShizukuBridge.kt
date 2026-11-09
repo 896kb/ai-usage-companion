@@ -84,7 +84,7 @@ class ShizukuBridge(private val context: Context) {
             service = if (binder != null && binder.pingBinder()) IRearService.Stub.asInterface(binder) else null
             portalApps?.let { b -> runCatching { service?.setPortalApps(b) } }
             notices?.let { b -> runCatching { service?.setNotices(b, "") } }
-            runCatching { service?.setPanelGuarded(panelGuarded) }
+            runCatching { service?.setPanelGuarded(panelGuarded); service?.setPanelControlCenter(panelControlCenter) }
             // A new shell process starts awake (dozing false): a panel asleep on purpose
             // would otherwise be read and woken as if it were not. But only what this process
             // KNOWS: a new app process has not heard from the panel yet, and pushing its
@@ -528,13 +528,25 @@ class ShizukuBridge(private val context: Context) {
      * and handed on again whenever the service (re)connects: a new shell process starts
      * unguarded. Never binds — a panel that says this is already being served.
      */
-    fun setPanelGuarded(value: Boolean) {
+    fun setPanelGuarded(value: Boolean, controlCenter: Boolean = false) {
         panelGuarded = value
-        runCatching { service?.setPanelGuarded(value) }
+        panelControlCenter = controlCenter
+        runCatching { service?.setPanelGuarded(value); service?.setPanelControlCenter(controlCenter) }
             .onFailure { Log.w(TAG, "setPanelGuarded($value) failed: ${it.message}") }
     }
 
     @Volatile private var panelGuarded = false
+
+    /** The panel's screenshot or recording tile: the shell captures the back (IRearService.capture). */
+    fun capture(record: Boolean) {
+        runCatching { service?.capture(record) }.onFailure { Log.w(TAG, "capture failed: ${it.message}") }
+    }
+
+    /** The panel asked for the back's code: the shell's keypad over it (IRearService.askBackCode). */
+    fun askBackCode() {
+        runCatching { service?.askBackCode() }.onFailure { Log.w(TAG, "askBackCode failed: ${it.message}") }
+    }
+    @Volatile private var panelControlCenter = false
 
     /**
      * Pocket mode switched the back off for a pocket, and has not brought it back: [wake]
@@ -605,6 +617,9 @@ class ShizukuBridge(private val context: Context) {
     /** "Keep right of the cameras" switched on the back. Set by Graph, as [onPortalDpi]. */
     var onPortalConfined: (pkg: String, on: Boolean) -> Unit = { _, _ -> }
 
+    /** An app's width set on the back, 0 for the whole. Set by Graph, as [onPortalDpi]. */
+    var onPortalWidth: (pkg: String, width: Int) -> Unit = { _, _ -> }
+
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** What the shell service tells this process (IRearEvents); handed over on every (re)connect. */
@@ -638,6 +653,11 @@ class ShizukuBridge(private val context: Context) {
             mainHandler.post { this@ShizukuBridge.onPortalDpi(pkg, dpi) }
         }
 
+        override fun onPortalWidth(pkg: String?, width: Int) {
+            if (pkg.isNullOrEmpty() || pkg.length > 255) return
+            mainHandler.post { this@ShizukuBridge.onPortalWidth(pkg, width) }
+        }
+
         // The shell's control centre over a guest: its tiles go the way the panel's do, as
         // the broadcasts UsagePollService already serves (RearActivity.ACTION_SET_QUICK,
         // ACTION_GET_QUICK), which switch them and send the states back to both.
@@ -662,6 +682,33 @@ class ShizukuBridge(private val context: Context) {
         override fun onPanelPoke() = toPanel(RearActivity.ACTION_PORTAL_POKE)
 
         override fun onPanelStepBack() = toPanel(RearActivity.ACTION_PORTAL_STEP_BACK)
+
+        override fun onPanelCloseControlCenter() = toPanel(RearActivity.ACTION_CLOSE_CONTROL_CENTER)
+
+        // A screenshot or recording of the back, made by the shell in this app's files: into the
+        // gallery, off the binder thread (CaptureStore).
+        override fun onCaptured(file: android.os.ParcelFileDescriptor?, video: Boolean) {
+            if (file == null) return
+            CaptureStore.save(context, file, video)
+        }
+
+        override fun onDeleteLastShot() {
+            CaptureStore.deleteLastShot(context)
+        }
+
+        override fun onRecording(on: Boolean) {
+            context.sendBroadcast(
+                android.content.Intent(RearActivity.ACTION_RECORDING).setPackage(context.packageName)
+                    .putExtra(RearActivity.EXTRA_RECORDING, on),
+            )
+        }
+
+        override fun onBackLock(locked: Boolean) {
+            context.sendBroadcast(
+                android.content.Intent(RearActivity.ACTION_BACK_LOCK).setPackage(context.packageName)
+                    .putExtra(RearActivity.EXTRA_BACK_LOCKED, locked),
+            )
+        }
 
         override fun onPortalConfined(pkg: String?, on: Boolean) {
             if (pkg.isNullOrEmpty() || pkg.length > 255) return

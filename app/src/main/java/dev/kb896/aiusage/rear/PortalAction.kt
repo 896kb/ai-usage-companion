@@ -30,7 +30,7 @@ object PortalAction {
         SHOW_LAYERS,
         /** Front: the guest to display 0, and it is no longer the guest. */
         FRONT,
-        /** Close: force-stopped. */
+        /** Close: its task removed, as a swipe away in Recents. */
         CLOSE,
     }
 

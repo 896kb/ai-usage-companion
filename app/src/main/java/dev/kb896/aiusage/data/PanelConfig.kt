@@ -623,6 +623,42 @@ data class PanelConfig(
      * Their colours fall back to the corner row's ([infoClockTint] and the rest).
      */
     val infoClock: Boolean? = null,
+    /**
+     * The big clock's seconds. Off, the clock is hours and minutes, as always-on already
+     * shows it (which drops them whatever this says).
+     */
+    val clockSeconds: Boolean = true,
+    /**
+     * The clock's face: [FACE_DIGITAL], the rolling figures, or [FACE_ANALOG], hands of glass
+     * pills (PillClock). A string, as [weather] is, so the file reads as the setting does; an
+     * unknown value is digital ([analogClock]).
+     */
+    val clockFace: String = FACE_DIGITAL,
+    /**
+     * Always-on's own face, [FACE_DIGITAL] or [FACE_ANALOG]; null until one is picked, which shows
+     * the clock page's ([clockFace]) — the setting offers only the two. Going into always-on and out of it, a different face changes with the
+     * gooey morph (ClockGoo). See [aodAnalogClock].
+     */
+    val aodClockFace: String? = null,
+    /**
+     * The digital face stood on end: hours, then minutes under them, then seconds, no colons
+     * (the owner, 2026-11-09). On the clock page and in always-on alike, wherever the digital
+     * face shows.
+     */
+    val clockVertical: Boolean = false,
+    /**
+     * Twelve hours with AM/PM, the American way, or twenty-four; null until picked, which follows
+     * the phone's own (see [twelveHour]). The digital face's; the analog face has no need of it.
+     */
+    val clock12h: Boolean? = null,
+    /**
+     * How much of the clock's colour the clock's glass takes — the analog hands and the digital
+     * glass figures — from 0, clear glass, to 1, nearly the colour itself (the owner,
+     * 2026-11-09: some will want clearer glass, and at the top it should read as the colour).
+     * [CLOCK_GLASS_TINT] is the look it had before there was a choice. The clock's alone; the
+     * Glass settings' tint is the rest's.
+     */
+    val clockGlassTint: Float = CLOCK_GLASS_TINT,
     val infoDate: Boolean? = null,
     val infoBattery: Boolean? = null,
     val infoClockColor: Int? = null,
@@ -681,6 +717,16 @@ data class PanelConfig(
      * that app is the guest on top, and the display goes back to its default otherwise.
      * No entry means the default. See RearDensity for the bounds.
      */
+    /**
+     * App Portal: how wide an app kept right of the cameras is, in the rear's pixels, by package
+     * (GuestWidth). None is the whole width right of the lenses.
+     */
+    /**
+     * Notifications on the back keep their words while the phone is locked: off, a locked back
+     * (BackLock) shows each as its app and "New notification", the rest after the code.
+     */
+    val lockedNoticeText: Boolean = false,
+    val portalWidth: Map<String, Int> = emptyMap(),
     val portalDpi: Map<String, Int> = emptyMap(),
     /** App Portal: how many apps a page of the back's grid holds. See PortalGrid. */
     val portalGrid: PortalGrid = PortalGrid.R3C4,
@@ -716,6 +762,15 @@ data class PanelConfig(
     /** This account's appearance, or an all-defaults one if it has no entry. */
     /** [clockColor] or the shared extras colour. Same for the two below. */
     val clockTint: Int get() = clockColor ?: extrasColor
+
+    /** The analog face is chosen; anything else is the digital one. */
+    val analogClock: Boolean get() = clockFace == FACE_ANALOG
+
+    /** The digital clock in twelve hours: as picked, or as the phone tells the time ([phoneIs24h]). */
+    fun twelveHour(phoneIs24h: Boolean): Boolean = clock12h ?: !phoneIs24h
+
+    /** Always-on shows the analog face: its own choice, or the clock page's. */
+    val aodAnalogClock: Boolean get() = (aodClockFace ?: clockFace) == FACE_ANALOG
     /** The rings as drawn: what the user set, or the phone's own default while untouched. */
     val effectiveRingLayout: RingLayout get() = if (ringLayout == RingLayout()) RingLayout.forDevice() else ringLayout
     val batteryTint: Int get() = batteryColor ?: extrasColor
@@ -826,6 +881,12 @@ data class PanelConfig(
 
     companion object {
         val DEFAULT = PanelConfig()
+
+        /** The clock's glass tint before it could be set: a wash of its colour, not the colour. */
+        const val CLOCK_GLASS_TINT = 0.35f
+
+        const val FACE_DIGITAL = "digital"
+        const val FACE_ANALOG = "analog"
 
         /**
          * Lenient so a newer payload cannot crash an older :rear process mid-install — nor

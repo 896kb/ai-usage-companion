@@ -21,10 +21,18 @@ object ControlCenterLayout {
     /** Between the brightness cell and the round button under it. */
     const val BUTTON_GAP = 14f
 
-    /** What [hit] found: a tile is its index, 0 to 3 (silent, Bluetooth, mobile data, Wi-Fi). */
+    /**
+     * What [hit] found: a tile is its index, 0 to 5 — the switches 0 to 3 (silent, Bluetooth, mobile
+     * data, Wi-Fi), then [SHOT] and [RECORD] in their own row at the bottom.
+     */
     const val NONE = -1
-    const val AUTO = 4
-    const val CELL = 5
+    const val SHOT = 4
+    const val RECORD = 5
+    const val TILES = 6
+    const val AUTO = 6
+    const val CELL = 7
+    /** The tiles' rows: the switches' two, and the screenshot and recording's under them. */
+    private const val ROWS = 3
 
     /**
      * How far above its place the contents are: from a quarter of the panel — half of the
@@ -65,7 +73,8 @@ object ControlCenterLayout {
     }
 
     /**
-     * The four tiles, two by two in the room right of the brightness: one gap between them,
+     * The six tiles, two across and three down in the room right of the brightness — the switches
+     * in the top two rows, the screenshot and the recording in the bottom one: one gap between them,
      * the same to the brightness, the panel's top, right and bottom.
      */
     fun tileRect(i: Int, progress: Float, lensRight: Float): RectF {
@@ -73,7 +82,7 @@ object ControlCenterLayout {
         val left = lensRight + ChargeOverlay.MARGIN + ChargeOverlay.width(Panel.WIDTH.toFloat()) + g
         val right = Panel.WIDTH - g
         val w = (right - left - g) / 2f
-        val h = (Panel.HEIGHT - 3f * g) / 2f
+        val h = (Panel.HEIGHT - (ROWS + 1) * g) / ROWS
         val col = i % 2
         val row = i / 2
         val shift = shift(progress)
@@ -86,6 +95,6 @@ object ControlCenterLayout {
     fun hit(x: Float, y: Float, lensRight: Float): Int = when {
         cellRect(1f, lensRight).contains(x, y) -> CELL
         autoRect(1f, lensRight).contains(x, y) -> AUTO
-        else -> (0 until 4).firstOrNull { tileRect(it, 1f, lensRight).contains(x, y) } ?: NONE
+        else -> (0 until TILES).firstOrNull { tileRect(it, 1f, lensRight).contains(x, y) } ?: NONE
     }
 }

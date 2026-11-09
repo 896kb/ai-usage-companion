@@ -240,7 +240,7 @@ class PortalSheetTest {
         // On the screen: the row's content y less the scroll.
         fun y(b: PortalSheet.Box) = b.centerY - STRIP
         assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.centerX, y(s.track), STRIP, 0))
-        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.left - PortalSheet.THUMB / 2 + 1f, FULL - 4f - PortalSheet.TOGGLE_ROW, STRIP, 0))
+        assertEquals(Hit.Slider, PortalSheet.hit(l, s.track.left - PortalSheet.THUMB / 2 + 1f, FULL - 4f - PortalSheet.TOGGLE_ROW - PortalSheet.WIDTH_ROW, STRIP, 0))
         assertEquals(Hit.SliderValue, PortalSheet.hit(l, s.value.centerX, y(s.value), STRIP, 0))
         assertEquals(Hit.Blank, PortalSheet.hit(l, s.icon.centerX, y(s.icon), STRIP, 0))
         // The grid moved up with it: a cell is hit where it now stands.
@@ -260,8 +260,10 @@ class PortalSheetTest {
         assertEquals(RearDensity.MAX, PortalSheet.sliderDpi(t, t.right))
         assertEquals(RearDensity.MIN, PortalSheet.sliderDpi(t, t.left - 50f))
         assertEquals(RearDensity.MAX, PortalSheet.sliderDpi(t, t.right + 50f))
-        assertEquals(420, PortalSheet.sliderDpi(t, t.left + t.width / 2))
-        for (dpi in RearDensity.MIN..RearDensity.MAX step RearDensity.STEP) {
+        assertEquals(340, PortalSheet.sliderDpi(t, t.left + t.width / 2))
+        // The minimum, 72, then the tens from 80.
+        assertEquals(RearDensity.MIN, PortalSheet.sliderDpi(t, PortalSheet.sliderX(t, RearDensity.MIN)))
+        for (dpi in 80..RearDensity.MAX step RearDensity.STEP) {
             assertEquals(dpi, PortalSheet.sliderDpi(t, PortalSheet.sliderX(t, dpi)))
             assertEquals(0, PortalSheet.sliderDpi(t, PortalSheet.sliderX(t, dpi) + 2f) % RearDensity.STEP)
         }
@@ -269,7 +271,7 @@ class PortalSheetTest {
 
     @Test fun `a drag moves the thumb by as much as the finger, from where it was`() {
         val t = layout(guest = true).slider!!.track
-        val perStep = t.width / ((RearDensity.MAX - RearDensity.MIN) / RearDensity.STEP)
+        val perStep = t.width / ((RearDensity.MAX - RearDensity.MIN) / RearDensity.STEP.toFloat())
         assertEquals(400, PortalSheet.sliderDrag(t, 400, 0f))
         assertEquals(430, PortalSheet.sliderDrag(t, 400, perStep * 3))
         assertEquals(380, PortalSheet.sliderDrag(t, 400, -perStep * 2))
@@ -297,12 +299,36 @@ class PortalSheetTest {
 
     @Test fun `a sideways drag on the slider's row moves the slider, anywhere above it turns the pages`() {
         val l = layout(30, guest = true)
-        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f - PortalSheet.TOGGLE_ROW, STRIP))
+        assertEquals(Swipe.SLIDER, PortalSheet.swipe(l, FULL - 20f - PortalSheet.TOGGLE_ROW - PortalSheet.WIDTH_ROW, STRIP))
         assertEquals(Swipe.NONE, PortalSheet.swipe(l, FULL - 20f, STRIP))
         assertEquals(Swipe.PAGES, PortalSheet.swipe(l, FULL - 20f, 0f))
         assertEquals(Swipe.PAGES, PortalSheet.swipe(l, 200f, STRIP))
         assertEquals(Swipe.NONE, PortalSheet.swipe(layout(12), 200f, 0f))
-        assertEquals(Swipe.SLIDER, PortalSheet.swipe(layout(12, guest = false), FULL - 20f - PortalSheet.TOGGLE_ROW, STRIP))
+        assertEquals(Swipe.SLIDER, PortalSheet.swipe(layout(12, guest = false), FULL - 20f - PortalSheet.TOGGLE_ROW - PortalSheet.WIDTH_ROW, STRIP))
+        // The width's row, under the slider's: its own drag; the switch's under it, none.
+        assertEquals(Swipe.WIDTH, PortalSheet.swipe(l, FULL - 20f - PortalSheet.TOGGLE_ROW, STRIP))
+        assertEquals(Swipe.NONE, PortalSheet.swipe(l, FULL - 20f, STRIP))
+    }
+
+    @Test fun `scrolled to the slider, the width's row is under it and the switch under that`() {
+        val l = layout(guest = true)
+        val w = l.width!!
+        fun y(b: PortalSheet.Box) = b.centerY - STRIP
+        assertEquals(Hit.Width, PortalSheet.hit(l, w.track.centerX, y(w.track), STRIP, 0))
+        assertEquals(Hit.WidthValue, PortalSheet.hit(l, w.value.centerX, y(w.value), STRIP, 0))
+        assertEquals(Hit.Toggle, PortalSheet.hit(l, l.toggle!!.row.centerX, y(l.toggle!!.row), STRIP, 0))
+        assertTrue(w.track.top >= l.slider!!.track.bottom)
+        assertTrue(l.toggle!!.row.top >= w.track.bottom)
+    }
+
+    @Test fun `the width slider runs from the narrowest at its start to the whole at its end`() {
+        val t = layout(guest = true).width!!.track
+        val pro = RearGeometry.PRO17
+        assertEquals(GuestWidth.min(pro), PortalSheet.widthAt(t, pro, t.left))
+        assertEquals(null, PortalSheet.widthAt(t, pro, t.right))
+        assertEquals(t.right, PortalSheet.widthX(t, pro, null), 0.01f)
+        assertEquals(480, PortalSheet.widthDrag(t, pro, 480, 0f))
+        assertEquals(GuestWidth.min(pro), PortalSheet.widthDrag(t, pro, 480, -1_000f))
     }
 
     // -- motion ----------------------------------------------------------------------------

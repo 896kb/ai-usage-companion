@@ -64,6 +64,13 @@ class ControlCenterPainter(
         val tiles: FloatArray,
         val reachable: Boolean,
         val pressed: Int = ControlCenterLayout.NONE,
+        /** The back is being recorded: the recording tile lit. */
+        val recording: Boolean = false,
+        /**
+         * The back's lock is on (BackLock): Bluetooth, mobile data and Wi-Fi faint and held, as
+         * without Shizuku. Silent, the brightness and automatic stay, as on the front's lock screen.
+         */
+        val locked: Boolean = false,
     )
 
     private val liquid = LiquidCellPainter()
@@ -121,7 +128,11 @@ class ControlCenterPainter(
     }
 
     /** A tile's colour as drawn: its own, or half lit under a finger. */
-    private fun tileOn(look: Look, i: Int): Float = if (look.pressed == i) PRESSED else look.tiles.getOrElse(i) { 0f }
+    private fun tileOn(look: Look, i: Int): Float = when {
+        look.pressed == i -> PRESSED
+        i == ControlCenterLayout.RECORD -> if (look.recording) 1f else 0f
+        else -> look.tiles.getOrElse(i) { 0f }
+    }
 
     private fun drawContents(
         canvas: Canvas, progress: Float, look: Look,
@@ -150,9 +161,9 @@ class ControlCenterPainter(
             liquidAlpha = if (glass) RearDialView.CHARGE_LIQUID_ALPHA else 0xFF,
             rimAlpha = if (glass) RearDialView.CHARGE_RIM_ALPHA else 0xFF,
             // Where it crosses a tile, its colour turns over as far as the tile is on.
-            figureOver = (0 until 4).map { i ->
+            figureOver = (0 until ControlCenterLayout.TILES).map { i ->
                 val r = ControlCenterLayout.tileRect(i, progress, lensRight)
-                tileShape(i, r, corner) to (if (i == 0 || look.reachable) tileOn(look, i) else 0f)
+                tileShape(i, r, corner) to (if (usable(look, i)) tileOn(look, i) else 0f)
             },
             figure = if (look.unavailable) "Needs Shizuku" else Math.round(level * 100f).toString() + "%",
             // THE SUN, in the glass near its foot: half a turn from dimmest to brightest,
@@ -180,23 +191,34 @@ class ControlCenterPainter(
      */
     private fun tileShape(i: Int, rect: RectF, corner: Float): Path {
         val base = minOf(rect.width(), rect.height()) * CcButton.CORNER
-        val screen = (corner - ChargeOverlay.MARGIN).coerceAtLeast(base)
-        // top-left, top-right, bottom-right, bottom-left — x and y for each.
+        // The screen's curve carried inward by the margin, from the rear's own corner: never more
+        // than half the tile, or the rounding would be scaled down on all four corners at once.
+        val screen = (corner - ChargeOverlay.MARGIN).coerceAtLeast(base).coerceAtMost(minOf(rect.width(), rect.height()) / 2f)
+        // top-left, top-right, bottom-right, bottom-left — x and y for each. The tiles that meet
+        // the screen's corners: the first row's right (Bluetooth), the last row's right (recording).
         val tr = if (i == 1) screen else base
-        val br = if (i == 3) screen else base
+        val br = if (i == ControlCenterLayout.TILES - 1) screen else base
         return Path().apply {
             addRoundRect(rect, floatArrayOf(base, base, tr, tr, br, br, base, base), Path.Direction.CW)
         }
     }
 
+    /**
+     * Whether tile [i] can be used now: silent is the app's own; Bluetooth, data and Wi-Fi need
+     * Shizuku and the back unlocked (faint without); the screenshot and recording are the shell's.
+     */
+    private fun usable(look: Look, i: Int): Boolean = when (i) {
+        0, ControlCenterLayout.SHOT, ControlCenterLayout.RECORD -> true
+        else -> !look.locked && look.reachable
+    }
+
     private fun drawQuickTiles(
         canvas: Canvas, progress: Float, look: Look, lens: LiquidCellPainter.Lens, corner: Float, buttonGround: () -> Int,
     ) {
-        for (i in 0 until 4) {
+        for (i in 0 until ControlCenterLayout.TILES) {
             val rect = ControlCenterLayout.tileRect(i, progress, lensRight)
             val shape = tileShape(i, rect, corner)
-            // Silent is the app's own; the others need Shizuku, and are faint without it.
-            val usable = i == 0 || look.reachable
+            val usable = usable(look, i)
             val on = if (usable) tileOn(look, i) else 0f
             drawCcButton(canvas, rect, minOf(rect.width(), rect.height()) * CcButton.CORNER, shape, on, lens, buttonGround) { c, color ->
                 val ink = if (usable) color else (color and 0x00FFFFFF) or (0x40 shl 24)
@@ -271,7 +293,7 @@ class ControlCenterPainter(
         const val PRESSED = 0.5f
 
         /** The tiles, in order: what they show, and the name a switch goes out by. */
-        val QUICK_ICONS = arrayOf(PanelIcons.SILENT, PanelIcons.BLUETOOTH, PanelIcons.MOBILE_DATA, PanelIcons.WIFI)
+        val QUICK_ICONS = arrayOf(PanelIcons.SILENT, PanelIcons.BLUETOOTH, PanelIcons.MOBILE_DATA, PanelIcons.WIFI, PanelIcons.SCREENSHOT, PanelIcons.RECORD)
         val QUICK_NAMES = arrayOf("silent", "bluetooth", "data", "wifi")
     }
 }

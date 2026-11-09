@@ -51,6 +51,14 @@ class ShellControlCenter(
     private val rear: Rear,
     private val events: () -> dev.kb896.aiusage.IRearEvents?,
     private val onProgress: (Float) -> Unit,
+    /** The back's lock is on (BackLock): its switches held. Read at every frame and touch. */
+    private val locked: () -> Boolean = { false },
+    /** A held switch was tapped: ask for the code. */
+    private val onLocked: () -> Unit = {},
+    /** The screenshot or recording tile ([record]) tapped: the shell captures the back. */
+    private val onCapture: (record: Boolean) -> Unit = {},
+    /** The back is being recorded: the recording tile lit. */
+    private val recording: () -> Boolean = { false },
 ) {
 
     /** The rear's brightness, as the service reads and writes it. Called on [io]. */
@@ -153,6 +161,7 @@ class ShellControlCenter(
                 is EdgeGestures.Action.PullEnd, is EdgeGestures.Action.SlideEnd, EdgeGestures.Action.Cancel -> rest += a
                 else -> if (!owns) rest += a
             }
+            model.locked = locked()
             if (owns) for (f in finger.feed(e)) effects += model.finger(f, now)
         }
         if (begin) open()
@@ -165,6 +174,11 @@ class ShellControlCenter(
      * Shut at once, no settle (the rear is going dark, the touch reader stopped, the service
      * is going). [sync]: the layers go on this thread (destroy, which exits next).
      */
+    /** The back's lock came on or went: drawn again now, its held switches faint or not. */
+    fun lockChanged() {
+        overlay?.changed()
+    }
+
     fun closeNow(why: String, sync: Boolean = false) {
         val o = synchronized(lock) {
             if (!up) return
@@ -210,7 +224,7 @@ class ShellControlCenter(
         overlay?.let { return it }
         synchronized(making) {
             overlay?.let { return it }
-            val made = runCatching { ShellOverlay(layerStack(), geometry(), "control-centre", "control centre", Drawing()) }
+            val made = runCatching { ShellOverlay(layerStack(), geometry(), "control-centre", "control centre", Drawing(), z = ShellLayer.Z_PANES) }
                 .onFailure { Log.w(TAG, "control centre: no sheet: ${it.message}") }.getOrNull() ?: return null
             made.onProgress = onProgress
             overlay = made
@@ -254,6 +268,8 @@ class ShellControlCenter(
                 if (ev == null) Log.w(TAG, "control centre: ${effect.which} — no app to switch it")
                 else runCatching { ev.onQuick(effect.which, effect.on) }.onFailure { Log.w(TAG, "control centre: ${effect.which}: ${it.message}") }
             }
+            ControlCenterModel.Effect.Locked -> runCatching { onLocked() }.onFailure { Log.w(TAG, "control centre: locked: ${it.message}") }
+            is ControlCenterModel.Effect.Capture -> runCatching { onCapture(effect.record) }.onFailure { Log.w(TAG, "control centre: capture: ${it.message}") }
             is ControlCenterModel.Effect.ShutAt -> synchronized(lock) {
                 shutCheck?.cancel(false)
                 val delay = (effect.atMs - SystemClock.uptimeMillis()).coerceAtLeast(0L) + SHUT_GRACE_MS
@@ -285,6 +301,8 @@ class ShellControlCenter(
         private var frameLook: ControlCenterPainter.Look? = null
 
         override fun frame(): Float = synchronized(lock) {
+            model.locked = locked()
+            model.recording = recording()
             val now = SystemClock.uptimeMillis()
             frameProgress = model.progress(now)
             frameLook = model.look(now)

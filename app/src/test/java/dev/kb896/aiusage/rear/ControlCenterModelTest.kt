@@ -24,9 +24,12 @@ class ControlCenterModelTest {
         val m = ControlCenterModel()
         m.beginPull(downY = 10f, y = 30f, atMs = 0L)
         assertEquals(20f / travel, m.progress(0L), 1e-4f)
+        // Faster than DRAG_SPEED_MAX: it trails, frame by frame, and catches up.
         m.movePull(10f + travel / 2f, 50L)
-        assertEquals(0.5f, m.progress(50L), 1e-4f)
-        assertTrue(m.shown(50L))
+        var t = 0L
+        while (t < 1_000L) { t += 16L; m.progress(t) }
+        assertEquals(0.5f, m.progress(t), 1e-4f)
+        assertTrue(m.shown(t))
     }
 
     @Test fun `let go past halfway it opens, short of it it shuts and says when its layers may go`() {
@@ -60,7 +63,9 @@ class ControlCenterModelTest {
         val m = opened()
         m.finger(Action.Down(ControlCenterLayout.NONE), 20_000L)
         m.finger(Action.Pull(-travel * 0.6f), 20_100L)
-        assertEquals(0.4f, m.progress(20_100L), 1e-4f)
+        var t = 20_100L
+        while (t < 21_000L) { t += 16L; m.progress(t) }
+        assertEquals(0.4f, m.progress(t), 1e-4f)
         val effects = m.finger(Action.Release(-travel * 0.6f, 0f, lifted = true), 20_400L)
         assertTrue(effects.single() is Effect.ShutAt)
     }

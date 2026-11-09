@@ -390,9 +390,24 @@ class RearDialView(context: Context) : View(context) {
             // ground from where the glyph WOULD be at rest. The picture inside the glass
             // then travelled with the numeral instead of staying where the picture is,
             // which is the frozen backdrop the panes were cured of and the clock was not.
+            //
+            // THROUGH THE WHOLE CANVAS, NOT ITS OFFSET (2026-11-09): a figure drawn scaled — the
+            // seconds coming and going, the clock fitted to the width — took the backdrop at the
+            // scale of the screen into a node the canvas then scaled, and the glass showed the
+            // picture behind it shrunk and shifted. Undoing the canvas (as GlassPainter does for a
+            // turned pane) keeps it the picture that is really there, at any scale.
             if (glassPainter.rootSpace(source)) {
-                canvas.getMatrix().mapRect(sdfAbs, sdfRect)
-                into.translate(-sdfAbs.left, -sdfAbs.top)
+                canvas.getMatrix(sdfMatrix)
+                sdfNode.set(
+                    Math.round(sdfRect.left).toFloat(), Math.round(sdfRect.top).toFloat(),
+                    Math.round(sdfRect.right).toFloat(), Math.round(sdfRect.bottom).toFloat(),
+                )
+                if (GlassPainter.sourceToPane(sdfMatrix, sdfNode, sdfSource)) {
+                    into.concat(sdfSource)
+                } else {
+                    sdfMatrix.mapRect(sdfAbs, sdfRect)
+                    into.translate(-sdfAbs.left, -sdfAbs.top)
+                }
             } else {
                 into.translate(-sdfRect.left, -sdfRect.top)
             }
@@ -409,7 +424,7 @@ class RearDialView(context: Context) : View(context) {
         // shader, which multiplies instead, the way a coloured pane actually treats the
         // light going through it.
         val tint = (paint.color and 0x00FFFFFF) or
-            ((Glass.SDF_TINT * 255f).toInt().coerceIn(0, 255) shl 24)
+            ((sdfTintAmount * 255f).toInt().coerceIn(0, 255) shl 24)
 
         // KEYED ON THE FIELD AND THE HUE — the number and the colour it is drawn in.
         // Neither moves between frames, and building a RenderEffect per frame is precisely
@@ -466,6 +481,14 @@ class RearDialView(context: Context) : View(context) {
     private val sdfRect = android.graphics.RectF()
     /** [sdfRect] mapped to root space, when the backdrop is root-space. */
     private val sdfAbs = android.graphics.RectF()
+    private val sdfNode = android.graphics.RectF()
+    /**
+     * How much of its colour a glass figure takes (Glass.SDF_TINT); the clock's own while the clock
+     * draws (PanelConfig.clockGlassTint × [CLOCK_SDF_TINT]), and back after.
+     */
+    private var sdfTintAmount = Glass.SDF_TINT
+    private val sdfMatrix = android.graphics.Matrix()
+    private val sdfSource = android.graphics.Matrix()
 
     /** The measured field for [text] at [paint]'s size and weight, kept until it changes. */
     private fun sdfFor(text: String, paint: Paint): android.graphics.Bitmap? {
@@ -636,6 +659,28 @@ class RearDialView(context: Context) : View(context) {
     }
 
     private var notice: Notice? = null
+
+    /**
+     * The back's lock is on (BackLock, the shell's word through the app): notifications show their
+     * app and "New notification" unless the owner asked for their words ([PanelConfig.lockedNoticeText]),
+     * and the control centre's switches and brightness are held.
+     */
+    var backLocked = false
+        set(value) { if (field != value) { field = value; invalidate() } }
+
+    /** Something the back's lock holds was asked for: the shell's keypad, please. */
+    var onAskCode: (() -> Unit)? = null
+
+    /** The screenshot tile, or the recording's ([record]): the shell captures the back. */
+    var onCapture: ((record: Boolean) -> Unit)? = null
+
+    /** The back is being recorded (the shell's word): the recording tile lit. */
+    var recording = false
+        set(value) { if (field != value) { field = value; invalidate() } }
+
+    /** [n] as the back may show it now: its words hidden while locked. */
+    private fun shown(n: Notice): Notice =
+        if (backLocked && !config.lockedNoticeText) n.copy(title = LOCKED_NOTICE, text = "", moreTitle = "", moreText = "") else n
     private var leaving: Notice? = null
 
     /** The notice that has expired and is riding the strip off the panel. */
@@ -1043,7 +1088,19 @@ class RearDialView(context: Context) : View(context) {
      */
     private fun frozen(now: Long): Boolean =
         aod && !aodPeek && aodFade(now) >= 1f && !lockBusy(now) && chargeAt == 0L && !tableGlowBusy(now) && !pager.animating() && now >= clockRollUntil &&
-            noticesIdle(SystemClock.elapsedRealtime())
+            !faceMorphing && !verticalMoving && noticesIdle(SystemClock.elapsedRealtime())
+
+    /**
+     * The face the clock page shows now (past halfway through a change, the one it is going to)
+     * and whether it is changing — always-on keeps drawing until the morph is done, or it would
+     * freeze half-way between the two faces. Set as the page draws.
+     */
+    private var analogShown = false
+    private var faceMorphing = false
+    /** The same for the digital clock on end (ClockStack), and the band round it. */
+    private var verticalShown = false
+    private var verticalMoving = false
+    private val verticalBox = RectF()
 
     /** The slider is sliding in or out, held by a finger, or springing back. */
     private fun lockBusy(now: Long): Boolean =
@@ -1065,7 +1122,10 @@ class RearDialView(context: Context) : View(context) {
         val a = (255 * AOD_VEIL_ALPHA * aodFade(frameNowMs)).toInt()
         if (a <= 0) return
         canvas.save()
-        if (aodBandOut()) canvas.clipOutRect(aodClockBand())
+        if (aodBandOut()) {
+            canvas.clipOutRect(aodClockBand())
+            analogBatteryBand()?.let { canvas.clipOutRect(it) }
+        }
         canvas.drawColor(a shl 24)
         canvas.restore()
     }
@@ -1090,7 +1150,206 @@ class RearDialView(context: Context) : View(context) {
     }
     private val digitBounds = android.graphics.Rect()
 
+    private val pillClock = PillClockPainter()
+
+    /**
+     * Where the analog face's battery card stands, set as drawClockLines draws it: always-on
+     * keeps it out of the veil, as the digital face's battery line over the figures is. Null
+     * with the digital face, or no battery.
+     */
+    private fun analogBatteryBand(): RectF? = analogBattery.takeIf { (analogShown || verticalShown) && !it.isEmpty }
+    private val analogBattery = RectF()
+    private val clockGoo = ClockGoo()
+
+    /** The analog face's dial, centred on [cx]: under the date's row, above the slider's band. */
+    private fun pillDial(cx: Float): PillClock.Dial =
+        PillClock.dial(
+            cx, Panel.CUTOUT_RIGHT.toFloat(), Panel.WIDTH.toFloat(),
+            ANALOG_ROW_BASELINE + ROW_CARD_PAD_Y + DIAL_GAP, markRegion().top - DIAL_CLEARANCE,
+        )
+
+    /** The date as the clock page spells it: Sunday, November 9th, 2026. */
+    private fun longDate(now: java.util.Calendar): String =
+        java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault()).format(now.time) +
+            ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) + ", " + now.get(java.util.Calendar.YEAR)
+
+    /**
+     * The clock page's date, battery and weather, for both faces and every step between them
+     * ([m]: 0 the digital face, 1 the analog, eased). The digital face has the battery over the
+     * figures, the date's line under them and the weather under that; the analog face has the
+     * date and the battery each on its own card in a row over the dial (a little left of its
+     * middle), and the weather under it, in the slider's band — never under a pill (the owner,
+     * 2026-11-09). Each MOVES from one place to the other as the face changes, rather than
+     * leaving one and appearing in the other (the owner, 2026-11-09); the battery's card comes
+     * with the analog place, as only it has one.
+     *
+     * THE WEATHER GIVES WAY TO THE SLIDER in the analog place, as the media player and the camera
+     * do (drawMark): it leaves through the bottom of the band on the lock's drum as the slider
+     * comes in from the top, and comes back the same way. In the digital place it stands clear
+     * of the band, as it always did.
+     */
+    private fun drawClockLines(
+        canvas: Canvas, cx: Float, now: java.util.Calendar, m: Float,
+        battery: Float, date: Float, weather: Float, aodNow: Float,
+    ) {
+        fun lerp(a: Float, b: Float) = a + (b - a) * m
+        extras = extrasDate
+        extras.textSize = typed(DATE_SIZE)
+        extras.textAlign = Paint.Align.LEFT
+        val ih = typed(DATE_SIZE)
+        val pct = if (battery > 0.004f) batteryPercent() else -1
+        analogBattery.setEmpty()
+        val dateText = if (date > 0.004f) longDate(now) else null
+        val figure = if (pct >= 0) "$pct%" else ""
+        val figW = if (pct >= 0) extras.measureText(figure) else 0f
+        val dateW = dateText?.let { extras.measureText(it) } ?: 0f
+        // The analog row: each card's width, padding and all; 0 for one that is off.
+        val dateCard = if (dateText != null) dateW + 2f * CARD_PAD_X else 0f
+        val batteryCard = if (pct >= 0) figW + AOD_BATTERY_GAP / 2f + ih * BATTERY_GLYPH_W + 2f * CARD_PAD_X else 0f
+        // THE ROW CLOSES UP AS ONE GOES, not after: each card takes its room by how much of it
+        // is there ([date], [battery] — the page's switch and always-on's, blended), so one
+        // leaving for always-on (or a switch) slides the other to the middle rather than
+        // leaving a gap that then jumps shut (the owner, 2026-11-09). The date leaves to the
+        // left, its right edge staying by the battery.
+        val dateRoom = dateCard * date.coerceIn(0f, 1f)
+        val batteryRoom = batteryCard * battery.coerceIn(0f, 1f)
+        val gap = if (dateCard > 0f && batteryCard > 0f) ANALOG_CARD_GAP * minOf(date, battery).coerceIn(0f, 1f) else 0f
+        val rowLeft = cx - ANALOG_ROW_LEFT - (dateRoom + gap + batteryRoom) / 2f
+
+        if (dateText != null) {
+            val x = lerp(cx - dateW / 2f, rowLeft + dateRoom - dateCard + CARD_PAD_X)
+            val base = lerp(DATE_BASELINE, ANALOG_ROW_BASELINE)
+            if (config.theme.isGlass) {
+                clockRect.set(x - CARD_PAD_X, base - DATE_SIZE - ROW_CARD_PAD_Y, x + dateW + CARD_PAD_X, base + ROW_CARD_PAD_Y)
+                glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = date * (1f - aodNow))
+            }
+            val ink = colorFor("date:info", config.infoDateTint)
+            extras.color = (ink and 0x00FFFFFF) or ((0xFF * date).toInt().coerceIn(0, 255) shl 24)
+            canvas.drawText(dateText, x, base, extras)
+        }
+        if (pct >= 0) {
+            val x = lerp(cx - figW / 2f, rowLeft + dateRoom + gap + CARD_PAD_X)
+            val base = lerp(clockBatteryBaseline(), ANALOG_ROW_BASELINE)
+            analogBattery.set(x - CARD_PAD_X, base - DATE_SIZE - ROW_CARD_PAD_Y, x - CARD_PAD_X + batteryCard, base + ROW_CARD_PAD_Y)
+            if (config.theme.isGlass && m > 0.004f) {
+                clockRect.set(analogBattery)
+                glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = battery * m * (1f - aodNow))
+            }
+            val ink = colorFor("battery:info", config.infoBatteryTint)
+            extras.color = (ink and 0x00FFFFFF) or ((0xFF * battery).toInt().coerceIn(0, 255) shl 24)
+            canvas.drawText(figure, x, base, extras)
+            drawBatteryGlyph(canvas, x + figW + AOD_BATTERY_GAP / 2f, base - ih * 0.85f, ih, pct)
+        }
+
+        if (weather > 0.004f) {
+            val reading = shownWeather()
+            // Only the analog place gives way to the slider.
+            val lock = lockSwap(frameNowMs) * m
+            if (reading != null && lock < 0.999f) {
+                val slot = markRegion()
+                val block = DATE_SIZE + if (reading.place.isEmpty()) 0f else WeatherLine.PLACE_BASELINE - WeatherLine.BASELINE
+                val inSlot = slot.top + (slot.height() - block) / 2f + DATE_SIZE - WeatherLine.BASELINE
+                canvas.save()
+                if (lock > 0.001f) {
+                    val clip = RectF(Panel.CUTOUT_RIGHT.toFloat(), lerp(0f, slot.top - ROW_CARD_PAD_Y), Panel.WIDTH.toFloat(), slot.bottom + ROW_CARD_PAD_Y)
+                    canvas.clipRect(clip)
+                    canvas.translate(0f, lock * (slot.height() + 2f * ROW_CARD_PAD_Y))
+                }
+                drawWeatherLine(canvas, cx, reading, colorFor("weather", config.weatherTint), weather, inSlot * m)
+                canvas.restore()
+            }
+        }
+        extras = extrasDate
+    }
+
+    /**
+     * The digital face's figures flat, for the change of face (ClockGoo): each glyph ON THE SAME
+     * PIXELS as the figures it stands in for, so the goo takes over from them without a jump —
+     * laid out by slot, the seconds at [secondsScale], filled with [paint]'s colour.
+     *
+     * Under GLASS the figures are distance fields (drawSdfText): each field's right edge from
+     * [slotRight], its middle on the clock's centre line, its glyph [SdfText.SPREAD] inside it, at
+     * whole pixels — which lands the glyph about a spread to the right of the slot's middle and
+     * higher than CLOCK_BASELINE. Set slot-centred on the baseline instead, the goo's first frames
+     * stood down and to the left of the figures (the owner, 2026-11-09). ORIGINAL draws them
+     * slot-centred on the baseline, and so does this there.
+     */
+    private fun drawFiguresFlat(
+        canvas: Canvas, paint: Paint, figures: String, cx: Float, span: Float, slot: Float, colon: Float, secondsScale: Float,
+    ) {
+        val colour = paint.color
+        paint.set(extrasBody)
+        paint.color = colour
+        paint.style = Paint.Style.FILL
+        paint.textSize = typed(CLOCK_SIZE)
+        paint.textAlign = Paint.Align.LEFT
+        val glass = config.theme.isGlass
+        val fm = paint.fontMetrics
+        val pad = SdfText.SPREAD
+        val fieldH = (fm.descent - fm.ascent + pad * 2f).toInt()
+        var x = cx - span / 2f
+        for ((i, ch) in figures.withIndex()) {
+            val full = when (ch) { ':' -> colon; ClockFigures.BLANK -> 0f; else -> slot }
+            val seconds = i >= 5
+            if (seconds && secondsScale <= 0.01f) break
+            val w = if (seconds) full * secondsScale else full
+            if (ch == ClockFigures.BLANK) { x += w; continue }
+            val placed = figureAt(canvas, i, ch, x, w)
+            canvas.save()
+            if (seconds) {
+                // As the figures do: scaled about the middle of the shrunken slot, the full-width glyph pulled into it.
+                canvas.scale(secondsScale, secondsScale, x + w / 2f, CLOCK_BASELINE - CLOCK_SIZE * 0.35f)
+                canvas.translate(-(full - w) / 2f, 0f)
+            }
+            val glyph = ch.toString()
+            val adv = paint.measureText(glyph)
+            if (glass) {
+                val fieldW = (adv + pad * 2f).toInt()
+                val rightAt = x + (full + adv) / 2f + pad // slotRight, with this paint
+                val left = Math.round(rightAt - fieldW + pad).toFloat()
+                val top = Math.round(CLOCK_BASELINE - CLOCK_SIZE / 2f - fieldH / 2f).toFloat()
+                canvas.drawText(glyph, left + pad, top + pad - fm.ascent, paint)
+            } else {
+                canvas.drawText(glyph, x + (full - adv) / 2f, CLOCK_BASELINE, paint)
+            }
+            canvas.restore()
+            canvas.restoreToCount(placed)
+            x += w
+        }
+    }
+
+    /**
+     * DEBUG BUILDS ONLY: `adb shell setprop debug.magicrear.clocktime 10:10:30` holds the clock at
+     * that time, to look at a face without waiting for it; empty, the real time. Read at most once
+     * a second.
+     */
+    private fun clockOverride(): IntArray? {
+        if (!dev.kb896.aiusage.BuildConfig.DEBUG) return null
+        val now = SystemClock.uptimeMillis()
+        if (now - clockOverrideReadAt > 1_000L) {
+            clockOverrideReadAt = now
+            val raw = runCatching {
+                Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
+                    .invoke(null, "debug.magicrear.clocktime") as? String
+            }.getOrNull().orEmpty()
+            clockOverrideValue = Regex("""(\d{1,2}):(\d{2}):(\d{2})""").matchEntire(raw.trim())
+                ?.destructured?.let { (h, m, s) -> intArrayOf(h.toInt(), m.toInt(), s.toInt()) }
+        }
+        return clockOverrideValue
+    }
+    private var clockOverrideReadAt = 0L
+    private var clockOverrideValue: IntArray? = null
+
     private fun aodClockBand(): RectF {
+        // The analog face: the dial alone. The battery's card is its own band beside it
+        // (analogBatteryBand); the date's card stays under the veil, as the digital face's date
+        // line does. A band of the dial's width over the row lit half the date (2026-11-09).
+        if (analogShown) {
+            val d = pillDial(aodClockCx)
+            return RectF(d.left - AOD_BAND_AIR, d.top, d.right + AOD_BAND_AIR, d.bottom)
+        }
+        // On end: round the stack.
+        if (verticalShown) return RectF(verticalBox)
         val half = if (aodClockSpan > 0f) aodClockSpan / 2f + AOD_BAND_AIR else Panel.WIDTH.toFloat()
         return RectF(
             aodClockCx - half, clockBatteryBaseline() - typed(DATE_SIZE) - 8f,
@@ -1119,6 +1378,7 @@ class RearDialView(context: Context) : View(context) {
         if (a <= 0) return
         veilPaint.color = a shl 24
         canvas.drawRect(aodClockBand(), veilPaint)
+        analogBatteryBand()?.let { canvas.drawRect(it, veilPaint) }
     }
 
     /** The slider's own, lighter veil in always-on: dimmed a little, never as much as the page. */
@@ -1717,11 +1977,7 @@ class RearDialView(context: Context) : View(context) {
             drawTableGlow(canvas)
             drawLockOverlay(canvas)
             drawAodSliderVeil(canvas)
-            // Same rule as the glass path's: the page below already has it. See the
-            // GROUP_NOTICE guard.
-            if (!listInView()) {
-                drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
-            }
+            drawNotice(canvas, noticeSlideHeld, SystemClock.elapsedRealtime())
             drawCharge(canvas)
             return
         }
@@ -1758,13 +2014,7 @@ class RearDialView(context: Context) : View(context) {
         if (lockSwap(frameNowMs) > 0.001f || tableGlowFade(frameNowMs) > 0.001f ||
             aod || (aodUntil != 0L && frameNowMs - aodUntil < AOD_FADE_MS)
         ) active.add(GROUP_LOCK)
-        // NOT WHILE THE PAGE THAT HOLDS THEM IS UP. The strip and the carousel are the
-        // same notification drawn twice — the strip slides one in over the top of a page
-        // whose whole job is showing it, and the newest card in the carousel IS that
-        // notification. Two of it is not emphasis, it is a mistake. With the list pushed up
-        // out of sight, though, the Info page shows nothing of it, and the strip comes in
-        // there as on any other page.
-        if (noticeSlideHeld > 0.001f && !listInView()) active.add(GROUP_NOTICE)
+        if (noticeSlideHeld > 0.001f) active.add(GROUP_NOTICE)
         if (chargeAt != 0L) active.add(GROUP_CHARGE)
         if (active.isEmpty()) return
 
@@ -1876,11 +2126,15 @@ class RearDialView(context: Context) : View(context) {
         source: android.graphics.RenderNode = paneBackdrop,
         held: Boolean = false,
         aberration: Float = Glass.ABERRATION,
+        /** Whether the Glass settings' tint may replace [tint]; false for glass with a colour of its own (the pill clock's). */
+        styled: Boolean = true,
+        /** The canvas's turn, in degrees, for a pane drawn rotated: see GlassPainter.drawPane. */
+        lightTurn: Float = 0f,
     ): Boolean {
         // The glass chosen in Glass settings, when it has been: one tint for every piece,
         // reacting as asked. Until then each piece keeps the tint it was given.
         @Suppress("NAME_SHADOWING")
-        val tint = config.glassStyle?.let { styledTint(it, rect) } ?: tint
+        val tint = config.glassStyle?.takeIf { styled }?.let { styledTint(it, rect) } ?: tint
         // A NODE INSIDE THE SCENE CANNOT SAMPLE THE SCENE. That is a cycle — the node is
         // in the scene's display list and the scene would be in its — and the renderer
         // does not detect it: it walks the tree to prepare it and recurses until the
@@ -1893,7 +2147,7 @@ class RearDialView(context: Context) : View(context) {
         // than at four call sites: no layer means no lens, and no lens is a look this
         // already has.
         val sampled = source.takeUnless { it === sceneNode && recordingScene }
-        return glassPainter.drawPane(canvas, rect, radius, tint, shape, refract, rim, sampled, held, aberration)
+        return glassPainter.drawPane(canvas, rect, radius, tint, shape, refract, rim, sampled, held, aberration, lightTurn = lightTurn)
     }
 
     /**
@@ -2671,8 +2925,6 @@ class RearDialView(context: Context) : View(context) {
         // with no readout page the clock page is page 0 and the media page is next, so
         // the notices fraction runs the other way from the same offset
         noticing = (if (gone) 1f - paged / Panel.HEIGHT else (readoutAt - paged) / Panel.HEIGHT).coerceIn(0f, 1f)
-        // Pulled-down notifications are a step of the Info page: off it, they are hidden again.
-        if (noticing <= 0.001f) hideNoticesOffPage()
 
         pagingNow = paging
         // The transport records where it rests against this, so it has to be the offset
@@ -2942,6 +3194,7 @@ class RearDialView(context: Context) : View(context) {
                 canvas, geo, owner.spec, account,
                 // The account's second ring eases on its own, not in step with its first.
                 key = if (owners.take(position).any { it.account == owner.account }) account.name + ":2" else account.name,
+                colourByUse = owners.count { it.account == owner.account } > 1,
                 breath = breath,
                 blend = paging,
                 mediaFraction = mediaFractions.getOrElse(at) { 0f },
@@ -3357,6 +3610,13 @@ class RearDialView(context: Context) : View(context) {
         account: Account,
         /** Its animations' name: the account's, or its second ring's when it has both. */
         key: String = account.name,
+        /**
+         * The account has both rings: a time ring's colour then says how much of the same window is
+         * used, in the ramp, as the other ring does — not the account's accent, which beside it read
+         * as an unrelated white (the owner, 2026-11-09). Its sweep is still the time; only the colour
+         * is the use, so a ring near its reset is not turned red by being near it.
+         */
+        colourByUse: Boolean = false,
         breath: Float = 0f,
         blend: Float = 0f,
         mediaFraction: Float = 0f,
@@ -3480,6 +3740,8 @@ class RearDialView(context: Context) : View(context) {
         val usageColor = when {
             status != null && status.health != Health.OK -> Panel.Palette.DIM
             spec.metric == RingMetric.UTILIZATION -> RampColor.at(shown, config.rampColors)
+            colourByUse && usable && window != null ->
+                RampColor.at(animateTo("ring:$key:use", window.utilization).coerceIn(0f, 1f), config.rampColors)
             else -> accentOf(account)
         }
         // The sweep and the colour travel together, on the page's own easing rather than
@@ -3974,6 +4236,47 @@ class RearDialView(context: Context) : View(context) {
      * A tap there is still whatever it was, and the gesture is only taken once it is that drag;
      * whatever had begun under it is cancelled.
      */
+    /**
+     * A drag up from the bottom edge is the portal's pull (the shell opens its sheet, PortalPull): here
+     * it only must not also turn the page. A finger drifting sideways on its way up was taken as a
+     * page swipe too, and the sheet opened over the next page (the owner, 2026-11-09). Taken once it
+     * goes up more than across, and quickly — before the pager's own slop would have it; whatever had
+     * begun under it is cancelled. A plainly sideways swipe from there still turns the page.
+     */
+    private var portalEdge = false
+    private var portalEdgeTaken = false
+    private var portalEdgeX = 0f
+    private var portalEdgeY = 0f
+
+    private fun portalPullTouch(event: android.view.MotionEvent): Boolean {
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                portalEdgeTaken = false
+                portalEdgeX = event.x
+                portalEdgeY = event.y
+                portalEdge = !aod && PortalPull.startsPull(event.x, event.y, Panel.CUTOUT_RIGHT.toFloat())
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val up = portalEdgeY - event.y
+                if (portalEdge && !portalEdgeTaken && up >= PORTAL_TAKE && up > kotlin.math.abs(event.x - portalEdgeX)) {
+                    portalEdge = false
+                    val cancel = android.view.MotionEvent.obtain(event).apply { action = android.view.MotionEvent.ACTION_CANCEL }
+                    onTouchEvent(cancel)
+                    cancel.recycle()
+                    portalEdgeTaken = true
+                }
+                return portalEdgeTaken
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                val taken = portalEdgeTaken
+                portalEdge = false
+                portalEdgeTaken = false
+                return taken
+            }
+        }
+        return false
+    }
+
     private fun noticePullTouch(event: android.view.MotionEvent): Boolean {
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
@@ -4024,6 +4327,7 @@ class RearDialView(context: Context) : View(context) {
         // nothing underneath sees it.
         if (locked) return lockTouch(event)
         if (noticePullTouch(event)) return true
+        if (portalPullTouch(event)) return true
         val onCamera = !ambient && near(cameraButton, event.x, event.y)
         // In ambient mode the whole panel is the way back, not just the button. The
         // mascot is walking and the button is a 16-unit disc on the back of a phone
@@ -4077,22 +4381,9 @@ class RearDialView(context: Context) : View(context) {
                 pager.onDown(event.y, android.os.SystemClock.uptimeMillis())
                 gestureVx = 0f; gestureVy = 0f
                 gestureLastX = event.x; gestureLastY = event.y; gestureLastAt = android.os.SystemClock.uptimeMillis()
-                // WHERE THE WHEEL OWNS THE AXIS. A wheel and a pager both want a vertical
-                // drag, and on this page they are inches apart — so the card decides. A
-                // finger that lands on the notifications is scrolling them; anywhere else
-                // on the page is still turning the page, which is how you get back down
-                // to the readout. Noted on the way down because that is when the finger
-                // chose, not when it has moved far enough to say so.
-                // No more pulling them into view on the Info page: the top edge's right half
-                // brings them down on any page (ShellNotices).
-                onReveal = false
-                onWheel = onReveal && noticesShown && event.y < wheelGrabBottom() && shownHistory().isNotEmpty()
-                wheelDownAt = noticeWheelAt
-                // The wheel claims the gesture by itself. It used to ride on the pager's
-                // claim, and with no readout there is no other page — the clock page is
-                // the only one, the pager is off, and a finger on the notifications was
-                // let go on the way down: they could not be scrolled at all.
-                hit || pager.enabled() || onVolume || onScrub || onWheel || onReveal
+                // The notifications are the shell's list now (ShellNotices), pulled down from
+                // the top edge on any page: the clock page keeps no wheel of its own.
+                hit || pager.enabled() || onVolume || onScrub
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 trackGesture(event.x, event.y)
@@ -4105,9 +4396,6 @@ class RearDialView(context: Context) : View(context) {
                     drag = when {
                         !sideways && onVolume -> Drag.VOLUME
                         sideways && onScrub -> Drag.SCRUB
-                        sideways && onWheel && event.x > downX && demoNow() == null -> Drag.DISMISS
-                        !sideways && onReveal && !noticesShown && event.y > downY -> Drag.REVEAL
-                        !sideways && onReveal && noticesShown && !onWheel && event.y < downY -> Drag.REVEAL
                         else -> Drag.PAGE
                     }
                     // NO auto-unmute here any more. It used to fire on the first move,
@@ -4116,9 +4404,6 @@ class RearDialView(context: Context) : View(context) {
                     // effect was that the volume control could do exactly one thing while
                     // muted, which was cancel the mute. A drag now moves the ghost and
                     // leaves the silence alone; see dragVolume.
-                    if (drag == Drag.DISMISS) {
-                        dismissIndex = Math.round(noticeWheelAt).coerceIn(0, shownHistory().size - 1)
-                    }
                 }
                 when (drag) {
                     Drag.VOLUME -> {
@@ -4140,31 +4425,11 @@ class RearDialView(context: Context) : View(context) {
                         true
                     }
                     Drag.PAGE -> {
-                        if (onWheel) {
-                            // A finger beats a settle. Without this the two fought each
-                            // other for the rest of the animation.
-                            wheelSettling = false
-                            // A row per row: dragging up by one card's height moves on by
-                            // one notification, so the item follows the finger rather than
-                            // the finger asking for an item.
-                            noticeWheelAt = (wheelDownAt + (downY - event.y) / NOTICE_H)
-                                .coerceIn(0f, (shownHistory().size - 1).toFloat())
-                            invalidate()
-                        } else if (pager.enabled() &&
+                        if (pager.enabled() &&
                             pager.onMove(event.y, android.os.SystemClock.uptimeMillis())
                         ) {
                             invalidate()
                         }
-                        true
-                    }
-                    Drag.REVEAL -> {
-                        revealDy = event.y - downY
-                        invalidate()
-                        true
-                    }
-                    Drag.DISMISS -> {
-                        dismissDx = event.x - downX
-                        invalidate()
                         true
                     }
                     Drag.UNDECIDED -> hit
@@ -4174,8 +4439,6 @@ class RearDialView(context: Context) : View(context) {
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
                 // The system taking the gesture away is not a decision to commit to it.
-                if (drag == Drag.REVEAL) letGoOfReveal(commit = false)
-                if (drag == Drag.DISMISS) letGoOfDismiss(commit = false)
                 endDrag(commit = false)
                 pager.onUp(android.os.SystemClock.uptimeMillis())
                 invalidate()
@@ -4187,43 +4450,10 @@ class RearDialView(context: Context) : View(context) {
                     endDrag(commit = dragInBounds)
                     return true
                 }
-                if (drag == Drag.REVEAL || drag == Drag.DISMISS) {
-                    val was = drag
-                    drag = Drag.UNDECIDED
-                    onWheel = false
-                    if (was == Drag.REVEAL) letGoOfReveal(commit = true) else letGoOfDismiss(commit = true)
-                    pager.onUp(android.os.SystemClock.uptimeMillis())
-                    return true
-                }
                 drag = Drag.UNDECIDED
                 // A drag is not a tap, and must not also fire whatever it started on.
                 // Without this, letting go of a page swipe that happened to begin over
                 // the close button closed the panel.
-                if (onWheel) {
-                    // Settled onto whichever it is nearest, the way a picker does. Nothing
-                    // animates it: the fraction IS the position, so rounding it is the
-                    // whole of the snap.
-                    onWheel = false
-                    wheelFrom = noticeWheelAt
-                    // In cards a millisecond: a drag up moves on through them.
-                    val (_, vy) = releaseVelocity()
-                    val v = -vy / NOTICE_H
-                    // A flick goes on to the next card that way, whatever the distance.
-                    val ahead = when {
-                        v > WHEEL_FLING -> Math.floor(noticeWheelAt.toDouble()).toFloat() + 1f
-                        v < -WHEEL_FLING -> Math.ceil(noticeWheelAt.toDouble()).toFloat() - 1f
-                        else -> Math.round(noticeWheelAt).toFloat()
-                    }
-                    wheelTo = ahead.coerceIn(0f, (shownHistory().size - 1).toFloat())
-                    val toward = if (wheelTo > wheelFrom) v else -v
-                    wheelCarried = toward > 0f
-                    wheelMs = Glide.ms(Math.abs(wheelTo - wheelFrom), if (wheelCarried) toward else 0f, GLIDE_MIN_MS, PAGE_SETTLE_MS)
-                    wheelSettleAt = frameNowMs
-                    wheelSettling = wheelTo != wheelFrom
-                    pager.onUp(android.os.SystemClock.uptimeMillis())
-                    invalidate()
-                    return true
-                }
                 if (pager.dragging) {
                     pager.onUp(android.os.SystemClock.uptimeMillis())
                     invalidate()
@@ -4631,29 +4861,12 @@ class RearDialView(context: Context) : View(context) {
         // the list is the front's and clearing it on the front clears one card here.
         if (key.isNotEmpty() && history.firstOrNull() != next) {
             val old = history.indexOfFirst { it.key == key }
-            if (old >= 0) removeHistoryAt(old, fromBack = false)
+            if (old >= 0) removeHistoryAt(old)
         }
         if (history.firstOrNull() != next) {
-            // The first card into an empty list takes the place of "No notifications":
-            // that slides up and out as the card slides down in (drawNoticeWheel).
-            if (history.isEmpty()) emptySwapAt = SystemClock.uptimeMillis()
             history.addFirst(next)
             while (history.size > HISTORY_MAX) history.removeLast()
             saveHistory()
-            // The Info page's wheel moves with its cards and, on the newest, turns to the
-            // new one: the card in view slides down and the new one comes in from above.
-            val arrival = NoticeWheel.afterArrival(noticeWheelAt, held = onWheel)
-            if (onWheel) wheelDownAt += arrival.at - noticeWheelAt
-            noticeWheelAt = arrival.at.coerceAtMost((history.size - 1).toFloat())
-            arrival.settleTo?.let { to ->
-                wheelFrom = noticeWheelAt
-                wheelTo = to
-                // No finger behind this one: the ordinary ease, the ordinary time.
-                wheelCarried = false
-                wheelMs = PAGE_SETTLE_MS
-                wheelSettleAt = SystemClock.uptimeMillis()
-                wheelSettling = true
-            }
             invalidate()
         }
 
@@ -5238,7 +5451,7 @@ class RearDialView(context: Context) : View(context) {
      * Decided at the moment the slop is crossed and then not revisited, because a gesture
      * that changes its mind halfway does both things badly.
      */
-    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, REVEAL, DISMISS, CC, BRIGHT }
+    private enum class Drag { UNDECIDED, VOLUME, SCRUB, PAGE, CC, BRIGHT }
 
     private var drag = Drag.UNDECIDED
     private var downX = 0f
@@ -6108,7 +6321,8 @@ class RearDialView(context: Context) : View(context) {
     private fun miniCardLeft(): Float =
         NOTICE_LEFT + maxOf(MINI_INSET_LEFT, cornerRadius() / CORNER_DIVISOR + MINI_CORNER_CLEARANCE)
 
-    private fun drawMiniRow(canvas: Canvas, item: Notice, y: Float, h: Float) {
+    private fun drawMiniRow(canvas: Canvas, raw: Notice, y: Float, h: Float) {
+        val item = shown(raw)
         // Padded from the CARD, not from the panel, and by the same amount the headline
         // uses — so the two cards' text lines up against their own edges the same way.
         val left = miniCardLeft() + NOTICE_PAD
@@ -6132,7 +6346,8 @@ class RearDialView(context: Context) : View(context) {
     }
 
     /** One row of the wheel, at [y]. Clipped by the strip, never faded. */
-    private fun drawNoticeRow(canvas: Canvas, item: Notice, y: Float) {
+    private fun drawNoticeRow(canvas: Canvas, raw: Notice, y: Float) {
+        val item = shown(raw)
         val alpha = 255
         val left = NOTICE_LEFT + NOTICE_PAD
         val right = Panel.WIDTH - NOTICE_PAD
@@ -6182,30 +6397,6 @@ class RearDialView(context: Context) : View(context) {
 
         label.alpha = 255
         heading.alpha = 255
-    }
-
-    private val emptyGround = Paint()
-    private var emptyGroundFor = -1f
-
-    /** The empty list: a band from black at the top to clear, and "No notifications", at [alpha]. */
-    private fun drawNoticesEmpty(canvas: Canvas, alpha: Float) {
-        if (alpha <= 0.004f) return
-        val h = NOTICE_H
-        if (emptyGroundFor != h) {
-            emptyGroundFor = h
-            emptyGround.shader = android.graphics.LinearGradient(
-                0f, 0f, 0f, h, intArrayOf(EMPTY_GREY, EMPTY_GREY and 0x00FFFFFF), null,
-                android.graphics.Shader.TileMode.CLAMP,
-            )
-        }
-        emptyGround.alpha = (255 * alpha).toInt().coerceIn(0, 255)
-        canvas.drawRect(0f, 0f, Panel.WIDTH.toFloat(), h, emptyGround)
-        label.color = colorFor("notice", config.notificationTint)
-        label.alpha = (255 * 0.6f * alpha).toInt().coerceIn(0, 255)
-        label.textAlign = Paint.Align.CENTER
-        canvas.drawText("No notifications", MediaPage.centreX(Panel.WIDTH.toFloat(), Panel.CUTOUT_RIGHT.toFloat()), h * 0.5f, label)
-        label.textAlign = Paint.Align.LEFT
-        label.alpha = 255
     }
 
     /** [text] cut to whatever fits [width], with an ellipsis when it had to be cut. */
@@ -6701,12 +6892,14 @@ class RearDialView(context: Context) : View(context) {
     data class Mirror(
         val page: Int, val aod: Boolean, val locked: Boolean, val ringsClosed: Boolean,
         val tableGlow: Boolean, val corner: Float,
+        /** The control centre is down, or on its way (not the preview's: the panel's guard rides on it). */
+        val controlCenter: Boolean = false,
     )
     var onMirror: ((Mirror) -> Unit)? = null
     private var lastMirror: Mirror? = null
     private fun publishMirror() {
         val cb = onMirror ?: return
-        val m = Mirror(pager.page, aod, locked, ringsClosed, tableGlow, cornerRadius())
+        val m = Mirror(pager.page, aod, locked, ringsClosed, tableGlow, cornerRadius(), controlCenterUp)
         if (m != lastMirror) { lastMirror = m; cb(m) }
     }
     /** Have the mirror published again on the next frame, whether or not it changed. */
@@ -7898,26 +8091,6 @@ class RearDialView(context: Context) : View(context) {
         // AND becoming visible reads as two effects where the gesture only asked for one.
         // A sheet of paper slid over another does not also become transparent.
 
-        // ---- what has come in ---------------------------------------------------------
-        //
-        // DEFERRED, for the reason the clock is. A pane can only bend a panel that has
-        // finished being drawn, and this page is drawn while the scene is still being
-        // recorded — so a card built here got a pane with nothing behind it and came out
-        // looking nothing like the notification strip, which is drawn in the overlay pass
-        // and gets the real thing. Same pass now, same glass.
-        // always-on: the notifications fade away with the backdrop; the clock stays
-        val wheelAlpha = 1f - aodFade(frameNowMs)
-        if (wheelAlpha > 0.001f) {
-            val wheel: (Canvas) -> Unit = { c ->
-                if (wheelAlpha < 0.999f) {
-                    val layer = c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * wheelAlpha).toInt())
-                    drawNoticeWheel(c)
-                    c.restoreToCount(layer) // whatever the wheel left open, the fade stays the wheel's
-                } else drawNoticeWheel(c)
-            }
-            if (!deferOver(canvas, wheel)) wheel(canvas)
-        }
-
         // ---- the clock, one wheel per digit -----------------------------------------
         //
         // EACH FIGURE ON ITS OWN WHEEL, which is the whole look of it: the seconds roll
@@ -7930,30 +8103,101 @@ class RearDialView(context: Context) : View(context) {
         // width of a zero and the digit is centred in it, so a 1 does not pull the rest
         // of the clock left as it rolls past.
         val now = java.util.Calendar.getInstance()
-        val figures = "%02d:%02d:%02d".format(
+        // The face: 0 the rolling figures, 1 the glass pills, eased between as always-on's fades are.
+        // The change of face: [faceT] runs straight across it for the morph (ClockGoo); [analog],
+        // eased in and out, carries what only moves — the date, the battery, the weather.
+        // Always-on may have a face of its own (PanelConfig.aodClockFace): going in and out of it,
+        // the faces change with the same morph, as the page dims and brightens.
+        val wantAnalog = if (aod && !aodPeek) config.aodAnalogClock else config.analogClock
+        val faceT = ease("clock:face", if (wantAnalog) 1f else 0f, FACE_MORPH_MS, linear = true)
+        analogShown = faceT >= 0.5f
+        faceMorphing = faceT > 0.001f && faceT < 0.999f
+        val analog = if (faceT < 0.5f) 4f * faceT * faceT * faceT else 1f - (2f - 2f * faceT).let { it * it * it } / 2f
+        val dial = pillDial(cx)
+        clockOverride()?.let { (h, m, s) ->
+            now.set(java.util.Calendar.HOUR_OF_DAY, h); now.set(java.util.Calendar.MINUTE, m)
+            now.set(java.util.Calendar.SECOND, s); now.set(java.util.Calendar.MILLISECOND, 0)
+        }
+        // Twelve hours with AM/PM, or twenty-four (PanelConfig.clock12h): ClockFigures.
+        val clockFigures = ClockFigures.of(
             now.get(java.util.Calendar.HOUR_OF_DAY),
             now.get(java.util.Calendar.MINUTE),
             now.get(java.util.Calendar.SECOND),
+            twelve = config.twelveHour(android.text.format.DateFormat.is24HourFormat(context)),
         )
+        val figures = clockFigures.figures
+        // AM/PM COMES AND GOES AS THE SECONDS DO (the owner, 2026-11-09): a grow, then a shrink
+        // about its middle, its room opening and closing so the time slides to the middle — and
+        // its words kept while it goes. Not with always-on: that keeps it.
+        val markScale = Tween.easeOutBack(
+            ease("clock:marker", if (clockFigures.marker != null) 1f else 0f, AOD_FADE_MS.toFloat(), linear = true),
+        )
+        val marker = (clockFigures.marker ?: if (now.get(java.util.Calendar.HOUR_OF_DAY) < 12) "AM" else "PM")
+            .takeIf { markScale > 0.01f }
         extras = extrasBody
         extras.textAlign = Paint.Align.LEFT
         extras.textSize = typed(CLOCK_SIZE)
         val slot = extras.measureText("0")
         val colon = extras.measureText(":")
         // always-on: the seconds fade out over the mode's first second and the rest of
-        // the time slides to the centre; on the way back out they return the same way
-        val secondsAlpha = 1f - aodFade(frameNowMs)
+        // the time slides to the centre; on the way back out they return the same way.
+        // The page's Seconds switch takes them away the same way, for good.
+        val secondsOn = ease("clock:seconds", if (config.clockSeconds) 1f else 0f, AOD_FADE_MS.toFloat(), linear = true)
+        val secondsAlpha = (1f - aodFade(frameNowMs)) * secondsOn
         // The seconds leave the way the charge cell does: a small grow first, then the
         // shrink to nothing about their own centre — easeOutBack read backwards — and they
         // come back with the same overshoot, the same curve read forwards.
         val secondsScale = Tween.easeOutBack(secondsAlpha)
         var span = 0f
-        for (c in figures) span += if (c == ':') colon else slot
+        for (c in figures) span += when (c) { ':' -> colon; ClockFigures.BLANK -> 0f; else -> slot }
         aodClockCx = cx
-        aodClockSpan = span // the full width, before the seconds shrink — the band must not breathe
+        // the full width, before the seconds shrink — the band must not breathe — but
+        // without the seconds when they are switched off and never coming back
+        aodClockSpan = if (config.clockSeconds) span else span - (colon + 2f * slot)
         span -= (colon + 2f * slot) * (1f - secondsScale)
+        // STOOD ON END (PanelConfig.clockVertical, ClockStack): each figure's shift from the line,
+        // eased, so turning it on or off slides each pair to its row and the colons shrink away.
+        val verticalT = ease("clock:vertical", if (config.clockVertical) 1f else 0f, VERTICAL_MS, linear = true)
+        val vertical = if (verticalT < 0.5f) 4f * verticalT * verticalT * verticalT else 1f - (2f - 2f * verticalT).let { it * it * it } / 2f
+        verticalShown = verticalT >= 0.5f
+        verticalMoving = verticalT > 0.001f && verticalT < 0.999f
+        colonShrink = vertical
+        val stackTop = ANALOG_ROW_BASELINE + ROW_CARD_PAD_Y + DIAL_GAP
+        val stackBottom = markRegion().top - DIAL_CLEARANCE
+        // AM/PM AFTER THE LAST FIGURES, never going with the seconds (the owner, 2026-11-09): after
+        // the seconds, after the minutes as they go (always-on's too), and the time and it centred
+        // together; on end, right of the last row.
+        val markW = marker?.let { markerWidth(it) } ?: 0f
+        val markRoom = if (marker != null) (AMPM_GAP + markW) * markScale else 0f
+        // On end, its own row under the last (the owner, 2026-11-09), coming and going as the seconds' row does.
+        val markRow = if (marker != null) markScale else 0f
+        val timeCx = cx - markRoom / 2f * (1f - vertical)
+        if (marker != null) aodClockSpan += markRoom
+        ClockStack.shifts(figures, timeCx, span, slot, colon, secondsScale, CLOCK_BASELINE, CLOCK_SIZE, stackTop, stackBottom, vertical, figureShift, marker = markRow)
+        val markLineX = timeCx + span / 2f + AMPM_GAP * markScale
+        val markX = markLineX + ((cx - markW / 2f) - markLineX) * vertical
+        val markBase = CLOCK_BASELINE + (ClockStack.markerBaseline(CLOCK_SIZE, stackTop, stackBottom, secondsScale, markRow) - CLOCK_BASELINE) * vertical
+        // FITTED TO THE WIDTH: the time and a full-size AM/PM ran past the screen's rounded edge
+        // and up to the lenses (2026-11-09). Wider than the room beside the lenses, the line is
+        // drawn smaller about its middle, and as the seconds or AM/PM come and go it grows back.
+        // On end it is narrow, and stands at its size.
+        val clockFit = run {
+            val half = minOf(cx - (Panel.CUTOUT_RIGHT + CLOCK_FIT_MARGIN), (Panel.WIDTH - CLOCK_FIT_MARGIN) - cx)
+            val wide = span + markRoom
+            val fit = if (wide > 0f) minOf(1f, half * 2f / wide) else 1f
+            fit + (1f - fit) * vertical
+        }
+        aodClockSpan *= clockFit
+        run {
+            // Always-on's band round the stack, as it stands on end.
+            val rowH = CLOCK_SIZE * ClockStack.ROW
+            val rows = 2f + secondsScale.coerceIn(0f, 1f) + markRow
+            val middle = (stackTop + stackBottom) / 2f
+            val half = maxOf(slot, markW / 2f)
+            verticalBox.set(cx - half - AOD_BAND_AIR, middle - rows / 2f * rowH, cx + half + AOD_BAND_AIR, middle + rows / 2f * rowH)
+        }
         val clockBase = CLOCK_BASELINE
-        var x = cx - span / 2f
+        var x = timeCx - span / 2f
         if (aod) armMinuteTick()
 
         // The battery level above the clock, and the charging glyph beside it while a
@@ -7962,25 +8206,7 @@ class RearDialView(context: Context) : View(context) {
         // corner row would have carried it (PanelConfig.infoBatteryOn).
         val noReadout = onlyAccount == null && readoutGone
         val batteryOn = if (config.infoBatteryOn(noReadout)) 1f else 0f
-        val batteryAlpha = batteryOn + ((if (config.aodBattery) 1f else 0f) - batteryOn) * aodFade(frameNowMs)
-        if (batteryAlpha > 0.001f) {
-            val pct = batteryPercent()
-            if (pct >= 0) {
-                val top = clockBatteryBaseline()
-                val figure = "$pct%"
-                extras.textSize = typed(DATE_SIZE)
-                extras.textAlign = Paint.Align.CENTER
-                // The battery's own colour, not the clock's it sits over — the corner row's
-                // battery has always used it, and the switch for it says "Battery".
-                val battery = colorFor("battery:info", config.infoBatteryTint)
-                extras.color = (battery and 0x00FFFFFF) or ((0xFF * batteryAlpha).toInt() shl 24)
-                canvas.drawText(figure, cx, top, extras)
-                val ih = typed(DATE_SIZE)
-                drawBatteryGlyph(canvas, cx + extras.measureText(figure) / 2f + AOD_BATTERY_GAP / 2f, top - ih * 0.85f, ih, pct)
-                extras.textAlign = Paint.Align.LEFT
-                extras.textSize = typed(CLOCK_SIZE)
-            }
-        }
+        val batteryKeep = batteryOn + ((if (config.aodBattery) 1f else 0f) - batteryOn) * aodFade(frameNowMs)
 
         extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
         // MADE OF GLASS, the way the charge figure is: the panel is bent through the
@@ -7999,19 +8225,30 @@ class RearDialView(context: Context) : View(context) {
         // aodClock).
         val clockOn = if (config.infoClockOn) 1f else 0f
         val clockKeep = clockOn + ((if (config.aodClock) 1f else 0f) - clockOn) * aodFade(frameNowMs)
-        val glassClock = clockKeep > 0.004f && config.theme.isGlass &&
+        // Each face's own glass, handing over to the goo between them (ClockGoo).
+        val digitsKeep = clockKeep * ClockGoo.digitalShown(faceT)
+        val pillsKeep = clockKeep * ClockGoo.analogShown(faceT)
+        val glassClock = digitsKeep > 0.004f && config.theme.isGlass &&
             deferOver(canvas) { c ->
-                val layer = if (clockKeep < 0.996f) c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * clockKeep).toInt()) else -1
-                drawGlassClock(c, figures, cx, span, slot, colon, ink, secondsScale)
+                val layer = if (digitsKeep < 0.996f) c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * digitsKeep).toInt()) else -1
+                val fitted = fitClock(c, cx, clockFit)
+                // The clock's own glass tint (PanelConfig.clockGlassTint), the same as its hands'.
+                sdfTintAmount = CLOCK_SDF_TINT * config.clockGlassTint.coerceIn(0f, 1f)
+                drawGlassClock(c, figures, timeCx, span, slot, colon, ink, secondsScale)
+                marker?.let { drawClockMarker(c, it, markX, markBase, ink, markW, markScale) }
+                sdfTintAmount = Glass.SDF_TINT
+                c.restoreToCount(fitted)
                 if (layer >= 0) c.restoreToCount(layer)
             }
-        if (!glassClock && clockKeep > 0.004f) {
-            val layer = if (clockKeep < 0.996f) canvas.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * clockKeep).toInt()) else -1
+        if (!glassClock && digitsKeep > 0.004f) {
+            val layer = if (digitsKeep < 0.996f) canvas.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * digitsKeep).toInt()) else -1
+            val fitted = fitClock(canvas, cx, clockFit)
             for ((i, ch) in figures.withIndex()) {
-                val full = if (ch == ':') colon else slot
+                val full = when (ch) { ':' -> colon; ClockFigures.BLANK -> 0f; else -> slot }
                 val w = if (i >= 5) full * secondsScale else full
+                if (i >= 5 && secondsScale <= 0.01f) break
+                val placed = figureAt(canvas, i, ch, x, w)
                 if (i >= 5) {
-                    if (secondsScale <= 0.01f) break
                     // the glyph draws at its full size, scaled about the centre of its shrunken slot
                     canvas.save()
                     canvas.scale(secondsScale, secondsScale, x + w / 2f, clockBase - CLOCK_SIZE * 0.35f)
@@ -8032,9 +8269,55 @@ class RearDialView(context: Context) : View(context) {
                     )
                 }
                 if (i >= 5) canvas.restore()
+                canvas.restoreToCount(placed)
                 x += w
             }
+            marker?.let { drawClockMarker(canvas, it, markX, markBase, ink, markW, markScale) }
+            canvas.restoreToCount(fitted)
             if (layer >= 0) canvas.restoreToCount(layer)
+        }
+
+        // The second hand out of the minute hand and back (PillClock.split): its own run, and
+        // gone as always-on comes in, as the figures' seconds are.
+        val pillSeconds = ease("clock:pill-seconds", if (config.clockSeconds) 1f else 0f, PILL_SPLIT_MS, linear = true) *
+            (1f - aodFade(frameNowMs))
+        val angles = PillClock.angles(
+            now.get(java.util.Calendar.HOUR_OF_DAY), now.get(java.util.Calendar.MINUTE),
+            now.get(java.util.Calendar.SECOND), now.get(java.util.Calendar.MILLISECOND),
+        )
+        // The pills: deferred to the overlay pass as the glass figures are, so their glass bends
+        // the finished page.
+        if (pillsKeep > 0.004f) {
+            val pills: (Canvas) -> Unit = { c ->
+                pillClock.draw(c, dial, angles, ink, pillSeconds, pillsKeep, glass = config.theme.isGlass, tintStrength = config.clockGlassTint) { cc, r, radius, tint, turn, outline ->
+                    // As glassCard draws a card — held, its ambient rim, the ground under it —
+                    // but in the clock's own colour, as the glass figures are: not the Glass
+                    // settings' tint, not the light under it.
+                    drawGlassPane(
+                        cc, r, radius, tint, shape = outline,
+                        source = groundNode, held = true, aberration = Glass.BUTTON_ABERRATION, styled = false, lightTurn = turn,
+                    )
+                }
+            }
+            if (!deferOver(canvas, pills)) pills(canvas)
+        }
+        // Between the faces, the goo: the figures running into the pills, or back (ClockGoo).
+        if (clockKeep > 0.004f && faceT > 0.001f && faceT < 0.999f) {
+            val goo: (Canvas) -> Unit = { c ->
+                val layer = if (clockKeep < 0.996f) c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * clockKeep).toInt()) else -1
+                clockGoo.draw(
+                    c, faceT, Panel.WIDTH, Panel.HEIGHT, ink,
+                    digital = { gc, p ->
+                        val fitted = fitClock(gc, cx, clockFit)
+                        drawFiguresFlat(gc, p, figures, timeCx, span, slot, colon, secondsScale)
+                        marker?.let { drawMarkerFlat(gc, p, it, markX, markBase, markW, markScale) }
+                        gc.restoreToCount(fitted)
+                    },
+                    analog = { gc, p -> pillClock.silhouette(gc, dial, angles, pillSeconds, p) },
+                )
+                if (layer >= 0) c.restoreToCount(layer)
+            }
+            if (!deferOver(canvas, goo)) goo(canvas)
         }
 
         // ---- the date, spelled out ---------------------------------------------------
@@ -8047,38 +8330,12 @@ class RearDialView(context: Context) : View(context) {
         // always-on, so neither pops. The weather on the glass is not this line's.
         val aodNow = aodFade(frameNowMs)
         val dateOn = if (config.infoDateOn) 1f else 0f
-        val dateKeep = dateOn + ((if (config.aodDate) 1f else 0f) - dateOn) * aodNow
+        val dateAll = dateOn + ((if (config.aodDate) 1f else 0f) - dateOn) * aodNow
         val weatherOn = if (config.showWeatherLine) 1f else 0f
-        val weatherKeep = weatherOn + ((if (config.aodWeather) 1f else 0f) - weatherOn) * aodNow
-        if (dateKeep > 0.004f) {
-            val date = java.text.SimpleDateFormat("EEEE, MMMM d", java.util.Locale.getDefault())
-                .format(now.time) + ordinal(now.get(java.util.Calendar.DAY_OF_MONTH)) +
-                ", " + now.get(java.util.Calendar.YEAR)
-            // ITS OWN COLOUR. The date and the clock are two readings, and the settings give
-            // them a colour each — this took the clock's for both, which is the sort of thing
-            // that looks deliberate until somebody changes one of them and only half the page
-            // moves.
-            // Heavier, and at full strength. It was the body weight at 60% opacity over a
-            // record, which is two different ways of being quiet at once.
-            extras = extrasDate
-            extras.textAlign = Paint.Align.LEFT
-            extras.textSize = typed(DATE_SIZE)
-            val dateInk = colorFor("date:info", config.infoDateTint)
-            val dateW = extras.measureText(date)
-            val dateLeft = cx - dateW / 2f
-            if (config.theme.isGlass) {
-                clockRect.set(
-                    dateLeft - CARD_PAD_X, DATE_BASELINE - DATE_SIZE - ROW_CARD_PAD_Y,
-                    dateLeft + dateW + CARD_PAD_X, DATE_BASELINE + ROW_CARD_PAD_Y,
-                )
-                glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = dateKeep * (1f - aodNow))
-            }
-            extras.color = (dateInk and 0x00FFFFFF) or ((0xFF * dateKeep).toInt() shl 24)
-            canvas.drawText(date, dateLeft, DATE_BASELINE, extras)
-        }
-        if (weatherKeep > 0.004f) {
-            shownWeather()?.let { drawWeatherLine(canvas, cx, it, colorFor("weather", config.weatherTint), weatherKeep) }
-        }
+        val weatherAll = weatherOn + ((if (config.aodWeather) 1f else 0f) - weatherOn) * aodNow
+        // The analog face has its own column for them, right of the dial; these are the digital face's.
+        // Aside — over and under — for the dial and for the clock on end alike.
+        drawClockLines(canvas, cx, now, maxOf(analog, vertical), batteryKeep, dateAll, weatherAll, aodNow)
         extras = extrasBody
         extras.textSize = typed(18f)
     }
@@ -8105,6 +8362,8 @@ class RearDialView(context: Context) : View(context) {
         reading: dev.kb896.aiusage.data.WeatherReading,
         ink: Int,
         keep: Float = 1f,
+        /** How far below its usual place: the analog face puts it in the slider's band. */
+        shift: Float = 0f,
     ) {
         // The card reaches into the unlock slider's band, so the block goes when the
         // slider comes and returns when it goes — the same bargain the square artwork
@@ -8140,7 +8399,7 @@ class RearDialView(context: Context) : View(context) {
         // wrap. So the place's width is no term in the reading's width.
         val total = iconH + WeatherLine.ICON_GAP + tempW + wordsW
         val left = cx - total / 2f
-        val base = WeatherLine.BASELINE
+        val base = WeatherLine.BASELINE + shift
 
         if (config.theme.isGlass) {
             // ONE CARD ROUND BOTH, cut to whichever line is wider — two cards, or one cut
@@ -8150,7 +8409,7 @@ class RearDialView(context: Context) : View(context) {
             clockRect.set(
                 cx - wide / 2f - CARD_PAD_X, base - DATE_SIZE - ROW_CARD_PAD_Y,
                 cx + wide / 2f + CARD_PAD_X,
-                (if (place.isEmpty()) base else WeatherLine.PLACE_BASELINE) + ROW_CARD_PAD_Y,
+                (if (place.isEmpty()) base else WeatherLine.PLACE_BASELINE + shift) + ROW_CARD_PAD_Y,
             )
             glassCard(canvas, clockRect, ROW_CARD_RADIUS, alpha = keep * (1f - aodFade(frameNowMs)))
         }
@@ -8185,269 +8444,10 @@ class RearDialView(context: Context) : View(context) {
         if (place.isNotEmpty()) {
             extras.textSize = typed(WeatherLine.PLACE_SIZE)
             extras.color = (ink and 0x00FFFFFF) or ((0x99 * keep).toInt() shl 24)
-            canvas.drawText(place, cx - placeW / 2f, WeatherLine.PLACE_BASELINE, extras)
+            canvas.drawText(place, cx - placeW / 2f, WeatherLine.PLACE_BASELINE + shift, extras)
         }
         extras.textSize = typed(DATE_SIZE)
     }
-
-    /**
-     * The last ten notifications, on a wheel.
-     *
-     * THE SAME CARD THE STRIP USES, deliberately to the unit: same left edge, same height,
-     * same corner following the display's own arc, same row renderer. A notification
-     * arriving on the readout and the same notification found again up here should be the
-     * one object seen twice, not two designs for one thing — so this asks drawNoticeRow to
-     * lay it out exactly as the strip would.
-     *
-     * Only the newest is at rest. The ones either side are drawn where they will be if you
-     * keep scrolling, which is what makes it read as a wheel rather than a slideshow: the
-     * next item is already visible at the edge, half out of the card, waiting.
-     */
-    private fun drawNoticeWheel(canvas: Canvas) {
-        val shown = shownHistory()
-        // Nothing in the list, and nothing pulled down: nothing to draw.
-        if (shown.isEmpty() && leavingCard == null && !noticesShown && revealTo == 0f && drag != Drag.REVEAL) return
-        canvas.save()
-        // THE DRIFT COMES BACK OFF. Everything on this page rides the burn-in offset with
-        // the rest of the canvas side, which is right for type floating in the middle of a
-        // panel and wrong for a card whose whole shape is an argument about the edge it is
-        // attached to: three units of drift left three units of background showing above
-        // it and beside it, and a card held off the corner it is supposed to be growing
-        // out of is just a card in the wrong place.
-        //
-        // The strip does not drift either — it is drawn in the overlay pass, outside every
-        // translate — so this is the same decision, not a new one.
-        canvas.translate(-dxNow, -dyNow)
-        // Hidden above the page until pulled down, or on its way. See NoticeReveal.
-        val down = revealOffset()
-        if (down <= 0.5f) { canvas.restore(); return }
-        canvas.translate(0f, down - revealHeight())
-        val swiped = dismissOffset()
-        val swap = emptySwap()
-        // The first card arriving: "No notifications" goes up and out as it comes down.
-        if (swap != null && shown.isNotEmpty()) {
-            canvas.save()
-            canvas.translate(0f, -NOTICE_H * swap)
-            drawNoticesEmpty(canvas, 1f - swap)
-            canvas.restore()
-        }
-        // EMPTY, it says so: a band fading from black to nothing, "No notifications" on
-        // it — coming in under the last card as that one slides off.
-        if (shown.isEmpty()) {
-            val leaving = leavingOffset()
-            val show = if (leaving == null) 1f else (leaving / Panel.WIDTH).coerceIn(0f, 1f)
-            drawNoticesEmpty(canvas, show)
-            if (leaving == null) { canvas.restore(); return }
-        }
-        // THE STRIP'S OWN RECT, not a second one that looks similar. A notification seen
-        // arriving on the readout and the same one found again up here is one object seen
-        // twice, so it sits exactly where it sat: same left edge, same margin, same
-        // height, same corner following the display's arc.
-        // EACH THEME'S OWN NOTIFICATION, not one shape wearing two colours. Under glass
-        // that is a pane held clear of the edges with its top-right corner following the
-        // display's arc; under ORIGINAL it is a full-width opaque band with a single
-        // rounded corner at the bottom left, because that one hangs off the top edge of
-        // the screen rather than floating on it. Falling back to a translucent version of
-        // the glass card gave the original theme something it has never had anywhere else
-        // on the panel.
-        val glass = config.theme.isGlass
-        val margin = if (glass) GlassCard.MIN else 0f
-        val r = if (glass) GLASS_NOTICE_RADIUS else cornerRadius() / CORNER_DIVISOR
-        noticeWheelRect.set(NOTICE_LEFT, margin, Panel.WIDTH - margin, NOTICE_H)
-        val cx = noticeWheelRect.centerX()
-        val cy = noticeWheelRect.centerY()
-        // TURNED BY THE DEMO, when there is one. A page of notifications that never moves
-        // says the panel holds ten and shows one; the whole point of the wheel is that it
-        // goes back through them, and a film that does not do it leaves the feature
-        // invisible. Paced so the neighbours are legible on the way past rather than
-        // flicked through.
-        val step = demoNow()
-        if (step != null && step.page == PAGE_NOTICES) {
-            val into = ((frameNowMs - demoStartedAt) / 1000f) % DEMO_WHEEL_PERIOD
-            noticeWheelAt = (into / DEMO_WHEEL_PERIOD * (shown.size - 1))
-                .coerceIn(0f, (shown.size - 1).toFloat())
-            wheelSettling = false
-        }
-
-        // SETTLES, it does not snap. Letting go a little past a card used to round the
-        // position and be done with it, which lands the card in place with no travel at
-        // all — the one movement on this panel that simply cut. The pager has settled its
-        // pages since it was written; this borrows the same duration so a wheel and a page
-        // let go of a finger the same way.
-        if (wheelSettling) {
-            val t = ((frameNowMs - wheelSettleAt) / wheelMs).coerceIn(0f, 1f)
-            noticeWheelAt = wheelFrom + (wheelTo - wheelFrom) * Glide.curve(t, wheelCarried)
-            if (t >= 1f) {
-                wheelSettling = false
-                noticeWheelAt = wheelTo
-            } else {
-                animating = true
-            }
-        }
-        val at = noticeWheelAt
-
-        // A CAROUSEL, so each notification is its own card rather than rows sliding inside
-        // one. Furthest first, so the nearest is laid over the others: the one you are on
-        // is whole and in front, and its neighbours sit half a card behind it, a little
-        // smaller and a little faded, which is what says there is more in both directions
-        // without having to draw a scrollbar to say it.
-        // The wheel's cards where they stand — each with its own glide, and the one under
-        // the finger off to the right — and the card swiped away, sliding off on its own.
-        class Card(val notice: Notice, val d: Float, val x: Float)
-        val cards = shown.mapIndexed { i, n -> Card(n, i - at + glideOf(n), if (i == dismissIndex) swiped else 0f) }
-            .toMutableList()
-        leavingOffset()?.let { x -> leavingCard?.let { cards += Card(it, leavingD, x) } }
-        // The first card into an empty list comes down from above as the band leaves.
-        val cardsSave = if (swap != null) canvas.save() else -1
-        if (swap != null) canvas.translate(0f, -(1f - swap) * (NOTICE_H + margin))
-        for (card in cards.sortedByDescending { Math.abs(it.d) }) {
-            val d = card.d
-            if (Math.abs(d) > CAROUSEL_REACH) continue
-            // TWO STRETCHES, because a neighbour and a departure want different things.
-            //
-            // Out to one card away it fades only a little: that one is the next
-            // notification, it is meant to be read at a glance, and its job is to say
-            // there is more. PAST one it keeps going, all the way to nothing by the time
-            // it reaches the edge of what is drawn. It used to stop at the neighbour's
-            // value and then be culled, so a card left at nearly half strength and then
-            // simply ceased to exist — which is the disappearing you can see.
-            val away = Math.abs(d)
-            val near = away.coerceAtMost(1f)
-            // ORIGINAL DOES NOT SHRINK. Its card is attached to the edge of the screen and
-            // its neighbours arrive across that edge; a card that is both sliding in from
-            // the side AND getting smaller is two ideas about the same movement. Under
-            // glass, where the card floats clear of every edge, shrinking is the only
-            // thing that can say "behind".
-            val scale = if (glass) 1f - CAROUSEL_SHRINK * near else 1f
-            val fade =
-                if (away <= 1f) 1f - CAROUSEL_FADE * away
-                else (1f - CAROUSEL_FADE) *
-                    (1f - (away - 1f) / (CAROUSEL_REACH - 1f)).coerceIn(0f, 1f)
-            // THE CARD'S RECT IS COMPUTED, NOT TRANSFORMED. Scaling the canvas would
-            // scale what the pane SAMPLES along with the pane: the backdrop would come out
-            // magnified inside the smaller card, which is a photograph of the panel rather
-            // than a window onto it. A pane has to sample and draw at one to one, so the
-            // shrinking is done by giving it a smaller rect in the same space.
-            val dy = d * NOTICE_H * CAROUSEL_STEP
-            val hh = noticeWheelRect.height() / 2f * scale
-            if (glass) {
-                // Held clear of every edge, so it shrinks about its own middle.
-                val hw = noticeWheelRect.width() / 2f * scale
-                cardRect.set(cx - hw, cy + dy - hh, cx + hw, cy + dy + hh)
-            } else {
-                // KEPT ON THE RIGHT EDGE, and arriving across it. This card is attached to
-                // the side of the screen rather than floating in the middle of it, so a
-                // neighbour that shrank about its centre would pull away from the one edge
-                // it is meant to be part of. Its right edge stays put and its LEFT edge
-                // travels, which makes the one behind read as still coming in from the
-                // side rather than as a smaller copy parked in the middle.
-                cardRect.set(
-                    noticeWheelRect.left + away.coerceAtMost(1f) * ORIGINAL_SLIDE,
-                    cy + dy - hh, noticeWheelRect.right, cy + dy + hh,
-                )
-            }
-            // The card being swiped away rides the finger right, contents and all.
-            cardRect.offset(card.x, 0f)
-            val cr = r * scale
-            val layer = fade < 0.999f
-            // Restored to this count below: the alpha layer is a save of its own, and
-            // popping a fixed two left it open for every fading card — on ORIGINAL,
-            // where the wheel is drawn inline, the clock, battery, date and weather
-            // then inherited the wheel's always-on fade and popped back when it ended.
-            val cardSave = canvas.save()
-            if (layer) {
-                canvas.saveLayerAlpha(cardRect, (255 * fade).toInt().coerceIn(0, 255))
-            }
-            val tr = GlassCard.innerRadius(cornerRadius(), margin, cr)
-            noticeWheelShape.rewind()
-            noticeWheelShape.addRoundRect(
-                cardRect,
-                if (glass) floatArrayOf(cr, cr, tr, tr, cr, cr, cr, cr)
-                // The strip's own corners: bottom-left only. See drawNotice.
-                else floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, cr, cr),
-                android.graphics.Path.Direction.CW,
-            )
-            if (!glass ||
-                !drawGlassPane(
-                    canvas, cardRect, cr, reactive(glassNoticeTint(), cardRect),
-                    shape = noticeWheelShape, held = true,
-                )
-            ) {
-                noticePaint.style = Paint.Style.FILL
-                // OPAQUE, and the strip's own colour. glassNoticeTint is the ground at a
-                // fraction of its opacity, which is what a PANE wants behind type it is
-                // refracting; an original-theme card is not refracting anything and a
-                // see-through one is just a card you cannot read.
-                noticePaint.color =
-                    if (glass) glassNoticeTint()
-                    else colorFor("notice:bg", config.notificationGround or (0xFF shl 24))
-                noticePaint.alpha = if (glass) noticePaint.alpha else 255
-                canvas.drawPath(noticeWheelShape, noticePaint)
-            }
-            // The CONTENTS may scale freely — type and an icon are painted, not sampled,
-            // so nothing about them depends on where the panel is underneath.
-            // The CONTENTS follow the card: down by the same offset, right by however far
-            // its left edge went, and scaled about the middle when the card is. Type and
-            // an icon are painted rather than sampled, so unlike the pane they can be
-            // transformed freely.
-            canvas.save()
-            canvas.clipRect(cardRect)
-            canvas.translate(cardRect.left - noticeWheelRect.left, dy)
-            if (scale < 0.999f) canvas.scale(scale, scale, cx, cy)
-            drawNoticeRow(canvas, card.notice, noticeWheelRect.top)
-            canvas.restore()
-            canvas.restoreToCount(cardSave)
-        }
-        if (cardsSave >= 0) canvas.restoreToCount(cardsSave)
-        canvas.restore()
-    }
-
-    /** When the first card came into an empty list; see [emptySwap]. */
-    private var emptySwapAt = 0L
-
-    /** How far through that swap — the band up and out, the card down and in — or null when none is running. */
-    private fun emptySwap(): Float? {
-        if (emptySwapAt == 0L) return null
-        val t = ((frameNowMs - emptySwapAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
-        if (t >= 1f) { emptySwapAt = 0L; return null }
-        animating = true
-        return Tween.easeInOut(t)
-    }
-
-    /**
-     * How far down the page a finger still belongs to the wheel.
-     *
-     * EVERYTHING ABOVE THE CLOCK, not just the card. The card is 143 units of a 572-unit
-     * panel and it is where the cards happen to be RESTING — but a carousel is a thing you
-     * reach into, and asking someone to land inside the one card that is currently in
-     * front is asking them to aim at a moving target on a screen facing away from them.
-     *
-     * The clock is the boundary because it is the next thing down that means something
-     * else: above it is the wheel and its neighbours coming and going, below it is the
-     * time and the date, which nothing scrolls. Measured from the clock's cell rather than
-     * its baseline so the grab stops where the numerals start, not where they sit.
-     */
-    private fun wheelGrabBottom(): Float =
-        CLOCK_BASELINE - CLOCK_SIZE / 2f - CLOCK_SIZE * CLOCK_ROLL_CELL / 2f
-
-    /** Which of the ten the wheel is on. Whole numbers rest; the fraction is a drag. */
-    private var noticeWheelAt = 0f
-
-    /** Whether this gesture belongs to the wheel rather than to the pager. */
-    private var onWheel = false
-
-    /** The settle after a release: where it let go, where it is going, and when. */
-    private var wheelSettling = false
-    private var wheelFrom = 0f
-    private var wheelTo = 0f
-    private var wheelSettleAt = 0L
-
-    /** How long the wheel's settle takes, and whether it carries on from a finger. See Glide. */
-    private var wheelMs = PAGE_SETTLE_MS
-    private var wheelCarried = false
-
-    /** Where the wheel stood when the finger landed, so the drag is relative to it. */
-    private var wheelDownAt = 0f
 
     // ---- the control centre ----
 
@@ -8584,8 +8584,15 @@ class RearDialView(context: Context) : View(context) {
      */
     val controlCenterUp: Boolean get() = ccOpen || ccTo > 0f || drag == Drag.CC
 
+    /** The control centre under a finger, trailing it when it is faster than ControlCenter.DRAG_SPEED_MAX. */
+    private val ccChase = ControlCenter.Chase()
+
     private fun controlCenterProgress(): Float {
-        if (drag == Drag.CC) return ControlCenter.progress(ccOpen, ccDy)
+        if (drag == Drag.CC) {
+            val shown = ccChase.to(ccDy, frameNowMs)
+            if (shown != ccDy) animating = true
+            return ControlCenter.progress(ccOpen, shown)
+        }
         if (ccAt == 0L) return ccTo
         val t = ((frameNowMs - ccAt) / ccSettleMs.toFloat()).coerceIn(0f, 1f)
         if (t < 1f) animating = true
@@ -8609,6 +8616,14 @@ class RearDialView(context: Context) : View(context) {
         ccSettleMs = ControlCenter.settleMs(Math.abs(ccTo - from) * ControlCenter.TRAVEL, toward)
         ccAt = SystemClock.uptimeMillis()
         invalidate()
+    }
+
+    /** Closed as a swipe up would close it, from wherever it stands: the shell's word (a swipe under Xiaomi's bottom window). */
+    fun closeControlCenter() {
+        if (!ccOpen && ccTo == 0f && drag != Drag.CC) return
+        if (drag == Drag.CC || drag == Drag.BRIGHT) drag = Drag.UNDECIDED
+        ccGesture = false
+        settleControlCenter(false, controlCenterProgress())
     }
 
     /** Shut at once: a lock, always-on. */
@@ -8642,7 +8657,7 @@ class RearDialView(context: Context) : View(context) {
                 ccVelocity = 0f; ccLastY = event.y; ccLastAt = now
                 ccOnCell = shown && brightCellRect(1f).contains(event.x, event.y)
                 ccOnButton = shown && autoButtonRect(1f).contains(event.x, event.y)
-                ccOnTile = if (shown) (0 until 4).firstOrNull { quickTileRect(it, 1f).contains(event.x, event.y) } ?: -1 else -1
+                ccOnTile = if (shown) (0 until ControlCenterLayout.TILES).firstOrNull { quickTileRect(it, 1f).contains(event.x, event.y) } ?: -1 else -1
                 // From wherever a settle had got to.
                 if (shown && ccAt != 0L) { ccOpen = controlCenterProgress() > 0.5f; ccAt = 0L; ccTo = if (ccOpen) 1f else 0f }
                 return true
@@ -8653,6 +8668,7 @@ class RearDialView(context: Context) : View(context) {
                 val dy = event.y - downY
                 if (drag == Drag.UNDECIDED && maxOf(Math.abs(dx), Math.abs(dy)) >= DRAG_SLOP) {
                     drag = if (ccOnCell && Math.abs(dy) > Math.abs(dx)) Drag.BRIGHT else Drag.CC
+                    if (drag == Drag.CC) ccChase.snap(0f, now)
                     if (drag == Drag.BRIGHT) {
                         brightFrom = brightLevel.coerceAtLeast(ControlCenter.MIN_LEVEL)
                         // Set by hand: no longer automatic (the service puts it on manual).
@@ -8687,7 +8703,8 @@ class RearDialView(context: Context) : View(context) {
                 if (!ccGesture) return false
                 when (drag) {
                     Drag.CC -> {
-                        val at = ControlCenter.progress(ccOpen, ccDy)
+                        // From where it is shown, which may trail the finger.
+                        val at = ControlCenter.progress(ccOpen, ccChase.shown.takeIf { !it.isNaN() } ?: ccDy)
                         // Let go: past halfway it goes. Taken away (a cancel): it stays as it was.
                         // A finger that stopped before lifting is not flicking.
                         val v = if (now - ccLastAt > 80L) 0f else ccVelocity
@@ -8710,7 +8727,13 @@ class RearDialView(context: Context) : View(context) {
                         if (ccOnCell) { brightChangedAt = now; invalidate() }
                         // A tile: its switch, turned now on the panel and then in the phone.
                         val tile = ccOnTile
-                        if (tile >= 0 && (tile == 0 || quickReachable) && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                        // Locked: Bluetooth, data and Wi-Fi ask for the code (the shell's keypad over this).
+                        if (backLocked && tile in 1 until 4 && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                            onAskCode?.invoke()
+                        } else if ((tile == ControlCenterLayout.SHOT || tile == ControlCenterLayout.RECORD) && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                            // The shell captures the back: the control centre goes first, so it is not in it.
+                            onCapture?.invoke(tile == ControlCenterLayout.RECORD)
+                        } else if (tile >= 0 && (tile == 0 || quickReachable) && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
                             val to = !quickOn[tile]
                             setQuickOn(tile, to)
                             onQuick?.invoke(quickNames[tile], to)
@@ -8769,7 +8792,7 @@ class RearDialView(context: Context) : View(context) {
         val tiles = FloatArray(4) { i -> if (i == 0 || quickReachable) quickShown(i) else 0f }
         val look = ControlCenterPainter.Look(
             level = level, figureGrow = brightFigureGrow(), unavailable = brightUnavailable,
-            auto = auto, tiles = tiles, reachable = quickReachable,
+            auto = auto, tiles = tiles, reachable = quickReachable, locked = backLocked, recording = recording,
         )
         val painter = ccPainter()
         painter.theme = config.theme
@@ -8789,53 +8812,6 @@ class RearDialView(context: Context) : View(context) {
         }
         // The panel's extras at the body size its other users expect, as the cell left them.
         extras.textSize = typed(18f)
-    }
-
-    // ---- the cards pulled into view, and one sent away ----
-
-    /** The finger landed on the Info page with cards to show: see NoticeReveal. */
-    private var onReveal = false
-    private var revealDy = 0f
-    private var revealFrom = 0f
-    private var revealTo = 0f
-    private var revealAt = 0L
-
-    /**
-     * Pulled down into view by a swipe on the Info page. Not kept: it is one more step of
-     * the page, so the page opens with them hidden, and leaving it hides them again.
-     */
-    private var noticesShown = false
-
-    /** How far the cards travel: from above the page down to where they rest, over the clock's cell. */
-    private fun revealHeight(): Float = wheelGrabBottom()
-
-    /** How far down the cards are now: under a finger, settling, or at rest. */
-    private fun revealOffset(): Float {
-        val h = revealHeight()
-        if (drag == Drag.REVEAL) return NoticeReveal.offset(noticesShown, revealDy, h)
-        val t = ((frameNowMs - revealAt) / revealMs).coerceIn(0f, 1f)
-        if (t < 1f) animating = true
-        return revealFrom + (revealTo - revealFrom) * Glide.curve(t, revealCarried)
-    }
-
-    /** How long the reveal's settle takes, and whether it carries on from a finger. See Glide. */
-    private var revealMs = PAGE_SETTLE_MS
-    private var revealCarried = false
-
-    /** The finger let go: into view, back up, or springing to where it was — at its speed. */
-    private fun letGoOfReveal(commit: Boolean) {
-        val h = revealHeight()
-        val now = NoticeReveal.offset(noticesShown, revealDy, h)
-        val (_, vy) = releaseVelocity()
-        if (commit) noticesShown = NoticeReveal.release(noticesShown, revealDy, h, vy)
-        revealFrom = now
-        revealTo = if (noticesShown) h else 0f
-        val toward = if (revealTo > now) vy else -vy
-        revealCarried = commit && toward > 0f
-        revealMs = Glide.ms(Math.abs(revealTo - now), if (revealCarried) toward else 0f, GLIDE_MIN_MS, PAGE_SETTLE_MS)
-        revealAt = SystemClock.uptimeMillis()
-        revealDy = 0f
-        invalidate()
     }
 
     // ---- the finger's speed, for whatever carries on after it lets go ----
@@ -8859,137 +8835,13 @@ class RearDialView(context: Context) : View(context) {
     private fun releaseVelocity(): Pair<Float, Float> =
         if (SystemClock.uptimeMillis() - gestureLastAt > 80L) 0f to 0f else gestureVx to gestureVy
 
-    /** The Info page is up with its list pulled down: the strip would show its newest card twice. */
-    private fun listInView(): Boolean = noticing >= 0.5f && noticesShown
-
-    /** Off the Info page, they are hidden again — out of sight, so at once. */
-    private fun hideNoticesOffPage() {
-        if (!noticesShown && revealTo == 0f) return
-        noticesShown = false
-        revealFrom = 0f; revealTo = 0f; revealAt = 0L
-    }
-
-    /** The card being swiped right, and how far; once let go past the line, when it left. */
-    private var dismissIndex = -1
-    private var dismissDx = 0f
-    private var dismissFrom = 0f
-    private var dismissAt = 0L
-
-    /** Told the front's key of a card swiped away on the back — to clear it on the front too. */
-    var onNoticeDismissed: ((String) -> Unit)? = null
-
-    /** How far right the swiped card is: under the finger, leaving, or springing back. */
-    private fun dismissOffset(): Float {
-        val w = Panel.WIDTH.toFloat()
-        if (drag == Drag.DISMISS) return NoticeReveal.dismissOffset(dismissDx, w)
-        if (dismissIndex < 0) return 0f
-        // Let go short of the line: it springs back.
-        val t = ((frameNowMs - dismissAt) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
-        if (t >= 1f) { dismissIndex = -1; return 0f }
-        animating = true
-        return dismissFrom * (1f - Tween.easeInOut(t))
-    }
-
-    /**
-     * Let go past the line: the card is out of the list AT ONCE, so the cards around it
-     * close the gap while it is still sliding off — one movement, not two in a row — and
-     * it is drawn on its own as it goes ([leavingCard]).
-     */
-    private fun letGoOfDismiss(commit: Boolean) {
-        val w = Panel.WIDTH.toFloat()
-        val now = SystemClock.uptimeMillis()
-        val x = NoticeReveal.dismissOffset(dismissDx, w)
-        dismissDx = 0f
-        if (commit && NoticeReveal.dismissed(x, w) && dismissIndex in history.indices) {
-            leavingCard = history[dismissIndex]
-            leavingD = dismissIndex - noticeWheelAt
-            leavingFrom = x
-            leavingAt = now
-            // Off the edge at the finger's speed, not stopping first.
-            val (vx, _) = releaseVelocity()
-            leavingCarried = vx > 0f
-            leavingMs = Glide.ms(w - x, vx, GLIDE_MIN_MS, PAGE_SETTLE_MS)
-            val index = dismissIndex
-            dismissIndex = -1
-            removeHistoryAt(index, fromBack = true)
-        } else {
-            dismissFrom = x
-            dismissAt = now
-        }
-        invalidate()
-    }
-
-    /** The card swiped away, sliding off on its own: where it stood on the wheel, and from how far right, since when. */
-    private var leavingCard: Notice? = null
-    private var leavingD = 0f
-    private var leavingFrom = 0f
-    private var leavingAt = 0L
-    private var leavingMs = PAGE_SETTLE_MS
-    private var leavingCarried = false
-
-    /** How far right the leaving card is now; null once it is gone. */
-    private fun leavingOffset(): Float? {
-        leavingCard ?: return null
-        val t = ((frameNowMs - leavingAt) / leavingMs).coerceIn(0f, 1f)
-        if (t >= 1f) { leavingCard = null; return null }
-        animating = true
-        return leavingFrom + (Panel.WIDTH - leavingFrom) * Glide.curve(t, leavingCarried)
-    }
-
-    /**
-     * Take one card out of the list. The wheel stays where it is, so the next card slides
-     * into the gap; [fromBack] — swiped here — tells the front, which clears it there when
-     * "Match the front notifications" is on.
-     */
-    private fun removeHistoryAt(index: Int, fromBack: Boolean) {
+    /** Take one card out of the list, and off the strip with it. */
+    private fun removeHistoryAt(index: Int) {
         if (index !in history.indices) return
-        val before = history.toList()
-        val atBefore = noticeWheelAt
-        val focus = Math.round(noticeWheelAt)
         val gone = history.removeAt(index)
         saveHistory()
         forgetOnStrip(gone)
-        // Emptied, the list stays where it is and says so — see drawNoticesEmpty.
-        // The card in view stays in view: one gone from above it takes the wheel up a slot
-        // with it; the last one gone, the wheel is on the one before.
-        noticeWheelAt = when {
-            history.isEmpty() -> 0f
-            index < focus -> noticeWheelAt - 1f
-            else -> noticeWheelAt.coerceAtMost((history.size - 1).toFloat())
-        }
-        wheelSettling = false
-        holdPlaces(before, atBefore)
-        if (fromBack && gone.key.isNotEmpty()) onNoticeDismissed?.invoke(gone.key)
         invalidate()
-    }
-
-    /**
-     * NOTHING JUMPS when the list changes under the wheel. Each card keeps where it was
-     * drawn and glides to its new place over a page's settle — its own glide, so a second
-     * change while the first is still running (a card cleared on the front just after one
-     * was swiped here) adds to it rather than cutting it short. Called after the change,
-     * with the list and the wheel as they were.
-     */
-    private fun holdPlaces(before: List<Notice>, atBefore: Float) {
-        val now = SystemClock.uptimeMillis()
-        history.forEachIndexed { i, n ->
-            val was = before.indexOfFirst { it === n }
-            if (was < 0) return@forEachIndexed
-            val r = (was - atBefore) - (i - noticeWheelAt)
-            if (Math.abs(r) > 0.001f) cardGlides[n] = (glideOf(n) + r) to now
-        }
-    }
-
-    /** Each card's glide: how far from its place it started, in cards, and when. */
-    private val cardGlides = java.util.IdentityHashMap<Notice, Pair<Float, Long>>()
-
-    /** How far card [n] still stands from its place. */
-    private fun glideOf(n: Notice): Float {
-        val (from, at) = cardGlides[n] ?: return 0f
-        val t = ((frameNowMs - at) / PAGE_SETTLE_MS).coerceIn(0f, 1f)
-        if (t >= 1f) { cardGlides.remove(n); return 0f }
-        animating = true
-        return from * (1f - Tween.easeInOut(t))
     }
 
     /**
@@ -9011,7 +8863,7 @@ class RearDialView(context: Context) : View(context) {
         pending.removeAll { it.key == key }
         notice?.let { if (it.key == key) noticeAt = SystemClock.elapsedRealtime() - NOTICE_MS - 1 }
         val i = history.indexOfFirst { listKey(it) == key }
-        if (i >= 0) removeHistoryAt(i, fromBack = false)
+        if (i >= 0) removeHistoryAt(i)
     }
 
     /** What is on the front now (Match the front notifications): cards whose notification left go. */
@@ -9019,24 +8871,12 @@ class RearDialView(context: Context) : View(context) {
         pending.removeAll { everything || it.key.isNotEmpty() && it.key !in active }
         val keep = if (everything) history.map { false } else dev.kb896.aiusage.data.NoticeMatch.keep(history.map { it.key }, active)
         if (keep.all { it }) return
-        val before = history.toList()
-        val atBefore = noticeWheelAt
-        val focused = before.getOrNull(Math.round(noticeWheelAt))
         val kept = history.filterIndexed { i, _ -> keep[i] }
         history.filterIndexed { i, _ -> !keep[i] }.forEach(::forgetOnStrip)
         history.clear(); history.addAll(kept)
         saveHistory()
-        // The card in view stays in view if it stayed; otherwise the wheel is where it was.
-        val still = kept.indexOfFirst { it === focused }
-        noticeWheelAt = (if (still >= 0) still.toFloat() else noticeWheelAt)
-            .coerceIn(0f, (history.size - 1).coerceAtLeast(0).toFloat())
-        wheelSettling = false
-        holdPlaces(before, atBefore)
         invalidate()
     }
-
-    private val noticeWheelRect = android.graphics.RectF()
-    private val noticeWheelShape = android.graphics.Path()
 
     /**
      * A run of glass glyphs, left to right: the clock's numerals with nothing rolling.
@@ -9099,10 +8939,12 @@ class RearDialView(context: Context) : View(context) {
         val cell = CLOCK_SIZE * CLOCK_ROLL_CELL
         var x = cx - span / 2f
         for ((i, ch) in figures.withIndex()) {
-            val full = if (ch == ':') colon else slot
+            val full = when (ch) { ':' -> colon; ClockFigures.BLANK -> 0f; else -> slot }
             val seconds = i >= 5
             if (seconds && secondsScale <= 0.01f) break
             val w = if (seconds) full * secondsScale else full
+            if (ch == ClockFigures.BLANK) { x += w; continue }
+            val placed = figureAt(canvas, i, ch, x, w)
             if (seconds) {
                 // the glyph at its full size, scaled about the centre of its shrunken slot
                 canvas.save()
@@ -9115,55 +8957,70 @@ class RearDialView(context: Context) : View(context) {
                     canvas.drawText(":", x, CLOCK_BASELINE, extras)
                 }
                 if (seconds) canvas.restore()
+                canvas.restoreToCount(placed)
                 x += w
                 continue
             }
-            val key = "clock:$i"
-            val was = clockRolls[key]
-            if (was == null || was.first != ch) {
-                clockRolls[key] = ch to (if (was == null) 0L else frameNowMs)
-                if (was != null) clockRollUntil = frameNowMs + CLOCK_ROLL_MS.toLong() // a frozen page thaws for the roll
-            }
-            val state = clockRolls[key]!!
-            val since = frameNowMs - state.second
-            val t =
-                if (state.second == 0L) 1f
-                else (since / CLOCK_ROLL_MS).coerceIn(0f, 1f)
-            if (t < 1f) animating = true
-            // Out-cubic: fast away from the old figure, easing onto the new one. Written
-            // here rather than added to Tween because it is the only thing that wants it.
-            val eased = 1f - (1f - t) * (1f - t) * (1f - t)
-            val mid = CLOCK_BASELINE - CLOCK_SIZE / 2f
-            canvas.save()
-            // WIDE ENOUGH FOR THE FIELD, not just the figure. A signed distance field is
-            // the glyph PLUS a margin for its spread to live in, and that margin is where
-            // the bevel is — the part that makes it read as glass rather than as a hole.
-            // Clipped to the slot, every numeral lost its right-hand edge.
-            //
-            // Horizontally there is nothing to clip anyway: the slots do not overlap and
-            // only one figure is ever drawn in each. The clip exists for the ROLL, which
-            // is vertical, so it runs the width of the panel and only bounds the cell.
-            canvas.clipRect(0f, mid - cell / 2f, Panel.WIDTH.toFloat(), mid + cell / 2f)
-            // Arriving from below, and whatever it replaced leaving through the top.
-            val rise = (1f - eased) * cell
-            if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, full, ch.toString()), mid + rise)) {
-                canvas.drawText(ch.toString(), x, CLOCK_BASELINE + rise, extras)
-            }
-            val leaving = clockLeaving[key]
-            if (t < 1f && leaving != null && leaving != ch) {
-                if (!drawSdfText(
-                        canvas, leaving.toString(), extras,
-                        slotRight(x, full, leaving.toString()), mid + rise - cell,
-                    )
-                ) {
-                    canvas.drawText(leaving.toString(), x, CLOCK_BASELINE + rise - cell, extras)
-                }
-            }
-            canvas.restore()
+            rollGlass(canvas, "clock:$i", ch, x, full)
             if (seconds) canvas.restore()
-            if (t >= 1f) clockLeaving[key] = ch
+            canvas.restoreToCount(placed)
             x += w
         }
+    }
+
+    /**
+     * One glass slot of the clock, [ch] in the slot from [x], [full] wide, on CLOCK_BASELINE (the
+     * caller moves the canvas for any other place): rolling up when it changes — the new figure
+     * from below, the old one out through the top — on the wheel keyed [key], which stays with the
+     * slot and not the figure. The figures' own, and AM/PM's.
+     */
+    private fun rollGlass(canvas: Canvas, key: String, ch: Char, x: Float, full: Float) {
+        val cell = CLOCK_SIZE * CLOCK_ROLL_CELL
+        val was = clockRolls[key]
+        if (was == null || was.first != ch) {
+            clockRolls[key] = ch to (if (was == null) 0L else frameNowMs)
+            if (was != null) clockRollUntil = frameNowMs + CLOCK_ROLL_MS.toLong() // a frozen page thaws for the roll
+        }
+        val state = clockRolls[key]!!
+        val since = frameNowMs - state.second
+        val t =
+            if (state.second == 0L) 1f
+            else (since / CLOCK_ROLL_MS).coerceIn(0f, 1f)
+        if (t < 1f) animating = true
+        // Out-cubic: fast away from the old figure, easing onto the new one. Written
+        // here rather than added to Tween because it is the only thing that wants it.
+        val eased = 1f - (1f - t) * (1f - t) * (1f - t)
+        val mid = CLOCK_BASELINE - CLOCK_SIZE / 2f
+        canvas.save()
+        // WIDE ENOUGH FOR THE FIELD, not just the figure. A signed distance field is
+        // the glyph PLUS a margin for its spread to live in, and that margin is where
+        // the bevel is — the part that makes it read as glass rather than as a hole.
+        // Clipped to the slot, every numeral lost its right-hand edge.
+        //
+        // Horizontally there is nothing to clip anyway: the slots do not overlap and
+        // only one figure is ever drawn in each. The clip exists for the ROLL, which
+        // is vertical, so it runs the width of the panel and only bounds the cell.
+        // NOT THE PANEL'S WIDTH EITHER: fitted to the width (fitClock) the line is drawn smaller,
+        // and in its own units it runs past the panel's right edge — clipped there, the M of a
+        // full-size AM was cut in half (2026-11-09). Only the cell's height is the roll's.
+        canvas.clipRect(-Panel.WIDTH.toFloat(), mid - cell / 2f, 2f * Panel.WIDTH, mid + cell / 2f)
+        // Arriving from below, and whatever it replaced leaving through the top.
+        val rise = (1f - eased) * cell
+        if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, full, ch.toString()), mid + rise)) {
+            canvas.drawText(ch.toString(), x, CLOCK_BASELINE + rise, extras)
+        }
+        val leaving = clockLeaving[key]
+        if (t < 1f && leaving != null && leaving != ch) {
+            if (!drawSdfText(
+                    canvas, leaving.toString(), extras,
+                    slotRight(x, full, leaving.toString()), mid + rise - cell,
+                )
+            ) {
+                canvas.drawText(leaving.toString(), x, CLOCK_BASELINE + rise - cell, extras)
+            }
+        }
+        canvas.restore()
+        if (t >= 1f) clockLeaving[key] = ch
     }
 
     /**
@@ -9180,6 +9037,118 @@ class RearDialView(context: Context) : View(context) {
      * the figure belongs in the middle of it, so that a 1 rolling past does not shunt the
      * rest of the time sideways.
      */
+    /**
+     * The canvas moved for figure [i] ([ch], its slot from [x], [w] wide) from its place in the
+     * line to where the clock standing on end puts it (ClockStack), and a colon shrunk away about
+     * its middle as it does. Restore with the count it returns.
+     */
+    private fun figureAt(canvas: Canvas, i: Int, ch: Char, x: Float, w: Float): Int {
+        val saved = canvas.save()
+        if (2 * i + 1 < figureShift.size) canvas.translate(figureShift[2 * i], figureShift[2 * i + 1])
+        if (ch == ':' && colonShrink > 0.001f) {
+            val k = 1f - colonShrink
+            canvas.scale(k, k, x + w / 2f, CLOCK_BASELINE - CLOCK_SIZE * ClockStack.CENTRE)
+        }
+        return saved
+    }
+
+    /**
+     * AM or PM ([marker], [width] wide, at [scale] as it comes and goes) AT THE FIGURES' SIZE,
+     * its left at [x] on [base], in the clock's [ink]
+     * (the owner, 2026-11-09): two slots, the A or P one ROLLING as the figures do when it changes
+     * at noon and midnight, the M standing. Glass under GLASS, type otherwise, as the figures.
+     */
+    private fun drawClockMarker(canvas: Canvas, marker: String, x: Float, base: Float, ink: Int, width: Float, scale: Float) {
+        val was = extras
+        extras = extrasBody
+        val size = extras.textSize
+        val align = extras.textAlign
+        extras.textSize = typed(CLOCK_SIZE)
+        extras.textAlign = Paint.Align.LEFT
+        extras.color = (ink and 0x00FFFFFF) or (0xFF shl 24)
+        val ap = markerSlot()
+        canvas.save()
+        // Coming and going as the seconds do: scaled about its middle.
+        if (scale < 0.999f) canvas.scale(scale, scale, x + width / 2f, base - CLOCK_SIZE * ClockStack.CENTRE)
+        canvas.translate(0f, base - CLOCK_BASELINE)
+        var at = x
+        for ((k, ch) in marker.withIndex()) {
+            val full = if (k == 0) ap else extras.measureText(ch.toString())
+            if (config.theme.isGlass) {
+                rollGlass(canvas, "clock:ampm$k", ch, at, full)
+            } else {
+                rolling(
+                    canvas, "clock:ampm$k", ch.toString(),
+                    at + (full - extras.measureText(ch.toString())) / 2f, CLOCK_BASELINE,
+                    android.graphics.RectF(at, CLOCK_BASELINE - CLOCK_SIZE, at + full, CLOCK_BASELINE + CLOCK_SIZE * 0.35f),
+                )
+            }
+            at += full
+        }
+        canvas.restore()
+        extras.textSize = size
+        extras.textAlign = align
+        extras = was
+    }
+
+    /** The A/P slot: as wide as the wider of the two, so the M does not move when it rolls. extras at the figures' size. */
+    /**
+     * AM/PM flat, for the change of face (ClockGoo): each letter on the pixels its glass or type
+     * stands on (as drawFiguresFlat's figures), [paint]'s colour. After drawFiguresFlat, whose
+     * paint settings it keeps.
+     */
+    private fun drawMarkerFlat(canvas: Canvas, paint: Paint, marker: String, x: Float, base: Float, width: Float, scale: Float) {
+        val glass = config.theme.isGlass
+        val fm = paint.fontMetrics
+        val pad = SdfText.SPREAD
+        val fieldH = (fm.descent - fm.ascent + pad * 2f).toInt()
+        val ap = maxOf(paint.measureText("A"), paint.measureText("P"))
+        canvas.save()
+        if (scale < 0.999f) canvas.scale(scale, scale, x + width / 2f, base - CLOCK_SIZE * ClockStack.CENTRE)
+        canvas.translate(0f, base - CLOCK_BASELINE)
+        var at = x
+        for ((k, ch) in marker.withIndex()) {
+            val glyph = ch.toString()
+            val adv = paint.measureText(glyph)
+            val full = if (k == 0) ap else adv
+            if (glass) {
+                val fieldW = (adv + pad * 2f).toInt()
+                val rightAt = at + (full + adv) / 2f + pad
+                val left = Math.round(rightAt - fieldW + pad).toFloat()
+                val top = Math.round(CLOCK_BASELINE - CLOCK_SIZE / 2f - fieldH / 2f).toFloat()
+                canvas.drawText(glyph, left + pad, top + pad - fm.ascent, paint)
+            } else {
+                canvas.drawText(glyph, at + (full - adv) / 2f, CLOCK_BASELINE, paint)
+            }
+            at += full
+        }
+        canvas.restore()
+    }
+
+    private fun markerSlot(): Float = maxOf(extras.measureText("A"), extras.measureText("P"))
+
+    private fun markerWidth(marker: String): Float {
+        val was = extras
+        extras = extrasBody
+        val size = extras.textSize
+        extras.textSize = typed(CLOCK_SIZE)
+        val w = markerSlot() + marker.drop(1).sumOf { extras.measureText(it.toString()).toDouble() }.toFloat()
+        extras.textSize = size
+        extras = was
+        return w
+    }
+
+    /** The canvas scaled by [fit] about the clock's middle ([cx], its figures' middle line); restore with the count. */
+    private fun fitClock(canvas: Canvas, cx: Float, fit: Float): Int {
+        val saved = canvas.save()
+        if (fit < 0.999f) canvas.scale(fit, fit, cx, CLOCK_BASELINE - CLOCK_SIZE * ClockStack.CENTRE)
+        return saved
+    }
+
+    /** This frame's shifts for the figures (ClockStack) and how far the colons have shrunk. */
+    private val figureShift = FloatArray(16)
+    private var colonShrink = 0f
+
     private fun slotRight(x: Float, w: Float, glyph: String): Float =
         x + (w + extras.measureText(glyph)) / 2f + SdfText.SPREAD
 
@@ -12345,6 +12314,10 @@ class RearDialView(context: Context) : View(context) {
 
         /** How long the strip takes to arrive or leave. */
         private const val SLIDE_MS = 260f
+        /** How far up from the bottom edge a finger goes before its pull is the portal's, not the page's: under the pager's slop. */
+        private const val PORTAL_TAKE = 6f
+        /** A notification's headline while the back is locked (backLocked). */
+        private const val LOCKED_NOTICE = "New notification"
 
         /**
          * How long the artwork takes to hand the slot over, and the play glyph to
@@ -12494,10 +12467,6 @@ class RearDialView(context: Context) : View(context) {
         private const val CC_DIM = 0.25f
         /** How often a brightness drag writes the setting, at most. */
         private const val BRIGHT_SEND_MS = ControlCenter.SEND_MS
-        /** The shortest a settle carried on from a finger may take. */
-        private const val GLIDE_MIN_MS = 80f
-        /** A flick through the cards, in cards a millisecond. */
-        private const val WHEEL_FLING = 0.004f
         /** How long a new brightness reading takes to pour in, and the button's colour to change. */
         private const val BRIGHT_POUR_MS = ControlCenter.POUR_MS
         private const val AUTO_FADE_MS = ControlCenter.SWITCH_MS
@@ -12595,8 +12564,6 @@ class RearDialView(context: Context) : View(context) {
 
         /** A quarter of the panel, which is what the strip was asked for. */
         private const val NOTICE_H = Panel.HEIGHT / 4f
-        /** The empty list's band at its top: black, a little see-through. */
-        private const val EMPTY_GREY = 0x99000000.toInt()
         /**
          * The cards' left edge: clear of the cutout, not flush against it.
          *
@@ -12841,8 +12808,6 @@ class RearDialView(context: Context) : View(context) {
          */
         private const val VINYL_PEEK = 0.15f
 
-        /** How long the demo takes to walk the whole wheel once. */
-        private const val DEMO_WHEEL_PERIOD = 6f
 
         /** Long enough that the playback ring is visibly part-way round, not near an end. */
         /** Bladee's "Apple" as LRCLIB has it: 1:44. */
@@ -12853,28 +12818,39 @@ class RearDialView(context: Context) : View(context) {
         /** A charge worth filming: past the halfway mark, so the cell is visibly full. */
         private const val DEMO_CHARGE = 68
 
-        /**
-         * How far either side of the current card the carousel still draws.
-         *
-         * Comfortably past one, and that is the point: everything between one and here is
-         * a card on its way out, and it needs somewhere to fade THROUGH. At 1.15 there was
-         * barely a tenth of a card's travel to do it in, so it read as vanishing.
-         */
-        private const val CAROUSEL_REACH = 1.6f
-
-        /** How much of a card's height its neighbour is offset by — half, behind it. */
-        private const val CAROUSEL_STEP = 0.5f
-
-        /** How much smaller a neighbour is, and how much of it has gone. */
-        /** How far a neighbour's left edge is pulled toward the right, under ORIGINAL. */
-        private const val ORIGINAL_SLIDE = 150f
-
-        private const val CAROUSEL_SHRINK = 0.12f
-        private const val CAROUSEL_FADE = 0.55f
 
         /** The notification page's clock: big, because the page is otherwise empty. */
         private const val CLOCK_SIZE = 92f
         private const val CLOCK_BASELINE = 330f
+        /** The analog dial's band: from here down to the slider's band less [DIAL_CLEARANCE]. */
+        private const val DIAL_TOP = 16f
+        private const val DIAL_CLEARANCE = 12f
+        /** The analog face's date row: its baseline, the air between its date and battery, and the dial's air under it. */
+        private const val ANALOG_ROW_BASELINE = 48f // DIAL_TOP + DATE_SIZE + ROW_CARD_PAD_Y, declared below it
+        /** Between the date's card and the battery's. */
+        private const val ANALOG_CARD_GAP = 10f
+        /** How far left of the dial's middle the row stands. */
+        private const val ANALOG_ROW_LEFT = 24f
+        private const val DIAL_GAP = 10f
+        /** How long the second hand takes to come out of the minute hand, or go back in. */
+        private const val PILL_SPLIT_MS = 520f
+        /** How long the clock takes to change face, digital to analog or back. */
+        private const val FACE_MORPH_MS = 1100f
+        /** How long the digital clock takes to stand on end, or lie back down. */
+        private const val VERTICAL_MS = 650f
+        /** The air between AM/PM and the figures before it. */
+        private const val AMPM_GAP = 18f
+        /** The clock's line keeps this far from the lenses and from the screen's right edge. */
+        private const val CLOCK_FIT_MARGIN = 44f
+        /**
+         * The glass figures' tint at the clock's full glass tint (PanelConfig.clockGlassTint): nearly
+         * the colour, as the hands' (PillClockPainter.TINT_MAX). At the default tint that is about a
+         * third — less than other glass figures' (Glass.SDF_TINT), which made the digital clock read
+         * far more coloured than the analog one (the owner, 2026-11-09).
+         */
+        private const val CLOCK_SDF_TINT = 0.95f
+        /** The battery glyph's width, in its height (the glass one is narrower; room for the charging bolt). */
+        private const val BATTERY_GLYPH_W = 0.6f
         private const val CLOCK_PAD_X = 20f
         private const val CLOCK_PAD_Y = 16f
         /**

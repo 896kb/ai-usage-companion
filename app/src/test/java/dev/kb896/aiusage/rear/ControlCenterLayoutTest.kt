@@ -41,16 +41,19 @@ class ControlCenterLayoutTest {
         assertEquals(Panel.HEIGHT - m, r.bottom, 0.001f)
     }
 
-    @Test fun `open, the tiles are two by two right of the cell, one gap apart and from every edge`() {
-        val t = (0 until 4).map { ControlCenterLayout.tileRect(it, 1f, PRO) }
+    @Test fun `open, the tiles are two across and three down right of the cell, one gap apart and from every edge`() {
+        val t = (0 until ControlCenterLayout.TILES).map { ControlCenterLayout.tileRect(it, 1f, PRO) }
         assertEquals(left + w + m, t[0].left, 0.001f)
         assertEquals(m, t[0].top, 0.001f)
         assertEquals(Panel.WIDTH - m, t[1].right, 0.001f)
-        assertEquals(Panel.HEIGHT - m, t[3].bottom, 0.001f)
+        // The screenshot and the recording, the last row, down to the bottom's margin.
+        assertEquals(Panel.HEIGHT - m, t[ControlCenterLayout.RECORD].bottom, 0.001f)
+        assertEquals(t[ControlCenterLayout.SHOT].top, t[ControlCenterLayout.RECORD].top, 0.001f)
         assertEquals(m, t[1].left - t[0].right, 0.001f)
         assertEquals(m, t[2].top - t[0].bottom, 0.001f)
-        assertEquals(t[0].width(), t[3].width(), 0.001f)
-        assertEquals(t[0].height(), t[3].height(), 0.001f)
+        assertEquals(m, t[ControlCenterLayout.SHOT].top - t[2].bottom, 0.001f)
+        assertEquals(t[0].width(), t[5].width(), 0.001f)
+        assertEquals(t[0].height(), t[5].height(), 0.001f)
     }
 
     @Test fun `arriving, each piece is higher by the arrival's offset and grown about its own middle`() {

@@ -273,6 +273,8 @@ class UsagePollService : Service() {
             addAction(RearActivity.ACTION_DOZING)
             // And whether its lock slider or always-on is up, for the shell's portal sheet.
             addAction(RearActivity.ACTION_GUARDED)
+            addAction(RearActivity.ACTION_ASK_CODE)
+            addAction(RearActivity.ACTION_CAPTURE)
             // The control centre's brightness: read it, set it — through Shizuku, here.
             addAction(RearActivity.ACTION_GET_REAR_BRIGHTNESS)
             addAction(RearActivity.ACTION_SET_REAR_BRIGHTNESS)
@@ -504,8 +506,19 @@ class UsagePollService : Service() {
                 }
                 return
             }
+            if (intent?.action == RearActivity.ACTION_CAPTURE) {
+                Graph.of(this@UsagePollService).bridge.capture(intent.getBooleanExtra(RearActivity.EXTRA_RECORD, false))
+                return
+            }
+            if (intent?.action == RearActivity.ACTION_ASK_CODE) {
+                Graph.of(this@UsagePollService).bridge.askBackCode()
+                return
+            }
             if (intent?.action == RearActivity.ACTION_GUARDED) {
-                Graph.of(this@UsagePollService).bridge.setPanelGuarded(intent.getBooleanExtra(RearActivity.EXTRA_GUARDED, false))
+                Graph.of(this@UsagePollService).bridge.setPanelGuarded(
+                    intent.getBooleanExtra(RearActivity.EXTRA_GUARDED, false),
+                    intent.getBooleanExtra(RearActivity.EXTRA_CONTROL_CENTER, false),
+                )
                 return
             }
             if (intent?.action == RearActivity.ACTION_DOZING) {

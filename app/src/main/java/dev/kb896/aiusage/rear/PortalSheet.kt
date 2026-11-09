@@ -48,6 +48,10 @@ object PortalSheet {
         data object Slider : Hit
         /** The slider's value: a tap there is Default. */
         data object SliderValue : Hit
+        /** The width slider's track, the thumb with it. */
+        data object Width : Hit
+        /** The width's value: a tap there is the whole width. */
+        data object WidthValue : Hit
         /** "Keep right of the cameras", its whole row: a tap switches it. */
         data object Toggle : Hit
         /**
@@ -69,12 +73,14 @@ object PortalSheet {
     const val OPEN = PortalPull.TRAVEL
 
     /**
-     * The slider's row's height with a margin round it, and under it the height of the switch's
-     * row ("Keep right of the cameras"). How far the open sheet scrolls is the two together.
+     * The slider's row's height with a margin round it, under it the width slider's, and under
+     * that the switch's row ("Keep right of the cameras"). How far the open sheet scrolls is the
+     * three together.
      */
     const val SLIDER_ROW = 88f
+    const val WIDTH_ROW = 72f
     const val TOGGLE_ROW = 72f
-    const val STRIP = SLIDER_ROW + TOGGLE_ROW
+    const val STRIP = SLIDER_ROW + WIDTH_ROW + TOGGLE_ROW
 
     /** Open and scrolled to the slider. */
     const val REVEALED = OPEN + STRIP
@@ -169,7 +175,9 @@ object PortalSheet {
         val dots: List<Box>,
         val dotsRow: Box?,
         val slider: Slider?,
-        /** Under the slider, with it. */
+        /** Under the slider, with it: the app's width (GuestWidth). */
+        val width: Slider?,
+        /** Under the width, with it. */
         val toggle: Toggle?,
         /** Where an empty sheet's words stand. */
         val emptyX: Float,
@@ -231,7 +239,8 @@ object PortalSheet {
             count = n,
             buttons = if (withGuest) buttons(left) else emptyList(),
             slots = slots, pages = pages, dots = dots, dotsRow = dotsRow,
-            slider = if (withGuest) slider(left) else null,
+            slider = if (withGuest) slider(left, FULL + (SLIDER_ROW - ROW_H) / 2) else null,
+            width = if (withGuest) slider(left, FULL + SLIDER_ROW + (WIDTH_ROW - ROW_H) / 2) else null,
             toggle = if (withGuest) toggle(left) else null,
             emptyX = centerX, emptyY = (top + bottom) / 2,
         )
@@ -245,8 +254,8 @@ object PortalSheet {
         }
     }
 
-    private fun slider(left: Float): Slider {
-        val top = FULL + (SLIDER_ROW - ROW_H) / 2
+    /** A slider's row with its top at [top]: an icon, the track, and the value. */
+    private fun slider(left: Float, top: Float): Slider {
         val bottom = top + ROW_H
         val iconTop = top + (ROW_H - SLIDER_ICON) / 2
         val icon = Box(left, iconTop, left + SLIDER_ICON, iconTop + SLIDER_ICON)
@@ -257,7 +266,7 @@ object PortalSheet {
     }
 
     private fun toggle(left: Float): Toggle {
-        val top = FULL + SLIDER_ROW + (TOGGLE_ROW - ROW_H) / 2
+        val top = FULL + SLIDER_ROW + WIDTH_ROW + (TOGGLE_ROW - ROW_H) / 2
         val row = Box(left, top, RIGHT, top + ROW_H)
         val knobTop = row.centerY - TOGGLE_H / 2
         val knobRight = RIGHT - BUTTON_PAD
@@ -297,7 +306,14 @@ object PortalSheet {
         val cy = y + scroll
         l.slider?.let { s ->
             if (cy >= FULL) return when {
-                cy >= FULL + SLIDER_ROW -> if (x in (l.toggle?.row?.left ?: 0f)..(l.toggle?.row?.right ?: 0f)) Hit.Toggle else Hit.Blank
+                cy >= FULL + SLIDER_ROW + WIDTH_ROW -> if (x in (l.toggle?.row?.left ?: 0f)..(l.toggle?.row?.right ?: 0f)) Hit.Toggle else Hit.Blank
+                cy >= FULL + SLIDER_ROW -> l.width?.let { w ->
+                    when {
+                        x in w.value.left..w.value.right -> Hit.WidthValue
+                        x in (w.track.left - THUMB / 2)..(w.track.right + THUMB / 2) -> Hit.Width
+                        else -> Hit.Blank
+                    }
+                } ?: Hit.Blank
                 x in s.value.left..s.value.right -> Hit.SliderValue
                 x in (s.track.left - THUMB / 2)..(s.track.right + THUMB / 2) -> Hit.Slider
                 else -> Hit.Blank
@@ -318,8 +334,8 @@ object PortalSheet {
     /** Whether [x] is on the slider's thumb, standing at [dpi] on [track]: a tap there changes nothing. */
     fun onThumb(track: Box, dpi: Int, x: Float): Boolean = kotlin.math.abs(x - sliderX(track, dpi)) <= THUMB / 2
 
-    /** What a sideways drag moves: the slider, the pages, or nothing. */
-    enum class Swipe { NONE, SLIDER, PAGES }
+    /** What a sideways drag moves: the DPI slider, the width slider, the pages, or nothing. */
+    enum class Swipe { NONE, SLIDER, WIDTH, PAGES }
 
     /**
      * A sideways drag that landed at [y] on the open sheet at rest scrolled by [scroll]: on
@@ -328,7 +344,8 @@ object PortalSheet {
      * anywhere above them with more than one page it turns the page.
      */
     fun swipe(l: Layout, y: Float, scroll: Float): Swipe = when {
-        y + scroll >= FULL + SLIDER_ROW -> Swipe.NONE
+        y + scroll >= FULL + SLIDER_ROW + WIDTH_ROW -> Swipe.NONE
+        l.width != null && y + scroll >= FULL + SLIDER_ROW -> Swipe.WIDTH
         l.slider != null && y + scroll >= FULL -> Swipe.SLIDER
         l.pages > 1 && y + scroll < FULL -> Swipe.PAGES
         else -> Swipe.NONE
@@ -349,11 +366,190 @@ object PortalSheet {
     /** The DPI after a drag of [dx] that began with the thumb at [from]. */
     fun sliderDrag(track: Box, from: Int, dx: Float): Int = sliderDpi(track, sliderX(track, from) + dx)
 
+    // -- the width slider -------------------------------------------------------------------
+
+    /** The width at [x] on [track] (null: the whole), for [rear]: GuestWidth's range across it. */
+    fun widthAt(track: Box, rear: RearGeometry, x: Float): Int? =
+        GuestWidth.at(rear, (x - track.left) / track.width)
+
+    /** Where [w]'s thumb centre stands on [track]. */
+    fun widthX(track: Box, rear: RearGeometry, w: Int?): Float = track.left + GuestWidth.fraction(rear, w) * track.width
+
+    /** The width after a drag of [dx] that began with the thumb at [from]. */
+    fun widthDrag(track: Box, rear: RearGeometry, from: Int?, dx: Float): Int? = widthAt(track, rear, widthX(track, rear, from) + dx)
+
     /**
      * What the slider's value says: the number being dragged to, or the app's own, or
      * "Default" for an app without one (the thumb then stands at the display's own).
      */
     fun sliderLabel(dragged: Int?, own: Int?): String = (dragged ?: own)?.let { "$it dpi" } ?: "Default"
+
+    // -- the lock's keypad ---------------------------------------------------------------------
+    //
+    // While the phone is locked the sheet is the back's lock (BackLock): one small line of words at
+    // the top — what to do, the dots typed, or what went wrong — and under it, from the lenses to
+    // the edge, the keys: round, a phone's three by four, spread over all of it.
+
+    /**
+     * The keypad's keys (1–9, then back, 0, enter), each a circle's square, and the line at the top:
+     * [titleY] its baseline (the dots' and the message's too), centred on [centerX] between
+     * [infoLeft] and [infoRight] — the room the keys below have.
+     */
+    data class Keypad(
+        val keys: List<Box>, val titleY: Float, val dotsY: Float, val messageY: Float, val centerX: Float,
+        val infoLeft: Float, val infoRight: Float,
+    )
+
+    const val KEY_BACK = 9
+    const val KEY_ZERO = 10
+    const val KEY_OK = 11
+    private const val KEY_SPACING = 14f
+    private const val KEY_PAD = 12f
+    /** The line at the top: its baseline, and where the keys start under it. */
+    private const val LINE_Y = 30f
+    private const val KEYS_TOP = 46f
+
+    /** Where the lock's keys or dots go: from the lenses' gap to the edge, under the line. */
+    fun lockArea(lensRight: Float) = Box(lensRight + LENS_GAP, KEYS_TOP, Panel.WIDTH - KEY_PAD, Panel.HEIGHT - KEY_PAD)
+
+    /**
+     * The keypad right of lenses ending at [lensRight], in panel units. [aspect]: the rear's real
+     * pixels down over across per panel unit (RearGeometry.fitY / fitX) — panel units are stretched
+     * to the rear one way across and another down, so a key [aspect] times as wide as tall in them
+     * is round on the glass, on every model.
+     */
+    fun keypad(lensRight: Float, aspect: Float = 1f): Keypad {
+        val a = lockArea(lensRight)
+        // As big as the height allows, the same gap across as down (spread over the width they
+        // stood far apart across and close down, which looked wrong), the block centred.
+        val d = (a.height - 3 * KEY_SPACING) / 4
+        val dw = d * aspect
+        val gw = KEY_SPACING * aspect
+        val blockW = 3 * dw + 2 * gw
+        val left = a.centerX - blockW / 2
+        val keys = (0 until 12).map { i ->
+            val l = left + (i % 3) * (dw + gw)
+            val t = a.top + (i / 3) * (d + KEY_SPACING)
+            Box(l, t, l + dw, t + d)
+        }
+        return Keypad(keys, titleY = LINE_Y, dotsY = LINE_Y - 6f, messageY = LINE_Y, centerX = a.centerX, infoLeft = a.left, infoRight = a.right)
+    }
+
+    /** The key under [x], [y] on [k]; -1 for none. */
+    fun keyAt(k: Keypad, x: Float, y: Float): Int = k.keys.indexOfFirst { it.contains(x, y) }
+
+    /** What key [i] types: its digit, or null for back and enter. */
+    fun keyDigit(i: Int): Char? = when (i) {
+        in 0..8 -> '1' + i
+        KEY_ZERO -> '0'
+        else -> null
+    }
+
+    // -- the lock's pattern -----------------------------------------------------------------
+    //
+    // A pattern lock's nine dots, spread over the room the keypad's keys have, numbered 1 to 9 as
+    // the lock settings service reads them.
+
+    /**
+     * The nine dots' centres, how far from one a finger catches it (down; across it is [aspect]
+     * times that, as round on the glass — see [keypad]), and the room they stand in.
+     */
+    data class PatternGrid(val centers: List<Pair<Float, Float>>, val reach: Float, val square: Box, val aspect: Float = 1f)
+
+    fun patternGrid(lensRight: Float, aspect: Float = 1f): PatternGrid {
+        val a = lockArea(lensRight)
+        val cellW = a.width / 3
+        val cellH = a.height / 3
+        val centers = (0 until 9).map { i -> a.left + cellW * (i % 3 + 0.5f) to a.top + cellH * (i / 3 + 0.5f) }
+        return PatternGrid(centers, reach = minOf(cellW / aspect, cellH) * 0.36f, square = a, aspect = aspect)
+    }
+
+    /** The dot a finger at [x], [y] is on; -1 for none. Round on the glass, so an oval in panel units. */
+    fun cellAt(g: PatternGrid, x: Float, y: Float): Int = g.centers.indexOfFirst { (cx, cy) ->
+        val ax = (x - cx) / g.aspect
+        ax * ax + (y - cy) * (y - cy) <= g.reach * g.reach
+    }
+
+    /**
+     * [cells] with [next] joined on, as Android's pattern lock joins it: a dot already in is not
+     * taken again, and a dot passed straight over on the way (the middle of a row, a column or a
+     * diagonal) is taken first.
+     */
+    fun patternAdd(cells: List<Int>, next: Int): List<Int> {
+        if (next in cells) return cells
+        val last = cells.lastOrNull() ?: return listOf(next)
+        val (r0, c0) = last / 3 to last % 3
+        val (r1, c1) = next / 3 to next % 3
+        val out = cells.toMutableList()
+        if ((r0 + r1) % 2 == 0 && (c0 + c1) % 2 == 0) {
+            val mid = (r0 + r1) / 2 * 3 + (c0 + c1) / 2
+            if (mid != last && mid != next && mid !in out) out += mid
+        }
+        out += next
+        return out
+    }
+
+    /** A pattern as the lock settings service takes it: its dots' numbers, 1 to 9, in order. */
+    fun patternCode(cells: List<Int>): String = cells.joinToString("") { (it + 1).toString() }
+
+    // -- the lock's keyboard ------------------------------------------------------------------
+    //
+    // A password lock's keyboard, across the whole width right of the lenses under the line at the
+    // top: letters (shift for capitals), and a page of digits and symbols.
+
+    enum class KbType { CHAR, SHIFT, BACK, MODE, SPACE, OK }
+
+    data class KbKey(val box: Box, val label: String, val type: KbType, val ch: Char = ' ')
+
+    /** One page's keys, and the line above them: its words and message at [titleY], dots at [dotsY]. */
+    data class Keyboard(val keys: List<KbKey>, val titleY: Float, val dotsY: Float, val centerX: Float, val left: Float, val right: Float)
+
+    const val KB_LOWER = 0
+    const val KB_UPPER = 1
+    const val KB_SYMBOLS = 2
+    private const val KB_ROW_MAX = 96f
+    private const val KB_GAP = 6f
+
+    fun keyboard(lensRight: Float, page: Int): Keyboard {
+        val left = lensRight + LENS_GAP
+        val right = Panel.WIDTH - KEY_PAD
+        val w = right - left
+        val top = KEYS_TOP
+        val rowH = minOf(KB_ROW_MAX, (Panel.HEIGHT - KEY_PAD - top - 3 * KB_GAP) / 4)
+        val unit = (w - 9 * KB_GAP) / 10
+        val rowsTop = Panel.HEIGHT - KEY_PAD - 4 * rowH - 3 * KB_GAP
+        val keys = mutableListOf<KbKey>()
+        /** A row of (label, type, char, width in units), centred. */
+        fun row(r: Int, items: List<Triple<String, KbType, Pair<Char, Float>>>) {
+            val total = items.sumOf { it.third.second.toDouble() }.toFloat() * unit + (items.size - 1) * KB_GAP
+            var x = left + (w - total) / 2
+            val t = rowsTop + r * (rowH + KB_GAP)
+            for ((label, type, cw) in items) {
+                val kw = cw.second * unit
+                keys += KbKey(Box(x, t, x + kw, t + rowH), label, type, cw.first)
+                x += kw + KB_GAP
+            }
+        }
+        fun chars(s: String) = s.map { Triple(it.toString(), KbType.CHAR, it to 1f) }
+        val letters = page != KB_SYMBOLS
+        val up = page == KB_UPPER
+        if (letters) {
+            fun c(s: String) = chars(if (up) s.uppercase() else s)
+            row(0, c("qwertyuiop"))
+            row(1, c("asdfghjkl"))
+            row(2, listOf(Triple("⇧", KbType.SHIFT, ' ' to 1.5f)) + c("zxcvbnm") + Triple("⌫", KbType.BACK, ' ' to 1.5f))
+            row(3, listOf(Triple("?123", KbType.MODE, ' ' to 2f), Triple("space", KbType.SPACE, ' ' to 5.6f), Triple("OK", KbType.OK, ' ' to 2f)))
+        } else {
+            row(0, chars("1234567890"))
+            row(1, chars("@#\$_&-+()/"))
+            row(2, chars("%*\"':;!?") + Triple("⌫", KbType.BACK, ' ' to 1.5f))
+            row(3, listOf(Triple("ABC", KbType.MODE, ' ' to 2f), Triple("space", KbType.SPACE, ' ' to 5.6f), Triple("OK", KbType.OK, ' ' to 2f)))
+        }
+        return Keyboard(keys, titleY = LINE_Y, dotsY = LINE_Y - 6f, centerX = (left + right) / 2, left = left, right = right)
+    }
+
+    /** The key under [x], [y]; -1 for none. */
+    fun kbKeyAt(k: Keyboard, x: Float, y: Float): Int = k.keys.indexOfFirst { it.box.contains(x, y) }
 
     // -- the buttons' marks and names --------------------------------------------------------
 

@@ -27,8 +27,9 @@ object StripColor {
      * [app] as it stands on [rear] (GuestShape.appOnRear), its whole height. Not the layer's: a
      * letterboxed app has a black bar there, and the strip would read black beside any app.
      */
-    fun sample(rear: RearGeometry, app: GuestShape.Bounds = GuestShape.appArea(rear)): GuestShape.Bounds {
-        val x = app.left - rear.cutoutPx
+    fun sample(rear: RearGeometry, app: GuestShape.Bounds = GuestShape.appArea(rear), areaLeft: Int = rear.cutoutPx): GuestShape.Bounds {
+        // From the display's left edge, which is the lenses' only for an app as wide as the area (GuestWidth).
+        val x = app.left - areaLeft
         return GuestShape.Bounds(x, app.top, x + SAMPLE_W, app.bottom)
     }
 

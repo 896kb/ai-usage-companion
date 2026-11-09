@@ -23,6 +23,10 @@ class ControlCenterModel {
         data class Quick(val which: String, val on: Boolean) : Effect
         /** It is settling shut: at [atMs] it is down, and its layers may go ([isShut] says for sure). */
         data class ShutAt(val atMs: Long) : Effect
+        /** A switch the back's lock holds was tapped: the code is to be asked for. */
+        data object Locked : Effect
+        /** The screenshot tile, or the recording's ([record]): the back captured, or its recording started or stopped. */
+        data class Capture(val record: Boolean) : Effect
     }
 
     // ---- how far down ----
@@ -89,8 +93,11 @@ class ControlCenterModel {
     }
 
     /** How far down it is now, 0 to 1: under a finger, settling, or at rest. */
+    /** Under a finger, trailing it when it is faster than ControlCenter.DRAG_SPEED_MAX. */
+    private val chase = ControlCenter.Chase()
+
     fun progress(nowMs: Long): Float {
-        if (dragging) return ControlCenter.progress(open, dy)
+        if (dragging) return ControlCenter.progress(open, chase.to(dy, nowMs))
         if (settleAt == 0L) return to
         val t = ((nowMs - settleAt) / settleMs.toFloat()).coerceIn(0f, 1f)
         // EASED OUT: it leaves at the finger's speed and slows into place — see settleMs.
@@ -120,6 +127,7 @@ class ControlCenterModel {
         settleAt = 0L; from = 0f; to = 0f
         pullDownY = downY
         dy = y - downY
+        chase.snap(dy, atMs)
         velocity = 0f; lastY = y; lastAt = atMs
         pressed = ControlCenterLayout.NONE
     }
@@ -136,7 +144,7 @@ class ControlCenterModel {
         pulling = false
         dy = y - pullDownY
         val v = if (atMs - lastAt > ControlCenterFinger.STILL_MS) 0f else velocity
-        val at = ControlCenter.progress(false, dy)
+        val at = ControlCenter.progress(false, chase.shown.takeIf { !it.isNaN() } ?: dy)
         dragging = false
         return settle(ControlCenter.release(false, dy, v), at, v, atMs)
     }
@@ -160,22 +168,26 @@ class ControlCenterModel {
 
     // ---- a finger on it, once shown ----
 
+    /** The back's lock is on (BackLock): Bluetooth, data and Wi-Fi held and faint. Set by its holder. */
+    var locked = false
+
     fun finger(a: ControlCenterFinger.Action, atMs: Long): List<Effect> = when (a) {
         is ControlCenterFinger.Action.Down -> {
             // From wherever a settle had got to: on to where it was going.
-            if (settleAt != 0L) { open = progress(atMs) > 0.5f; settleAt = 0L; to = if (open) 1f else 0f }
-            pressed = if (a.target == ControlCenterLayout.AUTO || a.target in 0 until 4) a.target else ControlCenterLayout.NONE
+            if (settleAt != 0L) { open = to > 0.5f; settleAt = 0L; to = if (open) 1f else 0f }
+            pressed = if (a.target == ControlCenterLayout.AUTO || a.target in 0 until ControlCenterLayout.TILES) a.target else ControlCenterLayout.NONE
             emptyList()
         }
         is ControlCenterFinger.Action.Pull -> {
             pressed = ControlCenterLayout.NONE
+            if (!dragging) chase.snap(0f, atMs)
             dragging = true
             dy = a.dy
             emptyList()
         }
         is ControlCenterFinger.Action.Release -> {
             // Let go: past halfway it goes. Taken away (lost): it stays as it was.
-            val at = ControlCenter.progress(open, a.dy)
+            val at = ControlCenter.progress(open, chase.shown.takeIf { !it.isNaN() } ?: a.dy)
             val toOpen = if (a.lifted) ControlCenter.release(open, a.dy, a.velocity) else open
             dragging = false
             dy = 0f
@@ -191,7 +203,8 @@ class ControlCenterModel {
         }
         is ControlCenterFinger.Action.Tap -> {
             pressed = ControlCenterLayout.NONE
-            tap(a.target, atMs)
+            // Locked: Bluetooth, data or Wi-Fi asks for the code; silent and the rest are as ever.
+            if (locked && a.target in 1 until 4) listOf(Effect.Locked) else tap(a.target, atMs)
         }
         ControlCenterFinger.Action.Back -> {
             pressed = ControlCenterLayout.NONE
@@ -239,9 +252,14 @@ class ControlCenterModel {
                     listOf(Effect.Quick(ControlCenterPainter.QUICK_NAMES[target], on))
                 }
             }
+            ControlCenterLayout.SHOT -> listOf(Effect.Capture(record = false))
+            ControlCenterLayout.RECORD -> listOf(Effect.Capture(record = true))
             else -> emptyList()
         }
     }
+
+    /** The back is being recorded: the recording tile lit. Set by its holder. */
+    var recording = false
 
     // ---- what the phone says ----
 
@@ -298,6 +316,8 @@ class ControlCenterModel {
         auto = if (unavailable) 0f else auto.shown(nowMs),
         tiles = FloatArray(4) { i -> if (i == 0 || reachable) tiles[i].shown(nowMs) else 0f },
         reachable = reachable,
-        pressed = pressed,
+        pressed = if (locked && pressed in 1 until 4) ControlCenterLayout.NONE else pressed,
+        recording = recording,
+        locked = locked,
     )
 }

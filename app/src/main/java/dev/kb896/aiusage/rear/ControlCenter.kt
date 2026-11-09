@@ -22,8 +22,12 @@ object ControlCenter {
      * glass's rounded top edge.
      */
     const val EDGE = 48f
-    /** How far a pull travels from shut to open. */
-    const val TRAVEL = 260f
+    /**
+     * How far a pull travels from shut to open: three quarters of the panel's height. At 260 (under
+     * half) it came twice as fast as the finger; the whole height was too long a pull (the owner,
+     * 2026-11-09).
+     */
+    const val TRAVEL = dev.kb896.aiusage.Panel.HEIGHT * 0.75f
     /** How far a drag on the cell takes the level from empty to full. */
     const val CELL_TRAVEL = 360f
     /** The dimmest it goes: one per cent, never black. */
@@ -63,8 +67,14 @@ object ControlCenter {
 
     /** A flick, in panel units a millisecond. */
     const val FLING = 0.6f
-    const val SETTLE_MIN_MS = 80L
-    const val SETTLE_MAX_MS = 450L
+    /**
+     * The shortest a settle takes, and the fastest a flick may send one: past these a fast swipe
+     * drew a panel in four or five frames, as if it had appeared rather than come (the owner,
+     * 2026-11-08; 1.6 and 200 ms were still too quick). Panel units a millisecond.
+     */
+    const val SETTLE_MIN_MS = 280L
+    const val SETTLE_MAX_MS = 480L
+    const val SPEED_MAX = 0.9f
 
     /**
      * How long the rest of the way takes, [distance] to go at [speed] toward it (panel units
@@ -73,12 +83,77 @@ object ControlCenter {
      */
     fun settleMs(distance: Float, speed: Float): Long {
         if (speed <= 0f) return SETTLE_MAX_MS
-        return (2f * distance / speed).toLong().coerceIn(SETTLE_MIN_MS, SETTLE_MAX_MS)
+        return (2f * distance / minOf(speed, SPEED_MAX)).toLong().coerceIn(SETTLE_MIN_MS, SETTLE_MAX_MS)
     }
 
-    fun level(setting: Int): Float = ((setting - 1) / 254f).coerceIn(MIN_LEVEL, 1f)
+    /**
+     * The fastest a panel follows a finger, panel units a millisecond. Under it, it is under the
+     * finger; past it, it trails and catches up ([Chase]): a fast swipe brought the control centre
+     * down in two frames, as if it had appeared (the owner, 2026-11-08).
+     */
+    const val DRAG_SPEED_MAX = 1.0f
 
-    fun setting(level: Float): Int = (1 + Math.round(level.coerceIn(0f, 1f) * 254f)).coerceIn(1, 255)
+    /**
+     * A value that follows its target at no more than [maxSpeed] units a millisecond: a panel under
+     * a finger, its place where the finger is unless the finger outruns it. Not thread-safe.
+     */
+    class Chase(private val maxSpeed: Float = DRAG_SPEED_MAX) {
+        /** Where it is shown; NaN before the first [to] after a [reset]. */
+        var shown = Float.NaN
+            private set
+        private var at = 0L
+
+        /** Where it stands at [nowMs], gone toward [target] as far as the time since the last call allows. */
+        fun to(target: Float, nowMs: Long): Float {
+            if (shown.isNaN()) { shown = target; at = nowMs; return target }
+            val step = maxSpeed * (nowMs - at).coerceIn(0L, MAX_STEP_MS)
+            at = nowMs
+            shown = if (kotlin.math.abs(target - shown) <= step) target else shown + kotlin.math.sign(target - shown) * step
+            return shown
+        }
+
+        /** Shown at [value] now, nothing to catch up. */
+        fun snap(value: Float, nowMs: Long) { shown = value; at = nowMs }
+
+        fun reset() { shown = Float.NaN }
+
+        private companion object {
+            /** A frame missed is not a jump: no more than this much time is caught up in one step. */
+            const val MAX_STEP_MS = 34L
+        }
+    }
+
+    /**
+     * The slider's level (0 to 1, as far as the liquid fills and the figure says) for a brightness
+     * [setting] (1 to 255), and back ([setting]). ON A PERCEPTUAL CURVE, Android's own: the hybrid
+     * log-gamma of its BrightnessUtils, which its brightness slider uses. The setting is linear in
+     * light, and eyes are not: on a straight line the bottom tenth of the slider did most of what
+     * could be seen and the top half next to nothing ("inconsistent, unnatural" — a user, through
+     * the owner, 2026-11-09). Now an even drag looks like an even change.
+     */
+    fun level(setting: Int): Float = linearToGamma(((setting - 1) / 254f).coerceIn(0f, 1f)).coerceIn(MIN_LEVEL, 1f)
+
+    fun setting(level: Float): Int = (1 + Math.round(gammaToLinear(level.coerceIn(0f, 1f)) * 254f)).coerceIn(1, 255)
+
+    // BrightnessUtils' constants (frameworks/base, packages/SettingsLib): Rec. 2100 HLG, scaled so
+    // the curve's 0..1 is the slider's and its 0..12 the light's.
+    private const val HLG_R = 0.5f
+    private const val HLG_A = 0.17883277f
+    private const val HLG_B = 0.28466892f
+    private const val HLG_C = 0.55991073f
+
+    /** Light (0 to 1) to the slider's place on it (0 to 1). */
+    fun linearToGamma(linear: Float): Float {
+        val n = linear.coerceIn(0f, 1f) * 12f
+        return if (n <= 1f) HLG_R * kotlin.math.sqrt(n) else HLG_A * kotlin.math.ln(n - HLG_B) + HLG_C
+    }
+
+    /** The slider's place (0 to 1) to light (0 to 1). */
+    fun gammaToLinear(gamma: Float): Float {
+        val g = gamma.coerceIn(0f, 1f)
+        val n = if (g <= HLG_R) (g / HLG_R) * (g / HLG_R) else kotlin.math.exp((g - HLG_C) / HLG_A) + HLG_B
+        return (n / 12f).coerceIn(0f, 1f)
+    }
 
     /** The level after a drag of [dy] on the cell from [from]: up is brighter. */
     fun drag(from: Float, dy: Float): Float = (from - dy / CELL_TRAVEL).coerceIn(MIN_LEVEL, 1f)

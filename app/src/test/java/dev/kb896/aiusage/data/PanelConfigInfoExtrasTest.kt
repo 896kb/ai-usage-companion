@@ -19,6 +19,13 @@ class PanelConfigInfoExtrasTest {
         assertFalse(old.copy(infoClock = false).infoClockOn)
     }
 
+    @Test fun `the clock keeps its seconds until switched off`() {
+        assertTrue(old.clockSeconds)
+        val json = Json { ignoreUnknownKeys = true }
+        val off = json.encodeToString(PanelConfig.serializer(), PanelConfig(clockSeconds = false))
+        assertFalse(json.decodeFromString(PanelConfig.serializer(), off).clockSeconds)
+    }
+
     @Test fun `the date line follows the corner row's Date switch until set`() {
         assertTrue(PanelConfig(showDate = true).infoDateOn)
         assertFalse(PanelConfig(showDate = true, infoDate = false).infoDateOn)

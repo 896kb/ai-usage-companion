@@ -38,7 +38,15 @@ class ShellNotices(
     private val geometry: () -> RearGeometry,
     private val onDismissed: (String) -> Unit,
     private val onProgress: (Float) -> Unit,
+    /** The back's lock is on and their words are not to show (BackLock, PanelConfig.lockedNoticeText). */
+    private val redact: () -> Boolean = { false },
+    /** A row tapped while its words are hidden: ask for the code. */
+    private val onLockedTap: () -> Unit = {},
 ) {
+
+    /** [item] as the back may show it now: whose it is, and "New notification" while [redact]. */
+    private fun shown(item: NoticeShade.Item): NoticeShade.Item =
+        if (redact()) item.copy(title = LOCKED_NOTICE, text = "") else item
     private val lock = Any()
     private val model by lazy { NoticeShade(geometry().cutoutUnits) }
     private var owns = false
@@ -65,6 +73,9 @@ class ShellNotices(
         face = f
         overlayOrNull()?.changed()
     }
+
+    /** The notifications' look as it is: for a button drawn as theirs elsewhere (ShotPolaroid's bin). */
+    fun lookNow(): NoticeCard.Look = look
 
     /** The panel's theme, Glass settings' style, and a notification's colours (PanelConfig.notificationTint, notificationGround). */
     fun theme(theme: PanelTheme, style: GlassStyle?, text: Int, ground: Int) {
@@ -136,6 +147,16 @@ class ShellNotices(
     }
 
     /** Shut at once, no settle (the rear going dark, the guest going), the banner with it. */
+    /**
+     * The back's lock came on or went: what is up drawn again now, its words hidden or shown — a
+     * list left on screen as the phone locked kept showing them, since nothing else asked for a
+     * frame (the owner, 2026-11-09). A banner up as it locks goes.
+     */
+    fun lockChanged() {
+        overlay?.changed()
+        if (redact()) banner.gone()
+    }
+
     fun closeNow(why: String, sync: Boolean = false) {
         banner.gone()
         val o = synchronized(lock) {
@@ -174,7 +195,7 @@ class ShellNotices(
         overlay?.let { return it }
         synchronized(making) {
             overlay?.let { return it }
-            val made = runCatching { ShellOverlay(layerStack(), geometry(), "notices", "notices", Drawing()) }
+            val made = runCatching { ShellOverlay(layerStack(), geometry(), "notices", "notices", Drawing(), z = ShellLayer.Z_PANES) }
                 .onFailure { Log.w(TAG, "notices: no sheet: ${it.message}") }.getOrNull() ?: return null
             made.onProgress = onProgress
             overlay = made
@@ -197,6 +218,7 @@ class ShellNotices(
                     }, NoticeShade.FLY_MS, TimeUnit.MILLISECONDS)
                 }
             }
+            is NoticeShade.Effect.Tapped -> if (redact()) runCatching { onLockedTap() }
             is NoticeShade.Effect.ClearedAll -> {
                 for (key in effect.keys) {
                     runCatching { onDismissed(key) }.onFailure { Log.w(TAG, "notices: dismiss: ${it.message}") }
@@ -285,7 +307,7 @@ class ShellNotices(
                     // Whole as it goes, not squashed: its place closes under it while it fades.
                     canvas.translate(r.dx, r.top)
                     rect.set(left, 0f, right, NoticeShade.ROW_H)
-                    card.draw(canvas, rect, r.item, alpha, square = false, screenTop = r.top - (1f - arrive) * 48f, look = look)
+                    card.draw(canvas, rect, shown(r.item), alpha, square = false, screenTop = r.top - (1f - arrive) * 48f, look = look)
                     canvas.restore()
                 }
                 clear?.let { c ->
@@ -371,7 +393,7 @@ class ShellNotices(
                         try {
                             c.drawColor(0, PorterDuff.Mode.CLEAR)
                             c.scale(rear.fitX, rear.fitY)
-                            card.draw(c, rect, it, 1f, square = !l.theme.isGlass, screenTop = rect.top, look = l)
+                            card.draw(c, rect, shown(it), 1f, square = !l.theme.isGlass, screenTop = rect.top, look = l)
                         } finally { surface.unlockCanvasAndPost(c) }
                         // A LITTLE BLUR under the card, cut to it: what is behind it, text above all,
                         // no longer reads through it. SurfaceFlinger's, so it costs this nothing a frame.
@@ -409,6 +431,8 @@ class ShellNotices(
     }
 
     companion object {
+        /** A notification's headline while the back is locked. */
+        private const val LOCKED_NOTICE = "New notification"
         private const val TAG = "AiUsageRear"
         private const val SHUT_GRACE_MS = 32L
         private val BANNER_H = NoticeShade.ROW_H
