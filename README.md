@@ -49,8 +49,10 @@ Updating from AI Usage keeps your settings: it's the same app (`dev.kb896.aiusag
 
 1. **Start Shizuku**: Developer options → Wireless debugging on, then **Start via Wireless debugging**
    in Shizuku. It doesn't survive a reboot, so start it again after each one (its notification is
-   the quickest way back). With a computer:
-   `adb shell sh /storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh`.
+   the quickest way back). With a computer (Shizuku 13.6 dropped the old `start.sh`):
+   `adb shell 'P=$(pm path moe.shizuku.privileged.api | head -n1 | cut -d: -f2); $(dirname $P)/lib/arm64/libshizuku.so'`.
+   Every step, with screenshots and the Xiaomi / HyperOS switches:
+   [How to set up Shizuku](https://rear.896.ro/en/guides/shizuku/).
 2. **Open Magic Rear** and work down the setup list at the top of its settings. Each row opens the
    right screen and ticks itself when it's done:
    - allow Magic Rear in Shizuku;

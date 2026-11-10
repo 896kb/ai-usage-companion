@@ -45,6 +45,13 @@
           system relaunches it. Declared for the app and again on the panel's activity.
         -->
         <meta-data android:name="miui.rear.policy" android:value="1" />
+        <!--
+          Shizuku's own list of apps (its "Authorized N applications" card) shows only apps
+          that declare this, so without it Magic Rear held the permission but never appeared
+          there and couldn't be switched off from Shizuku (AuthorizationManager.getPackages,
+          Shizuku 13.6.0). The permission itself works either way.
+        -->
+        <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">
