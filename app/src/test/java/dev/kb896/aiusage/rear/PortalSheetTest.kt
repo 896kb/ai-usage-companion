@@ -132,13 +132,16 @@ class PortalSheetTest {
 
     // -- pages --------------------------------------------------------------------------
 
-    @Test fun `more apps than a page holds go on more pages, each with its dot`() {
+    @Test fun `more apps than a page holds go on more pages, and none has a dot`() {
         assertEquals(1, layout(12).pages)
-        assertEquals(emptyList<PortalSheet.Box>(), layout(12).dots)
         assertEquals(2, layout(13).pages)
         assertEquals(12, layout(48, grid = PortalGrid.R2C2).pages)
-        assertEquals(12, layout(48, grid = PortalGrid.R2C2).dots.size)
         assertEquals(1, layout(0).pages)
+        // The apps scroll and stop anywhere: no page to name, no dot to tap.
+        for (n in listOf(12, 13, 48)) {
+            assertEquals(emptyList<PortalSheet.Box>(), layout(n).dots)
+            assertNull(layout(n).dotsRow)
+        }
     }
 
     @Test fun `no more than MAX_APPS are taken`() {
@@ -156,16 +159,6 @@ class PortalSheetTest {
         assertEquals(-1, l.appAt(2, 0))
     }
 
-    @Test fun `the dots stand under the grid, centred, one after another`() {
-        val l = layout(30)
-        val gridBottom = l.slots.maxOf { it.bottom }
-        l.dots.forEach { assertTrue(it.top >= gridBottom) }
-        assertEquals(l.emptyX, (l.dots.first().left + l.dots.last().right) / 2, 0.01f)
-        l.dots.zipWithNext().forEach { (a, b) -> assertTrue(a.right <= b.left + 0.01f) }
-    }
-
-    // -- hits on the full sheet ------------------------------------------------------------
-
     @Test fun `a tap on a cell is that app, on the page that shows`() {
         val l = layout(20)
         val c = l.slots[5]
@@ -176,6 +169,26 @@ class PortalSheetTest {
         assertEquals(Hit.Outside, PortalSheet.hit(l, empty.centerX, empty.centerY, 0f, 1))
     }
 
+    @Test fun `scrolled between two pages, a tap is the app that stands under it`() {
+        val l = layout(20)
+        val c = l.slots[5]
+        // A quarter of a page along, the first page's cells stand a quarter of a stride left.
+        assertEquals(Hit.App(5), PortalSheet.hit(l, c.centerX - l.pageStride * 0.25f, c.centerY, 0f, 0.25f))
+        // And the second page's first column has come in at the right.
+        val first = l.slots[0]
+        val x = first.centerX + l.pageStride * 0.75f
+        if (x < l.slots.maxOf { it.right }) assertEquals(Hit.App(l.perPage), PortalSheet.hit(l, x, first.centerY, 0f, 0.25f))
+    }
+
+    @Test fun `a column scrolled into the left fade is still its apps`() {
+        val l = layout(20)
+        // A fifth of a page along, the first column stands left of where the contents start.
+        val c = l.slots[4]
+        val x = c.centerX - l.pageStride * 0.2f
+        assertTrue(x < l.left)
+        assertEquals(Hit.App(4), PortalSheet.hit(l, x, c.centerY, 0f, 0.2f))
+    }
+
     @Test fun `with a guest, the strip's three buttons sit above the grid`() {
         for (guest in listOf(false, true)) {
             val l = layout(guest = guest)
@@ -184,31 +197,6 @@ class PortalSheetTest {
             assertEquals(Hit.Button(2), PortalSheet.hit(l, b.centerX, b.centerY, 0f, 0))
         }
         assertEquals(emptyList<PortalSheet.Box>(), layout(guest = null).buttons)
-    }
-
-    @Test fun `a dot is its page`() {
-        val l = layout(30)
-        val d = l.dots[2]
-        assertEquals(Hit.Page(2), PortalSheet.hit(l, d.centerX, d.centerY, 0f, 0))
-    }
-
-    @Test fun `a finger near a dot finds it, the row is tall enough for one`() {
-        for (guest in guests) {
-            val l = layout(30, guest)
-            val row = l.dotsRow!!
-            assertTrue(row.height >= 44f)
-            val d = l.dots[0]
-            assertEquals(Hit.Page(0), PortalSheet.hit(l, d.centerX - 15f, d.centerY + 15f, 0f, 0))
-            assertEquals(Hit.Page(2), PortalSheet.hit(l, l.dots[2].centerX + 15f, d.centerY - 8f, 0f, 0))
-        }
-    }
-
-    @Test fun `a miss in the dots' row keeps the sheet up`() {
-        val l = layout(30)
-        val y = l.dots[0].centerY
-        assertEquals(Hit.Blank, PortalSheet.hit(l, l.dotsRow!!.left + 4f, y, 0f, 0))
-        assertEquals(Hit.Blank, PortalSheet.hit(l, l.dotsRow!!.right - 4f, y, 0f, 0))
-        assertNull(layout(12).dotsRow)
     }
 
     @Test fun `the dots' row takes nothing from the apps over it`() {
@@ -407,9 +395,13 @@ class PortalSheetTest {
         }
     }
 
-    @Test fun `a page is the width right of the lenses across, on either rear`() {
-        assertEquals(608f, layout().pageStride, 0.01f)
-        assertEquals(Panel.WIDTH - proMax, layout(lensRight = proMax).pageStride, 0.01f)
+    @Test fun `a page is its own width and a gap across, so the columns run on evenly`() {
+        for (l in listOf(layout(30), layout(30, lensRight = proMax))) {
+            val cols = l.slots.map { it.left }.distinct().sorted()
+            val step = cols[1] - cols[0]
+            // The first column of the next page stands one step on from the last of this one.
+            assertEquals(cols.last() + step, cols.first() + l.pageStride, 0.01f)
+        }
         assertEquals(layout(30, lensRight = proMax).slots.minOf { it.left } - EdgeFade.BAND, layout(30, lensRight = proMax).pagesLeft, 1f)
     }
 

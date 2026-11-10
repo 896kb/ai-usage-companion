@@ -84,6 +84,8 @@ class ShellOverlay(
     private val blurs: Boolean = true,
     /** Its height among our layers: the portal sheet's, or under it for the panes (ShellLayer.Z_PANES). */
     private val z: Int = ShellLayer.Z_SHEET,
+    /** The live blur under it when fully open, in SurfaceFlinger px: the sheets' [BLUR_MAX], or more for what must hide what is under it (GuestCurtain). */
+    private val blurMax: Int = BLUR_MAX,
 ) {
 
     /** What one sheet draws. Its methods run on the render thread, under [DRAW]. */
@@ -302,7 +304,7 @@ class ShellOverlay(
                     surface.unlockCanvasAndPost(canvas)
                 }
                 // With the frame it goes with, and only when it moves.
-                val radius = blurPx(p)
+                val radius = Math.round(blurMax * p)
                 if (blurs && radius != blurred && blur(r, radius)) blurred = radius
                 drawn = v
                 synchronized(progressLock) { if (gen == r.gen) onProgress?.invoke(p) }

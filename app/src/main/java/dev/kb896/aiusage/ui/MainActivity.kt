@@ -146,7 +146,7 @@ class MainActivity : ComponentActivity() {
         stopWatchingConfig = null
         // Backgrounding re-locks: the app may be resumed by someone else, and a phone
         // handed over while a screen is open is exactly the case this guards.
-        Unlock.lock()
+        Unlock.lockForBackground()
     }
 
     override fun onResume() {
@@ -1503,10 +1503,13 @@ class MainActivity : ComponentActivity() {
                 override fun pin(pkg: String, on: Boolean): Boolean {
                     val next = PortalApps.pinned(store.load().portalApps, pkg, on)
                     if (on && pkg !in next) return false
+                    // An app unpinned takes its own settings with it. Only its own: the list
+                    // was cut to the pinned apps on every change, which also threw away what
+                    // had been set on the back for an app sent there by the tile.
                     write {
-                        it.copy(portalApps = next, portalDpi = it.portalDpi.filterKeys { k -> k in next },
-                            portalWidth = it.portalWidth.filterKeys { k -> k in next },
-                            portalConfined = it.portalConfined.filter { k -> k in next }.toSet())
+                        if (on) it.copy(portalApps = next)
+                        else it.copy(portalApps = next, portalDpi = it.portalDpi - pkg,
+                            portalWidth = it.portalWidth - pkg, portalConfined = it.portalConfined - pkg)
                     }
                     return true
                 }
@@ -1550,12 +1553,19 @@ class MainActivity : ComponentActivity() {
             )
         }
         SettingsRows.navigation(portalRows, "Apps in the portal", config.portalApps.size.toString(), icon = R.drawable.ic_tab_portal) { pickPortalApps() }
-        // Rows × columns a page; more pinned apps than that go on further pages on the back.
+        // The launcher's shape on the back: the grid, or the apps on a dome turned any way.
         SettingsRows.pills(
-            portalRows, "Apps per page", PortalGrid.entries.map { it.label }, config.portalGrid.ordinal,
-        ) { i -> write { it.copy(portalGrid = PortalGrid.entries[i]) } }
-        SettingsRows.toggle(portalRows, "Show app names", config.portalAppNames) { on ->
-            write { it.copy(portalAppNames = on) }
+            portalRows, "Launcher", listOf("Grid", "Dome"), if (config.portalDome) 1 else 0,
+        ) { i -> write { it.copy(portalDome = i == 1) }; buildSettingsRows() } // the grid's own rows come and go with it
+        // The grid's alone: the dome has no pages, and shows no names.
+        if (!config.portalDome) {
+            // Rows × columns a page; more pinned apps than that go on further pages on the back.
+            SettingsRows.pills(
+                portalRows, "Apps per page", PortalGrid.entries.map { it.label }, config.portalGrid.ordinal,
+            ) { i -> write { it.copy(portalGrid = PortalGrid.entries[i]) } }
+            SettingsRows.toggle(portalRows, "Show app names", config.portalAppNames) { on ->
+                write { it.copy(portalAppNames = on) }
+            }
         }
         // The frame round a guest on the back: one row, its switch and its colour, as the
         // other coloured switches are.

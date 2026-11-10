@@ -978,6 +978,12 @@ class RearUserService : IRearService.Stub {
 
     /** The portal grid's size (PanelConfig.portalGrid), from the last payload. */
     @Volatile private var portalGrid = dev.kb896.aiusage.data.PortalGrid.R3C4
+    /** The apps as a dome, not the grid (PanelConfig.portalDome), from the last payload. */
+    @Volatile private var portalDome = false
+    /** Where the dome is turned to, and going. Under [sheetLock]. */
+    private val dome = DomeMotion()
+    /** This finger is turning the dome. Under [sheetLock]. */
+    private var domeHeld = false
 
     /** The apps' names under their icons on the back (PanelConfig.portalAppNames), from the last payload. */
     @Volatile private var portalNames = true
@@ -997,7 +1003,7 @@ class RearUserService : IRearService.Stub {
         runCatching {
             sheetClock.execute {
                 synchronized(sheetLock) {
-                    pager.pages = sheetLayout().pages
+                    sheetLayout().let { pager.stride = it.pageStride; pager.pages = it.pages }
                     if (sheetUp) shellSheet?.page(pager.position(android.os.SystemClock.uptimeMillis()))
                 }
             }
@@ -1048,6 +1054,8 @@ class RearUserService : IRearService.Stub {
             if (regrid) repage()
             portalNames = config.portalAppNames
             shellSheet?.names(config.portalAppNames)
+            portalDome = config.portalDome
+            shellSheet?.dome(config.portalDome)
             // An app kept right of the cameras, or let back, while it is the guest: relaunched
             // in its new place — on the mode worker, not this binder thread (update() is the app's).
             val confined = synchronized(dpiLock) { confinedEdits.overlay(config.portalConfined, android.os.SystemClock.uptimeMillis()) }
@@ -1258,7 +1266,29 @@ class RearUserService : IRearService.Stub {
         return true
     }
 
-    override fun launchGuest(pkg: String?, displayId: Int): Boolean = synchronized(placing) {
+    /**
+     * The back blurred and dimmed while one app gives way to another there (GuestCurtain),
+     * round [work]: up as it starts, clear again once it is done, whatever came of it.
+     */
+    private inline fun <T> curtained(work: () -> T): T {
+        val c = runCatching { curtain }.getOrNull()
+        runCatching { c?.rise() }
+        try {
+            return work()
+        } finally {
+            runCatching { c?.fall() }
+        }
+    }
+
+    private val curtain by lazy { GuestCurtain(rearLayerStack(), geometry) }
+
+    override fun launchGuest(pkg: String?, displayId: Int): Boolean {
+        // Nothing to launch, nothing to cover.
+        if (displayId < 0 || pkg == null || placedDisplayId < 0) return launchGuestNow(pkg, displayId)
+        return curtained { launchGuestNow(pkg, displayId) }
+    }
+
+    private fun launchGuestNow(pkg: String?, displayId: Int): Boolean = synchronized(placing) {
         if (displayId < 0 || pkg == null || !PACKAGE_NAME.matches(pkg) || !GuestTask.sendable(pkg, PKG)) {
             return@synchronized false
         }
@@ -1711,7 +1741,7 @@ class RearUserService : IRearService.Stub {
      */
     private fun startOnPrivate(component: String, pkg: String, display: Int, throughFront: Boolean): Int? {
         RearKeyboard.showOn(display)
-        exec(if (throughFront) "am start --display 0 -n $component" else "am start --display $display -n $component")
+        exec(if (throughFront) "am start --display 0 -n $component" else "am start $NO_SLIDE --display $display -n $component")
         val settle = GuestTask.Settle()
         val began = android.os.SystemClock.uptimeMillis()
         var seen: GuestTask.Entry? = null
@@ -1740,7 +1770,7 @@ class RearUserService : IRearService.Stub {
 
     /** [g], already on its private display, asked for again: to the front of it, and on top. Under [placing]. */
     private fun openAgainOnPrivate(g: Guest, component: String, displayId: Int): Boolean {
-        exec("am start --display ${g.privateDisplay} -n $component")
+        exec("am start $NO_SLIDE --display ${g.privateDisplay} -n $component")
         if (!g.onTop) guestOnTopAgain(g, "opened again")
         wake(displayId)
         return true
@@ -2216,6 +2246,10 @@ class RearUserService : IRearService.Stub {
     private fun reveal(cover: GuestCover, what: String, displayId: Int, onDrawn: () -> Unit = {}, drawn: () -> Boolean) {
         val coveredAt = android.os.SystemClock.uptimeMillis()
         val r = GuestReveal(coveredAt)
+        // Blurred and dimmed over all of it (GuestCurtain): the cover is a still picture, and
+        // without this the rear looked frozen until it went. Every change made under a cover
+        // comes through here — a launch, the tile, Panel, Front, Close, Resume.
+        runCatching { curtain.rise() }
         try {
             var seen = false
             while (r.waiting(android.os.SystemClock.uptimeMillis())) {
@@ -2239,6 +2273,7 @@ class RearUserService : IRearService.Stub {
         } finally {
             // Interrupted or not, a cover is never left over the rear.
             cover.remove()
+            runCatching { curtain.fall() }
         }
     }
 
@@ -2277,7 +2312,7 @@ class RearUserService : IRearService.Stub {
      * is seen to have gone (LockRetry.closedItself), whether that is the end of waiting for it.
      */
     private fun startSettled(component: String, pkg: String, front: Boolean, retries: (Boolean) -> Boolean): Started {
-        val out = exec(if (front) "am start --display 0 -n $component" else "am start -n $component")
+        val out = exec(if (front) "am start --display 0 -n $component" else "am start $NO_SLIDE -n $component")
         val took = !out.contains("Error", ignoreCase = true)
         val settle = GuestTask.Settle()
         val began = android.os.SystemClock.uptimeMillis()
@@ -2308,7 +2343,12 @@ class RearUserService : IRearService.Stub {
         data object Nothing : Started
     }
 
-    override fun sendFocusedToBack(displayId: Int): String = synchronized(placing) {
+    override fun sendFocusedToBack(displayId: Int): String {
+        if (displayId < 0 || placedDisplayId < 0) return sendFocusedToBackNow(displayId)
+        return curtained { sendFocusedToBackNow(displayId) }
+    }
+
+    private fun sendFocusedToBackNow(displayId: Int): String = synchronized(placing) {
         if (displayId < 0) return@synchronized ""
         // As in launchGuest: without a placed panel no keep-alive would watch the guest.
         if (placedDisplayId < 0) { Log.w(TAG, "portal: no panel placed — not sending to back"); return@synchronized "" }
@@ -2489,6 +2529,18 @@ class RearUserService : IRearService.Stub {
         touchWatch.set(proc)
         // Its pull bands start where this rear's lenses end, in panel units.
         val gestures = EdgeGestures(geometry.cutoutUnits)
+        // On the dome a finger goes any way; on the strips over and under it, it moves the sheet.
+        // Only on the open sheet at rest with its apps whole — not scrolled up to the sliders,
+        // whose drags are theirs and the sheet's: with the dome's part taken from where it
+        // stands unscrolled, a finger on the sliders was the dome's, and neither moved them nor
+        // brought the sheet back down (the owner, 2026-11-10). Asked as a finger's drag starts,
+        // on the reader's thread under the sheet's lock, as every action is.
+        gestures.roams = { x, y ->
+            portalDome && !sheetLocked && runCatching {
+                val at = motion.settled(android.os.SystemClock.uptimeMillis())
+                at != null && motion.heading && PortalSheet.scroll(at) < 0.5f && PortalDome.turns(sheetLayout()).contains(x, y)
+            }.getOrDefault(false)
+        }
         synchronized(sheetLock) {
             gestures.sheet = sheetUp
             this.gestures = gestures
@@ -2573,7 +2625,7 @@ class RearUserService : IRearService.Stub {
     /** And across: a sideways drag is measured from there. Under [sheetLock]. */
     private var touchDownX = 0f
     /** The grid's pages: which shows, and their slide. Under [sheetLock]. */
-    private val pager by lazy { SheetPager(PortalSheet.pageStride(geometry.cutoutUnits)) }
+    private val pager by lazy { SheetPager(sheetLayout().pageStride) }
     /** What this finger's sideways drag moves (PortalSheet.swipe), decided as it starts. Under [sheetLock]. */
     private var slide = PortalSheet.Swipe.NONE
     /** A slider drag's app, the DPI its thumb started at, and where it is now. Under [sheetLock]. */
@@ -2602,7 +2654,18 @@ class RearUserService : IRearService.Stub {
     private fun dropChoice() {
         afterShut = null
         if (veilHeld) { veilHeld = false; frame.releaseVeil() }
+        releaseCurtain()
     }
+
+    /** The curtain was raised for a launch chosen on the sheet, and is not yet let fall. */
+    @Volatile private var curtainHeld = false
+
+    /** That curtain let fall, once: the launch done, or never to come. Any thread. */
+    private fun releaseCurtain() {
+        val held = synchronized(curtainLock) { curtainHeld.also { curtainHeld = false } }
+        if (held) runCatching { curtain.fall() }
+    }
+    private val curtainLock = Any()
     private var anim: java.util.concurrent.ScheduledFuture<*>? = null
     /** The button (or the slider's part, PortalSheetPainter.PRESS_*) shown pressed, or -1. Under [sheetLock]. */
     private var pressed = -1
@@ -2647,6 +2710,7 @@ class RearUserService : IRearService.Stub {
             s.keepRight(guest?.let { keepsRight(it) } == true)
             s.grid(portalGrid)
             s.names(portalNames)
+            s.dome(portalDome)
             shellSheet = s
             // Again, now that it is published: a setPortalDpi between the first and here told
             // no sheet. The lock makes this one see that write.
@@ -2654,6 +2718,8 @@ class RearUserService : IRearService.Stub {
             // And the grid and the names: a payload between the first and here told no sheet.
             s.grid(portalGrid)
             s.names(portalNames)
+            s.dome(portalDome)
+            s.domeAt(dome.pose(android.os.SystemClock.uptimeMillis()))
             s.dpiDefault(sliderDefault())
             syncSheetGuest()
             return s
@@ -2714,7 +2780,7 @@ class RearUserService : IRearService.Stub {
             if (!sheetUp) return@synchronized
             val now = android.os.SystemClock.uptimeMillis()
             motion.setDetents(PortalSheet.detents(sheetGuestOnTop), now)
-            pager.pages = sheetLayout().pages
+            sheetLayout().let { pager.stride = it.pageStride; pager.pages = it.pages }
             afterMotion(now)
         }
     }.onFailure { Log.w(TAG, "portal sheet: restop failed: ${it.message}") }
@@ -3175,8 +3241,8 @@ class RearUserService : IRearService.Stub {
                 stopAnim()
                 motion.hold(atMs)
                 pushPosition(atMs)
-                // The pages keep sliding under a finger that has not moved yet.
-                if (pager.settling) startAnim()
+                // The pages keep sliding under a finger that has not moved yet, and the dome turning.
+                if (pager.settling || dome.settling) startAnim()
                 setPressed(motion.settled(atMs)?.let { at -> pressOf(sheetLayout(), a.x, a.y, at) } ?: -1)
             }
             is EdgeGestures.Action.PullStart -> if (sheetUp) {
@@ -3198,6 +3264,24 @@ class RearUserService : IRearService.Stub {
             is EdgeGestures.Action.SlideStart -> if (sheetAlive()) slideStart(a.x, atMs)
             is EdgeGestures.Action.SlideMove -> if (sheetAlive()) slideMove(a.x, atMs)
             is EdgeGestures.Action.SlideEnd -> if (sheetAlive()) slideEnd(a.x, atMs)
+            // The dome, turned any way: only on the open sheet at rest, its apps showing whole.
+            is EdgeGestures.Action.RoamStart -> if (sheetAlive()) {
+                val at = motion.settled(atMs)
+                setPressed(-1)
+                motion.resume(atMs)
+                domeHeld = at != null && motion.heading && !sheetLocked && PortalSheet.scroll(at) < 0.5f
+                if (domeHeld) {
+                    dropChoice()
+                    stopAnim()
+                    dome.grab(touchDownX, touchDownY, touchDownAt)
+                    shellSheet?.domeAt(dome.drag(a.x, a.y, atMs))
+                } else afterMotion(atMs)
+            }
+            is EdgeGestures.Action.RoamMove -> if (domeHeld && sheetAlive()) shellSheet?.domeAt(dome.drag(a.x, a.y, atMs))
+            is EdgeGestures.Action.RoamEnd -> if (domeHeld) {
+                domeHeld = false
+                if (sheetAlive()) { dome.release(a.x, a.y, atMs); if (dome.settling) startAnim() }
+            }
             is EdgeGestures.Action.Tap -> {
                 setPressed(-1)
                 if (sheetAlive()) tap(a.x, a.y, atMs)
@@ -3248,7 +3332,7 @@ class RearUserService : IRearService.Stub {
         motion.grab(touchDownY, touchDownAt)
         motion.drag(y, atMs)
         pager.reset()
-        pager.pages = sheetLayout().pages
+        sheetLayout().let { pager.stride = it.pageStride; pager.pages = it.pages }
         slide = PortalSheet.Swipe.NONE
         sheetUp = true
         beginPending = true
@@ -3549,7 +3633,7 @@ class RearUserService : IRearService.Stub {
             BackLock.Kind.PATTERN -> -1
             else -> PortalSheet.keyAt(keypadNow(), x, y)
         }.let { if (it < 0) -1 else PortalSheetPainter.PRESS_KEY + it }
-        else when (val hit = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.page)) {
+        else when (val hit = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.position(android.os.SystemClock.uptimeMillis()))) {
             is PortalSheet.Hit.Button -> hit.index
             PortalSheet.Hit.SliderValue -> PortalSheetPainter.PRESS_VALUE
             PortalSheet.Hit.WidthValue -> PortalSheetPainter.PRESS_WIDTH_VALUE
@@ -3589,20 +3673,37 @@ class RearUserService : IRearService.Stub {
         val at = motion.settled(atMs)
         if (at == null || !motion.heading) { motion.resume(atMs); afterMotion(atMs); return }
         if (sheetLocked) { lockTap(x, y, atMs); return }
+        // The lock is still leaving: what is under it is not there to tap yet.
+        if (atMs < unlockingUntil) { steady(atMs); return }
         val apps = portalApps
         val onTop = sheetGuestOnTop
         val layout = sheetLayout()
-        when (val hit = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.page)) {
+        val flat = PortalSheet.hit(layout, x, y, PortalSheet.scroll(at), pager.position(atMs))
+        // On the dome the apps are its tiles, where the grid's cells would have been or not.
+        val onDome = portalDome && PortalSheet.scroll(at) < 0.5f && PortalDome.area(layout).contains(x, y)
+        if (onDome && dome.settling) { shellSheet?.domeAt(dome.stop(atMs)); steady(atMs); return }
+        // The sheet's own buttons stand over the dome, and are themselves.
+        val hit = if (!onDome || flat is PortalSheet.Hit.Button) flat else
+            PortalDome.hit(PortalDome.tiles(PortalDome.area(layout), layout.count, dome.pose(atMs)), x, y)?.let { PortalSheet.Hit.App(it) } ?: PortalSheet.Hit.Blank
+        when (hit) {
             is PortalSheet.Hit.App -> {
-                // Pages still sliding: the cell under the finger is not yet where it will be.
-                if (pager.settling) { steady(atMs); return }
+                // Still gliding: this finger stopped the apps where they are, and opens nothing —
+                // the cell under it is not where it was when the finger set off.
+                if (pager.settling) { shellSheet?.page(pager.stop(atMs)); steady(atMs); return }
                 val pkg = apps.packages.getOrNull(hit.index)
                 // The guest's own icon opens nothing new: see PortalAction.appTap.
                 val tapped = pkg?.let { PortalAction.appTap(it, sliderGuest(), onTop) }
                 when (tapped) {
                     PortalAction.AppTap.SHUT -> { Log.i(TAG, "portal sheet: $pkg is the guest already — only shut"); shutSheet(atMs, null) }
                     PortalAction.AppTap.RESUME -> { Log.i(TAG, "portal sheet: $pkg is the guest, behind — Resume"); shutSheet(atMs) { onSheetButton(0, false) } }
-                    else -> shutSheet(atMs, pkg?.let { p -> { launchGuest(p, rearDisplay()); Unit } })
+                    else -> {
+                        // The curtain comes up now, under the sheet as it goes down: the back stays
+                        // blurred from the sheet into the change of app, not cleared and blurred
+                        // again (the owner, 2026-11-10). Let fall when the launch is done — or
+                        // when the choice is dropped (dropChoice).
+                        if (pkg != null) { runCatching { curtain.rise() }; curtainHeld = true }
+                        shutSheet(atMs, pkg?.let { p -> { try { launchGuest(p, rearDisplay()) } finally { releaseCurtain() }; Unit } })
+                    }
                 }
             }
             is PortalSheet.Hit.Button -> {
@@ -3611,7 +3712,11 @@ class RearUserService : IRearService.Stub {
                 frame.holdVeil()
                 // Before the shut, which may hand the choice over at once (sheetDown).
                 veilHeld = true
-                shutSheet(atMs) { try { onSheetButton(hit.index, onTop ?: false) } finally { frame.releaseVeil() } }
+                // And the curtain up now, under the sheet as it goes down, as for a launch: the back
+                // stays blurred from the sheet into Panel, Front, Close or Resume, not cleared
+                // and blurred again (the owner, 2026-11-10).
+                runCatching { curtain.rise() }; curtainHeld = true
+                shutSheet(atMs) { try { onSheetButton(hit.index, onTop ?: false) } finally { frame.releaseVeil(); releaseCurtain() } }
             }
             is PortalSheet.Hit.Page -> {
                 steady(atMs)
@@ -3692,6 +3797,8 @@ class RearUserService : IRearService.Stub {
         steady(atMs)
         val layout = sheetLayout()
         slide = if (at == null || !motion.heading || sheetLocked) PortalSheet.Swipe.NONE else PortalSheet.swipe(layout, touchDownY, PortalSheet.scroll(at))
+        // The dome has no pages to slide: a sideways drag on the sheet's own strips moves nothing.
+        if (portalDome && slide == PortalSheet.Swipe.PAGES) slide = PortalSheet.Swipe.NONE
         when (slide) {
             PortalSheet.Swipe.SLIDER -> {
                 val pkg = sliderGuest()
@@ -4245,6 +4352,8 @@ class RearUserService : IRearService.Stub {
     @Volatile private var lockKind: BackLock.Kind? = null
     /** The open sheet is the lock. Under [sheetLock], read anywhere. */
     @Volatile private var sheetLocked = false
+    /** Until when (uptime) the lock is leaving, its code given: taps on the sheet wait for it. */
+    @Volatile private var unlockingUntil = 0L
     /** The code being typed, its message, and whether one is being checked. Under [sheetLock]. */
     private val lockEntry = BackLock.Entry()
     private var lockMessage: String? = null
@@ -4532,15 +4641,30 @@ class RearUserService : IRearService.Stub {
                             sheetLocked = false
                             // Over a covered guest: it shows again, just as it was, and the sheet goes.
                             if (lockVeiled || lockPrompt) {
-                                // What it covered back behind the sheet, and the sheet down, the code on it as it goes.
+                                // The lock leaves first — its glass into a pill, the tick (ShellSheet.unlockFade)
+                                // — and as the pill goes, what it covered is back behind the sheet and
+                                // the sheet goes down. No finger does anything on the sheet until then.
                                 lockPrompt = false
-                                unveil("the code")
-                                shutSheet(android.os.SystemClock.uptimeMillis(), null)
+                                shellSheet?.unlockFade()
+                                val wait = (PortalSheetPainter.UNLOCK_MS * PortalSheetPainter.UNLOCK_GOING).toLong()
+                                unlockingUntil = android.os.SystemClock.uptimeMillis() + wait
+                                runCatching {
+                                    sheetClock.schedule({
+                                        synchronized(sheetLock) {
+                                            unveil("the code")
+                                            if (sheetUp) shutSheet(android.os.SystemClock.uptimeMillis(), null)
+                                        }
+                                    }, wait, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                }.onFailure {
+                                    unveil("the code")
+                                    shutSheet(android.os.SystemClock.uptimeMillis(), null)
+                                }
                                 return@synchronized
                             }
                             lockMessage = null
-                            // The keypad fades away, the apps it gated coming in under it.
+                            // The lock leaves (its glass into a pill, the tick), the apps it gated coming in as it goes.
                             shellSheet?.unlockFade()
+                            unlockingUntil = android.os.SystemClock.uptimeMillis() + (PortalSheetPainter.UNLOCK_MS * PortalSheetPainter.UNLOCK_GOING).toLong()
                             // The guest's buttons and sliders back, and the sheet's stops with them (on the clock).
                             syncSheetGuest()
                             runCatching { sheetClock.execute { restop() } }
@@ -4665,7 +4789,7 @@ class RearUserService : IRearService.Stub {
             motion.reset()
             motion.setDetents(listOf(0f, PortalSheet.OPEN), now)
             pager.reset()
-            pager.pages = sheetLayout().pages
+            sheetLayout().let { pager.stride = it.pageStride; pager.pages = it.pages }
             slide = PortalSheet.Swipe.NONE
             sheetUp = true
             beginPending = true
@@ -4692,7 +4816,7 @@ class RearUserService : IRearService.Stub {
             SheetMotion.Phase.SHUT -> sheetDown()
             // Still: no frames for the sheet, but pages still sliding keep theirs.
             else -> {
-                if (!pager.settling) stopAnim(); pushPosition(nowMs)
+                if (!pager.settling && !dome.settling) stopAnim(); pushPosition(nowMs)
                 if (motion.phase == SheetMotion.Phase.OPEN) portalOpened.fire { events?.onPortalOpened() != null }
             }
         }
@@ -4716,14 +4840,15 @@ class RearUserService : IRearService.Stub {
     private fun animStep() {
         try {
             synchronized(sheetLock) {
-                if (!sheetUp || (motion.phase != SheetMotion.Phase.SETTLING && !pager.settling)) { stopAnim(); return }
+                if (!sheetUp || (motion.phase != SheetMotion.Phase.SETTLING && !pager.settling && !dome.settling)) { stopAnim(); return }
                 if (!sheetAlive()) return
                 val now = android.os.SystemClock.uptimeMillis()
                 if (pager.settling) shellSheet?.page(pager.at(now))
+                if (dome.settling) shellSheet?.domeAt(dome.at(now))
                 if (motion.phase == SheetMotion.Phase.SETTLING) {
                     shellSheet?.position(motion.at(now))
                     if (motion.phase != SheetMotion.Phase.SETTLING) afterMotion(now)
-                } else if (!pager.settling) stopAnim()
+                } else if (!pager.settling && !dome.settling) stopAnim()
             }
         } catch (e: Throwable) {
             Log.w(TAG, "portal sheet: settle frame failed: ${e.message}")
@@ -5257,6 +5382,11 @@ class RearUserService : IRearService.Stub {
     }
 
     private companion object {
+        /**
+         * Asks the system for no animation of its own as an app starts on the back: the change
+         * is covered by ours (GuestCurtain), and its slide under that was still seen moving.
+         */
+        private const val NO_SLIDE = "--activity-no-animation"
         /** The rear display's power group — see rearPowerGroup. */
         const val REAR_POWER_GROUP = 1
         /** The rear's size unread: how long the 17 Pro's stands in before it is asked again. */

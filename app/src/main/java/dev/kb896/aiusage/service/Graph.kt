@@ -36,16 +36,17 @@ class Graph private constructor(context: Context) {
         // the onboarding decides whether the panel may be placed at all (Setup.panelAllowed)
         b.gate = { status -> dev.kb896.aiusage.ui.Setup.panelAllowed(context.applicationContext, status) }
         // An app's DPI set on the back: saved as the front's own rows save it, and the
-        // payload pushed, so the shell sees its value come back (DpiEdits). Only for a
-        // pinned app — the back shows no others.
+        // payload pushed, so the shell sees its value come back (DpiEdits). For the guest
+        // whichever way it got there, as "keep right of the cameras" below: it was saved for a
+        // pinned app alone, so the DPI of an app sent by the tile was never saved — it held on
+        // the back for the shell's ten seconds, then went back to the default, and the app
+        // was restarted at it (the owner, 2026-11-10).
         b.onPortalDpi = { pkg, dpi ->
             val store = ConfigStore(context.applicationContext)
             val config = store.load()
-            if (pkg in config.portalApps) {
-                val next = config.copy(portalDpi = DpiEdits.applied(config.portalDpi, pkg, dpi))
-                store.save(next)
-                if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
-            }
+            val next = config.copy(portalDpi = DpiEdits.applied(config.portalDpi, pkg, dpi))
+            store.save(next)
+            if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
         }
         // "Keep right of the cameras" switched on the back, for the guest whichever way it got
         // there: not only a pinned app's, or a guest sent by the tile would go back where it was
@@ -57,15 +58,13 @@ class Graph private constructor(context: Context) {
             store.save(next)
             if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
         }
-        // An app's width set on the back: saved for a pinned app, as its DPI is.
+        // An app's width set on the back: saved as its DPI is, pinned or not.
         b.onPortalWidth = { pkg, width ->
             val store = ConfigStore(context.applicationContext)
             val config = store.load()
-            if (pkg in config.portalApps) {
-                val next = config.copy(portalWidth = if (width <= 0) config.portalWidth - pkg else config.portalWidth + (pkg to width))
-                store.save(next)
-                if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
-            }
+            val next = config.copy(portalWidth = if (width <= 0) config.portalWidth - pkg else config.portalWidth + (pkg to width))
+            store.save(next)
+            if (!b.calibrating) b.update(StatePayload.encode(repository.state.value, next, WeatherPoll.latest))
         }
         // The sheet opened on the back: the Portal tab's last step ticks. The front's alone —
         // nothing on the back reads it, so no payload goes.

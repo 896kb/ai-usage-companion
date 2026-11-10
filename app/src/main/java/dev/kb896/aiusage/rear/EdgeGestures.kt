@@ -74,6 +74,13 @@ class EdgeGestures(
         data class SlideStart(val x: Float) : Action
         data class SlideMove(val x: Float) : Action
         data class SlideEnd(val x: Float) : Action
+        /**
+         * A drag on the open sheet that began where [roams] says a finger goes any way (the
+         * portal's dome): where it is as it starts, as it goes, and where it lifts.
+         */
+        data class RoamStart(val x: Float, val y: Float) : Action
+        data class RoamMove(val x: Float, val y: Float) : Action
+        data class RoamEnd(val x: Float, val y: Float) : Action
         /** A sheet gesture that came to nothing: held too long, or lost. */
         data object Cancel : Action
     }
@@ -95,6 +102,11 @@ class EdgeGestures(
     private var lastY = 0f
     /** A committed sheet drag is sideways (a slide), not a pull. */
     private var sideways = false
+    /** A committed sheet drag goes any way ([roams]), not along one axis. */
+    private var roaming = false
+
+    /** Whether a drag on the open sheet that lands at x, y goes any way, not along one axis. Any thread. */
+    @Volatile var roams: (Float, Float) -> Boolean = { _, _ -> false }
 
     fun feed(e: RearTouches.Event): List<Action> = when (e) {
         is RearTouches.Down -> {
@@ -102,12 +114,12 @@ class EdgeGestures(
                 kind == Kind.PULL && committed -> listOf(Action.PullEnd(lastY))
                 kind == Kind.TOP && committed -> listOf(Action.TopPullEnd(lastY))
                 kind == Kind.NOTICES && committed -> listOf(Action.NoticePullEnd(lastY))
-                kind == Kind.SHEET && committed -> listOf(if (sideways) Action.SlideEnd(lastX) else Action.PullEnd(lastY))
+                kind == Kind.SHEET && committed -> listOf(if (roaming) Action.RoamEnd(lastX, lastY) else if (sideways) Action.SlideEnd(lastX) else Action.PullEnd(lastY))
                 kind == Kind.SHEET -> listOf(Action.Cancel)
                 else -> emptyList()
             }
             downX = e.x; downY = e.y; lastX = e.x; lastY = e.y; downAt = e.atMs
-            committed = false; sideways = false
+            committed = false; sideways = false; roaming = false
             kind = when {
                 sheet -> Kind.SHEET
                 PortalPull.startsPull(e.x, e.y, usableLeft) -> Kind.PULL
@@ -158,17 +170,18 @@ class EdgeGestures(
     }
 
     private fun sheetMove(e: RearTouches.Event): List<Action> {
-        if (committed) return listOf(if (sideways) Action.SlideMove(e.x) else Action.PullMove(e.y))
+        if (committed) return listOf(if (roaming) Action.RoamMove(e.x, e.y) else if (sideways) Action.SlideMove(e.x) else Action.PullMove(e.y))
         val dx = abs(e.x - downX)
         val dy = abs(e.y - downY)
         if (maxOf(dx, dy) < SLOP) return emptyList()
         committed = true
+        if (roams(downX, downY)) { roaming = true; return listOf(Action.RoamStart(e.x, e.y)) }
         sideways = dx > dy
         return listOf(if (sideways) Action.SlideStart(e.x) else Action.PullStart(e.y, onSheet = true))
     }
 
     private fun sheetUp(e: RearTouches.Event): List<Action> {
-        if (committed) return listOf(if (sideways) Action.SlideEnd(e.x) else Action.PullEnd(e.y))
+        if (committed) return listOf(if (roaming) Action.RoamEnd(e.x, e.y) else if (sideways) Action.SlideEnd(e.x) else Action.PullEnd(e.y))
         val moved = maxOf(abs(e.x - downX), abs(e.y - downY)) >= SLOP
         return when {
             moved -> listOf(Action.Cancel)

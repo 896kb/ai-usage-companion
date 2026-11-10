@@ -90,6 +90,7 @@ internal class PortalSheetPreview(context: Context) : View(context) {
         val key = config.portalGrid to labels.size
         val layout = laid?.takeIf { laidFor == key }
             ?: PortalSheet.layout(key.first, key.second, guestOnTop = null, lensRight = rear.cutoutPx.toFloat()).also { laid = it; laidFor = key }
+        painter.dome = if (config.portalDome) dev.kb896.aiusage.rear.PortalDome.Pose(0f, 0f) else null
         painter.draw(
             canvas, progress = progress, scroll = 0f, layout = layout, page = 0f, icons = icons, labels = labels,
             guestOnTop = false, names = config.portalAppNames,

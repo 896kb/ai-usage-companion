@@ -101,7 +101,7 @@ object PortalSheet {
     private const val GAP = 12f
     private const val BUTTON_H = 64f
     /** The contents start this far right of the lens column. */
-    private const val LENS_GAP = 24f
+    const val LENS_GAP = 24f
     /**
      * Where the contents end: four cells of 120 from the 17 Pro's lenses as the portal was
      * born, at 836, clear of Xiaomi's Back strip (x ≥ 842). Fixed: on a rear whose lenses end
@@ -112,8 +112,6 @@ object PortalSheet {
     private const val PAD_BOTTOM = 8f
     /** The page dots' band under the grid. Kept whether or not there are pages, so the cells do not jump. */
     const val DOTS_H = 20f
-    /** From one page dot to the next. */
-    private const val DOT_STEP = 18f
     /**
      * The dots' row is this tall for a finger, and reaches this far past its end dots: a
      * dot is tiny, and a near miss must not shut the sheet. Within it the nearest dot is
@@ -129,11 +127,6 @@ object PortalSheet {
     const val ICON_MARGIN = 0.1f
     private const val CELL_PAD = 0.1f
 
-    /**
-     * From one page to the next across, for lenses ending at [lensRight]: the width right of
-     * them, so a page at rest shows none of its neighbours.
-     */
-    fun pageStride(lensRight: Float): Float = Panel.WIDTH - lensRight
 
     /** The slider's row, in the middle of its strip. */
     private const val ROW_H = 56f
@@ -228,14 +221,16 @@ object PortalSheet {
         }
         val pages = maxOf(1, ceil(n / grid.perPage.toFloat()).toInt())
         val centerX = (left + RIGHT) / 2
-        val dotsY = t0 + h + DOTS_H / 2 + 2f
-        val dots = if (pages < 2) emptyList() else (0 until pages).map { i ->
-            val x = centerX + (i - (pages - 1) / 2f) * DOT_STEP
-            Box(x - DOT_STEP / 2, dotsY - DOTS_H / 2, x + DOT_STEP / 2, dotsY + DOTS_H / 2)
-        }
-        val dotsRow = if (pages < 2) null else Box(left, dotsY - DOTS_HIT_H / 2, RIGHT, dotsY + DOTS_HIT_H / 2)
+        // NO DOTS (the owner, 2026-11-10): a dot a page said which page was up and took a tap to
+        // go to it, while the apps turned a page at a time. They scroll now and stop anywhere
+        // (SheetPager), so there is no page to name. Their band under the grid stays empty, so
+        // the cells are the size they were.
+        val dots = emptyList<Box>()
+        val dotsRow: Box? = null
         return Layout(
-            left = left, pageStride = pageStride(lensRight),
+            // A page's own width and one gap: the columns run on evenly from page to page,
+            // so the apps scroll as one row of columns with no page to stop on (SheetPager).
+            left = left, pageStride = w + GAP,
             count = n,
             buttons = if (withGuest) buttons(left) else emptyList(),
             slots = slots, pages = pages, dots = dots, dotsRow = dotsRow,
@@ -302,7 +297,14 @@ object PortalSheet {
      * apps, then the dots' row — the nearest dot within reach, else nothing; anything else
      * is [Hit.Outside], and a tap there shuts the sheet.
      */
-    fun hit(l: Layout, x: Float, y: Float, scroll: Float, page: Int): Hit {
+    fun hit(l: Layout, x: Float, y: Float, scroll: Float, page: Int): Hit = hit(l, x, y, scroll, page.toFloat())
+
+    /**
+     * [hit] with the apps scrolled to [page] in pages, anywhere between two (SheetPager.position):
+     * each page's cells stand its stride on from the last, and only what shows between the
+     * sides' fades is there to tap.
+     */
+    fun hit(l: Layout, x: Float, y: Float, scroll: Float, page: Float): Hit {
         val cy = y + scroll
         l.slider?.let { s ->
             if (cy >= FULL) return when {
@@ -320,9 +322,21 @@ object PortalSheet {
             }
         }
         l.buttons.forEachIndexed { i, b -> if (b.contains(x, cy)) return Hit.Button(i) }
-        l.slots.forEachIndexed { slot, c ->
-            if (c.contains(x, cy)) return l.appAt(page, slot).takeIf { it >= 0 }?.let { Hit.App(it) } ?: Hit.Outside
+        // As far out as the apps show: scrolled, a column stands in the sides' fade, left of where
+        // the contents start, whole enough to tap — and a tap there was taken as outside the
+        // grid and shut the sheet (found shooting the 1.2.0 stills, 2026-11-10).
+        if (x in l.pagesLeft..PAGES_RIGHT) {
+            val first = kotlin.math.floor(page).toInt()
+            for (p in first - 1..first + 2) {
+                if (p !in 0 until l.pages) continue
+                val dx = (p - page) * l.pageStride
+                l.slots.forEachIndexed { slot, c ->
+                    if (c.contains(x - dx, cy)) l.appAt(p, slot).takeIf { it >= 0 }?.let { return Hit.App(it) }
+                }
+            }
         }
+        // On a cell's place with no app in it: nothing there, as outside the grid.
+        if (l.slots.any { it.contains(x, cy) }) return Hit.Outside
         l.dotsRow?.let { row ->
             if (!row.contains(x, cy)) return@let
             val nearest = l.dots.indices.minBy { kotlin.math.abs(l.dots[it].centerX - x) }

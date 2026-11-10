@@ -458,8 +458,95 @@ class RearDialView(context: Context) : View(context) {
             sdfEffects[effectKey] = effect
         }
         node.setRenderEffect(effect)
+        if (sdfLamp) sdfHalo(canvas, text, paint, left + pad, top + pad - paint.fontMetrics.ascent)
         recorder.drawRenderNode(node)
+        if (sdfLamp) sdfGlow(canvas, text, paint, left + pad, top + pad - paint.fontMetrics.ascent)
         return true
+    }
+
+    /**
+     * Whether glass type carries the pill clock's lamp — its light at the edge, its halo: the
+     * digital clock's, while the clock draws, and off after (as [sdfTintAmount] is the clock's).
+     */
+    private var sdfLamp = false
+    private val sdfHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var sdfHaloBlur: android.graphics.BlurMaskFilter? = null
+    private var sdfHaloRadius = -1f
+    private val sdfGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    /** Each glyph's outline, at the origin, kept with the fields. */
+    private val sdfGlowPaths = HashMap<String, android.graphics.Path>()
+    /** What [sdfGlowPaint]'s light was last built for: the type's size and its colour. */
+    private var sdfGlowSize = -1f
+    private var sdfGlowInk = 0
+    private val sdfGlowDrift = android.graphics.Matrix()
+
+    /** The lamp's halo behind a glass glyph: the glyph itself, blurred, in its colour, swelling as the hour hand's does. */
+    private fun sdfHalo(canvas: Canvas, text: String, paint: Paint, x: Float, baseline: Float) {
+        val p = sdfHaloPaint
+        p.set(paint)
+        p.textAlign = Paint.Align.LEFT
+        val radius = paint.textSize * SDF_HALO_BLUR
+        if (radius != sdfHaloRadius) {
+            sdfHaloRadius = radius
+            sdfHaloBlur = android.graphics.BlurMaskFilter(radius.coerceAtLeast(0.5f), android.graphics.BlurMaskFilter.Blur.NORMAL)
+        }
+        p.maskFilter = sdfHaloBlur
+        p.shader = null
+        val swell = 0.82f + 0.12f * Math.sin(lampSeconds * 0.9).toFloat() + 0.06f * Math.sin(lampSeconds * 0.37 + 1.3).toFloat()
+        p.color = (paint.color and 0x00FFFFFF) or ((255 * SDF_HALO_ALPHA * swell).toInt().coerceIn(0, 255) shl 24)
+        canvas.drawText(text, x, baseline, p)
+    }
+
+    /**
+     * The lamp's light on the glass glyph just drawn: a soft line of it just inside the letter's
+     * edge, as the hour hand's rim is lit — and as its is, not all the way round: dark bands
+     * cross the type slantwise and drift, so stretches of every outline go dark and come back,
+     * and the whole light swells and eases. Locked where it stands while the lamp's clock is held
+     * (always-on).
+     *
+     * THE OUTLINE ITSELF, STROKED AND BLURRED, clipped to the letter. It was first read out of
+     * the glyph's measured field in a shader, and came out as a dotted line along the edge and
+     * next to nothing inside it (the owner, 2026-11-10: "artifacted") — the field is measured
+     * to bend light by, on a grid, and its edge cells are not a clean outline.
+     */
+    private fun sdfGlow(canvas: Canvas, text: String, paint: Paint, x: Float, baseline: Float) {
+        val key = sdfKey ?: return
+        val outline = sdfGlowPaths.getOrPut(key) {
+            android.graphics.Path().also { paint.getTextPath(text, 0, text.length, 0f, 0f, it) }
+        }
+        val size = paint.textSize
+        val ink = paint.color or (0xFF shl 24)
+        val p = sdfGlowPaint
+        if (size != sdfGlowSize || ink != sdfGlowInk) {
+            sdfGlowSize = size
+            sdfGlowInk = ink
+            // The light: the colour drawn towards white, as the hands' rims are.
+            val hot = android.graphics.Color.rgb(
+                (android.graphics.Color.red(ink) * 0.45f + 255 * 0.55f).toInt(),
+                (android.graphics.Color.green(ink) * 0.45f + 255 * 0.55f).toInt(),
+                (android.graphics.Color.blue(ink) * 0.45f + 255 * 0.55f).toInt(),
+            )
+            val off = hot and 0x00FFFFFF or (0x10 shl 24)
+            val period = size * SDF_GLOW_PERIOD
+            p.shader = android.graphics.LinearGradient(
+                0f, 0f, period, period * 0.6f,
+                intArrayOf(hot, hot, off, off, hot),
+                // About a fifth of the way dark, eased in and out.
+                floatArrayOf(0f, 0.68f, 0.78f, 0.9f, 1f),
+                android.graphics.Shader.TileMode.REPEAT,
+            )
+            p.strokeWidth = size * SDF_GLOW_WIDTH
+            p.maskFilter = android.graphics.BlurMaskFilter((size * SDF_GLOW_SOFT).coerceAtLeast(0.5f), android.graphics.BlurMaskFilter.Blur.NORMAL)
+        }
+        sdfGlowDrift.setTranslate(lampSeconds * size * SDF_GLOW_DRIFT, 0f)
+        p.shader.setLocalMatrix(sdfGlowDrift)
+        val swell = 0.82f + 0.12f * Math.sin(lampSeconds * 0.9).toFloat() + 0.06f * Math.sin(lampSeconds * 0.37 + 1.3).toFloat()
+        p.alpha = (255 * SDF_GLOW_ALPHA * swell).toInt().coerceIn(0, 255)
+        canvas.save()
+        canvas.translate(x, baseline)
+        canvas.clipPath(outline)
+        canvas.drawPath(outline, p)
+        canvas.restore()
     }
 
     /**
@@ -527,6 +614,7 @@ class RearDialView(context: Context) : View(context) {
             sdfFields.values.forEach { it.recycle() }
             sdfFields.clear()
             sdfEffects.clear()
+            sdfGlowPaths.clear()
         }
         sdfFields[key] = out
         return out
@@ -1151,6 +1239,9 @@ class RearDialView(context: Context) : View(context) {
     private val digitBounds = android.graphics.Rect()
 
     private val pillClock = PillClockPainter()
+    /** The pill clock's lamp: its own time, in seconds, and the frame it was last advanced on. */
+    private var lampSeconds = 0f
+    private var lampAt = 0L
 
     /**
      * Where the analog face's battery card stands, set as drawClockLines draws it: always-on
@@ -2106,6 +2197,28 @@ class RearDialView(context: Context) : View(context) {
 
     /** What a pane bends when it is not given something of its own. */
     private var paneBackdrop = sceneNode
+
+    /**
+     * [under] (the ground, or what an earlier call made of it) with [draw] on it, drawn as [canvas] would draw it now: a backdrop for panes
+     * that lie over something of their own as well as the ground (the pill clock's hands over
+     * its lit hour hand). Panel-wide from the origin, as the ground is, so a pane samples it as
+     * it does the ground. Null where there is no ground to draw on, or no nodes to hold it.
+     */
+    private fun litGround(canvas: Canvas, under: android.graphics.RenderNode, draw: (Canvas) -> Unit): android.graphics.RenderNode? {
+        if (canvas !is android.graphics.RecordingCanvas || !under.hasDisplayList()) return null
+        val out = glassPainter.nextNode()
+        out.setRenderEffect(null)
+        out.setPosition(0, 0, Panel.WIDTH, Panel.HEIGHT)
+        val into = out.beginRecording(Panel.WIDTH, Panel.HEIGHT)
+        try {
+            into.drawRenderNode(under)
+            into.concat(canvas.matrix)
+            draw(into)
+        } finally {
+            out.endRecording()
+        }
+        return out
+    }
 
     /** The strip's slide, taken during the scene pass so the second pass cannot re-advance it. */
     private var noticeSlideHeld = 0f
@@ -6910,9 +7023,16 @@ class RearDialView(context: Context) : View(context) {
         cornerRadius = m.corner
         if (ringsClosed != m.ringsClosed) ringsClosed = m.ringsClosed
         if (tableGlow != m.tableGlow) tableGlow = m.tableGlow
+        val leavingAod = aod && !m.aod
         if (aod != m.aod) aod = m.aod
         if (m.locked && !locked) lock() else if (!m.locked && locked) unlock()
-        if (!aod && pager.page != m.page) pager.goTo(m.page, SystemClock.uptimeMillis())
+        // OUT OF ALWAYS-ON, TO THE PAGE ASKED FOR — whatever the pager says it is on. Leaving
+        // always-on sets off for the page it was entered from (aodReturnPage), but the pager
+        // still stands on the clock page as that move starts, so "already on the page asked
+        // for" was true for the clock page and the move home was left to run: the settings'
+        // Usage tab, then Always-on, then Clock ended on the usage page (the owner, 2026-11-10).
+        if (leavingAod) pager.goTo(m.page, SystemClock.uptimeMillis(), AOD_FADE_MS.toFloat())
+        else if (!aod && pager.page != m.page) pager.goTo(m.page, SystemClock.uptimeMillis())
         invalidate()
     }
 
@@ -8194,7 +8314,11 @@ class RearDialView(context: Context) : View(context) {
             val rows = 2f + secondsScale.coerceIn(0f, 1f) + markRow
             val middle = (stackTop + stackBottom) / 2f
             val half = maxOf(slot, markW / 2f)
-            verticalBox.set(cx - half - AOD_BAND_AIR, middle - rows / 2f * rowH, cx + half + AOD_BAND_AIR, middle + rows / 2f * rowH)
+            // With room over and under for the figures' halo (the lamp's, sdfHalo): the band stopped
+            // at the rows, and always-on's veil cut the top row's light off flat (the owner,
+            // 2026-11-10).
+            val glow = CLOCK_SIZE * AOD_BAND_GLOW
+            verticalBox.set(cx - half - AOD_BAND_AIR, middle - rows / 2f * rowH - glow, cx + half + AOD_BAND_AIR, middle + rows / 2f * rowH + glow)
         }
         val clockBase = CLOCK_BASELINE
         var x = timeCx - span / 2f
@@ -8228,14 +8352,26 @@ class RearDialView(context: Context) : View(context) {
         // Each face's own glass, handing over to the goo between them (ClockGoo).
         val digitsKeep = clockKeep * ClockGoo.digitalShown(faceT)
         val pillsKeep = clockKeep * ClockGoo.analogShown(faceT)
+        // The lamp's clock, for whichever face is up: running while the page is awake, slowing
+        // to a stop as always-on comes in — the glow is locked there, and no frames are asked
+        // for it.
+        if (clockKeep > 0.004f && config.theme.isGlass) {
+            val awake = 1f - aodFade(frameNowMs)
+            if (lampAt != 0L) lampSeconds = (lampSeconds + (frameNowMs - lampAt).coerceIn(0L, 100L) / 1000f * awake) % LAMP_LOOP_S
+            lampAt = frameNowMs
+            if (awake > 0.004f) animating = true
+        }
         val glassClock = digitsKeep > 0.004f && config.theme.isGlass &&
             deferOver(canvas) { c ->
                 val layer = if (digitsKeep < 0.996f) c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * digitsKeep).toInt()) else -1
                 val fitted = fitClock(c, cx, clockFit)
                 // The clock's own glass tint (PanelConfig.clockGlassTint), the same as its hands'.
                 sdfTintAmount = CLOCK_SDF_TINT * config.clockGlassTint.coerceIn(0f, 1f)
+                // And the lamp the analog face's hour hand carries: on every figure, letter and colon.
+                sdfLamp = true
                 drawGlassClock(c, figures, timeCx, span, slot, colon, ink, secondsScale)
                 marker?.let { drawClockMarker(c, it, markX, markBase, ink, markW, markScale) }
+                sdfLamp = false
                 sdfTintAmount = Glass.SDF_TINT
                 c.restoreToCount(fitted)
                 if (layer >= 0) c.restoreToCount(layer)
@@ -8288,14 +8424,26 @@ class RearDialView(context: Context) : View(context) {
         // The pills: deferred to the overlay pass as the glass figures are, so their glass bends
         // the finished page.
         if (pillsKeep > 0.004f) {
+            val lampSeconds = lampSeconds
             val pills: (Canvas) -> Unit = { c ->
-                pillClock.draw(c, dial, angles, ink, pillSeconds, pillsKeep, glass = config.theme.isGlass, tintStrength = config.clockGlassTint) { cc, r, radius, tint, turn, outline ->
+                // The ground with the hands so far on it — the lit hour hand, then the minute
+                // hand too: what the next hand over them bends (PillClockPainter). Null until
+                // the painter has drawn it, or where it cannot be.
+                var lit: android.graphics.RenderNode? = null
+                pillClock.draw(
+                    c, dial, angles, ink, pillSeconds, pillsKeep, glass = config.theme.isGlass, tintStrength = config.clockGlassTint,
+                    time = lampSeconds,
+                    light = { hand -> lit = litGround(c, lit ?: groundNode, hand) },
+                ) { cc, r, radius, tint, turn, outline, overLamp ->
                     // As glassCard draws a card — held, its ambient rim, the ground under it —
                     // but in the clock's own colour, as the glass figures are: not the Glass
                     // settings' tint, not the light under it.
                     drawGlassPane(
                         cc, r, radius, tint, shape = outline,
-                        source = groundNode, held = true, aberration = Glass.BUTTON_ABERRATION, styled = false, lightTurn = turn,
+                        source = (if (overLamp) lit else null) ?: groundNode,
+                        // Over the lamp no light is split: its bright edge came through the
+                        // hand in coloured fringes (the owner, 2026-11-10: "artifacts").
+                        held = true, aberration = if (overLamp) 0f else Glass.BUTTON_ABERRATION, styled = false, lightTurn = turn,
                     )
                 }
             }
@@ -8307,6 +8455,9 @@ class RearDialView(context: Context) : View(context) {
                 val layer = if (clockKeep < 0.996f) c.saveLayerAlpha(0f, 0f, Panel.WIDTH.toFloat(), Panel.HEIGHT.toFloat(), (255 * clockKeep).toInt()) else -1
                 clockGoo.draw(
                     c, faceT, Panel.WIDTH, Panel.HEIGHT, ink,
+                    // Glass between the faces as at either end: the ground bent, the pills' tint.
+                    ground = groundNode.takeIf { config.theme.isGlass },
+                    tint = PillClockPainter.TINT_MAX * config.clockGlassTint,
                     digital = { gc, p ->
                         val fitted = fitClock(gc, cx, clockFit)
                         drawFiguresFlat(gc, p, figures, timeCx, span, slot, colon, secondsScale)
@@ -9003,7 +9154,10 @@ class RearDialView(context: Context) : View(context) {
         // NOT THE PANEL'S WIDTH EITHER: fitted to the width (fitClock) the line is drawn smaller,
         // and in its own units it runs past the panel's right edge — clipped there, the M of a
         // full-size AM was cut in half (2026-11-09). Only the cell's height is the roll's.
-        canvas.clipRect(-Panel.WIDTH.toFloat(), mid - cell / 2f, 2f * Panel.WIDTH, mid + cell / 2f)
+        // AND ONLY WHILE IT ROLLS: at rest there is one figure and nothing to hide, and the cell
+        // cut the top off the figure's halo (the lamp's, sdfHalo) — the top row's showed, flat
+        // across, in always-on (the owner, 2026-11-10).
+        if (t < 1f) canvas.clipRect(-Panel.WIDTH.toFloat(), mid - cell / 2f, 2f * Panel.WIDTH, mid + cell / 2f)
         // Arriving from below, and whatever it replaced leaving through the top.
         val rise = (1f - eased) * cell
         if (!drawSdfText(canvas, ch.toString(), extras, slotRight(x, full, ch.toString()), mid + rise)) {
@@ -12002,6 +12156,8 @@ class RearDialView(context: Context) : View(context) {
         /** air either side of the clock inside its undimmed band, and how far under its baseline the band goes */
         const val AOD_BAND_BELOW = 4f
         const val AOD_BAND_AIR = 28f
+        /** Room over and under the clock on end, in always-on's band, for its figures' halo: in the figures' size. */
+        const val AOD_BAND_GLOW = 0.2f
         /** and the slider's own, lighter one */
         const val AOD_SLIDER_VEIL_ALPHA = 0.15f
         /**
@@ -12834,6 +12990,8 @@ class RearDialView(context: Context) : View(context) {
         private const val DIAL_GAP = 10f
         /** How long the second hand takes to come out of the minute hand, or go back in. */
         private const val PILL_SPLIT_MS = 520f
+        /** The lamp's clock starts over after this long, so its seconds stay fine-grained: a jump in its glow once in hours. */
+        private const val LAMP_LOOP_S = 10_000f
         /** How long the clock takes to change face, digital to analog or back. */
         private const val FACE_MORPH_MS = 1100f
         /** How long the digital clock takes to stand on end, or lie back down. */
@@ -12849,6 +13007,19 @@ class RearDialView(context: Context) : View(context) {
          * far more coloured than the analog one (the owner, 2026-11-09).
          */
         private const val CLOCK_SDF_TINT = 0.95f
+        /** The lamp's halo behind a glass figure: its blur, in the type's size, and its strength. */
+        private const val SDF_HALO_BLUR = 0.1f
+        private const val SDF_HALO_ALPHA = 0.5f
+        /**
+         * The lamp's light inside a glass figure's edge, in the type's size: the line's width
+         * (half of it shows, inside the edge) and softness, its strength, how far apart the dark
+         * bands lie, and how far they drift a second.
+         */
+        private const val SDF_GLOW_WIDTH = 0.07f
+        private const val SDF_GLOW_SOFT = 0.022f
+        private const val SDF_GLOW_ALPHA = 0.9f
+        private const val SDF_GLOW_PERIOD = 1.3f
+        private const val SDF_GLOW_DRIFT = 0.06f
         /** The battery glyph's width, in its height (the glass one is narrower; room for the charging bolt). */
         private const val BATTERY_GLYPH_W = 0.6f
         private const val CLOCK_PAD_X = 20f

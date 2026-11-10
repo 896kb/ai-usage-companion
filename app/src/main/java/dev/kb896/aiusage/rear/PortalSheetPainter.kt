@@ -66,6 +66,9 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * Outfit under GLASS, Departure Mono under ORIGINAL, or the one chosen in General.
      */
     var face: PanelType.Face = face
+
+    /** The apps as a dome turned to this (PortalDome), or null for the grid: set before [draw]. */
+    var dome: PortalDome.Pose? = null
         set(value) {
             if (value === field) return
             field = value
@@ -112,8 +115,15 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         val finger: Pair<Float, Float>? = null,
         /** The keyboard's page (PortalSheet.KB_LOWER and the rest). */
         val page: Int = PortalSheet.KB_LOWER,
+        /**
+         * The code was right: how far through its leaving the lock is, 0 to 1 ([drawUnlock]) —
+         * its keys run together into one pill, a tick is drawn in it, and it goes. Under 0: not
+         * leaving.
+         */
+        val unlocking: Float = -1f,
     ) {
-        fun pressing(key: Int) = LockLook(title, entered, message, wrong, key, keys, kind, pattern, finger, page)
+        fun pressing(key: Int) = LockLook(title, entered, message, wrong, key, keys, kind, pattern, finger, page, unlocking)
+        fun unlocking(t: Float) = LockLook(title, entered, message, wrong, -1, keys, kind, pattern, finger, page, t)
     }
 
     /** A slider as it is to be drawn: the thumb [fraction] of the way along, the value saying [label]. */
@@ -180,7 +190,10 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
                 }
                 return
             }
-            val paging = kotlin.math.abs(page - Math.round(page)) > 0.001f
+            // With more apps than a page holds they scroll sideways and stop anywhere: the
+            // sides always fade, so a column part-way in is not cut off hard.
+            // The dome fades its own edges, all four (drawDome): not the grid's sides over them.
+            val paging = layout.pages > 1 && dome == null
             faded(canvas, layout.pagesLeft, sides = paging, top = PortalSheet.topFade(scroll)) { c ->
                 drawUpper(c, dy, g, layout, page, icons, labels, guestOnTop, pressed, guestIcon, names)
             }
@@ -302,6 +315,8 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         icons: List<Bitmap?>, labels: List<String>, guestOnTop: Boolean, pressed: Int, guestIcon: Bitmap?,
         names: Boolean,
     ) {
+        // The dome is the whole of the sheet's upper part: under the buttons, which stand over it.
+        dome?.let { pose -> drawDome(canvas, dy, g, layout, pose, icons) }
         val m = text.fontMetrics
         val middle = -(m.ascent + m.descent) / 2f
         if (labels.isEmpty() && layout.buttons.isEmpty()) {
@@ -323,16 +338,20 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
                 canvas.drawText(name, at.textCenterX, r.centerY() + middle, text)
             }
         }
-        // The page under the finger and the next one in, each its stride across.
+        // The dome was drawn first, under the buttons (above): no pages.
+        if (dome != null) return
+        // Every page any of which shows, each its stride across: the one the scroll is on,
+        // and its neighbours either side (a page is no wider than what shows).
         iconPaint.alpha = 255
         val first = kotlin.math.floor(page).toInt()
-        for (p in first..first + 1) {
+        for (p in first - 1..first + 2) {
             if (p !in 0 until layout.pages) continue
             val dx = (p - page) * layout.pageStride
-            if (kotlin.math.abs(dx) >= layout.pageStride) continue
             layout.slots.forEachIndexed { slot, c ->
                 val i = layout.appAt(p, slot)
                 if (i < 0) return@forEachIndexed
+                // Wholly past the sides' fades: not drawn.
+                if (c.right + dx < layout.pagesLeft || c.left + dx > PortalSheet.PAGES_RIGHT) return@forEachIndexed
                 // The icon and its name, one piece.
                 grown(canvas, c.centerX + dx, c.centerY + dy, g) {
                     icons.getOrNull(i)?.let { bmp ->
@@ -389,6 +408,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * for none yet), the keys as the sheet's buttons — back and enter as glyphs — and the message.
      */
     private fun drawLock(canvas: Canvas, k: PortalSheet.Keypad, dy: Float, g: Float, look: LockLook) {
+        if (look.unlocking >= 0f) { drawUnlock(canvas, k.keys, dy, look.unlocking, round = true); return }
         drawLockLine(canvas, k.centerX, k.infoRight - k.infoLeft, k.titleY + dy, k.dotsY + dy, look)
         // The keys: circles of the sheet's glass, their figures large.
         val size = text.textSize
@@ -445,6 +465,12 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * on to the finger — the accent, red when it was wrong — and the words in their column.
      */
     private fun drawPattern(canvas: Canvas, k: PortalSheet.Keypad, grid: PortalSheet.PatternGrid, dy: Float, look: LockLook) {
+        if (look.unlocking >= 0f) {
+            // The nine dots, each as a bead of glass the size of its ring.
+            val ring = grid.reach * 0.7f
+            drawUnlock(canvas, grid.centers.map { (x, y) -> PortalSheet.Box(x - ring * grid.aspect, y - ring, x + ring * grid.aspect, y + ring) }, dy, look.unlocking, round = true)
+            return
+        }
         drawLockLine(canvas, k.centerX, k.infoRight - k.infoLeft, k.titleY + dy, k.dotsY + dy, look)
         val accent = if (look.wrong) Panel.Palette.CRIT else if (theme.isGlass) GLASS_ACCENT else Panel.Palette.WORK
         val p = markPaint
@@ -488,6 +514,7 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
      * glass, rounded.
      */
     private fun drawKeyboard(canvas: Canvas, k: PortalSheet.Keyboard, dy: Float, g: Float, look: LockLook) {
+        if (look.unlocking >= 0f) { drawUnlock(canvas, k.keys.map { it.box }, dy, look.unlocking, round = false); return }
         val size0 = text.textSize
         drawLockLine(canvas, k.centerX, k.right - k.left, k.titleY + dy, k.dotsY + dy, look)
         text.textSize = k.keys[0].box.height * KB_TEXT
@@ -504,6 +531,279 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
             }
         }
         text.textSize = size0
+    }
+
+    /**
+     * The apps as a dome ([PortalDome]) at [pose], [dy] down, grown to [g]: each tile its app's
+     * icon, the furthest first, fainter towards the rim; and a short bar in each of the sheet's
+     * own strips, over and under the dome, where a drag still moves the sheet.
+     */
+    private fun drawDome(canvas: Canvas, dy: Float, g: Float, layout: PortalSheet.Layout, pose: PortalDome.Pose, icons: List<Bitmap?>) {
+        val area = PortalDome.area(layout)
+        val tiles = PortalDome.tiles(area, layout.count, pose)
+        val draw: (Canvas) -> Unit = { c ->
+            grown(c, area.centerX, area.centerY + dy, g) {
+                for (t in tiles) {
+                    val bmp = icons.getOrNull(t.app) ?: continue
+                    iconPaint.alpha = (255 * t.alpha).toInt().coerceIn(0, 255)
+                    // Turned as the ball turns it: narrower along the way out from the middle.
+                    val deg = Math.toDegrees(t.turn.toDouble()).toFloat()
+                    c.save()
+                    c.translate(t.cx, t.cy + dy)
+                    c.rotate(deg)
+                    c.scale(t.along, t.across)
+                    c.rotate(-deg)
+                    iconRect.set(-t.half, -t.half, t.half, t.half)
+                    c.drawBitmap(bmp, null, iconRect, iconPaint)
+                    c.restore()
+                }
+            }
+            iconPaint.alpha = 255
+        }
+        // INTO ITS EDGES THE DOME BLURS, THEN FADES (the owner, 2026-11-10: "some blur to the
+        // margin of the dome instead of just fading"), on all four sides: a blurred copy of the
+        // picture with its middle taken out and its very edge faded to nothing, and the sharp
+        // picture over it, whole in the middle and gone by the edge. The blur needs a hardware
+        // canvas (a RenderNode with a RenderEffect); on a software one the fade alone.
+        val l = area.left; val t0 = area.top + dy; val r = area.right; val b = area.bottom + dy
+        // The sheet's buttons stand over the dome: under each the dome is not drawn as it is but
+        // blurred right down and dimmed (below), so the button's name is read against a soft
+        // ground, not against icons (the owner, 2026-11-10).
+        domeButtons.rewind()
+        for (bx in layout.buttons) {
+            val rad = minOf(bx.width, bx.height) * CcButton.CORNER
+            domeButtons.addRoundRect(bx.left, bx.top + dy, bx.right, bx.bottom + dy, rad, rad, Path.Direction.CW)
+        }
+        canvas.save()
+        canvas.clipRect(l, t0, r, b)
+        if (layout.buttons.isNotEmpty()) canvas.clipOutPath(domeButtons)
+        domeMasks(area, dy)
+        if (canvas.isHardwareAccelerated) {
+            val w = Panel.WIDTH; val h = Panel.HEIGHT
+            domeNode.setPosition(0, 0, w, h)
+            val rc = domeNode.beginRecording(w, h)
+            try { draw(rc) } finally { domeNode.endRecording() }
+            domeBlurred.setPosition(0, 0, w, h)
+            domeBlurred.setRenderEffect(domeBlur)
+            val bc = domeBlurred.beginRecording(w, h)
+            try { bc.drawRenderNode(domeNode) } finally { domeBlurred.endRecording() }
+            // Blurred: everywhere but the middle, and nothing at the very edge.
+            var layer = canvas.saveLayer(l, t0, r, b, null)
+            canvas.drawRenderNode(domeBlurred)
+            val hole = canvas.saveLayer(l, t0, r, b, domeHole)
+            domeFill.shader = null
+            canvas.drawRect(l, t0, r, b, domeFill)
+            maskPaint.shader = domeSharpX; canvas.drawRect(l, t0, r, b, maskPaint)
+            maskPaint.shader = domeSharpY; canvas.drawRect(l, t0, r, b, maskPaint)
+            canvas.restoreToCount(hole)
+            maskPaint.shader = domeOuterX; canvas.drawRect(l, t0, r, b, maskPaint)
+            maskPaint.shader = domeOuterY; canvas.drawRect(l, t0, r, b, maskPaint)
+            canvas.restoreToCount(layer)
+            // Sharp, over it: whole in the middle, gone by the edge.
+            layer = canvas.saveLayer(l, t0, r, b, null)
+            canvas.drawRenderNode(domeNode)
+            maskPaint.shader = domeSharpX; canvas.drawRect(l, t0, r, b, maskPaint)
+            maskPaint.shader = domeSharpY; canvas.drawRect(l, t0, r, b, maskPaint)
+            canvas.restoreToCount(layer)
+        } else {
+            val layer = canvas.saveLayer(l, t0, r, b, null)
+            draw(canvas)
+            maskPaint.shader = domeSharpX; canvas.drawRect(l, t0, r, b, maskPaint)
+            maskPaint.shader = domeSharpY; canvas.drawRect(l, t0, r, b, maskPaint)
+            canvas.restoreToCount(layer)
+        }
+        canvas.restore()
+        if (layout.buttons.isNotEmpty()) {
+            canvas.save()
+            canvas.clipRect(l, t0, r, b)
+            canvas.clipPath(domeButtons)
+            if (canvas.isHardwareAccelerated) {
+                val w = Panel.WIDTH; val h = Panel.HEIGHT
+                domeUnderButtons.setPosition(0, 0, w, h)
+                domeUnderButtons.setRenderEffect(domeButtonBlur)
+                val uc = domeUnderButtons.beginRecording(w, h)
+                try { uc.drawRenderNode(domeNode) } finally { domeUnderButtons.endRecording() }
+                canvas.drawRenderNode(domeUnderButtons)
+            }
+            domeFill.color = DOME_BUTTON_DIM
+            canvas.drawRect(l, t0, r, b, domeFill)
+            domeFill.color = 0xFFFFFFFF.toInt()
+            canvas.restore()
+        }
+        // The grips: where a drag is the sheet's and not the dome's (PortalDome.turns), a bar
+        // near the bottom edge and, with no buttons, one near the top.
+        val p = markPaint
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = DOME_GRIP_H
+        p.color = (ink and 0x00FFFFFF) or (DOME_GRIP_ALPHA shl 24)
+        // The bottom one only with an app on the back: it is for pulling its sliders up.
+        if (PortalDome.pullsUp(layout)) {
+            val under = PortalSheet.FULL - DOME_GRIP_EDGE + dy
+            canvas.drawLine(area.centerX - DOME_GRIP_W / 2f, under, area.centerX + DOME_GRIP_W / 2f, under, p)
+        }
+        if (layout.buttons.isEmpty()) {
+            val over = DOME_GRIP_EDGE + dy
+            canvas.drawLine(area.centerX - DOME_GRIP_W / 2f, over, area.centerX + DOME_GRIP_W / 2f, over, p)
+        }
+        p.strokeCap = Paint.Cap.BUTT
+    }
+
+    private val domeNode = RenderNode("portal-dome")
+    private val domeUnderButtons = RenderNode("portal-dome-under-buttons")
+    private val domeButtonBlur = RenderEffect.createBlurEffect(DOME_BUTTON_BLUR, DOME_BUTTON_BLUR, Shader.TileMode.DECAL)
+    private val domeButtons = Path()
+    private val domeBlurred = RenderNode("portal-dome-blurred")
+    private val domeBlur = RenderEffect.createBlurEffect(DOME_BLUR, DOME_BLUR, Shader.TileMode.DECAL)
+    /** Takes out of the layer under it what is drawn in it: the blurred copy's middle. */
+    private val domeHole = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) }
+    private val domeFill = Paint().apply { color = 0xFFFFFFFF.toInt() }
+    private var domeSharpX: Shader? = null
+    private var domeSharpY: Shader? = null
+    private var domeOuterX: Shader? = null
+    private var domeOuterY: Shader? = null
+    private var domeMasksFor: PortalSheet.Box? = null
+    private var domeMasksDy = Float.NaN
+
+    /**
+     * The dome's masks for [area], [dy] down, each way: the sharp picture's, nothing at the
+     * edge and whole [PortalDome.MARGIN] in; and the blurred copy's own fade at the very edge,
+     * over the first third of that.
+     */
+    private fun domeMasks(area: PortalSheet.Box, dy: Float) {
+        if (domeMasksFor == area && domeMasksDy == dy) return
+        domeMasksFor = area; domeMasksDy = dy
+        val whole = 0xFF000000.toInt()
+        // Straight ramps, [margin] in from each end.
+        fun band(from: Float, to: Float, across: Boolean, margin: Float): Shader {
+            val m = (margin / (to - from)).coerceAtMost(0.49f)
+            val pos = floatArrayOf(0f, m, 1f - m, 1f)
+            val col = intArrayOf(0, whole, whole, 0)
+            return if (across) LinearGradient(from, 0f, to, 0f, col, pos, Shader.TileMode.CLAMP)
+            else LinearGradient(0f, from, 0f, to, col, pos, Shader.TileMode.CLAMP)
+        }
+        // Across, the left is its own (the owner, 2026-11-10): towards the lenses the fade is
+        // longer ([left] in) and eased in and out, in steps — a straight ramp ended there in a
+        // line the eye found. The right as the other sides: straight, [right] in.
+        fun across(left: Float, right: Float): Shader {
+            val span = area.right - area.left
+            val ml = (left / span).coerceAtMost(0.6f)
+            val mr = (right / span).coerceAtMost(0.3f)
+            val steps = 8
+            val pos = FloatArray(steps + 3)
+            val col = IntArray(steps + 3)
+            for (i in 0..steps) {
+                val t = i / steps.toFloat()
+                pos[i] = ml * t
+                col[i] = Math.round(255 * t * t * (3f - 2f * t)) shl 24
+            }
+            pos[steps + 1] = 1f - mr; col[steps + 1] = whole
+            pos[steps + 2] = 1f; col[steps + 2] = 0
+            return LinearGradient(area.left, 0f, area.right, 0f, col, pos, Shader.TileMode.CLAMP)
+        }
+        domeSharpX = across(PortalDome.MARGIN_LEFT, PortalDome.MARGIN)
+        domeSharpY = band(area.top + dy, area.bottom + dy, false, PortalDome.MARGIN)
+        domeOuterX = across(PortalDome.MARGIN_LEFT * 0.8f, PortalDome.MARGIN / 3f)
+        domeOuterY = band(area.top + dy, area.bottom + dy, false, PortalDome.MARGIN / 3f)
+    }
+
+    /**
+     * THE LOCK LEAVING, the code right (the owner, 2026-11-10): at [t] from 0 to 1, every piece of
+     * glass the lock is made of — the keypad's keys, the keyboard's, the pattern's dots, in
+     * [pieces] — runs together into one big rounded pill in their middle; a tick is drawn in it,
+     * glowing; and the pill goes, a little bigger as it does, leaving what the lock stood over.
+     * The pieces' figures are not drawn: they are gone as it starts.
+     *
+     * The pieces travel as themselves for the first of it, fading as the pill they are making
+     * comes up under them: thirty panes of glass on one spot would be as dark as thirty, where
+     * one pill is one.
+     */
+    private fun drawUnlock(canvas: Canvas, pieces: List<PortalSheet.Box>, dy: Float, t: Float, round: Boolean) {
+        if (pieces.isEmpty()) return
+        val left = pieces.minOf { it.left }; val right = pieces.maxOf { it.right }
+        val top = pieces.minOf { it.top } + dy; val bottom = pieces.maxOf { it.bottom } + dy
+        val cx = (left + right) / 2f
+        val cy = (top + bottom) / 2f
+        val h = minOf((bottom - top) * UNLOCK_PILL_H, UNLOCK_PILL_MAX)
+        val w = minOf((right - left) * 0.8f, h * UNLOCK_PILL_ASPECT)
+        val gather = smooth(0f, UNLOCK_GATHERED, t)
+        val gone = smooth(UNLOCK_GOING, 1f, t)
+        val all = if (gone > 0.004f) canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * (1f - gone)).toInt().coerceIn(0, 255)) else -1
+        canvas.save()
+        val swell = 1f + UNLOCK_SWELL * gone
+        canvas.scale(swell, swell, cx, cy)
+
+        // The pieces, on their way in.
+        val piecesAlpha = 1f - smooth(UNLOCK_GATHERED * 0.55f, UNLOCK_GATHERED, t)
+        if (piecesAlpha > 0.004f) {
+            val layer = if (piecesAlpha < 0.996f) canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * piecesAlpha).toInt()) else -1
+            for (b in pieces) {
+                val l = b.left + (cx - w / 2f - b.left) * gather
+                val r = b.right + (cx + w / 2f - b.right) * gather
+                val tp = b.top + dy + (cy - h / 2f - (b.top + dy)) * gather
+                val bt = b.bottom + dy + (cy + h / 2f - (b.bottom + dy)) * gather
+                buttonRect.set(l, tp, r, bt)
+                val own = minOf(b.width, b.height) * if (round) 0.5f else 0.42f
+                drawButton(canvas, buttonRect, 0f, false, radius = own + (h / 2f - own) * gather)
+            }
+            if (layer >= 0) canvas.restoreToCount(layer)
+        }
+        // The pill they make.
+        val pillAlpha = smooth(UNLOCK_GATHERED * 0.4f, UNLOCK_GATHERED, t)
+        if (pillAlpha > 0.004f) {
+            val layer = if (pillAlpha < 0.996f) canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * pillAlpha).toInt()) else -1
+            buttonRect.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
+            drawButton(canvas, buttonRect, 0f, false, radius = h / 2f)
+            if (layer >= 0) canvas.restoreToCount(layer)
+        }
+        // The tick, drawn from its short stroke on, in light.
+        val drawn = smooth(UNLOCK_GATHERED - 0.04f, UNLOCK_TICKED, t)
+        if (drawn > 0.004f) {
+            tick.rewind()
+            tick.moveTo(cx - h * 0.21f, cy + h * 0.02f)
+            tick.lineTo(cx - h * 0.06f, cy + h * 0.17f)
+            tick.lineTo(cx + h * 0.23f, cy - h * 0.15f)
+            tickMeasure.setPath(tick, false)
+            tickDrawn.rewind()
+            tickMeasure.getSegment(0f, tickMeasure.length * drawn, tickDrawn, true)
+            // Grey light, not the accent's purple (the owner, 2026-11-10): the sheet's own ink.
+            val accent = TICK_GLOW
+            // Its glow: up as it is drawn, flaring as it closes, easing after.
+            val flare = Math.sin(Math.PI * smooth(UNLOCK_GATHERED, UNLOCK_GOING, t).toDouble()).toFloat()
+            val p = markPaint
+            p.style = Paint.Style.STROKE
+            p.strokeCap = Paint.Cap.ROUND
+            p.strokeJoin = Paint.Join.ROUND
+            val blur = h * (0.07f + 0.07f * flare)
+            if (blur != tickBlurRadius) {
+                tickBlurRadius = blur
+                tickBlur = android.graphics.BlurMaskFilter(blur.coerceAtLeast(0.5f), android.graphics.BlurMaskFilter.Blur.NORMAL)
+            }
+            p.maskFilter = tickBlur
+            p.strokeWidth = h * 0.13f
+            p.color = accent
+            p.alpha = (255 * (0.55f + 0.45f * flare)).toInt()
+            canvas.drawPath(tickDrawn, p)
+            p.maskFilter = null
+            p.strokeWidth = h * 0.075f
+            p.color = 0xFFFFFFFF.toInt()
+            p.alpha = 255
+            canvas.drawPath(tickDrawn, p)
+            p.strokeCap = Paint.Cap.BUTT
+        }
+        canvas.restore()
+        if (all >= 0) canvas.restoreToCount(all)
+    }
+
+    private val tick = Path()
+    private val tickDrawn = Path()
+    private val tickMeasure = android.graphics.PathMeasure()
+    private var tickBlur: android.graphics.BlurMaskFilter? = null
+    private var tickBlurRadius = -1f
+
+    private fun smooth(e0: Float, e1: Float, t: Float): Float {
+        val x = ((t - e0) / (e1 - e0)).coerceIn(0f, 1f)
+        return x * x * (3f - 2f * x)
     }
 
     /** The width slider's mark in [box]: a two-headed arrow between two upright bars, in the ink. */
@@ -655,6 +955,35 @@ class PortalSheetPainter(var theme: PanelTheme, face: PanelType.Face) {
         const val PRESS_KEY = 100
         /** The lock's dots: their radius, and the most shown in a row. */
         private const val LOCK_DOT_R = 6f
+        /** The dome's grips, in the sheet's own strips over and under it: a bar this wide and thick, this faint. */
+        private const val DOME_GRIP_W = 96f
+        private const val DOME_GRIP_H = 6f
+        private const val DOME_GRIP_ALPHA = 0x99
+        /** How far in from the sheet's top and bottom edges the grips stand. */
+        private const val DOME_GRIP_EDGE = 16f
+        /** How blurred the dome is in its margins. */
+        private const val DOME_BLUR = 14f
+        /** Under the sheet's buttons the dome is blurred this much, and dimmed by this. */
+        private const val DOME_BUTTON_BLUR = 26f
+        private const val DOME_BUTTON_DIM = 0x52000000
+        /**
+         * The lock leaving ([drawUnlock]), in its run: by where its pieces have run together, by
+         * where the tick is drawn, and from where it all goes — the last of which is also from
+         * where what it stood over comes in (ShellSheet).
+         */
+        /** How long the lock takes to leave, all of it. */
+        const val UNLOCK_MS = 1100L
+        /** The tick's glow: a light grey. */
+        private const val TICK_GLOW = 0xFFC8C8CC.toInt()
+        const val UNLOCK_GATHERED = 0.36f
+        const val UNLOCK_TICKED = 0.62f
+        const val UNLOCK_GOING = 0.8f
+        /** The pill the pieces make: its height in theirs together, no more than this, and its width in its height. */
+        private const val UNLOCK_PILL_H = 0.5f
+        private const val UNLOCK_PILL_MAX = 130f
+        private const val UNLOCK_PILL_ASPECT = 2.3f
+        /** How much bigger the pill is by the time it has gone. */
+        private const val UNLOCK_SWELL = 0.08f
         /** A pattern's dots and its line. */
         private const val PATTERN_DOT = 8f
         private const val PATTERN_LINE = 10f

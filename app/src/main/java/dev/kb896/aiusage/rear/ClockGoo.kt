@@ -25,6 +25,15 @@ import android.graphics.Shader
  * The real glass faces hand over to it at the ends: the figures' glass gone in the first quarter
  * ([digitalShown]), the pills' only in the last ([analogShown]), the goo carrying the rest.
  *
+ * THE GOO IS GLASS TOO, where there is a ground to bend (the owner, 2026-11-10: "still be glass
+ * while transitioning instead of going full solid and then transforming into glass again"). The
+ * two blurred faces are then not the paint but the MASK: the ground is drawn and cut to them, so
+ * one layer carries the ground in its colour and the goo's shape in its alpha, and [GLASS] makes
+ * the glass from that alone — the cut, the ground bent in from the edge (the alpha's slope is the
+ * way in, and it is steepest at the edge), the clock's tint, and a lit rim just inside the cut.
+ * No distance field: the goo has no shape that could be written down. With no ground it is the
+ * flat tinted liquid it was (the ORIGINAL theme, which has no glass).
+ *
  * ONE EFFECT PER BLUR STEP, kept: the blur is quantised to [STEPS] radii and each is built once —
  * a RenderEffect a frame is the leak GlassPainter.lensFor ended.
  */
@@ -35,6 +44,18 @@ class ClockGoo {
     private val blurs = arrayOfNulls<RenderEffect>(STEPS + 1)
     private val cut by lazy { RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(ColorMatrix(matrix()))) }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    /** Cuts what is under it to what is drawn through it: the ground to the goo. */
+    private val mask = Paint().apply { blendMode = android.graphics.BlendMode.DST_IN }
+    private val glassShader: android.graphics.RuntimeShader? by lazy {
+        runCatching { android.graphics.RuntimeShader(GLASS) }
+            .onFailure { android.util.Log.w("AiUsageRear", "clock goo: the glass shader would not compile, the goo stays flat", it) }
+            .getOrNull()
+    }
+    /** The glass for one colour and tint, kept: an effect is built when either changes, not a frame. */
+    private var glass: RenderEffect? = null
+    private var glassInk = 0
+    private var glassTint = -1f
+    private val under = android.graphics.Matrix()
 
     /**
      * The goo at [t] (0 the digital face, 1 the analog), [width] by [height] in the canvas's
@@ -43,6 +64,10 @@ class ClockGoo {
      */
     fun draw(
         canvas: Canvas, t: Float, width: Int, height: Int, ink: Int,
+        /** What the goo bends, panel-wide from the root's origin; null for the flat liquid. */
+        ground: RenderNode? = null,
+        /** How much of [ink] the glass takes, 0 clear to 1. */
+        tint: Float = 0f,
         digital: (Canvas, Paint) -> Unit, analog: (Canvas, Paint) -> Unit,
     ): Boolean {
         val shown = gooShown(t)
@@ -50,18 +75,38 @@ class ClockGoo {
         val recorder = canvas as? RecordingCanvas ?: return false
         face(digitalNode, 1f - t, width, height, ink, digital)
         face(analogNode, t, width, height, ink, analog)
+        val lens = if (ground != null && ground.hasDisplayList() && canvas.matrix.invert(under)) glassFor(ink, tint) else null
         node.setPosition(0, 0, width, height)
         val c = node.beginRecording()
         try {
+            if (lens != null) {
+                // The ground where it lies under this canvas, then cut to the two faces.
+                c.save()
+                c.concat(under)
+                c.drawRenderNode(ground!!)
+                c.restore()
+                c.saveLayer(null, mask)
+            }
             c.drawRenderNode(digitalNode)
             c.drawRenderNode(analogNode)
+            if (lens != null) c.restore()
         } finally {
             node.endRecording()
         }
-        node.setRenderEffect(cut)
-        node.setAlpha(GOO_ALPHA * shown)
+        node.setRenderEffect(lens ?: cut)
+        node.setAlpha(if (lens != null) shown else GOO_ALPHA * shown)
         recorder.drawRenderNode(node)
         return true
+    }
+
+    private fun glassFor(ink: Int, tint: Float): RenderEffect? {
+        val shader = glassShader ?: return null
+        glass?.takeIf { glassInk == ink && glassTint == tint }?.let { return it }
+        shader.setColorUniform("ink", ink or (0xFF shl 24))
+        shader.setFloatUniform("tint", tint.coerceIn(0f, 1f))
+        return RenderEffect.createRuntimeShaderEffect(shader, "content").also {
+            glass = it; glassInk = ink; glassTint = tint
+        }
     }
 
     /** One face's layer at its [share]: as there as [opacityOf] says, as blurred as [blurOf] says. */
@@ -99,6 +144,41 @@ class ClockGoo {
         private const val SHARPNESS = 24f
         /** How strong the goo is at its fullest: a tinted liquid, not a paint. */
         const val GOO_ALPHA = 0.7f
+
+        /**
+         * The goo as glass. [content] is the ground, cut to the goo: its alpha is the two blurred
+         * faces together. Where that alpha passes [THRESHOLD] is the edge, as hard as the flat
+         * goo's; the alpha's slope points in from it, and the ground is taken from further along
+         * that way the nearer the edge, as a lens bends; then the clock's tint, and a line of
+         * light just inside the edge, brighter where it faces the panel's light (up and left).
+         */
+        const val GLASS = """
+            uniform shader content;
+            layout(color) uniform half4 ink;
+            uniform float tint;
+
+            half4 main(float2 xy) {
+                float a = content.eval(xy).a;
+                float cut = clamp((a - 0.5) * 24.0, 0.0, 1.0);
+                if (cut <= 0.0) { return half4(0.0); }
+                float d = 3.0;
+                float2 g = float2(
+                    content.eval(xy + float2(d, 0.0)).a - content.eval(xy - float2(d, 0.0)).a,
+                    content.eval(xy + float2(0.0, d)).a - content.eval(xy - float2(0.0, d)).a);
+                float gl = length(g);
+                float2 gn = g / max(gl, 0.0001);
+                float nearEdge = 1.0 - smoothstep(0.5, 0.9, a);
+                half4 b = content.eval(xy + gn * min(gl * 60.0, 18.0) * nearEdge);
+                float3 ground = float3(b.rgb) / max(float(b.a), 0.001);
+                float3 c = float3(ink.rgb);
+                float3 col = mix(ground, c, tint);
+                float3 hot = mix(c, float3(1.0), 0.55);
+                float line = smoothstep(0.5, 0.56, a) * (1.0 - smoothstep(0.56, 0.68, a));
+                float facing = 0.5 + 0.5 * dot(gn, float2(0.6, 0.8));
+                col = min(col + hot * line * (0.12 + 0.88 * facing * facing) * 0.7, float3(1.0));
+                return half4(half3(col * cut), half(cut));
+            }
+        """
 
         /** A face's blur at its [share] of the morph: none when all there, [BLUR_K] at half, up to [BLUR_CAP]. */
         fun blurOf(share: Float): Float {

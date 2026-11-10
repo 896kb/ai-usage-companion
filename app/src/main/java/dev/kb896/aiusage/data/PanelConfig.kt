@@ -737,6 +737,8 @@ data class PanelConfig(
      * the names' room (PortalSheet.icon).
      */
     val portalAppNames: Boolean = true,
+    /** The portal's apps as a dome turned any way by a finger (PortalDome), not the grid. */
+    val portalDome: Boolean = false,
     /** A notification pops up as a banner on the back as it arrives. The pull-down list is there either way. */
     val noticesOverApps: Boolean = true,
     /**

@@ -147,6 +147,22 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
         overlay.changed()
     }
 
+    /** The apps as a dome (PanelConfig.portalDome), not the grid. */
+    fun dome(on: Boolean) {
+        if (domeOn == on) return
+        domeOn = on
+        overlay.changed()
+    }
+
+    /** Where the dome is turned to. */
+    fun domeAt(pose: PortalDome.Pose) {
+        domePose = pose
+        overlay.changed()
+    }
+
+    @Volatile private var domeOn = false
+    @Volatile private var domePose = PortalDome.Pose(0f, 0f)
+
     /** The slider's thumb dragged to [dpi]; null when let go (the value then is the app's own). */
     fun sliderDrag(dpi: Int?) {
         sliderDrag = dpi
@@ -279,8 +295,8 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
     private companion object {
         /** The width's preview fading in or out. */
         const val PREVIEW_FADE_MS = 220L
-        /** The lock fading away when the phone is unlocked under it. */
-        const val UNLOCK_FADE_MS = 280L
+        /** The lock leaving when its code is given, or the phone is unlocked under it. */
+        const val UNLOCK_FADE_MS = PortalSheetPainter.UNLOCK_MS
     }
 
     /**
@@ -348,20 +364,14 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
             } else null
             sheetPainter.theme = frameLook.theme
             sheetPainter.face = face
+            sheetPainter.dome = domePose.takeIf { domeOn }
             // The lock fading out over what it gated, fading in (unlockFade).
             val fading = fadingLock
             val fadeT = if (fading == null) 1f else ((android.os.SystemClock.uptimeMillis() - fadeAt) / UNLOCK_FADE_MS.toFloat()).coerceIn(0f, 1f)
             if (fading != null && fadeT >= 1f) fadingLock = null
-            if (fading != null && fadeT < 1f) {
-                val out = canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * (1f - fadeT)).toInt())
-                sheetPainter.draw(
-                    canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
-                    guestOnTop = onTop ?: false, lock = fading, keypad = keypad, grid = dots,
-                    keyboard = fading.takeIf { it.kind == BackLock.Kind.PASSWORD }?.let { keyboards.getOrPut(it.page) { PortalSheet.keyboard(rear.cutoutUnits, it.page) } },
-                )
-                canvas.restoreToCount(out)
-            }
-            val inLayer = if (fading != null && fadeT < 1f) canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * fadeT).toInt()) else -1
+            // What it gated comes in only as the pill goes (PortalSheetPainter.drawUnlock).
+            val shown = if (fading == null) 1f else ((fadeT - PortalSheetPainter.UNLOCK_GOING) / (1f - PortalSheetPainter.UNLOCK_GOING)).coerceIn(0f, 1f)
+            val inLayer = if (fading != null && fadeT < 1f) canvas.saveLayerAlpha(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat(), (255 * shown).toInt()) else -1
             sheetPainter.draw(
                 canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
                 guestOnTop = onTop ?: false, pressed = pressed,
@@ -372,6 +382,14 @@ class ShellSheet(layerStack: Int, private val rear: RearGeometry, face: PanelTyp
                 keyboard = lockLook?.takeIf { it.kind == BackLock.Kind.PASSWORD }?.let { keyboards.getOrPut(it.page) { PortalSheet.keyboard(rear.cutoutUnits, it.page) } },
             )
             if (inLayer >= 0) canvas.restoreToCount(inLayer)
+            // The lock leaving, over it: its glass run together into a pill, the tick, and gone.
+            if (fading != null && fadeT < 1f) {
+                sheetPainter.draw(
+                    canvas, p, PortalSheet.scroll(at), layout, page, a.icons, a.snapshot.labels,
+                    guestOnTop = onTop ?: false, lock = fading.unlocking(fadeT), keypad = keypad, grid = dots,
+                    keyboard = fading.takeIf { it.kind == BackLock.Kind.PASSWORD }?.let { keyboards.getOrPut(it.page) { PortalSheet.keyboard(rear.cutoutUnits, it.page) } },
+                )
+            }
             return drawPreview(canvas, shownWidth, p) || (fading != null && fadeT < 1f)
         }
 

@@ -71,10 +71,54 @@ object Unlock {
      */
     fun remainingMs(): Long = (unlockedUntil - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
 
-    /** Forget the unlock: on leaving the screen, on backgrounding, on screen-off. */
+    /**
+     * Forget the unlock: on leaving the screen, on backgrounding, on screen-off — and tell
+     * whoever is showing what it unlocked ([onLock]), so nothing stays on the screen that the
+     * lock no longer covers.
+     */
     fun lock() {
         unlockedUntil = 0L
+        lockListeners.toList().forEach { it() }
     }
+
+    /**
+     * [lock], for the app going to the background — unless the unlock is only just given.
+     *
+     * The prompt is the system's, and on some phones putting it up or taking it down pauses the
+     * activity under it. A pause landing just after the prompt succeeded would lock again at
+     * once, hide what was just shown, and the next tap would ask for the code a second time.
+     * Not seen on the phone this was written on; guarded because the cost of being wrong is
+     * that loop, and the cost of the guard is [SETTLE_MS] in which a real backgrounding leaves
+     * the window to run out on its own (WINDOW_MS, and the page's own timer).
+     */
+    fun lockForBackground() {
+        if (SystemClock.elapsedRealtime() - grantedAt < SETTLE_MS) return
+        lock()
+    }
+
+    private var grantedAt = -SETTLE_MS
+    private const val SETTLE_MS = 800L
+
+    private val lockListeners = LinkedHashSet<() -> Unit>()
+
+    /**
+     * [listener] is called at every [lock], on the thread that locks (the main one). Returns
+     * what removes it again.
+     *
+     * A SCREEN THAT SHOWS UNLOCKED DETAILS MUST FOLLOW THE LOCK. The account page did not:
+     * backgrounding the app locked (MainActivity.onPause) while the page kept the name on show
+     * under a button reading "Hide" — and that button, asking the lock and not the screen,
+     * took "locked" to mean "reveal" and put up the credential prompt. To the person holding
+     * the phone that was the lock code asked for twice, to hide what the first had shown
+     * (reported by users; found by reading, 2026-11-10).
+     */
+    fun onLock(listener: () -> Unit): () -> Unit {
+        lockListeners += listener
+        return { lockListeners -= listener }
+    }
+
+    /** A prompt is up and not yet answered: a second [require] is not a second prompt. */
+    private var prompting = false
 
     /**
      * @param onResult true if the user authenticated, false if they cancelled or the
@@ -90,6 +134,10 @@ object Unlock {
             onResult(true)
             return
         }
+        // ONE PROMPT AT A TIME. A second tap before the first prompt was up started a second
+        // one: the system drops the first for it, or on some phones stacks them, and either
+        // way the code is asked for again.
+        if (prompting) return
         val keyguard = activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         if (!keyguard.isDeviceSecure) {
             grant()
@@ -99,6 +147,7 @@ object Unlock {
         // Wrapped, because this call reaches a system service that can refuse for
         // reasons this app cannot see — a missing permission took it down once, and a
         // settings screen must not die trying to hide a name.
+        prompting = true
         try {
         android.hardware.biometrics.BiometricPrompt.Builder(activity)
             .setTitle("Confirm it's you")
@@ -115,22 +164,26 @@ object Unlock {
                     override fun onAuthenticationSucceeded(
                         result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?
                     ) {
+                        prompting = false
                         grant()
                         onResult(true)
                     }
 
                     override fun onAuthenticationError(code: Int, message: CharSequence?) {
+                        prompting = false
                         onResult(false)
                     }
                 },
             )
         } catch (e: Exception) {
             android.util.Log.w("AiUsageUnlock", "credential prompt unavailable", e)
+            prompting = false
             onResult(false)
         }
     }
 
     private fun grant() {
+        grantedAt = SystemClock.elapsedRealtime()
         unlockedUntil = SystemClock.elapsedRealtime() + WINDOW_MS
     }
 }

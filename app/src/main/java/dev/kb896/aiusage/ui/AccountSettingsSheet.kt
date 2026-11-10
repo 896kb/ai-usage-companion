@@ -42,6 +42,8 @@ object AccountSettingsSheet {
 
     /** Collectors running for the open page, cancelled when it closes. */
     private val sheetJobs = mutableListOf<kotlinx.coroutines.Job>()
+    /** Stops the open page following the lock (Unlock.onLock): one page, one listener. */
+    private var stopFollowingLock: (() -> Unit)? = null
 
     /**
      * Fill [content] with the account's sections: a Back button, then a card per section.
@@ -315,25 +317,30 @@ object AccountSettingsSheet {
                         values.forEach { it.text = if (masked) MASK else it.tag as? String }
                     }
                     lateinit var toggle: android.widget.Button
+                    // What is on the screen now, which is what the button goes by — not the
+                    // lock, which can be taken away under a page still showing (Unlock.onLock).
+                    var revealed = Unlock.isUnlocked()
 
                     // The timer is posted to the view, so it dies with the view. A
                     // Handler kept elsewhere would outlive a closed sheet and remask a
                     // screen that no longer exists.
                     val hideNow = Runnable {
                         Unlock.lock()
+                        revealed = false
                         applyMask(true)
                         toggle.text = "Reveal"
                     }
 
                     toggle = SettingsRows.navigationButton(details,
                         if (Unlock.isUnlocked()) "Hide" else "Reveal", R.drawable.ic_eye) {
-                        if (Unlock.isUnlocked()) {
+                        if (revealed) {
                             details.removeCallbacks(hideNow)
                             hideNow.run()
                         } else {
                             val activity = context as? Activity ?: return@navigationButton
                             Unlock.require(activity, "To show this account's details") { ok ->
                                 if (ok) {
+                                    revealed = true
                                     applyMask(false)
                                     toggle.text = "Hide"
                                     // Auto-hide, for the case none of the other triggers
@@ -359,10 +366,21 @@ object AccountSettingsSheet {
                     // The screen going dark with a name on it, waiting to be read by
                     // whoever wakes the phone, is the case this gate exists for.
                     val watcher = Unlock.observeScreenOff(context) {
+                        revealed = false
                         applyMask(true)
                         toggle.text = "Reveal"
                     }
                     sheetReceivers += watcher
+                    // And any other lock — the app backgrounded, above all: the details go
+                    // with it, so the page never shows what the lock no longer covers, and
+                    // the button never reads "Hide" over a lock that would prompt.
+                    stopFollowingLock?.invoke()
+                    stopFollowingLock = Unlock.onLock {
+                        details.removeCallbacks(hideNow)
+                        revealed = false
+                        applyMask(true)
+                        toggle.text = "Reveal"
+                    }
                 }
             }
             // Glass grows when pressed and rims sit on edges: the rebuilt rows must not clip it.
@@ -394,6 +412,8 @@ object AccountSettingsSheet {
         // Leaking a receiver per open would eventually crash the process.
         sheetReceivers.forEach { runCatching { context.unregisterReceiver(it) } }
         sheetReceivers.clear()
+        stopFollowingLock?.invoke()
+        stopFollowingLock = null
         // Same for the collectors: the activity's scope outlives the page.
         sheetJobs.forEach { it.cancel() }
         sheetJobs.clear()
